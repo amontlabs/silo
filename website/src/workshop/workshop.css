@@ -267,11 +267,12 @@
 .ws-word { font: 400 12px var(--mono); color: var(--muted); white-space: nowrap; min-width: 66px; text-align: right; }
 .ws-side { display: flex; align-items: center; font: 12px var(--mono); color: var(--faint); white-space: nowrap; }
 .ws-by { margin-right: 14px; }
-.ws-votes { width: 52px; }
+.ws-votes { width: 64px; }
 .ws-talks { width: 38px; }
-.ws .ws-vote { padding: 2px 5px; margin: -2px -5px; border-radius: 3px; font: 12px var(--mono); color: var(--faint); transition: background-color .16s, color .16s; }
-.ws .ws-vote:hover { color: var(--accent-ink); }
-.ws .ws-vote.on { color: var(--accent-ink); background: var(--accent-wash); }
+/* One button for a row and a comment, drawn as GitHub draws a reaction: the thumb, then the count from 1 up. */
+.ws .ws-vote { display: inline-flex; align-items: center; gap: 5px; box-sizing: border-box; height: 22px; padding: 0 8px; border: 1px solid var(--line); border-radius: 999px; font: 12px/1 var(--mono); color: var(--faint); transition: background-color .16s, color .16s, border-color .16s; }
+.ws .ws-vote:hover { color: var(--accent-ink); border-color: var(--accent-ink); }
+.ws .ws-vote.on { color: var(--accent-ink); border-color: var(--accent-ink); background: var(--accent-wash); }
 .ws .ws-vote:focus-visible { outline-offset: 2px; }
 .ws-more { position: relative; display: grid; grid-template-rows: 0fr; transition: grid-template-rows .2s var(--ease-out); }
 .ws-more.open { grid-template-rows: 1fr; }
@@ -411,7 +412,7 @@
   .ws-line { padding-right: 16px; gap: 8px; }
   .ws .ws-row { padding-left: 10px; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 8px; }
   .ws-word { display: none; }
-  .ws-votes { width: 46px; }
+  .ws-votes { width: 60px; }
   .ws-talks { width: 32px; }
   .ws-by { display: none; }
   .ws-notes.wide { display: none; }
@@ -458,7 +459,8 @@
 /* Faint text is for numbers and drawing labels; what a person reads or presses is muted. */
 .ws-side, .ws .ws-vote, .ws-signin, .ws-gh, .ws-link { color: var(--muted); }
 /* Small controls get a taller target than they look. */
-.ws .ws-vote { padding: 8px 5px; margin: -8px -5px; }
+.ws .ws-vote { position: relative; }
+.ws .ws-vote::after { content: ""; position: absolute; inset: -8px -5px; }
 .ws .ws-back { padding: 12px 0; margin: -8px 0; }
 .ws-fold-link { display: inline-block; padding: 8px 0; margin: -8px 0; }
 @media (max-width: 640px) { .workshop-shell .site-header .ws-account-slot .button.small { font-size: 12px; } }
@@ -467,8 +469,8 @@
 .ws-gh-alt { justify-self: start; display: inline-flex; align-items: center; margin-top: -4px; padding: 4px 0; font: 12px/1.5 var(--mono); color: var(--muted); }
 .ws-gh-alt:hover { color: var(--accent-ink); }
 .ws-gh-alt .out { stroke: currentColor; }
-/* Under a comment: its 👍 count, pressed like a row's. */
-.ws .ws-cvote { display: inline-block; margin: 3px 0 -4px -5px; padding: 4px 5px; }
+/* Under a comment: the same button, a little smaller. */
+.ws .ws-cvote { margin: 3px 0 0; height: 20px; padding: 0 7px; }
 /* An entry with no comment yet, and one whose thread is closed: one line each, the height of the line under the sign-in box. */
 .ws-none { margin: 0 0 -4px; padding: 4px 0; font: 12px/1.5 var(--mono); }
 .ws-closed { margin: 2px 0 0; font: 12px/1.5 var(--mono); color: var(--muted); }
@@ -538,7 +540,7 @@
 @keyframes ws-pulse { 50% { opacity: .45; } }
 .ws-ph { display: block; border-radius: 3px; background: color-mix(in srgb, var(--line) 40%, transparent); }
 .ws-ph, .ws-c-ghost, .ws-h-ghost, .ws-latest-ghost .ws-latest-name, .ws-latest-ghost .ws-sub { animation: ws-pulse 1.6s ease-in-out infinite; }
-.ws-ph-vote { display: inline-block; width: 30px; height: 12px; vertical-align: middle; }
+.ws-ph-vote { display: inline-block; width: 36px; height: 22px; vertical-align: middle; border-radius: 999px; }
 /* A placeholder built from the real boxes (the suggest form, the comment box), so it has their exact size. */
 .ws .ws-ph-shape :is(input, textarea, .ws-btn) {
   color: transparent; border-color: transparent; box-shadow: none; opacity: 1; resize: none; pointer-events: none;

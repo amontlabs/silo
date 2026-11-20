@@ -37,7 +37,7 @@ describe('the first frame', () => {
     mockApi({ state: () => answer.promise, routes: { 'GET me': () => answer.promise } });
     history.replaceState(null, '', '/workshop#part-b');
     render(<App data={buildData()} />);
-    expect(votes('Create and delete a computer')).toBe('👍 12');
+    expect(votes('Create and delete a computer')).toBe('👍12');
     expect(within(itemOf('Create and delete a computer')).getByLabelText('2 comments')).toBeInTheDocument();
     expect(screen.getByText('polarzero')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
@@ -55,7 +55,7 @@ describe('the first frame', () => {
     history.replaceState(null, '', '/workshop#part-b');
     render(<App data={buildData()} />);
     expect(screen.getByText('polarzero')).toBeInTheDocument();
-    expect(votes('Create and delete a computer')).toBe('👍 12');
+    expect(votes('Create and delete a computer')).toBe('👍12');
     expect(screen.queryByText(/to decide/)).toBeNull();
     expect(within(itemOf('Create and delete a computer')).queryByText('dropped')).toBeNull();
     await act(async () => answer.release(ok(owner)));
@@ -109,12 +109,12 @@ describe('the first frame', () => {
     const first = await renderApp();
     await userEvent.click(screen.getByRole('button', { name: '12 votes' }));
     await waitFor(() => expect(posts(calls, 'vote')).toHaveLength(1));
-    await waitFor(() => expect(votes('Create and delete a computer')).toBe('👍 13'));
+    await waitFor(() => expect(votes('Create and delete a computer')).toBe('👍13'));
     first.unmount();
     const answer = held<{ status: number; body: unknown }>();
     mockApi({ state: () => answer.promise, me: owner });
     render(<App data={buildData()} />);
-    expect(votes('Create and delete a computer')).toBe('👍 13');
+    expect(votes('Create and delete a computer')).toBe('👍13');
     expect(screen.getByText('polarzero')).toBeInTheDocument();
     // The answer is remembered as it came.
     expect(JSON.parse(localStorage.getItem(STATE) ?? '{}').issues[12].up).toBe(12);
@@ -189,7 +189,7 @@ describe('the load', () => {
     });
     history.replaceState(null, '', '/workshop#part-b');
     await renderApp();
-    await waitFor(() => expect(votes('Create and delete a computer')).toBe('👍 30'));
+    await waitFor(() => expect(votes('Create and delete a computer')).toBe('👍30'));
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(asked).toEqual(['', '?fresh=1']);
   });
@@ -226,7 +226,7 @@ describe('the load', () => {
     await renderApp();
     await waitFor(() => expect(calls.filter((call) => call.path === 'state')).toHaveLength(2));
     await act(async () => {});
-    expect(votes('Create and delete a computer')).toBe('👍 40');
+    expect(votes('Create and delete a computer')).toBe('👍40');
     expect(screen.queryByText('Votes and comments are offline.')).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
@@ -247,7 +247,7 @@ describe('the load', () => {
     fail = false;
     fireEvent.click(again[0]);
     for (const button of screen.getAllByRole('button', { name: 'Try again' })) expect(button).toBeDisabled();
-    await waitFor(() => expect(votes('Create and delete a computer')).toBe('👍 12'));
+    await waitFor(() => expect(votes('Create and delete a computer')).toBe('👍12'));
     expect(screen.queryByText('Votes and comments are offline.')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
   });
@@ -265,7 +265,7 @@ describe('the load', () => {
     mockApi({ state: () => ({ status: 502, body: { error: 'github', message: 'GitHub failed.' } }) });
     history.replaceState(null, '', '/workshop#part-b');
     await renderApp();
-    expect(votes('Create and delete a computer')).toBe('👍 12');
+    expect(votes('Create and delete a computer')).toBe('👍12');
     expect(screen.getAllByText('Votes and comments are offline.').length).toBeGreaterThan(0);
   });
 });
@@ -291,11 +291,11 @@ describe('the page\'s own writes over an answer', () => {
       });
       history.replaceState(null, '', '/workshop#part-b');
       const first = render(<App data={buildData()} />);
-      expect(votes('Create and delete a computer')).toBe('👍 12');
+      expect(votes('Create and delete a computer')).toBe('👍12');
       fireEvent.click(screen.getByRole('button', { name: '12 votes' }));
       await waitFor(() => expect(posts(calls, 'vote')).toHaveLength(1));
       // Without a count from the server, the count shown moves by one.
-      const kept = server ? '👍 21' : '👍 13';
+      const kept = server ? '👍21' : '👍13';
       await waitFor(() => expect(votes('Create and delete a computer')).toBe(kept));
       await act(async () => cdn.release({ status: 200, body: { ...computers(20), fetchedAt: at(Date.now() - 5 * 60_000) }, headers: { Age: '300' } }));
       await waitFor(() => expect(stored().up).toBe(20));
@@ -316,7 +316,7 @@ describe('the page\'s own writes over an answer', () => {
       time.advance(2 * 60_000);
       mockApi({ me: visitor, state: () => ok({ ...computers(23), fetchedAt: at(Date.now()) }) });
       render(<App data={buildData()} />);
-      await waitFor(() => expect(votes('Create and delete a computer')).toBe('👍 23'));
+      await waitFor(() => expect(votes('Create and delete a computer')).toBe('👍23'));
     });
   }
 
