@@ -128,8 +128,6 @@ export interface BuildData {
   entries: Entry[];
   /** Where the parts sit on the map: Silo's own (map.ts), or the example the tests draw. Without places, no map. */
   map: MapLayout;
-  /** Whether entries have threads on GitHub (votes, comments). Off in the real build: no entry has one yet. */
-  threads: boolean;
   /** Set when the build could not read the whole history of the repository: every History ends with a line that says so. */
   shallow: boolean;
 }
@@ -162,6 +160,8 @@ export interface LiveState {
   repo: string;
   fetchedAt: string;
   issues: Record<string, LiveIssue>;
+  /** The issue number of each entry's thread, by entry id; an entry with no comment or vote yet has none. */
+  threads?: Record<string, number>;
   latest?: LiveLatest[];
   /** Set when the snapshot is older than the server's freshness bound, or a cache served it stale. */
   old?: boolean;
@@ -203,6 +203,8 @@ export interface Row {
   replacedBy: string | null;
   date: string | null;
   closedAt: string | null;
+  /** Whether the thread of this entry is closed on GitHub. */
+  closed: boolean;
 }
 
 /** A line of Latest: a comment (`text`, from `author`) or a change of the entry's history. */
@@ -259,10 +261,8 @@ export interface Plan {
   left: Row[];
   /** Suggestions by votes; dropped ones last. */
   suggestions: Row[];
-  /** The newest comments and changes across the entries, newest first; empty without threads. */
+  /** The newest comments and changes across the entries, newest first. */
   latest: LatestItem[];
-  /** Whether entries have threads (BuildData.threads). */
-  threads: boolean;
   /** Whether the history is cut short (BuildData.shallow). */
   shallow: boolean;
 }
@@ -313,7 +313,7 @@ function suggestionStatus(live: LiveIssue): Status {
 function baseRow(key: string, kind: RowKind, name: string): Row {
   return {
     key, kind, of: null, name, what: null, issue: null, status: 'undecided', stage: null, part: null, n: null, notes: false, more: false, history: null, verdict: null, needs: [], built: null,
-    author: null, up: null, comments: null, replaces: [], replacedBy: null, date: null, closedAt: null,
+    author: null, up: null, comments: null, replaces: [], replacedBy: null, date: null, closedAt: null, closed: false,
   };
 }
 
@@ -372,21 +372,23 @@ export function stateWords(group: { state: PartState; counts: Counts }): string 
   }
 }
 
-export function buildPlan(data: BuildData, live: LiveState | null, histories: Histories = {}): Plan {
+/** @param closedKeys the rows whose thread the server refused a write on as closed, before the state says so */
+export function buildPlan(data: BuildData, live: LiveState | null, histories: Histories = {}, closedKeys: ReadonlySet<string> = new Set()): Plan {
   const issues = live?.issues ?? {};
-  // Old issues on GitHub are never matched to an entry while entries have no threads.
-  const byEntry = new Map<string, number>();
-  if (data.threads) {
-    for (const [number, issue] of Object.entries(issues)) {
-      if (issue.kind === 'entry' && issue.entry) byEntry.set(issue.entry, Number(number));
-    }
-  }
+  // An entry's thread is the issue the server names for it; the page matches none by itself.
+  const threads = live?.threads ?? {};
+  const threadNumbers = new Set(Object.values(threads));
+  // An entry with no thread yet shows no vote and no comment, once a state is shown.
   const counts = (row: Row) => {
     const issue = row.issue === null ? undefined : issues[row.issue];
     if (issue) {
       row.up = issue.up;
       row.comments = issue.comments;
       row.closedAt = issue.closedAt;
+      row.closed = row.kind === 'entry' && (issue.state === 'closed' || closedKeys.has(row.key));
+    } else if (live && row.kind === 'entry') {
+      row.up = 0;
+      row.comments = 0;
     }
   };
 
@@ -408,7 +410,7 @@ export function buildPlan(data: BuildData, live: LiveState | null, histories: Hi
     // A dropped decision replaces nothing, so it names nothing.
     row.replaces = entry.kind === 'decision' && statuses.get(entry.id) !== 'dropped' ? entry.replaces.map((id) => `entry-${id}`) : [];
     row.replacedBy = entry.replacedBy === null ? null : `entry-${entry.replacedBy}`;
-    row.issue = byEntry.get(entry.id) ?? null;
+    row.issue = Number.isSafeInteger(threads[entry.id]) ? threads[entry.id] : null;
     row.status = statuses.get(entry.id) as Status;
     counts(row);
     entries.set(entry.id, row);
@@ -431,6 +433,8 @@ export function buildPlan(data: BuildData, live: LiveState | null, histories: Hi
   for (const [key, issue] of Object.entries(issues)) {
     if (issue.kind !== 'suggestion') continue;
     const number = Number(key);
+    // A feature written from a suggestion shows once, as the feature.
+    if (threadNumbers.has(number)) continue;
     const row = baseRow(`issue-${number}`, 'suggestion', issue.title);
     row.issue = number;
     row.author = issue.author;
@@ -443,25 +447,23 @@ export function buildPlan(data: BuildData, live: LiveState | null, histories: Hi
   suggestions.sort((a, b) => dropped(a) - dropped(b) || (b.up ?? 0) - (a.up ?? 0) || (a.issue ?? 0) - (b.issue ?? 0));
 
   const latest: LatestItem[] = [];
-  if (data.threads) {
-    for (const [index, item] of (live?.latest ?? []).entries()) {
-      const row = entries.get(item.entry);
-      if (!row || row.issue !== item.n) continue;
-      latest.push({ key: `latest-${index}`, row, author: item.author, createdAt: item.createdAt, text: item.text ?? null, change: null });
-    }
-    for (const [id, changes] of Object.entries(histories)) {
-      const row = entries.get(id);
-      if (!row) continue;
-      for (const [index, change] of changes.entries()) latest.push({ key: `latest-${id}-${index}`, row, author: '', createdAt: change.date, text: null, change });
-    }
-    // Newest first; a comment goes before a change of the same second, and what is equal keeps its order.
-    latest.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-    latest.length = Math.min(latest.length, LATEST_LINES);
+  for (const [index, item] of (live?.latest ?? []).entries()) {
+    const row = entries.get(item.entry);
+    if (!row || row.issue !== item.n) continue;
+    latest.push({ key: `latest-${index}`, row, author: item.author, createdAt: item.createdAt, text: item.text ?? null, change: null });
   }
+  for (const [id, changes] of Object.entries(histories)) {
+    const row = entries.get(id);
+    if (!row) continue;
+    for (const [index, change] of changes.entries()) latest.push({ key: `latest-${id}-${index}`, row, author: '', createdAt: change.date, text: null, change });
+  }
+  // Newest first; a comment goes before a change of the same second, and what is equal keeps its order.
+  latest.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  latest.length = Math.min(latest.length, LATEST_LINES);
 
   const product = rows.filter((row) => row.part === null);
   const left = groups.flatMap((group) => group.rows.filter((row) => row.status === 'dropped')).sort((a, b) => (a.n ?? 0) - (b.n ?? 0));
-  return { parts: groups, product, left, suggestions, latest, threads: data.threads, shallow: data.shallow };
+  return { parts: groups, product, left, suggestions, latest, shallow: data.shallow };
 }
 
 /** Every row once: the parts' entries, the whole product's decisions, then suggestions. */

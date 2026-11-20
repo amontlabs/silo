@@ -53,6 +53,14 @@ export function loadEntries(dir) {
     .map((entry) => ({ id: entry.id, name: entry.name ?? entry.asks, what: entry.what ?? entry.answer ?? entry.asks, ...(entry.built ? { built: entry.built } : {}) }));
 }
 
+/** How many entries the fake GitHub opens an issue for: the rest have no thread yet, so rows without one can be tried. */
+export const SEEDED_ENTRIES = 3;
+
+/** The entries the fake GitHub opens an issue for: the first few of the plan. */
+export function demoEntries(entries) {
+  return entries.slice(0, SEEDED_ENTRIES);
+}
+
 // `planDir` is the plan whose entries the server knows, and the one the fake GitHub is seeded from.
 export async function startDev({ fake = false, planDir = PLAN, port = 4174, host = '127.0.0.1', distDir = join(website, 'dist'), env = process.env, log } = {}) {
   const origin = `http://${host}:${port}`;
@@ -61,7 +69,10 @@ export async function startDev({ fake = false, planDir = PLAN, port = 4174, host
   if (fake) {
     fakeGitHub = createFakeGitHub({ repo: 'amontlabs/silo' });
     await fakeGitHub.listen();
-    seedDemo(fakeGitHub, loadEntries(planDir));
+    seedDemo(fakeGitHub, demoEntries(loadEntries(planDir)));
+    // The first comment of the first thread has votes: one of the person who signs in as owner-fake, one of visitor-fake.
+    const first = fakeGitHub.state.issues.get(1)?.comments[0];
+    if (first) for (const login of ['visitor-fake', 'owner-fake']) fakeGitHub.reactToComment(first.id, login);
     config = readConfig(fakeGitHub.workshopEnv(origin), { apiBase: fakeGitHub.url, webBase: fakeGitHub.url });
   } else {
     config = readConfig({ ...env, WORKSHOP_SITE_ORIGIN: origin });

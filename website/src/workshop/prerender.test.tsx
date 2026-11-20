@@ -81,7 +81,7 @@ describe('the prerendered Workshop', () => {
   it.each([
     ['a plan with parts', buildData],
     ['a plan with no part', () => buildDataFrom(emptyPlanFiles())],
-    // The real build's shape: parts without a map, no verdicts, no threads.
+    // The real build's shape: parts without a map, no verdicts.
     ['the plan tool\'s sample, as the real build reads it', () => buildDataFrom(loadDir(SAMPLE))],
   ])('is what the script renders first on a first visit without a session at the plain address, for %s', (_, plan) => {
     mockApi({ state: () => new Promise(() => {}) });

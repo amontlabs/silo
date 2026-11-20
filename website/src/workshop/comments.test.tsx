@@ -79,7 +79,7 @@ describe('an opening panel', () => {
     if (!talk) return 'no panel';
     const ghostComments = talk.querySelectorAll('.ws-c-ghost').length;
     const comments = talk.querySelectorAll('.ws-c:not(.ws-pending)').length;
-    if (talk.querySelector('.ws-quiet') || /Loading|could not/i.test(talk.textContent ?? '')) return 'a lone line';
+    if (talk.querySelector('.ws-quiet:not(.ws-none)') || /Loading|could not/i.test(talk.textContent ?? '')) return 'a lone line';
     if (ghostComments > 0) return comments === 0 && ghostComments === want.comments ? 'placeholders' : `mixed: ${ghostComments} places, ${comments} lines`;
     return comments === want.comments ? 'thread' : `partial: ${comments} of ${want.comments}`;
   };

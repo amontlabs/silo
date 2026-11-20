@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { api, ApiError, hasSessionHint } from './api';
-import type { Comment, IssueDetail, Me } from './api';
+import type { Comment, IssueDetail, Me, MyVotes, Target } from './api';
 import { recallPerson, recallState, rememberPerson, rememberState } from './memory';
-import { applyKept, keep, keptComments, newerAnswer } from './writes';
+import { applyKept, keep, keepCommentUp, keptComments, newerAnswer } from './writes';
 import type { Write } from './writes';
 import { allRows, buildPlan } from './plan';
 import type { BuildData, Facts, Histories, LiveIssue, LiveState, Notes, Row } from './plan';
@@ -55,15 +55,22 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   /** Who the page shows as signed in: `me`'s answer, else the remembered person; undefined while not known. */
   const me: Me | null | undefined = meKnown ? answer : !hasSessionHint() ? null : remembered ?? (answer === 'error' ? null : undefined);
   const [details, setDetails] = useState<Record<number, Detail>>({});
+  const detailRef = useRef(details);
+  detailRef.current = details;
   const [notice, setNotice] = useState<string | null>(null);
-  // Writes the server has not answered yet. Nothing here counts as done.
-  const [sending, setSending] = useState<Record<number, Comment[]>>({});
-  const [votePending, setVotePending] = useState<ReadonlySet<number>>(new Set());
+  // Writes the server has not answered yet, by the key of the row (an entry may have no thread yet). Nothing here counts as done.
+  const [sending, setSending] = useState<Record<string, Comment[]>>({});
+  const [votePending, setVotePending] = useState<ReadonlySet<string>>(new Set());
+  const [commentVotePending, setCommentVotePending] = useState<ReadonlySet<string>>(new Set());
   const [suggestionsSending, setSuggestionsSending] = useState<{ id: number; title: string; author: string }[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [suggestDraft, setSuggestDraft] = useState({ title: '', text: '' });
   const [announce, setAnnounce] = useState('');
   const [votes, setVotes] = useState<Record<number, boolean>>({});
+  // The comments of each issue the person has given a 👍, as `GET vote` says and as the person changes them.
+  const [commentVotes, setCommentVotes] = useState<Record<number, readonly (string | number)[]>>({});
+  // The rows whose thread the server refused a comment on because it is closed on GitHub.
+  const [closedKeys, setClosedKeys] = useState<ReadonlySet<string>>(new Set());
   const [signinFailed] = useState(takeSigninFailure);
 
   /** A state is shown, from memory or from the server. */
@@ -85,7 +92,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     setHistories('loading');
     loadHistory().then((loaded) => setHistories(loaded), () => setHistories('error'));
   }, [loadHistory]);
-  const plan = useMemo(() => buildPlan(data, live.state, typeof histories === 'object' ? histories : undefined), [data, live.state, histories]);
+  const plan = useMemo(() => buildPlan(data, live.state, typeof histories === 'object' ? histories : undefined, closedKeys), [data, live.state, histories, closedKeys]);
   const rows = useMemo(() => allRows(plan), [plan]);
   const rowByKey = useMemo(() => new Map(rows.map((row) => [row.key, row])), [rows]);
 
@@ -174,6 +181,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
       (detail) => {
         fetched.current.set(n, Date.now());
         setDetails((current) => ({ ...current, [n]: { ...detail, comments: keptComments(n, detail.comments ?? [], Date.now()) } }));
+        // The comments' 👍 counts are the thread's; the person's own votes on them come with the row's own vote.
       },
       () => setDetails((current) => (typeof current[n] === 'object' ? current : { ...current, [n]: 'error' })),
     ).finally(() => fetching.current.delete(n));
@@ -218,33 +226,61 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     if (liveOk && row?.issue != null) loadDetail(row.issue);
     // The plan changing under the same open row does not load again.
   }, [liveOk, openKey, openings, loadDetail]);
-  // One check of the person's own vote per opening of a row, never retried: a failure leaves 👍 off. It waits for
+  /** What the person's own votes on an issue are, as `GET vote` answered; what the page already knows stays. */
+  const noteVotes = (n: number, mine: MyVotes) => {
+    setVotes((current) => (n in current ? current : { ...current, [n]: mine.on }));
+    setCommentVotes((current) => (n in current ? current : { ...current, [n]: mine.comments }));
+  };
+  // One check of the person's own votes per opening of a row, never retried: a failure leaves 👍 off. It waits for
   // `me` to answer on this visit (not the remembered person), and a session found gone there says nothing.
   const signedInAs = meKnown && answer ? answer.login : null;
-  useEffect(() => {
-    const row = openKey ? rowByKey.get(openKey) : undefined;
-    const n = row?.issue;
-    if (!liveOk || !signedInAs || n == null || n <= 0 || (row?.kind !== 'entry' && row?.kind !== 'suggestion')) return;
+  const askVotes = (n: number) => {
     api.myVote(n).then(
-      (on) => setVotes((current) => (n in current ? current : { ...current, [n]: on })),
+      (mine) => noteVotes(n, mine),
       (error) => {
         if (error instanceof ApiError && error.status === 401) {
           setMe(null);
           setVotes({});
+          setCommentVotes({});
           rememberPerson(null);
         }
       },
     );
+  };
+  useEffect(() => {
+    const row = openKey ? rowByKey.get(openKey) : undefined;
+    const n = row?.issue;
+    if (!liveOk || !signedInAs || n == null || n <= 0 || (row?.kind !== 'entry' && row?.kind !== 'suggestion')) return;
+    askVotes(n);
     // Re-rendering, or the plan changing under the same open row, does not ask again.
   }, [openKey, openings, liveOk, signedInAs]);
+  // An open row that takes a thread, or whose thread's number changes, asks for that thread and for the person's votes
+  // as an opening does. Rows open independently, so each open row is followed.
+  const threadAsked = useRef(new Map<string, number | null>());
+  useEffect(() => {
+    const asked = threadAsked.current;
+    for (const key of [...asked.keys()]) if (!openKeys.has(key)) asked.delete(key);
+    for (const key of openKeys) {
+      const n = rowByKey.get(key)?.issue ?? null;
+      const before = asked.get(key);
+      asked.set(key, n);
+      // The opening itself asks; only a thread that arrives under a row already open asks here.
+      if (before === undefined || before === n || n === null || n <= 0 || !liveOk) continue;
+      loadDetail(n, true);
+      if (signedInAs) askVotes(n);
+    }
+  }, [rowByKey, openKeys, liveOk, signedInAs]);
 
   // The count the server answered for a write; an older server answers none, and the count shown moves by one.
   const shownRef = useRef(shownState);
   shownRef.current = shownState;
   const count = (answered: unknown, fallback: number) => (typeof answered === 'number' && Number.isInteger(answered) && answered >= 0 ? answered : fallback);
   /** A write the server confirmed: kept, and shown at once over the answer. */
-  const remember = (write: Omit<Write, 'at'>, comment?: Comment) => {
-    keep(write, Date.now(), comment);
+  const sentRef = useRef(0);
+  /** The moment a write is sent, with its place in the order of sending. */
+  const sending$ = () => ({ at: Date.now(), seq: (sentRef.current += 1) });
+  const remember = (write: Omit<Write, 'at' | 'seq'>, sent: { at: number; seq: number }, comment?: Comment) => {
+    keep({ ...write, seq: sent.seq }, Date.now(), comment, sent.at);
     setWritesTick((tick) => tick + 1);
   };
 
@@ -252,24 +288,32 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     setMe(null);
     rememberPerson(null);
     setVotes({});
+    setCommentVotes({});
     setNotice('Sign in again.');
   }
 
   const ownComment = (text: string): Comment | null => (me
-    ? { id: `own-${Date.now()}-${Math.random().toString(36).slice(2)}`, author: me.login, avatar: me.avatar, bot: false, createdAt: new Date().toISOString(), text }
+    ? { id: `own-${Date.now()}-${Math.random().toString(36).slice(2)}`, author: me.login, avatar: me.avatar, bot: false, createdAt: new Date().toISOString(), text, up: 0 }
     : null);
-  const startSending = (n: number, comment: Comment | null) => {
-    if (comment) setSending((current) => ({ ...current, [n]: [...(current[n] ?? []), comment] }));
+  const startSending = (key: string, comment: Comment | null) => {
+    if (comment) setSending((current) => ({ ...current, [key]: [...(current[key] ?? []), comment] }));
   };
-  const stopSending = (n: number, comment: Comment | null) => {
-    if (comment) setSending((current) => ({ ...current, [n]: (current[n] ?? []).filter((c) => c.id !== comment.id) }));
+  const stopSending = (key: string, comment: Comment | null) => {
+    if (comment) setSending((current) => ({ ...current, [key]: (current[key] ?? []).filter((c) => c.id !== comment.id) }));
   };
-  /** A comment the server confirmed joins the thread as an ordinary one. */
-  const confirmComment = (n: number, comment: Comment | null) => {
+  /**
+   * A comment the server confirmed joins the thread as an ordinary one, once. A thread the row had none of yet is
+   * made here, so the comment shows without a load.
+   */
+  const confirmComment = (row: Row, n: number, comment: Comment | null) => {
     if (!comment) return;
     setDetails((current) => {
       const detail = current[n];
-      return typeof detail === 'object' ? { ...current, [n]: { ...detail, comments: [...detail.comments, { ...comment, createdAt: new Date().toISOString() }] } } : current;
+      if (typeof detail === 'object') {
+        if (detail.comments.some((c) => c.id === comment.id || (c.author === comment.author && c.text.trim() === comment.text.trim()))) return current;
+        return { ...current, [n]: { ...detail, comments: [...detail.comments, comment] } };
+      }
+      return row.issue === null ? { ...current, [n]: { number: n, title: row.name, body: '', url: '', up: 0, comments: [comment] } } : current;
     });
   };
 
@@ -282,45 +326,133 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     setNotice(`${what}: not saved. ${message}`);
   };
 
+  /** What a write on a row names: for a decision or a feature its id, so the server finds the thread and says when it is closed; a suggestion by its number. */
+  const targetOf = (row: Row): Target | null => {
+    if (row.kind === 'entry') return { entry: row.key.slice('entry-'.length) };
+    return row.issue !== null && row.issue > 0 ? { n: row.issue } : null;
+  };
+  /** The thread a write answered, else the row's own. */
+  const threadOf = (row: Row, answered: { n?: unknown } | undefined): number | null => {
+    const n = answered?.n;
+    if (typeof n === 'number' && Number.isSafeInteger(n) && n > 0) return n;
+    return row.issue !== null && row.issue > 0 ? row.issue : null;
+  };
+  /** The thread as it stood before the write that made or found it; the write's own values are set over it. */
+  const opened = (row: Row, n: number): Pick<Write, 'opens'> => (row.issue === n ? {} : {
+    opens: {
+      entry: row.key.slice('entry-'.length),
+      issue: { kind: 'entry', entry: row.key.slice('entry-'.length), title: row.name, state: 'open', reason: null, up: 0, comments: 0, author: '', bot: true, createdAt: new Date().toISOString(), closedAt: null },
+    },
+  });
+  /** A refusal because the thread is closed on GitHub: the row takes the thread the server names, and shows it closed. */
+  const refusedClosed = (row: Row, error: unknown, sent: { at: number; seq: number }) => {
+    if (!(error instanceof ApiError && error.status === 403 && error.code === 'closed')) return false;
+    setClosedKeys((current) => new Set(current).add(row.key));
+    const n = error.n ?? row.issue;
+    if (n !== null && n > 0 && row.issue !== n) remember({ n, ...opened(row, n), set: {} }, sent);
+    return true;
+  };
+
   const sendComment = async (row: Row, event: FormEvent) => {
     event.preventDefault();
-    const n = row.issue;
+    const target = targetOf(row);
     const text = (drafts[row.key] ?? '').trim();
     const own = ownComment(text);
-    if (n === null || n <= 0 || !text || !own) return;
+    if (!target || !text || !own) return;
+    const sent = sending$();
     setDrafts((current) => ({ ...current, [row.key]: '' }));
-    startSending(n, own);
+    startSending(row.key, own);
     setAnnounce('Sending comment');
     try {
-      const answered = await api.comment(n, text);
-      confirmComment(n, own);
-      remember({ n, set: { comments: count(answered?.comments, (shownRef.current?.issues[n]?.comments ?? 0) + 1) } }, own);
+      const answered = await api.comment(target, text);
+      const n = threadOf(row, answered);
+      if (n === null) throw new Error('No thread answered.');
+      const confirmed = { ...own, ...(typeof answered?.id === 'number' ? { id: answered.id } : {}), createdAt: new Date().toISOString() };
+      confirmComment(row, n, confirmed);
+      remember({ n, ...opened(row, n), set: { comments: count(answered?.comments, (shownRef.current?.issues[n]?.comments ?? 0) + 1) } }, sent, confirmed);
     } catch (error) {
       setDrafts((current) => ({ ...current, [row.key]: current[row.key] ? current[row.key] : text }));
-      failed('Comment', error);
+      if (!refusedClosed(row, error, sent)) failed('Comment', error);
     } finally {
-      stopSending(n, own);
+      stopSending(row.key, own);
     }
   };
 
-  const votingRef = useRef(new Set<number>());
+  const votingRef = useRef(new Set<string>());
   const toggleVote = async (row: Row) => {
-    const n = row.issue;
-    if (n === null || n <= 0 || !me || votingRef.current.has(n)) return;
-    votingRef.current.add(n);
+    const target = targetOf(row);
+    if (!target || !me || votingRef.current.has(row.key)) return;
+    votingRef.current.add(row.key);
+    const sent = sending$();
     setVotePending(new Set(votingRef.current));
     setAnnounce('Sending vote');
     try {
-      const was = n in votes ? votes[n] : await api.myVote(n);
+      // An entry with no thread has no 👍 of the person's.
+      const known = row.issue !== null ? votes[row.issue] : false;
+      const was = known !== undefined ? known : row.issue !== null ? (await api.myVote(row.issue)).on : false;
       const on = !was;
-      const answered = await api.vote(n, on);
+      const answered = await api.vote(target, on);
+      const n = threadOf(row, answered);
+      if (n === null) throw new Error('No thread answered.');
       setVotes((current) => ({ ...current, [n]: on }));
-      remember({ n, set: { up: count(answered?.up, Math.max(0, (shownRef.current?.issues[n]?.up ?? 0) + (on ? 1 : -1))) } });
+      remember({ n, ...opened(row, n), set: { up: count(answered?.up, Math.max(0, (shownRef.current?.issues[n]?.up ?? 0) + (on ? 1 : -1))) } }, sent);
     } catch (error) {
+      if (!refusedClosed(row, error, sent)) failed('Vote', error);
+    } finally {
+      votingRef.current.delete(row.key);
+      setVotePending(new Set(votingRef.current));
+    }
+  };
+
+  const commentVotingRef = useRef(new Set<string>());
+  /** The person's 👍 on a comment: the count changes at once, and goes back when the server refuses. */
+  const toggleCommentVote = async (row: Row, comment: Comment) => {
+    const n = row.issue;
+    const id = comment.id;
+    if (n === null || n <= 0 || typeof id !== 'number' || !me) return;
+    const pending = `${n}:${id}`;
+    if (commentVotingRef.current.has(pending)) return;
+    commentVotingRef.current.add(pending);
+    setCommentVotePending(new Set(commentVotingRef.current));
+    // The page's own change to the count: one up or one down, from the count shown now.
+    const bump = (delta: number, on: boolean) => {
+      setDetails((current) => {
+        const detail = current[n];
+        return typeof detail === 'object' ? { ...current, [n]: { ...detail, comments: detail.comments.map((c) => (c.id === id ? { ...c, up: Math.max(0, (c.up ?? 0) + delta) } : c)) } } : current;
+      });
+      setCommentVotes((current) => {
+        const others = (current[n] ?? []).filter((other) => other !== id);
+        return { ...current, [n]: on ? [...others, id] : others };
+      });
+    };
+    let revert: (() => void) | null = null;
+    try {
+      let mine = commentVotes[n];
+      if (mine === undefined) {
+        const asked = await api.myVote(n);
+        noteVotes(n, asked);
+        mine = asked.comments;
+      }
+      const was = mine.includes(id);
+      const on = !was;
+      const delta = on ? 1 : -1;
+      bump(delta, on);
+      revert = () => bump(-delta, was);
+      const answered = await api.commentVote(n, id, on);
+      const shown = (detailRef.current[n] as IssueDetail | undefined)?.comments.find((c) => c.id === id)?.up ?? 0;
+      const up = count(answered?.up, shown);
+      revert = null;
+      setDetails((current) => {
+        const detail = current[n];
+        return typeof detail === 'object' ? { ...current, [n]: { ...detail, comments: detail.comments.map((c) => (c.id === id ? { ...c, up } : c)) } } : current;
+      });
+      keepCommentUp(n, id, up, Date.now());
+    } catch (error) {
+      revert?.();
       failed('Vote', error);
     } finally {
-      votingRef.current.delete(n);
-      setVotePending(new Set(votingRef.current));
+      commentVotingRef.current.delete(pending);
+      setCommentVotePending(new Set(commentVotingRef.current));
     }
   };
 
@@ -330,6 +462,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     const text = suggestDraft.text.trim();
     if (!title || !me || !live.state) return;
     const id = Date.now() + Math.random();
+    const sent = sending$();
     const author = me.login;
     setSuggestionsSending((current) => [...current, { id, title, author }]);
     setSuggestDraft({ title: '', text: '' });
@@ -338,7 +471,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
       const { number } = await api.suggest(title, text);
       const issue: LiveIssue = { kind: 'suggestion', entry: null, title, state: 'open', reason: null, up: 0, comments: 0, author, bot: false, createdAt: new Date().toISOString(), closedAt: null };
       setDetails((current) => ({ ...current, [number]: { number, title, body: text, url: '', up: 0, comments: [] } }));
-      remember({ n: number, set: issue });
+      remember({ n: number, set: issue }, sent);
     } catch (error) {
       setSuggestDraft({ title, text });
       failed('Suggestion', error);
@@ -353,6 +486,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
       setMe(null);
       rememberPerson(null);
       setVotes({});
+      setCommentVotes({});
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) signedOut();
       else setNotice('Could not sign out.');
@@ -361,7 +495,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
 
   return {
     live, liveOk, waiting, offline, settled, me, retry, plan, rowByKey, details, prefetch, notes, wantNotes, facts, wantFacts, histories, wantHistory, fetchNow, sending, votePending,
-    votes, suggestionsSending, notice, drafts, setDrafts, suggestDraft,
+    votes, commentVotes, commentVotePending, toggleCommentVote, suggestionsSending, notice, drafts, setDrafts, suggestDraft,
     setSuggestDraft, announce, setAnnounce, signinFailed, sendComment, toggleVote,
     sendSuggestion, signOut,
   };

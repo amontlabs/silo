@@ -15,6 +15,17 @@ export interface Comment {
   bot: boolean;
   createdAt: string;
   text: string;
+  /** The comment's 👍 count; absent counts as 0. */
+  up?: number;
+}
+
+/** What a write names: an issue by its number, or an entry of the plan by its id (the server finds or opens its thread). */
+export type Target = { n: number } | { entry: string };
+
+/** What the person's own votes on an issue are: its 👍, and the comments they gave one. */
+export interface MyVotes {
+  on: boolean;
+  comments: (string | number)[];
 }
 
 export interface IssueDetail {
@@ -29,7 +40,8 @@ export interface IssueDetail {
 }
 
 export class ApiError extends Error {
-  constructor(readonly status: number, readonly code: string, message: string) {
+  /** `n`: the thread, when the server names it in its refusal of a write on an entry. */
+  constructor(readonly status: number, readonly code: string, message: string, readonly n: number | null = null) {
     super(message);
   }
 }
@@ -67,14 +79,16 @@ async function respond<T>(path: string, init?: RequestInit): Promise<{ body: T; 
   if (!response.ok) {
     let code = 'error';
     let message = FALLBACK[response.status] ?? 'Something went wrong.';
+    let n: number | null = null;
     try {
-      const body = (await response.json()) as { error?: unknown; message?: unknown };
+      const body = (await response.json()) as { error?: unknown; message?: unknown; n?: unknown };
       if (typeof body.error === 'string') code = body.error;
+      if (typeof body.n === 'number' && Number.isSafeInteger(body.n) && body.n > 0) n = body.n;
       if (typeof body.message === 'string' && body.message.trim()) message = body.message;
     } catch {
       // The status alone says enough.
     }
-    throw new ApiError(response.status, code, message);
+    throw new ApiError(response.status, code, message, n);
   }
   return { body: (await response.json()) as T, headers: response.headers };
 }
@@ -109,11 +123,16 @@ export const api = {
     }
   },
   issue: (n: number) => request<IssueDetail>(`issue?n=${n}`),
-  myVote: async (n: number) => (await request<{ on: boolean }>(`vote?n=${n}`, { cache: 'no-store' })).on === true,
-  /** `comments`: the issue's whole count after the comment, when the server says. */
-  comment: (n: number, text: string) => post<{ comments?: unknown }>('comment', { n, text }),
-  /** `up`: the issue's 👍 count after the vote, when the server says. */
-  vote: (n: number, on: boolean) => post<{ up?: unknown }>('vote', { n, on }),
+  myVote: async (n: number): Promise<MyVotes> => {
+    const body = await request<{ on?: unknown; comments?: unknown }>(`vote?n=${n}`, { cache: 'no-store' });
+    return { on: body.on === true, comments: Array.isArray(body.comments) ? body.comments.filter((id): id is string | number => typeof id === 'number' || typeof id === 'string') : [] };
+  },
+  /** `comments`: the issue's whole count after the comment, when the server says; `id`: the comment; `n`: the thread, answered when the write named an entry. */
+  comment: (target: Target, text: string) => post<{ comments?: unknown; id?: unknown; n?: unknown }>('comment', { ...target, text }),
+  /** `up`: the issue's 👍 count after the vote, when the server says; `n`: the thread, answered when the write named an entry. */
+  vote: (target: Target, on: boolean) => post<{ up?: unknown; n?: unknown }>('vote', { ...target, on }),
+  /** `up`: the comment's 👍 count after the vote, when the server says. */
+  commentVote: (n: number, comment: string | number, on: boolean) => post<{ up?: unknown }>('comment-vote', { n, comment, on }),
   suggest: (title: string, text: string) => post<{ number: number }>('suggest', { title, text }),
   logout: () => post<unknown>('logout', {}),
 };

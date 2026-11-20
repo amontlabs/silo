@@ -18,7 +18,7 @@ Vite. It has two pages:
   plan, the parts of the product as tiles, each with its decisions and
   features, the decisions of the whole product, and the features people
   suggest. Anyone signed in with GitHub can suggest a feature, and vote and
-  comment on a suggestion. Its API lives under `/api/workshop/` (`server/`,
+  comment on a suggestion, a decision or a feature. Its API lives under `/api/workshop/` (`server/`,
   `api/`). While the plan holds no part, it is the same page with no tile but
   "Suggest a feature".
 
@@ -61,8 +61,9 @@ npm --prefix website run workshop:dev -- --fake
 This serves `website/dist` and the API at `http://127.0.0.1:4174`
 (`--port` to change it), with the Workshop page at `/workshop` and
 `/workshop/`. `--fake` starts a fake GitHub on another local port, seeded with
-an issue for every entry of `plan/` (or of the plan `WORKSHOP_PLAN` names; the
-page matches none of them while entries have no threads), two issues with the retired label
+an issue for the first three entries of `plan/` (or of the plan `WORKSHOP_PLAN` names), so that
+the other rows have no thread yet and can be tried; the first comment of the first issue has two 👍.
+It also holds two issues with the retired label
 `workshop:decision` (outside the Workshop), a suggestion, comments, 👍 votes,
 an ordinary issue and a pull request.
 Sign-in goes through the fake's page, which offers two people: `owner-fake`
@@ -86,8 +87,8 @@ uses an installed Chrome. It opens `http://127.0.0.1:4174/workshop` (pass
 another URL after `--` to check another server) at 1440 × 900, 1440 × 1100,
 2560 × 1440, 1024 × 1366 and 390 × 844, on the plain view, the first part
 that has rows, `#product` when the whole product has rows, `#latest`
-when entries have threads, and `#suggested`. The parts, the whole product's
-rows and whether entries have threads are read from the page's data
+and `#suggested`. The parts and the whole product's
+rows are read from the page's data
 (`window.__workshopData`, set by `main.tsx`), and the places to visit are chosen
 from its counts of rows (`placesOf`, tested in `load-check.test.mjs`); whether
 it draws a map is read
@@ -97,14 +98,13 @@ feature" appeared, what the page's first frame held, and every layout shift
 with their total. Every one of these loads is a first visit: its first frame
 must hold the sign-in button (unless `--signed-in`), "Suggest a feature" on the
 plain view, and on the first place with rows (the first part that has rows,
-else the whole product) a vote placeholder on every row when entries have threads, none on
-any row when they have not. Then, in one browser profile at 1440 × 900, that
-place (the plain view when the plan has no row) is visited twice (with threads,
-the second visit must have the votes in its first frame), and a person signs
+else the whole product) a vote placeholder on every row. Then, in one browser profile at 1440 × 900, that
+place (the plain view when the plan has no row) is visited twice (the second
+visit must have the votes in its first frame), and a person signs
 in through the fake GitHub's page as `owner-fake` (so the session cookie, its
 marker and the remembered person are real) and visits again: the login must
 be in its first frame (the app's first frame: the markup the build drew does not count). Then
-an entry of that place without comments is opened before the answers, at 1440 × 900 and
+an entry of that place without comments (one with no thread yet included) is opened before the answers, at 1440 × 900 and
 390 × 844, and the rows below it must not move when they arrive; and
 `#suggested` is visited signed in with nobody remembered, and the list must not
 move when `me` answers. "account" is when the login or the sign-in button
@@ -176,24 +176,15 @@ nothing else, or the build stops. `map-example.ts` is a made-up layout of five
 parts that shows every kind of thing a layout can hold; the tests draw their
 fixture plan (`fixtures.ts`) with it, and the page never shows it.
 
-The page's data (`BuildData`) carries one switch, `threads`. It switches entries'
-issues on GitHub: off in the real build, on in the tests' fixture plan. Off, the
-code behind it and its tests stay. The page has no way to take or drop an entry
-and the server has no verdict route: decisions and features are taken or dropped
-with `plan take` and `plan drop`.
-
-With `threads` off, no issue is matched to an entry, even an old one whose
-marker names it, and an entry shows its text, its notes, its history and its state with
-no vote, no count, no comment box, no GitHub link and no placeholder for any of
-them; the page has no Latest, and sign-in has no tooltip. Suggestions keep their
-votes and comments.
+The page has no way to take or drop an entry and the server has no verdict route:
+decisions and features are taken or dropped with `plan take` and `plan drop`.
 
 `npm run build` then runs `scripts/prerender.mjs`, which renders the plain
 address `/workshop` (`src/workshop/prerender.tsx`: nothing remembered, nobody
 signed in, the load pending) and writes it into `dist/workshop/index.html`: the
 title row, the map when there is one, the tiles and the row under them in
 `#workshop-root`, "Sign in with GitHub" in the header's account slot (with its
-tooltip when entries have threads), and, in the page's `<noscript>`, the line
+tooltip), and, in the page's `<noscript>`, the line
 that says what needs JavaScript followed by every part with its decisions and
 features and then the decisions of the whole product, as a plain list (id,
 name, state, and "Replaced by" for a replaced decision; `NoScript.tsx`). The root and the slot carry `data-prerendered`
@@ -266,16 +257,17 @@ What a person sees:
   a map and the window is at least 760 px tall); the part's rows open in place,
   each on its own. Opening or closing a row never moves it or the rows above it.
   The row opened last is the one in the address. A row with a thread loads its
-  comments when a pointer, a press or focus reaches it, and on every opening;
+  comments when a pointer, a press or focus reaches it, and on every opening (a
+  row with no thread yet loads nothing);
   it shows itself open at once, its panel grows when the comments are in or
   after 180 ms, and while they still load each one the count announces holds
-  its place. An entry named by the address opens at once; with threads, it
+  its place. An entry named by the address
   waits closed until the first answer when no live state is shown yet. An
   address naming something the state shown lacks falls back to the plan only
   once the load has answered or failed, and the `fresh=1` ask has too when one
-  was made. The person's own vote on an opened row is checked only once `me`
-  has answered on this visit, so a session found gone on page load says
-  nothing. The suggest form shows whenever the person is shown signed in and
+  was made. The person's own vote on an opened row and their votes on its comments
+  come from one `GET vote`, asked only once `me` has answered on this visit, so a session found gone
+  on page load says nothing; a row with no thread yet asks nothing. The suggest form shows whenever the person is shown signed in and
   keeps its draft; it sends only while a state is shown.
 - What the page shows first: the plan is in the bundle. The live state (votes,
   comments, suggestions) and who is signed in come from
@@ -285,14 +277,18 @@ What a person sees:
   kept apart (`writes.ts`), as a list with each one's time, of values set: a
   new suggestion, and for a vote or a comment the count the server
   answered for that write (`up`, `comments`; the count shown plus or minus one
-  when an older server answers none). Never a change to a count: the server
+  when an older server answers none). A write that made or found an entry's thread
+  also says so (`opens`), which adds the thread to an answer that lacks it and never
+  replaces one it has. Never a change to a count: the server
   patches its snapshot in place, so an answer may already count a write made
   after its `fetchedAt`. What the page shows is the answer with every write applied in
-  order, except those the answer was fetched more than a minute after; a write
-  is dropped after a day, the page's own comments after six minutes. Both are drawn in the
+  the order it was sent, except those the answer was fetched more than a minute after; a write
+  is dropped after a day, the page's own comments and the count the server answered for the
+  person's vote on a comment after six minutes. Both are drawn in the
   first frame. The person is used only while the `workshop-hint` cookie is
   there, and forgotten on sign-out, on a 401 and when `me` answers signed out; a
-  state over 7 days old or of another shape is ignored, and so is a field that
+  state over 7 days old or of another shape is ignored (a state with no `threads`, as an
+  older page stored it, is another shape), and so is a field that
   an older page stored and this one does not read. Without the cookie the
   visitor is signed out from the first frame ("Sign in with GitHub", "Sign in to
   comment", "Sign in to suggest").
@@ -303,14 +299,13 @@ What a person sees:
   once more after 1.5 s (not on `not_configured`); then "Votes and comments are
   offline." shows with "Try again", and remembered numbers stay on screen.
 - While no state is shown and the first answer is to come, placeholders hold the
-  room of what is known to come: the vote of every row with a thread, the
+  room of what is known to come: the vote of every row, the
   header's account when the cookie is there and nobody is remembered, Latest's
-  lines, the comment box of an open row with a thread, two rows of suggestions
+  lines, in an open entry's panel "No comments yet." and the comment box (the shape most entries have; a thread with comments makes the panel grow once, as a slow one does), two rows of suggestions
   and the suggest form; notes have their own while their chunk loads. They
   pulse slowly (not with reduced motion), are `aria-hidden`, and their region
   is `aria-busy`. Nothing has a placeholder that may not come (comment counts,
-  "N suggested", anything of a thread an entry does not
-  have). What arrives after the first frames (numbers, the account, a new
+  "N suggested", the link to an issue). What arrives after the first frames (numbers, the account, a new
   item of the key) fades in over 150 ms where it stands;
   nothing fades on navigation or when a row opens, or with reduced motion.
 - An open entry shows, in this order, each part only when it has something: its
@@ -346,8 +341,8 @@ What a person sees:
   own (`virtual:workshop-notes`), loaded the first time a pointer, a press or
   focus reaches a "Notes"; the page's bundle only knows which entries have
   some.
-- "History" is on every entry that has at least one change, with or without
-  threads. Closed, its line reads "History", the last change's phrases and
+- "History" is on every entry that has at least one change, whether or not it has a
+  thread. Closed, its line reads "History", the last change's phrases and
   its date, and "N changes" when there are several ("History · Decided, 20
   Nov · 3 changes"). Opened, it lists the changes in place, newest first, one
   line each: the date, the phrases of that change joined by ` · `, and a
@@ -372,18 +367,49 @@ What a person sees:
   loaded the first time a pointer, a press or focus reaches a History, or Latest
   opens, with one placeholder line per change meanwhile; if it cannot load,
   the list says so and the next time tries again.
-- An open suggestion, or an entry when entries have threads, shows its thread
-  and a box to add a comment. A comment of the Workshop's App is an ordinary
+- An open row, a decision, a feature or a suggestion, shows its thread and a box
+  to add a comment. A comment of the Workshop's App is an ordinary
   comment. While the thread loads, each comment the live state counts holds
   its place. A visitor who is not signed in gets "Sign in to comment" and, under it,
   "or comment directly on GitHub", the one link to that row's issue; a signed-in person
   gets the box and "GitHub #N". Until `me` answers, the panel keeps the room of
   the shape the `workshop-hint` cookie predicts, so it moves only when that
   cookie was stale.
+- An entry's thread is the issue that `threads` of `GET state` gives for its id; the page
+  matches none by itself, so an issue that merely names the entry is not its thread. A feature
+  whose file has `suggested_in` shows once, as the feature, and its thread is that
+  suggestion's issue, which is not listed among the suggestions.
+- A row whose entry has no thread yet shows the vote with a count of 0. Opened, it shows
+  "No comments yet." and then the comment box (signed in) or "Sign in to comment", and no link to
+  GitHub, since there is no issue yet; the room of that link stays empty, so the row taking its
+  thread moves nothing in the panel. A row whose thread has no comment shows the same line.
+- A comment or a 👍 on a decision or a feature is sent with `entry`, the id of the entry, whether or not the
+  page knows its thread. The server finds the thread, or opens it at the first one.
+- A comment or a 👍 on a suggestion is sent with `n`, its issue.
+- The `n` of the answer becomes the row's thread at once, and the comment or the count shows without a reload.
+- A row that takes a thread, or whose thread's number changes, while it is open asks for that thread and for the
+  person's votes, as an opening does.
+- The person's own comment stays shown from the page's kept writes until an answer holds it.
+- A 👍 works the same on a decision, a feature and a suggestion, whether the entry is decided, planned, dropped
+  or replaced.
+- A comment that the server answers twice (a retry after an error) shows once.
+- The page applies and keeps its own writes in the order it sent them, not the order their answers came.
+- A thread closed on GitHub shows its comments, no box, and "This thread is closed on GitHub." with the
+  link to the issue.
+- A thread is closed when `state` says `closed`.
+- A thread is also closed when the server answers a write 403 `closed`, which it does only to a write that names an entry.
+- That answer carries `n`, which becomes the row's thread when the row had none.
+- Under each comment of a thread are its 👍 count and a button (`up` of `GET issue`). Signed out,
+  the count shows and the button asks to sign in, as the row's vote does. Signed in, the button is
+  pressed for the comments `GET vote` names. A click changes the count at once and sends
+  `POST comment-vote`.
+- The count the server answers for a vote on a comment is applied to a `GET issue` answer unless that answer
+  was fetched more than a minute after the vote (`writes.ts`).
+- A refusal takes back the page's own change, one up or one down from the count shown by then, and says
+  "Vote: not saved." with the server's words.
 - The strip under the tiles links to what is left out (every dropped decision
   and feature of the parts), to "The whole product" (`#product`: the decisions
-  of `plan/decisions/`, with their own counts), to Latest when entries have
-  threads, and to the suggestions. Latest (`#latest`) lists the newest 30
+  of `plan/decisions/`, with their own counts), to Latest, and to the suggestions. Latest (`#latest`) lists the newest 30
   comments and changes (from the history chunk) across the entries, merged by
   time, newest first, each opening its entry (a click with a modifier key, or a middle click, is left to the
   browser). While it loads, ten one-line placeholders hold its place and
@@ -395,18 +421,17 @@ What a person sees:
   the head script applies it before first paint; it is never applied during a
   visit, so on the first visit after signing in the login sits right-aligned in
   the reserved width.
-  When entries have threads, under "Sign in with GitHub", on hover and keyboard
+  Under "Sign in with GitHub", on hover and keyboard
   focus, a tooltip tied to the button says "or comment directly on GitHub",
-  taking no room. Without threads there is no tooltip: signing in then serves
-  only suggestions, and "Sign in to suggest" says so where it is offered.
+  taking no room.
 
 Addresses: `#<part>`, `#<part>/<entry id>`, `#product`, `#suggested` and
-`#left`, each with an optional open row (`#suggested/issue-<n>`), and `#latest`
-when entries have threads. A row named by an address is looked for first
+`#left`, each with an optional open row (`#suggested/issue-<n>`), and `#latest`.
+A row named by an address is looked for first
 among the plan's entries, by id, whatever place the address names (an entry
 whose id begins with `issue-` included), and only then among the suggestions;
 the address is then rewritten to where the row is. An entry that no longer
-exists opens its part. The older `#entry-<id>` and `#issue-<n>` open that row
+exists opens its part. `#suggested/issue-<n>` for a suggestion that became a feature opens the feature, where it lives. The older `#entry-<id>` and `#issue-<n>` open that row
 where it now lives. The old list of decisions and its address `#decisions` are
 gone. No part can take the id of a place: the build refuses it (above).
 Back and Forward move between places; opening a row replaces the address.
@@ -417,7 +442,7 @@ Back and Forward move between places; opening a row replaces the address.
 | `useWorkshop.ts` | Live state and every write: the load, pending writes. |
 | `MapView.tsx`, `Tiles.tsx` | The map and the tiles. |
 | `PartView.tsx`, `Suggest.tsx`, `Latest.tsx` | An opened part, the whole product's decisions and what is left out; the suggestions; the latest changes. |
-| `Entry.tsx` | One row and what it shows open: the text, what the entry says of the plan's lists and what it needs, its id and the button that copies it, the state, notes, history, and for a row with a thread the thread. |
+| `Entry.tsx` | One row and what it shows open: the text, what the entry says of the plan's lists and what it needs, its id and the button that copies it, the state, notes, history, and the thread with the votes on its comments. |
 | `routes.ts`, `plan.ts`, `map.ts`, `data.ts` | Addresses; the rows, statuses, parts' counts and states on top of the plan's model; the drawing; the build-time reader. |
 | `api.ts`, `writes.ts`, `memory.ts`, `RichText.tsx`, `Markdown.tsx`, `Boundary.tsx` | The API client, the page's own writes (a list of values set, kept a day; its comments six minutes), the remembered answer and person, text from GitHub, notes, the fallback list. |
 | `prerender.tsx`, `NoScript.tsx`, `takeover.ts` | The markup the build writes into the page, the list for a reader without JavaScript, and the script's takeover. |

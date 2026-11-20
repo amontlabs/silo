@@ -43,9 +43,9 @@ describe('reading the plan files', () => {
     expect(JSON.stringify(buildData())).not.toContain('The engine owns every computer');
   });
 
-  it('turns entries\' threads off in the real build, and on in the fixtures', () => {
-    expect(buildDataFrom(emptyPlanFiles())).toMatchObject({ threads: false });
-    expect(buildData()).toMatchObject({ threads: true });
+  it('holds no switch for entries\' threads: the page\'s data has none, in the real build and in the fixtures', () => {
+    expect(buildDataFrom(emptyPlanFiles())).not.toHaveProperty('threads');
+    expect(buildData()).not.toHaveProperty('threads');
     expect(buildData()).not.toHaveProperty('decide');
   });
 });
@@ -144,7 +144,6 @@ describe('reading plan/ from a repository folder', () => {
       const data = readBuildData(root, EXAMPLE_MAP);
       expect(data.entries).toHaveLength(FEATURES.length + DECISIONS.length);
       expect(data.parts).toHaveLength(PARTS.length);
-      expect(data).toMatchObject({ threads: false });
       expect(() => readBuildData(join(root, 'missing'))).toThrow('cannot be read');
     } finally {
       rmSync(root, { recursive: true, force: true });
