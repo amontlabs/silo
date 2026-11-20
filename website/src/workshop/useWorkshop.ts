@@ -8,7 +8,7 @@ import { recallPerson, recallState, rememberPerson, rememberState } from './memo
 import { applyKept, keep, keptComments, newerAnswer } from './writes';
 import type { Write } from './writes';
 import { allRows, buildPlan } from './plan';
-import type { BuildData, Facts, LiveIssue, LiveState, Notes, Row } from './plan';
+import type { BuildData, Facts, Histories, LiveIssue, LiveState, Notes, Row } from './plan';
 
 const NOTICE_MS = 8000;
 /** A fetch of an issue's comments this recent serves an opening. */
@@ -39,7 +39,7 @@ function takeSigninFailure(): boolean {
   return true;
 }
 
-export function useWorkshop(data: BuildData, openKey: string | null, openKeys: ReadonlySet<string>, openings: number, loadNotes: () => Promise<Notes> = () => Promise.resolve({}), loadFacts: () => Promise<Facts> = () => Promise.resolve({ entries: {}, statements: {} })) {
+export function useWorkshop(data: BuildData, openKey: string | null, openKeys: ReadonlySet<string>, openings: number, loadNotes: () => Promise<Notes> = () => Promise.resolve({}), loadFacts: () => Promise<Facts> = () => Promise.resolve({ entries: {}, statements: {} }), loadHistory: () => Promise<Histories> = () => Promise.resolve({})) {
   // The newest answer as the server sent it (or as remembered), how the load stands, and whether a `fresh=1` ask is
   // still out. What the page shows is that answer with the page's own writes applied (writes.ts).
   const [loaded, setLoaded] = useState<{ load: Live['load']; answer: LiveState | null; fresh: boolean }>(() => ({ load: 'pending', answer: recallState(Date.now()), fresh: false }));
@@ -74,7 +74,18 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   const waiting = !liveOk && live.load === 'pending' && !offline;
   const liveRefOk = useRef(liveOk);
   liveRefOk.current = liveOk;
-  const plan = useMemo(() => buildPlan(data, live.state), [data, live.state]);
+  // The changes of the entries: loaded once, the first time a History is opened or Latest is reached; a failed load is
+  // tried again at the next.
+  const [histories, setHistories] = useState<Histories | 'loading' | 'error' | undefined>(undefined);
+  const historiesRef = useRef(histories);
+  historiesRef.current = histories;
+  const wantHistory = useCallback(() => {
+    if (historiesRef.current === 'loading' || typeof historiesRef.current === 'object') return;
+    historiesRef.current = 'loading';
+    setHistories('loading');
+    loadHistory().then((loaded) => setHistories(loaded), () => setHistories('error'));
+  }, [loadHistory]);
+  const plan = useMemo(() => buildPlan(data, live.state, typeof histories === 'object' ? histories : undefined), [data, live.state, histories]);
   const rows = useMemo(() => allRows(plan), [plan]);
   const rowByKey = useMemo(() => new Map(rows.map((row) => [row.key, row])), [rows]);
 
@@ -349,7 +360,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   };
 
   return {
-    live, liveOk, waiting, offline, settled, me, retry, plan, rowByKey, details, prefetch, notes, wantNotes, facts, wantFacts, fetchNow, sending, votePending,
+    live, liveOk, waiting, offline, settled, me, retry, plan, rowByKey, details, prefetch, notes, wantNotes, facts, wantFacts, histories, wantHistory, fetchNow, sending, votePending,
     votes, suggestionsSending, notice, drafts, setDrafts, suggestDraft,
     setSuggestDraft, announce, setAnnounce, signinFailed, sendComment, toggleVote,
     sendSuggestion, signOut,

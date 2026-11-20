@@ -4,7 +4,7 @@ import { expect, vi } from 'vitest';
 import { App } from './App';
 import type { IssueDetail, Me } from './api';
 import type { BuildData } from './plan';
-import { buildData, fixtureFacts, fixtureNotes, liveState } from './fixtures';
+import { buildData, fixtureFacts, fixtureHistories, fixtureNotes, liveState } from './fixtures';
 
 export type Call = { method: string; path: string; body: Record<string, unknown> | null; headers: Record<string, string> };
 type Answer = { status: number; body: unknown; headers?: Record<string, string> };
@@ -64,8 +64,8 @@ export function tile(id: string) {
 }
 export const partTitle = () => document.getElementById('ws-part-title');
 
-export async function renderApp(data: BuildData = buildData(), loadNotes = () => Promise.resolve(fixtureNotes(data)), loadFacts = () => Promise.resolve(fixtureFacts(data))) {
-  const view = render(<App data={data} loadNotes={loadNotes} loadFacts={loadFacts} />);
+export async function renderApp(data: BuildData = buildData(), loadNotes = () => Promise.resolve(fixtureNotes(data)), loadFacts = () => Promise.resolve(fixtureFacts(data)), loadHistory = () => Promise.resolve(fixtureHistories(data))) {
+  const view = render(<App data={data} loadNotes={loadNotes} loadFacts={loadFacts} loadHistory={loadHistory} />);
   // Settled: the load has answered or failed, and the account shows who is signed in.
   await waitFor(() => expect(document.querySelector('.ws[data-live="answered"], .ws[data-live="failed"]')).not.toBeNull());
   await waitFor(() => expect(document.querySelector('.ws-account, .ws-account-inline a')).not.toBeNull());

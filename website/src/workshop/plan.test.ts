@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { buildDataFrom } from './data';
 import { buildData, DECISIONS, FEATURES, issue, liveState, planFiles } from './fixtures';
-import { allRows, buildPlan, changeLine, changeWords, countDecisions, entryStatuses, isDecided, relativeTime, statusLine, stateWords } from './plan';
-import type { Change, Entry, PartGroup } from './plan';
+import { allRows, buildPlan, changeLine, changePhrase, countDecisions, entryStatuses, isDecided, LATEST_LINES, relativeTime, shortDate, statusLine, stateWords } from './plan';
+import type { Change, ChangeName, Entry, PartGroup } from './plan';
 
 const names = (rows: { name: string }[]) => rows.map((row) => row.name);
 const byPart = (plan: ReturnType<typeof buildPlan>) => new Map(plan.parts.map((group) => [group.part.id, group]));
@@ -47,7 +47,7 @@ describe('the plan by part', () => {
   });
 
   it('says a status in the page\'s words, through the plan\'s model', () => {
-    const entry = (fields: Partial<Entry>): Entry => ({ id: 'x', kind: 'feature', part: 'p', stage: 's', position: 1, name: 'X', what: 'X.', needs: [], verdict: null, replaces: [], replacedBy: null, built: null, notes: false, more: false, ...fields });
+    const entry = (fields: Partial<Entry>): Entry => ({ id: 'x', kind: 'feature', part: 'p', stage: 's', position: 1, name: 'X', what: 'X.', needs: [], verdict: null, replaces: [], replacedBy: null, built: null, notes: false, more: false, history: null, ...fields });
     const status = (fields: Partial<Entry>, others: Entry[] = []) => entryStatuses([entry(fields), ...others]).get('x');
     expect(status({})).toBe('undecided');
     expect(status({ verdict: 'take' })).toBe('planned');
@@ -115,22 +115,22 @@ describe('the plan by part', () => {
     expect([status('Start a task from Slack'), status('Dropped idea'), status('Built idea'), status('Closed idea')]).toEqual(['undecided', 'dropped', 'built', 'undecided']);
   });
 
-  it('counts people\'s comments as the issue\'s comments less its history lines', () => {
+  it('counts the comments of an issue as they are: a comment of the App is a comment', () => {
     const plan = buildPlan(buildData(), liveState());
     const create = byPart(plan).get('part-b')!.rows[0];
-    expect(create).toMatchObject({ comments: 2, updates: 3, up: 12, issue: 12 });
-    expect(byPart(buildPlan(buildData(), liveState({ 12: issue({ entry: 'create', comments: 1, updates: 4 }) }))).get('part-b')!.rows[0]).toMatchObject({ comments: 0, updates: 1 });
+    expect(create).toMatchObject({ comments: 2, up: 12, issue: 12 });
+    expect(create).not.toHaveProperty('updates');
   });
 
-  it('puts the latest items on their entries, newest first as given, and skips one of another issue', () => {
+  it('puts the latest comments on their entries, newest first as given, and skips one of another issue', () => {
     const at = '2026-11-16T10:00:00Z';
     const plan = buildPlan(buildData(), liveState({}, [
       { n: 12, entry: 'create', author: 'mara-k', bot: false, createdAt: at, text: 'Hello' },
       { n: 99, entry: 'exec', author: 'x', bot: false, createdAt: at, text: 'Wrong issue' },
-      { n: 10, entry: 'core', author: 'silo-workshop[bot]', bot: true, createdAt: at, change: { fields: ['verdict'], verdict: 'take', before: 'a'.repeat(40), commit: 'b'.repeat(40) } as Change },
+      { n: 10, entry: 'core', author: 'silo-workshop[bot]', bot: true, createdAt: at, text: 'From the App' },
       { n: 5, entry: 'nothing', author: 'x', bot: false, createdAt: at, text: 'Gone' },
     ]));
-    expect(plan.latest.map((item) => [item.row.key, item.text, item.change?.verdict ?? null])).toEqual([['entry-create', 'Hello', null], ['entry-core', null, 'take']]);
+    expect(plan.latest.map((item) => [item.row.key, item.text, item.change])).toEqual([['entry-create', 'Hello', null], ['entry-core', 'From the App', null]]);
   });
 
   it('holds the decisions of the fixture plan as entries, with nothing of the old list of decisions', () => {
@@ -140,31 +140,76 @@ describe('the plan by part', () => {
   });
 });
 
-describe('history words', () => {
-  const change = (fields: string[], extra: Record<string, unknown> = {}) => ({ fields, before: 'a'.repeat(40), commit: 'b'.repeat(40), ...extra }) as Change;
+describe('Latest: comments and changes merged by time', () => {
+  const change = (commit: string, date: string, what: ChangeName[] = ['notes']): Change => ({ commit, date, what });
+  const comment = (n: number, entry: string, createdAt: string, text: string) => ({ n, entry, author: 'mara-k', bot: false, createdAt, text });
 
-  it('name each change in its phrase, never a raw key, joined by a middle dot', () => {
-    expect(changeWords(change(['verdict'], { verdict: 'take' }))).toEqual(['Taken']);
-    expect(changeWords(change(['verdict'], { verdict: 'drop' }))).toEqual(['Dropped']);
-    // "later" is no verdict any more: its change says nothing.
-    expect(changeWords(change(['verdict'], { verdict: 'later' }))).toEqual([]);
-    expect(changeWords(change(['verdict']))).toEqual(['Verdict cleared']);
-    expect(changeWords(change(['built'], { built: '2026-11-16' }))).toEqual(['Built']);
-    expect(changeWords(change(['name', 'what']))).toEqual(['Text changed']);
-    expect(changeWords(change(['notes']))).toEqual(['Notes edited']);
-    expect(changeWords(change(['name']))).toEqual(['Text changed']);
-    expect(changeWords(change(['needs']))).toEqual(['Needs changed']);
-    expect(changeWords(change(['area']))).toEqual(['Moved to another part']);
-    expect(changeWords(change(['suggest']))).toEqual(['Suggestion changed']);
-    expect(changeWords(change(['surfaces']))).toEqual(['Surfaces changed']);
-    expect(changeWords(change(['replaces']))).toEqual(['Replaces changed']);
-    expect(changeWords(change(['suggested_in']))).toEqual([]);
-    expect(changeWords(change(['needs', 'verdict'], { verdict: 'take' }))).toEqual(['Needs changed', 'Taken']);
-    const every = change(['name', 'what', 'area', 'needs', 'surfaces', 'replaces', 'suggest', 'suggested_in', 'verdict', 'built', 'notes'], { verdict: 'take', built: '2026-11-16' });
-    expect(changeLine(every)).toBe('Text changed · Moved to another part · Needs changed · Surfaces changed · Replaces changed · Suggestion changed · Taken · Built · Notes edited');
-    expect(changeLine(every)).not.toMatch(/[a-z]+_[a-z]+|\b(name|what|area|needs|surfaces|replaces|suggest|verdict|built|notes)\b/);
+  it('lists comments and changes together, newest first, each on its entry', () => {
+    const histories = {
+      core: [change('c3', '2026-11-18T10:00:00Z', ['taken']), change('c1', '2026-11-12T10:00:00Z', ['added'])],
+      calls: [change('c2', '2026-11-15T10:00:00Z')],
+    };
+    const plan = buildPlan(buildData(), liveState({}, [comment(12, 'create', '2026-11-17T10:00:00Z', 'Hello'), comment(13, 'exec', '2026-11-13T10:00:00Z', 'Older')]), histories);
+    expect(plan.latest.map((item) => [item.row.key, item.text, item.change?.commit ?? null])).toEqual([
+      ['entry-core', null, 'c3'], ['entry-create', 'Hello', null], ['entry-calls', null, 'c2'], ['entry-exec', 'Older', null], ['entry-core', null, 'c1'],
+    ]);
+    expect(new Set(plan.latest.map((item) => item.key)).size).toBe(5);
   });
 
+  it('puts a comment before a change made at the same time', () => {
+    const at = '2026-11-17T10:00:00Z';
+    const plan = buildPlan(buildData(), liveState({}, [comment(12, 'create', at, 'Hello')]), { core: [change('c1', at)] });
+    expect(plan.latest.map((item) => item.text ?? item.change?.commit)).toEqual(['Hello', 'c1']);
+  });
+
+  it('holds 30 lines in all, the oldest dropped, and skips an entry the plan lacks', () => {
+    const changes = Array.from({ length: 25 }, (_, i) => change(`c${i}`, new Date(Date.parse('2026-11-20T23:00:00Z') - i * 3_600_000).toISOString()));
+    const comments = Array.from({ length: 12 }, (_, i) => comment(12, 'create', `2026-11-0${1 + (i % 9)}T10:00:0${i % 10}Z`, `Comment ${i}`));
+    const plan = buildPlan(buildData(), liveState({}, comments), { core: changes, nothing: [change('gone', '2026-11-20T23:59:00Z')] });
+    expect(LATEST_LINES).toBe(30);
+    expect(plan.latest).toHaveLength(30);
+    expect(plan.latest.some((item) => item.change?.commit === 'gone')).toBe(false);
+    const times = plan.latest.map((item) => Date.parse(item.createdAt));
+    expect(times).toEqual([...times].sort((a, b) => b - a));
+    expect(plan.latest.filter((item) => item.change)).toHaveLength(25);
+    expect(plan.latest.filter((item) => item.text)).toHaveLength(5);
+  });
+
+  it('has no Latest without threads, whatever the history', () => {
+    const data = { ...buildData(), threads: false };
+    expect(buildPlan(data, liveState({}, [comment(12, 'create', '2026-11-17T10:00:00Z', 'Hello')]), { core: [change('c1', '2026-11-17T10:00:00Z')] }).latest).toEqual([]);
+  });
+});
+
+describe('the phrases of a change', () => {
+  const names: ChangeName[] = ['added', 'moved', 'text', 'sets', 'needs', 'keeps', 'surfaces', 'suggest', 'notes', 'taken', 'dropped', 'cleared', 'replaced', 'built'];
+
+  it('say each name in the page\'s words, for a decision and for a feature', () => {
+    const words = (of: 'decision' | 'feature') => names.map((name) => changePhrase(name, of));
+    expect(words('decision')).toEqual([
+      'Added', 'Moved to another part', 'Text changed', 'What a yes would do changed', 'Needs changed', 'What it must keep changed', 'Where it shows changed',
+      'Recommendation changed', 'Notes edited', 'Decided', 'Dropped', 'Back to not decided', 'Replaced by', 'Built',
+    ]);
+    expect(words('feature')).toEqual([...words('decision').slice(0, 9), 'Planned', ...words('decision').slice(10)]);
+  });
+
+  it('never let the name of a key through', () => {
+    const line = changeLine(names, 'decision');
+    expect(line).not.toMatch(/\b(taken|sets|keeps|surfaces|suggest|cleared|replaced)\b|[a-z]+_[a-z]+/);
+    expect(line.split(' · ')).toHaveLength(names.length);
+  });
+
+  it('join the phrases of one change by a middle dot, in the order given', () => {
+    expect(changeLine(['text', 'notes', 'taken'], 'feature')).toBe('Text changed · Notes edited · Planned');
+    expect(changeLine(['added'], 'decision')).toBe('Added');
+  });
+
+  it('write a date as day and month', () => {
+    expect(shortDate('2026-11-20T09:30:00Z')).toBe('20 Nov');
+  });
+});
+
+describe('time', () => {
   it('says how long ago', () => {
     const now = Date.parse('2026-11-17T12:00:00Z');
     expect(relativeTime('2026-11-17T11:59:00Z', now)).toBe('just now');
@@ -209,7 +254,7 @@ describe('the line under the title', () => {
 });
 
 describe('a replaced decision', () => {
-  const decision = (fields: Partial<Entry>): Entry => ({ id: 'x', kind: 'decision', part: 'p', stage: 's', position: 1, name: 'X?', what: 'Yes.', needs: [], verdict: 'take', replaces: [], replacedBy: null, built: null, notes: false, more: false, ...fields });
+  const decision = (fields: Partial<Entry>): Entry => ({ id: 'x', kind: 'decision', part: 'p', stage: 's', position: 1, name: 'X?', what: 'Yes.', needs: [], verdict: 'take', replaces: [], replacedBy: null, built: null, notes: false, more: false, history: null, ...fields });
   const status = (fields: Partial<Entry>) => entryStatuses([decision(fields)]).get('x');
 
   it('has the status replaced once its file names the decision that replaced it, and is decided before', () => {

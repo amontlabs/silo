@@ -11,6 +11,7 @@ import './workshop.css';
 
 const loadNotes = () => import('virtual:workshop-notes').then((module) => module.default);
 const loadFacts = () => import('virtual:workshop-facts').then((module) => module.default);
+const loadHistory = () => import('virtual:workshop-history').then((module) => module.default);
 
 function mount() {
   const root = document.getElementById('workshop-root');
@@ -19,7 +20,7 @@ function mount() {
   takeOver(root, slot, (
     <StrictMode>
       <Boundary data={data}>
-        <App data={data} loadNotes={loadNotes} loadFacts={loadFacts} accountSlot={slot} />
+        <App data={data} loadNotes={loadNotes} loadFacts={loadFacts} loadHistory={loadHistory} accountSlot={slot} />
       </Boundary>
     </StrictMode>
   ));

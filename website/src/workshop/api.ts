@@ -1,5 +1,5 @@
 // The browser side of the Workshop's HTTP contract (`/api/workshop/`).
-import type { Change, LiveState } from './plan';
+import type { LiveState } from './plan';
 
 export const API = '/api/workshop';
 
@@ -15,8 +15,6 @@ export interface Comment {
   bot: boolean;
   createdAt: string;
   text: string;
-  /** Set on the bot's history comments: what changed, and in which commits. */
-  change?: Change;
 }
 
 export interface IssueDetail {

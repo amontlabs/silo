@@ -1,14 +1,16 @@
 // The plan as the repository holds it, in plan/: read with tools/plan/read and checked with tools/plan/check
 // at build time. Any error stops the build with the file, the field and the fix.
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkFiles, formatProblem } from '../../../tools/plan/check/index.js';
 import { listKind, wordId } from '../../../tools/plan/model/index.js';
+import { entryHistory, readSteps } from '../../../tools/plan/history/index.js';
 import { loadDir, parsePlan } from '../../../tools/plan/read/index.js';
 import { checkLayout, LayoutError, SILO_MAP } from './map.ts';
 import type { MapLayout } from './map.ts';
 import { RESERVED_ADDRESSES } from './routes.ts';
-import type { BuildData, Entry, EntryFacts, Facts, Notes, Statement, Verdict } from './plan.ts';
+import type { BuildData, Change, Entry, EntryFacts, Facts, Histories, Notes, Statement, Verdict } from './plan.ts';
 
 export const PLAN_DIR = 'plan';
 
@@ -47,10 +49,17 @@ interface RawPlan {
   properties: { id: string; says: string }[];
 }
 
-/** The map, and what the page may do beyond showing the plan: entries' threads (off by default). */
+/** What the repository's history says of the plan's entries: each one's changes, newest first, and whether the clone it was read from is shallow. */
+export interface HistorySource {
+  changes: Map<string, Change[]>;
+  shallow: boolean;
+}
+
+/** The map, and what the page may do beyond showing the plan: entries' threads (off by default), and the history of its entries (none by default). */
 export interface BuildOptions {
   map?: MapLayout;
   threads?: boolean;
+  history?: HistorySource | null;
 }
 
 const hasNotes = (raw: RawEntry) => typeof raw.notes === 'string' && raw.notes.trim() !== '';
@@ -62,6 +71,11 @@ export function toNotes(plan: RawPlan): Notes {
   const notes: Notes = {};
   for (const raw of ordered(plan)) if (hasNotes(raw)) notes[raw.id] = raw.notes as string;
   return notes;
+}
+
+/** What a closed History line needs of an entry's changes (newest first): the newest and how many there are. */
+function summaryOf(changes: Change[] | undefined): Entry['history'] {
+  return changes?.length ? { date: changes[0].date, what: changes[0].what, count: changes.length } : null;
 }
 
 const list = (value: unknown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []);
@@ -130,8 +144,18 @@ export function toFacts(plan: RawPlan): Facts {
   return { entries, statements: statementsOf(plan) };
 }
 
+/** The changes of the entries of the plan, by id: the chunk the page loads when a History is first opened. */
+export function toHistories(plan: RawPlan, source: HistorySource | null): Histories {
+  const histories: Histories = {};
+  for (const raw of ordered(plan)) {
+    const changes = source?.changes.get(raw.id);
+    if (changes?.length) histories[raw.id] = changes;
+  }
+  return histories;
+}
+
 /** The plan object of tools/plan/read, as the page holds it: decisions and features in the order of order.json. */
-export function toBuildData(plan: RawPlan, { map = SILO_MAP, threads = false }: BuildOptions = {}): BuildData {
+export function toBuildData(plan: RawPlan, { map = SILO_MAP, threads = false, history = null }: BuildOptions = {}): BuildData {
   const entries: Entry[] = ordered(plan).map((raw) => ({
     id: raw.id,
     kind: raw.kind,
@@ -147,6 +171,7 @@ export function toBuildData(plan: RawPlan, { map = SILO_MAP, threads = false }: 
     built: raw.built ?? null,
     notes: hasNotes(raw),
     more: hasFacts(raw),
+    history: summaryOf(history?.changes.get(raw.id)),
   }));
   return {
     parts: plan.parts.map((part) => ({ id: part.id, title: part.title, line: part.line })),
@@ -154,6 +179,7 @@ export function toBuildData(plan: RawPlan, { map = SILO_MAP, threads = false }: 
     entries,
     map,
     threads,
+    shallow: history?.shallow === true,
   };
 }
 
@@ -167,6 +193,11 @@ function checkedPlan(files: Map<string, string>, exists?: (path: string) => bool
 /** Checks the files of a plan and gives their notes, or throws with every problem. */
 export function notesFrom(files: Map<string, string>): Notes {
   return toNotes(checkedPlan(files));
+}
+
+/** Checks the files of a plan and gives its histories, or throws with every problem. */
+export function historiesFrom(files: Map<string, string>, source: HistorySource | null): Histories {
+  return toHistories(checkedPlan(files), source);
 }
 
 /** Checks the files of a plan and gives its facts, or throws with every problem. */
@@ -204,9 +235,50 @@ function planFilesIn(dir: string): Map<string, string> {
   }
 }
 
+/** What a build does to read the history of the repository: its git, and its way of fetching what a shallow clone lacks. */
+export interface Git {
+  readSteps: typeof readSteps;
+  unshallow: (root: string) => void;
+}
+
+/** `git fetch --unshallow` from origin: the repository is public, so it needs no credential and must never ask for one. */
+function unshallow(root: string): void {
+  execFileSync('git', ['-C', root, 'fetch', '--unshallow', 'origin'], { stdio: 'ignore', timeout: 5 * 60_000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+}
+
+/**
+ * The changes of every entry, read from the git repository at `repository`. A shallow clone is fetched whole from
+ * origin once and read again; when that fails the build goes on with what the clone holds and `shallow` says so.
+ */
+export function historyFromGit(repository: string, git: Git = { readSteps, unshallow }): HistorySource {
+  let read = git.readSteps(repository);
+  if (read.shallow) {
+    try {
+      git.unshallow(repository);
+    } catch {
+      // The host may not reach origin: the build goes on with the clone it has.
+    }
+    read = git.readSteps(repository);
+  }
+  return { changes: entryHistory(read.steps) as Map<string, Change[]>, shallow: read.shallow };
+}
+
+const readOnce = new Map<string, HistorySource>();
+
+/**
+ * The history of this repository's plan, read once per build. A plan read from another folder (`WORKSHOP_PLAN`) has
+ * none: its files are not this repository's.
+ */
+export function readHistory(repository: string): HistorySource | null {
+  if (planDir(repository) !== join(repository, PLAN_DIR)) return null;
+  let source = readOnce.get(repository);
+  if (!source) readOnce.set(repository, (source = historyFromGit(repository)));
+  return source;
+}
+
 /** Reads the plan of `repository` and returns the page's data for the real build: no threads. */
 export function readBuildData(repository: string, map: MapLayout = SILO_MAP): BuildData {
-  return buildDataFrom(planFilesIn(planDir(repository)), { map }, (path) => existsSync(join(repository, path)));
+  return buildDataFrom(planFilesIn(planDir(repository)), { map, history: readHistory(repository) }, (path) => existsSync(join(repository, path)));
 }
 
 /** Reads the plan of `repository` and returns its facts, or throws. */
@@ -217,4 +289,9 @@ export function readFacts(repository: string): Facts {
 /** Reads the plan of `repository` and returns its notes, or throws. */
 export function readNotes(repository: string): Notes {
   return notesFrom(planFilesIn(planDir(repository)));
+}
+
+/** Reads the plan of `repository` and returns the changes of its entries, or throws. */
+export function readHistories(repository: string): Histories {
+  return historiesFrom(planFilesIn(planDir(repository)), readHistory(repository));
 }

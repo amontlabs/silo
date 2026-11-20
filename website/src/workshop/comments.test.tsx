@@ -3,8 +3,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { HOLD_MS } from './Entry';
-import type { Change } from './plan';
-import { historyComment, liveState, SHA } from './fixtures';
+import { liveState } from './fixtures';
 import { clock, detail, itemOf, mockApi, ok, refused, renderApp, rowButton, wait } from './test-support';
 
 describe('comments that arrive late', () => {
@@ -67,34 +66,22 @@ describe('a failed early fetch', () => {
 });
 
 describe('an opening panel', () => {
-  // What the live state announces for a row: its own comments and its history lines.
+  // What the live state announces for a row: its comments.
   const expectedOf = (name: string) => {
     const found = Object.entries(liveState().issues).find(([, live]) => live.title === name);
-    const live = found![1];
-    const updates = Math.max(0, Math.min(live.updates ?? 0, live.comments));
-    return { n: Number(found![0]), comments: live.comments - updates, updates };
+    return { n: Number(found![0]), comments: found![1].comments };
   };
-  const threadOf = (name: string) => {
-    const { comments, updates } = expectedOf(name);
-    return [
-      ...Array.from({ length: updates }, (_, i) => historyComment(100 + i, { fields: ['verdict'], before: SHA.a, commit: SHA.b, verdict: 'take' } as Change, '2026-11-12T10:00:00Z')),
-      ...Array.from({ length: comments }, (_, i) => ({ id: i + 1, author: 'mara-k', avatar: '', bot: false, createdAt: '2026-11-14T10:00:00Z', text: `Comment ${i + 1}.` })),
-    ];
-  };
-  // What the open panel shows right now: the whole thread, one placeholder per expected comment and history line, or
-  // something that must never be seen (nothing, a lone line, part of the thread).
-  const shape = (item: HTMLElement, want: { comments: number; updates: number }) => {
+  const threadOf = (name: string) => Array.from({ length: expectedOf(name).comments }, (_, i) => ({ id: i + 1, author: 'mara-k', avatar: '', bot: false, createdAt: '2026-11-14T10:00:00Z', text: `Comment ${i + 1}.` }));
+  // What the open panel shows right now: the whole thread, one placeholder per expected comment, or something that
+  // must never be seen (nothing, a lone line, part of the thread).
+  const shape = (item: HTMLElement, want: { comments: number }) => {
     const talk = item.querySelector('.ws-talk');
     if (!talk) return 'no panel';
     const ghostComments = talk.querySelectorAll('.ws-c-ghost').length;
-    const ghostUpdates = talk.querySelectorAll('.ws-h-ghost').length;
     const comments = talk.querySelectorAll('.ws-c:not(.ws-pending)').length;
-    const updates = talk.querySelectorAll('.ws-h').length;
     if (talk.querySelector('.ws-quiet') || /Loading|could not/i.test(talk.textContent ?? '')) return 'a lone line';
-    if (ghostComments + ghostUpdates > 0) {
-      return comments + updates === 0 && ghostComments === want.comments && ghostUpdates === want.updates ? 'placeholders' : `mixed: ${ghostComments}+${ghostUpdates} places, ${comments}+${updates} lines`;
-    }
-    return comments === want.comments && updates === want.updates ? 'thread' : `partial: ${comments}+${updates} of ${want.comments}+${want.updates}`;
+    if (ghostComments > 0) return comments === 0 && ghostComments === want.comments ? 'placeholders' : `mixed: ${ghostComments} places, ${comments} lines`;
+    return comments === want.comments ? 'thread' : `partial: ${comments} of ${want.comments}`;
   };
 
   const modes = ['cached', 'quick', 'slow', 'failed then retried'] as const;
@@ -147,7 +134,7 @@ describe('an opening panel', () => {
       if (mode === 'slow' || mode === 'failed then retried') {
         // A slow panel opens no later than the hold, on its placeholders, and not before the row said it was open.
         await waitFor(() => expect(item.querySelector('.ws-more')).toHaveClass('open'), { timeout: HOLD_MS + 150 });
-        if (want.comments + want.updates > 0) expect(arrived).toBe(false);
+        if (want.comments > 0) expect(arrived).toBe(false);
         await waitFor(() => expect(arrived).toBe(true), { timeout: 2000 });
       }
       await waitFor(() => expect(item.querySelector('.ws-more')).toHaveClass('open'), { timeout: HOLD_MS + 150 });

@@ -15,10 +15,10 @@ import { seal, unseal } from '../server/session.mjs';
 import { BUDGET, createWorkshop, LABELS } from '../server/workshop.mjs';
 import { CUTS, cut, readBody } from '../server/issues.mjs';
 import { SNAPSHOT } from '../server/snapshot.mjs';
-import { createFakeGitHub, FAKE_APP, progressOf, seedDemo } from './fake-github.mjs';
+import { createFakeGitHub, FAKE_APP, seedDemo } from './fake-github.mjs';
 import { DEFAULT_OUTPUT, ENDPOINTS, HANDLER, prepareVercel, RUNTIME } from './prepare-vercel.mjs';
-import { loadEntries, progressLine, startDev } from './workshop-dev.mjs';
-import { changeComment, readChange, readEntryMarker, withoutMarkers } from '../../tools/workshop/model/index.js';
+import { loadEntries, startDev } from './workshop-dev.mjs';
+import { readEntryMarker, withoutMarkers } from '../../tools/workshop/model/index.js';
 
 import { count, retiredNumber, entryNumber, FAILED, issueOf, ORIGIN, SESSION, setup, START, withBudget } from './workshop-test-support.mjs';
 
@@ -787,7 +787,7 @@ test('workshop-dev --fake serves the site and the API on one port, with sign-in 
     for (const path of ['/workshop', '/workshop/']) {
       const page = await fetch(dev.origin + path);
       assert.equal(page.status, 200);
-      assert.equal(await page.text(), `<!doctype html><head><meta name="workshop-raw" content="${dev.fakeGitHub.rawUrl}"><title>Workshop</title></head>`);
+      assert.equal(await page.text(), '<!doctype html><head><title>Workshop</title></head>');
     }
     assert.equal(loadEntries(join(site, 'plan')).length, 4, 'seeded from the plan directory');
     assert.equal((await fetch(dev.origin + '/')).status, 200);
@@ -932,9 +932,6 @@ test('an issue with two Workshop kind labels is not a Workshop issue', async () 
   } finally { await t.close(); }
 });
 
-const SHA_A = 'a'.repeat(40);
-const SHA_B = 'b'.repeat(40);
-const CHANGE = { commit: SHA_B, before: SHA_A, fields: ['name', 'what'] };
 
 test('the entry marker line is removed from a body', async () => {
   assert.deepEqual(readBody('Text.\n<!-- silo-entry: engine-service -->'), { entry: 'engine-service', text: 'Text.' });
@@ -960,60 +957,42 @@ test('the entry marker line is removed from a body', async () => {
   } finally { await t.close(); }
 });
 
-test('only the Workshop App\'s comments carry a change, read on the whole comment; a person\'s, another bot\'s and a mid-comment marker do not', async () => {
+test('a comment of the Workshop App is an ordinary comment: marked as the bot\'s, with no change and no count of history lines', async () => {
   const t = await setup();
   try {
-    const text = changeComment(CHANGE, { repo: t.fake.repo });
-    t.fake.addComment(1, null, text, START + 1000);
-    t.fake.addComment(1, 'visitor-fake', text, START + 2000);
-    t.fake.addComment(1, null, `${'x'.repeat(CUTS.comment)}\n${text}`, START + 3000);
-    t.fake.addComment(1, null, `${text}\nAnd more.`, START + 4000);
-    t.fake.addUser('other-app[bot]', { type: 'Bot' });
-    t.fake.addComment(1, 'other-app[bot]', text, START + 5000);
     t.fake.addUser('silo-workshop[bot]', { type: 'Bot' });
-    t.fake.addComment(1, 'silo-workshop[bot]', text, START + 6000);
+    t.fake.addComment(1, null, 'Updated in bbbbbbb: what, verdict', START + 1000);
+    t.fake.addComment(1, 'silo-workshop[bot]', 'Updated in ccccccc: notes', START + 2000);
+    t.fake.addComment(1, 'visitor-fake', 'A person.', START + 3000);
+    t.fake.addComment(6, null, 'On a suggestion, not listed.', START + 4000);
     const c = t.client();
     await settle(t, c);
     const comments = (await c.call('GET', 'issue?n=1')).json.comments;
     const mine = comments.filter((x) => x.createdAt > new Date(START).toISOString());
-    assert.equal(mine.length, 6);
-    assert.deepEqual(mine[0].change, CHANGE);
-    assert.equal(mine[0].bot, true);
-    assert.deepEqual(mine[0].change, readChange(text));
-    assert.equal(Object.hasOwn(mine[1], 'change'), false, 'a person cannot write history');
-    assert.equal(mine[1].bot, false);
-    assert.deepEqual([mine[2].cut, mine[2].change], [true, CHANGE], 'the marker is read on the whole comment, before the cut');
-    assert.equal(Object.hasOwn(mine[3], 'change'), false, 'the marker is not the last line');
-    assert.deepEqual([mine[4].bot, Object.hasOwn(mine[4], 'change')], [false, false], 'another App\'s comment is an ordinary comment');
-    assert.deepEqual([mine[5].bot, mine[5].change], [true, CHANGE], 'the App\'s own account, by its login');
+    assert.deepEqual(mine.map((x) => x.bot), [true, true, false]);
+    assert.ok(mine.every((x) => !Object.hasOwn(x, 'change')), 'no comment carries a change');
+    assert.deepEqual(mine.map((x) => x.text), ['Updated in bbbbbbb: what, verdict', 'Updated in ccccccc: notes', 'A person.']);
+    const state = (await c.call('GET', 'state')).json;
+    assert.ok(Object.values(state.issues).every((issue) => !Object.hasOwn(issue, 'updates')), 'an entry carries no count of history lines');
+    assert.equal(state.issues[1].comments, comments.length, 'the App\'s comments count as comments');
   } finally { await t.close(); }
 });
 
-test('state: updates counts the held history comments of an entry; latest is the newest 30 across entries, newest first', async () => {
+test('state: latest is the newest 30 comments across entries, newest first, each with its first line', async () => {
   const t = await setup();
   try {
-    t.fake.addComment(6, null, changeComment(CHANGE, { repo: t.fake.repo }), START + 500_000);
-    t.fake.addComment(6, 'visitor-fake', 'On a suggestion, not listed.', START + 500_001);
+    t.fake.addComment(6, 'visitor-fake', 'On a suggestion, not listed.', START + 500_000);
     let at = START + 1000;
-    const history = [];
     for (let i = 0; i < 12; i += 1) {
       const target = 1 + (i % 3);
-      if (i % 2 === 0) {
-        const change = { ...CHANGE, commit: String(i % 10).repeat(40), fields: [i % 4 === 0 ? 'verdict' : 'notes'], ...(i % 4 === 0 ? { verdict: 'take' } : {}) };
-        t.fake.addComment(target, null, changeComment(change, { repo: t.fake.repo }), at);
-        history.push([target, 'change', at]);
-      } else {
-        t.fake.addComment(target, 'visitor-fake', `\n\nLine ${i} ${'y'.repeat(200)}\nsecond line`, at);
-        history.push([target, 'text', at]);
-      }
+      if (i % 2 === 0) t.fake.addComment(target, null, `Bot line ${i}`, at);
+      else t.fake.addComment(target, 'visitor-fake', `\n\nLine ${i} ${'y'.repeat(200)}\nsecond line`, at);
       at += 1000;
     }
     for (let i = 0; i < 25; i += 1) { t.fake.addComment(2, 'visitor-fake', `Filler ${i}`, at); at += 1000; }
     const c = t.client();
     await settle(t, c);
     const state = (await c.call('GET', 'state')).json;
-    assert.deepEqual([1, 2, 3].map((n) => state.issues[n].updates), [2, 2, 2]);
-    assert.equal(Object.hasOwn(state.issues[6], 'updates'), false, 'suggestions carry no updates');
     assert.equal(Object.hasOwn(state.issues[6], 'latest'), false);
     assert.equal(state.latest.length, 30);
     const times = state.latest.map((x) => x.createdAt);
@@ -1021,19 +1000,18 @@ test('state: updates counts the held history comments of an entry; latest is the
     assert.equal(state.latest[0].text, 'Filler 24');
     assert.ok(state.latest.every((x) => ['engine-service', 'calls-and-events', 'vm-runtime'].includes(x.entry)), 'entries only');
     assert.ok(state.latest.every((x) => [1, 2, 3].includes(x.n)));
-    assert.ok(state.latest.every((x) => Object.hasOwn(x, 'change') !== Object.hasOwn(x, 'text')), 'change or text');
+    assert.ok(state.latest.every((x) => typeof x.text === 'string' && !Object.hasOwn(x, 'change')), 'every line has its text and none a change');
     const numbers = new Map([[1, 'engine-service'], [2, 'calls-and-events'], [3, 'vm-runtime']]);
     assert.ok(state.latest.every((x) => x.entry === numbers.get(x.n)));
-    // Older ones, with the history lines among them, fall off: the 30 newest are 25 fillers and the last 5 of the 12.
+    // Older ones fall off: the 30 newest are 25 fillers and the last 5 of the 12.
     const rest = state.latest.slice(25);
     assert.equal(rest.length, 5);
-    assert.ok(rest.some((x) => x.change && x.bot === true), 'a history line shows its change');
+    assert.ok(rest.some((x) => x.bot === true && x.text.startsWith('Bot line')), 'a comment of the App is listed as a comment');
     const long = rest.find((x) => x.text?.startsWith('Line'));
     assert.ok(long, 'a person comment shows its first non-empty line');
     assert.equal(long.text.length <= 140, true);
     assert.equal(long.bot, false);
     assert.equal(long.author, 'visitor-fake');
-    assert.equal(Object.hasOwn(long, 'change'), false);
   } finally { await t.close(); }
 });
 
@@ -1177,105 +1155,22 @@ test('the local server survives //, an aborted POST body and /api/workshop/const
   }
 });
 
-const STAGES = ['s1', 's2', 's3', 's4', 's5', 's6', 's7'];
 const PLAN = [
-  ['a1', 's1', 'take', null, '2026-11-01'], ['a2', 's1', undefined, 'take'], ['b1', 's2', undefined, 'later'], ['b2', 's2', undefined, 'drop'],
-  ['c1', 's3', 'take'], ['c2', 's3', undefined, 'take'], ['d1', 's4', 'take'], ['d2', 's4'],
-  ['e1', 's5', undefined, 'take'], ['e2', 's5', 'later'], ['f1', 's6', undefined, 'take'], ['g1', 's7', 'take'], ['h1', 's7', undefined, 'take'],
-].map(([id, stage, verdict, suggested, built]) => ({
-  id, stage, area: 'part-a', needs: [], name: `Name of ${id}`, what: `What ${id} does.`,
-  ...(verdict ? { verdict } : {}), ...(built ? { built } : {}), ...(suggested ? { suggest: { verdict: suggested, why: 'Because.' } } : {}),
+  ['a1', 'take', '2026-11-01'], ['a2'], ['b1'], ['b2'], ['c1', 'take'], ['d2'],
+].map(([id, verdict, built]) => ({
+  id, area: 'part-a', needs: [], name: `Name of ${id}`, what: `What ${id} does.`,
+  ...(verdict ? { verdict } : {}), ...(built ? { built } : {}),
 }));
 
-test('progressOf: the first six stages carry their verdicts', () => {
-  assert.deepEqual(STAGES.slice(0, 6), progressOf(PLAN).stages);
-  const plan = progressOf(PLAN);
-  const verdicts = Object.fromEntries(plan.verdicts);
-  assert.deepEqual(verdicts, { a1: 'take', a2: 'take', b1: 'later', b2: 'drop', c1: 'take', c2: 'take', d1: 'take', e1: 'take', e2: 'later', f1: 'take', g1: 'take' });
-  assert.equal(plan.verdicts.has('h1'), false, 'a suggestion in a later stage is not applied');
-  assert.equal(plan.verdicts.get('g1'), 'take', 'a file verdict counts in any stage');
-  assert.deepEqual([...plan.built], ['a1'], 'built comes only from the file');
-  assert.match(progressLine(plan), /^Verdicts on the stages s1, s2, s3, s4, s5, s6: 8 taken, 2 later, 1 dropped; built: 1\.$/);
-});
-
-test('seedDemo with progress: closed entries and a history comment of every kind', async () => {
+test('seedDemo closes only the entry its file says is built, and seeds no comment of the App', async () => {
   const t = await setup({ seed: false });
   try {
-    const seeded = seedDemo(t.fake, PLAN, { progress: true, now: START });
-    const c = t.client();
-    const state = (await c.call('GET', 'state')).json;
-    const entries = Object.values(state.issues).filter((i) => i.kind === 'entry');
-    const by = Object.fromEntries(entries.map((i) => [i.entry, i]));
-    assert.deepEqual(Object.keys(by).sort(), PLAN.map((f) => f.id).sort());
-    assert.deepEqual([by.a1.state, by.a1.reason], ['closed', 'completed']);
-    assert.deepEqual([by.b2.state, by.b2.reason, by.d2.state, by.g1.state], ['closed', 'not_planned', 'open', 'open']);
-    assert.ok(state.latest.length > 5 && state.latest.length <= 30);
-
-    // Every kind of history comment is there, read through the model.
-    const changes = [];
-    const people = new Set();
-    for (const issue of t.fake.state.issues.values()) {
-      for (const comment of issue.comments) {
-        const change = comment.user.type === 'Bot' ? readChange(comment.body) : null;
-        if (change) changes.push({ number: issue.number, change });
-        else if (comment.user.type !== 'Bot') people.add(comment.user.login);
-      }
-    }
-    const has = (test) => changes.some(({ change }) => test(change));
-    for (const verdict of ['take', 'later', 'drop', null]) assert.ok(has((x) => x.fields.includes('verdict') && x.verdict === verdict), `verdict ${verdict}`);
-    assert.ok(has((x) => x.fields.includes('built') && x.built), 'built');
-    assert.ok(has((x) => x.fields.includes('name') && x.fields.includes('what')), 'name and what');
-    assert.ok(has((x) => x.fields.includes('notes')), 'notes');
-    assert.ok(has((x) => x.fields.includes('needs')), 'a plain field');
-    assert.ok(people.size >= 3, 'people comment too');
-    for (const { number, change } of changes.filter(({ change }) => change.fields.includes('name'))) {
-      const id = [...Object.entries(state.issues)].find(([n]) => Number(n) === number)[1].entry;
-      for (const commit of [change.before, change.commit]) {
-        const raw = await fetch(`${t.fake.rawUrl}/${t.fake.repo}/${commit}/plan/features/${id}.json`);
-        assert.equal(raw.status, 200, `the file at ${commit.slice(0, 7)}`);
-        assert.ok(JSON.parse(await raw.text()).name);
-      }
-      const [before, after] = await Promise.all([change.before, change.commit].map(async (commit) => JSON.parse(await (await fetch(`${t.fake.rawUrl}/${t.fake.repo}/${commit}/plan/features/${id}.json`)).text())));
-      assert.notDeepEqual(before, after, 'the before and after differ');
-    }
-    // Every history line agrees with the entry's state: Built only on a built entry, the last verdict line is
-    // the verdict the plan gives it.
-    const entryOf = (number) => state.issues[number];
-    for (const { number, change } of changes.filter(({ change }) => change.fields.includes('built'))) {
-      assert.deepEqual([entryOf(number).state, entryOf(number).reason], ['closed', 'completed'], `built line on ${entryOf(number).entry}`);
-    }
-    const lastVerdict = new Map();
-    for (const { number, change } of changes) if (change.fields.includes('verdict')) lastVerdict.set(number, change.verdict);
-    for (const [number, verdict] of lastVerdict) assert.equal(seeded.progress.verdicts.get(entryOf(number).entry) ?? null, verdict, `verdict line on ${entryOf(number).entry}`);
-    // Entries with history say so in the state.
-    assert.ok(entries.some((i) => i.updates > 0));
-  } finally { await t.close(); }
-});
-
-test('the fake\'s raw endpoint serves a file at a commit from any origin, and 404 for anything else', async () => {
-  const t = await setup({ seed: false });
-  try {
-    t.fake.setRaw(SHA_A, 'plan/features/x.json', '{"name":"X"}\n');
-    const ok = await fetch(`${t.fake.rawUrl}/${t.fake.repo}/${SHA_A}/plan/features/x.json`);
-    assert.equal(ok.status, 200);
-    assert.equal(ok.headers.get('access-control-allow-origin'), '*');
-    assert.equal(await ok.text(), '{"name":"X"}\n');
-    for (const path of [`${SHA_B}/plan/features/x.json`, `${SHA_A}/plan/features/y.json`]) {
-      const missing = await fetch(`${t.fake.rawUrl}/${t.fake.repo}/${path}`);
-      assert.equal(missing.status, 404, path);
-      assert.equal(missing.headers.get('access-control-allow-origin'), '*');
-    }
-    assert.notEqual((await fetch(`${t.fake.rawUrl}/other/repo/${SHA_A}/plan/features/x.json`)).status, 200, 'only this repository');
-  } finally { await t.close(); }
-});
-
-test('without progress only the entry its file says is built is closed', async () => {
-  const t = await setup({ seed: false });
-  try {
-    assert.equal(seedDemo(t.fake, PLAN).progress, null);
+    seedDemo(t.fake, PLAN);
     const issues = Object.values((await t.client().call('GET', 'state')).json.issues);
     assert.deepEqual(issues.filter((i) => i.kind === 'entry' && i.state === 'closed').map((i) => i.entry), ['a1'], 'only the entry its file says is built');
     assert.equal(issues.some((i) => i.updates), false);
+    const bots = [...t.fake.state.issues.values()].flatMap((issue) => issue.comments).filter((comment) => comment.user.type === 'Bot' && comment.body !== 'Posted by an agent.');
+    assert.deepEqual(bots, []);
   } finally { await t.close(); }
 });
 

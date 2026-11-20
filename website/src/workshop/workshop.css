@@ -476,6 +476,9 @@
 .ws .ws-disc[aria-expanded="true"]::before { transform: rotate(90deg); }
 .ws .ws-disc:hover, .ws .ws-disc[aria-expanded="true"] { color: var(--ink); }
 .ws .ws-disc:focus-visible { outline-offset: 2px; }
+.ws .ws-disc-history { min-width: 0; }
+.ws .ws-disc-history > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); }
+.ws .ws-disc-history:hover > span, .ws .ws-disc-history[aria-expanded="true"] > span { color: var(--muted); }
 .ws-extras-in { margin-top: 10px; padding-left: 12px; border-left: 2px solid var(--line); }
 .ws-md { color: var(--muted); font-size: 14px; max-width: 68ch; overflow-wrap: anywhere; }
 .ws-md > * + * { margin-top: 8px; }
@@ -500,6 +503,7 @@
 .ws-h-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 0 4px; margin: 0 -4px; }
 .ws-h > div > p > small, .ws-h-link { flex: none; }
 .ws-h small { color: var(--faint); font-size: 12px; }
+.ws-h-date { width: 6ch; }
 .ws .ws-h-btn { font: inherit; color: var(--ink); text-decoration: underline dotted; text-underline-offset: 3px; }
 .ws .ws-h-btn:hover, .ws .ws-h-btn[aria-expanded="true"] { color: var(--accent-ink); }
 .ws .ws-h-btn:focus-visible { outline-offset: 2px; }

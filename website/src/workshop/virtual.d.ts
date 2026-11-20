@@ -12,3 +12,8 @@ declare module 'virtual:workshop-facts' {
   const facts: import('./plan').Facts;
   export default facts;
 }
+
+declare module 'virtual:workshop-history' {
+  const histories: import('./plan').Histories;
+  export default histories;
+}

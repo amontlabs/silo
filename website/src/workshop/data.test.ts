@@ -4,7 +4,8 @@ import { dirname, join } from 'node:path';
 import { canonicalText } from '../../../tools/plan/model/index.js';
 import { describe, expect, it } from 'vitest';
 import { loadDir } from '../../../tools/plan/read/index.js';
-import { buildDataFrom, factsFrom, notesFrom, planDir, readBuildData } from './data';
+import { buildDataFrom, factsFrom, historiesFrom, historyFromGit, notesFrom, planDir, readBuildData, readHistories, readHistory } from './data';
+import type { Git } from './data';
 import { buildData, CORE_NOTES, DECISIONS, emptyPlanFiles, FEATURES, PARTS, planFiles, withLists, ZIG_NOTES } from './fixtures';
 import { checkLayout, LayoutError, MAP_HEIGHT, SILO_MAP } from './map';
 import type { Box, MapLayout } from './map';
@@ -156,6 +157,93 @@ describe('reading plan/ from a repository folder', () => {
     const data = buildDataFrom(loadDir(SAMPLE));
     expect(data.parts.map((part) => part.id)).toEqual(['engine', 'record']);
     expect(data.entries.filter((entry) => entry.part === null).map((entry) => entry.id)).toEqual(['the-design', 'nothing-without-a-reason']);
+  });
+});
+
+const REPOSITORY = join(dirname(new URL(import.meta.url).pathname), '../../..');
+
+describe('the history of the entries', () => {
+  const step = (commit: string, date: string, path: string, before: unknown, after: unknown) => ({
+    commit, date, files: { [path]: { before: before === null ? null : JSON.stringify(before), after: JSON.stringify(after) } },
+  });
+  const file = { asks: 'Which?', answer: 'This one.' };
+  const steps = [
+    step('a'.repeat(40), '2026-11-01T10:00:00Z', 'decisions/which.json', null, { asks: 'Which?' }),
+    step('b'.repeat(40), '2026-11-02T10:00:00Z', 'decisions/which.json', { asks: 'Which?' }, file),
+    step('c'.repeat(40), '2026-11-03T10:00:00Z', 'decisions/which.json', file, { ...file, verdict: 'take' }),
+  ];
+  /** A git that reads from a list of answers and starts no process. */
+  const fakeGit = (reads: { steps: typeof steps; shallow: boolean }[], unshallow: Git['unshallow'] = () => {}) => {
+    const calls: string[] = [];
+    let read = 0;
+    const git: Git = {
+      readSteps: () => { calls.push('read'); return reads[Math.min(read++, reads.length - 1)]; },
+      unshallow: (root) => { calls.push('unshallow'); unshallow(root); },
+    };
+    return { git, calls };
+  };
+
+  it('turns the steps of git into each entry\'s changes, newest first', () => {
+    const { git, calls } = fakeGit([{ steps, shallow: false }]);
+    const source = historyFromGit('/repo', git);
+    expect(calls).toEqual(['read']);
+    expect(source.shallow).toBe(false);
+    expect(source.changes.get('which')?.map((change) => [change.commit[0], change.what])).toEqual([['c', ['taken']], ['b', ['text']], ['a', ['added']]]);
+  });
+
+  it('fetches a shallow clone whole from origin once, and reads again', () => {
+    const { git, calls } = fakeGit([{ steps: steps.slice(2), shallow: true }, { steps, shallow: false }]);
+    const source = historyFromGit('/repo', git);
+    expect(calls).toEqual(['read', 'unshallow', 'read']);
+    expect(source.shallow).toBe(false);
+    expect(source.changes.get('which')).toHaveLength(3);
+  });
+
+  it('goes on with the clone it has when the fetch fails, or the clone stays shallow, and says so', () => {
+    const failing = fakeGit([{ steps: steps.slice(2), shallow: true }], () => { throw new Error('no network'); });
+    expect(historyFromGit('/repo', failing.git)).toMatchObject({ shallow: true });
+    expect(failing.calls).toEqual(['read', 'unshallow', 'read']);
+    const still = fakeGit([{ steps: steps.slice(2), shallow: true }]);
+    const source = historyFromGit('/repo', still.git);
+    expect(source.shallow).toBe(true);
+    expect(still.calls.filter((call) => call === 'unshallow')).toHaveLength(1);
+    expect(buildDataFrom(emptyPlanFiles(), { history: source }).shallow).toBe(true);
+    expect(buildDataFrom(emptyPlanFiles()).shallow).toBe(false);
+  });
+
+  it('gives a plan read from another folder none: the history is the caller\'s, or none', () => {
+    expect(readHistory(REPOSITORY)).not.toBeNull();
+    const before = process.env.WORKSHOP_PLAN;
+    process.env.WORKSHOP_PLAN = SAMPLE;
+    try {
+      expect(readHistory(REPOSITORY)).toBeNull();
+      const data = readBuildData(REPOSITORY);
+      expect(data.entries.every((entry) => entry.history === null)).toBe(true);
+      expect(data.shallow).toBe(false);
+      expect(readHistories(REPOSITORY)).toEqual({});
+    } finally {
+      if (before === undefined) delete process.env.WORKSHOP_PLAN;
+      else process.env.WORKSHOP_PLAN = before;
+    }
+  });
+
+  it('gives an entry of the real repository its history: main-and-its-agents has changes, in the build and in the chunk', () => {
+    const entry = readBuildData(REPOSITORY).entries.find((item) => item.id === 'main-and-its-agents');
+    expect(entry?.history).not.toBeNull();
+    expect(entry?.history?.count).toBeGreaterThan(0);
+    const changes = readHistories(REPOSITORY)['main-and-its-agents'];
+    expect(changes.length).toBe(entry?.history?.count);
+    expect(changes.at(-1)?.what).toEqual(['added']);
+    expect(changes[0]).toMatchObject({ date: entry?.history?.date, what: entry?.history?.what });
+    expect(changes[0].commit).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  it('holds in the chunk only the entries of the plan that have a change', () => {
+    const files = planFiles();
+    const source = { shallow: false, changes: new Map([['core', [{ commit: 'a'.repeat(40), date: '2026-11-01T10:00:00Z', what: ['added' as const] }]], ['gone', [{ commit: 'b'.repeat(40), date: '2026-11-01T10:00:00Z', what: ['added' as const] }]]]) };
+    expect(Object.keys(historiesFrom(files, source))).toEqual(['core']);
+    expect(buildDataFrom(files, { history: source }).entries.filter((entry) => entry.history).map((entry) => entry.id)).toEqual(['core']);
+    expect(historiesFrom(files, null)).toEqual({});
   });
 });
 

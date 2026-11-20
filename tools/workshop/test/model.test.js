@@ -2,9 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  changeComment, compareLink, entryMarker, featureFileAt, isDate, readChange, readEntryMarker, withoutMarkers,
-} from '../model/index.js';
+import * as model from '../model/index.js';
+import { entryMarker, readEntryMarker, withoutMarkers } from '../model/index.js';
 
 test('the entry marker', () => {
   const body = `Text\n\n${entryMarker('fork')}`;
@@ -15,33 +14,8 @@ test('the entry marker', () => {
   assert.throws(() => entryMarker('Bad Id'));
 });
 
-test('history comment: written and read back, nothing from the plan in it', () => {
-  const change = { commit: 'b'.repeat(40), before: 'c'.repeat(40), fields: ['what', 'verdict', 'notes'], verdict: 'take' };
-  const text = changeComment(change);
-  assert.equal(text.split('\n')[0], 'Updated in bbbbbbb: what, verdict, notes');
-  assert.equal(text.split('\n')[1], `https://github.com/amontlabs/silo/compare/${'c'.repeat(40)}...${'b'.repeat(40)}`);
-  assert.deepEqual(readChange(text), change);
-  assert.deepEqual(readChange(changeComment({ ...change, fields: ['verdict'], verdict: null })), { ...change, fields: ['verdict'], verdict: null });
-  assert.deepEqual(readChange(changeComment({ commit: change.commit, before: change.before, fields: ['built'], built: '2026-12-04' })).built, '2026-12-04');
-  assert.equal(readChange('a plain comment'), null);
-  assert.equal(readChange('<!-- silo-change: {"commit":"x"} -->'), null);
-  assert.equal(readChange(`<!-- silo-change: ${JSON.stringify({ ...change, fields: ['title'] })} -->`), null);
-  assert.equal(readChange(`<!-- silo-change: ${JSON.stringify({ ...change, verdict: 'refine' })} -->`), null);
-  assert.throws(() => changeComment({ ...change, fields: [] }));
-});
-
-test('the links of a change: the comparison on GitHub and a feature file at a commit', () => {
-  const change = { commit: 'b'.repeat(40), before: 'c'.repeat(40) };
-  assert.equal(compareLink(change, { repo: 'o/r' }), `https://github.com/o/r/compare/${'c'.repeat(40)}...${'b'.repeat(40)}`);
-  assert.equal(featureFileAt('b'.repeat(40), 'fork'), `https://raw.githubusercontent.com/amontlabs/silo/${'b'.repeat(40)}/plan/features/fork.json`);
-  assert.throws(() => compareLink({ ...change, before: '../x' }));
-  assert.throws(() => featureFileAt('b'.repeat(40), '../fork'));
-  assert.throws(() => featureFileAt('main', 'fork'));
-});
-
-test('dates', () => {
-  assert.equal(isDate('2026-02-28'), true);
-  assert.equal(isDate('2026-02-30'), false);
+test('the model holds no history comment', () => {
+  for (const name of ['changeComment', 'readChange', 'compareLink', 'featureFileAt', 'CHANGE_FIELDS', 'DEFAULT_RAW', 'VERDICTS', 'isDate']) assert.equal(name in model, false, name);
 });
 
 test('the model imports nothing outside its folder and no node: module', () => {

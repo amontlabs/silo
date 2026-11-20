@@ -2,7 +2,7 @@ import { fileURLToPath, URL } from 'node:url';
 import react from '@vitejs/plugin-react';
 import type { Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
-import { planDir, readBuildData, readFacts, readNotes } from './src/workshop/data.ts';
+import { planDir, readBuildData, readFacts, readHistories, readNotes } from './src/workshop/data.ts';
 
 const repository = fileURLToPath(new URL('..', import.meta.url));
 // plan/, or the plan WORKSHOP_PLAN names: a fixture plan proves the page without the real one.
@@ -47,6 +47,19 @@ function workshopFacts(): Plugin {
   };
 }
 
+/** `virtual:workshop-history`: the changes of every entry, read from git, a chunk of their own that the page loads when a History is first opened. */
+function workshopHistory(): Plugin {
+  const id = 'virtual:workshop-history';
+  return {
+    name: 'workshop-history',
+    resolveId: (source) => (source === id ? `\0${id}` : null),
+    load(source) {
+      if (source !== `\0${id}`) return null;
+      return `export default ${JSON.stringify(readHistories(repository))};`;
+    },
+  };
+}
+
 /** While developing, the page reloads with the new data when a file of the plan is added, changed or removed. */
 function planWatch(): Plugin {
   return {
@@ -55,7 +68,7 @@ function planWatch(): Plugin {
       server.watcher.add(plan);
       server.watcher.on('all', (_event, file) => {
         if (!file.startsWith(plan)) return;
-        for (const id of ['\0virtual:workshop-data', '\0virtual:workshop-notes', '\0virtual:workshop-facts']) {
+        for (const id of ['\0virtual:workshop-data', '\0virtual:workshop-notes', '\0virtual:workshop-facts', '\0virtual:workshop-history']) {
           const module = server.moduleGraph.getModuleById(id);
           if (module) server.moduleGraph.invalidateModule(module);
         }
@@ -66,7 +79,7 @@ function planWatch(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), workshopData(), workshopNotes(), workshopFacts(), planWatch()],
+  plugins: [react(), workshopData(), workshopNotes(), workshopFacts(), workshopHistory(), planWatch()],
   // The page imports the plan's model from tools/plan/model, outside website/.
   server: { fs: { allow: [repository] } },
   build: {

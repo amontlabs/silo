@@ -196,7 +196,7 @@ describe('the load', () => {
       state: (url) => {
         asked.push(url.search);
         return url.searchParams.get('fresh') === '1'
-          ? ok(liveState({ 12: issue({ entry: 'create', title: 'Create and delete a computer', up: 30, comments: 5, updates: 3 }) }))
+          ? ok(liveState({ 12: issue({ entry: 'create', title: 'Create and delete a computer', up: 30, comments: 2 }) }))
           : ok({ ...liveState(), fetchedAt: at(Date.now() - 1000), old: true });
       },
     });
@@ -229,7 +229,7 @@ describe('the load', () => {
   });
 
   it('never replaces a newer state shown with an older answer, and says nothing when the fresh ask fails', async () => {
-    remember(liveState({ 12: issue({ entry: 'create', title: 'Create and delete a computer', up: 40, comments: 5, updates: 3 }) }));
+    remember(liveState({ 12: issue({ entry: 'create', title: 'Create and delete a computer', up: 40, comments: 2 }) }));
     const calls = mockApi({
       state: (url) => (url.searchParams.get('fresh') === '1'
         ? { status: 502, body: { error: 'github', message: 'GitHub failed.' } }
@@ -284,7 +284,7 @@ describe('the load', () => {
 });
 
 describe('the page\'s own writes over an answer', () => {
-  const computers = (up: number, comments = 5) => liveState({ 12: issue({ entry: 'create', title: 'Create and delete a computer', up, comments, updates: 3 }) });
+  const computers = (up: number, comments = 2) => liveState({ 12: issue({ entry: 'create', title: 'Create and delete a computer', up, comments }) });
   const stored = () => JSON.parse(localStorage.getItem(STATE) ?? '{}').issues[12];
 
   // Remembered 12, real 20: the person votes at once, the server answers 21. The page shows 21 over memory, over
@@ -333,34 +333,33 @@ describe('the page\'s own writes over an answer', () => {
     });
   }
 
-  it('keep the comment count the server answered, the whole count with history lines', async () => {
+  it('keep the comment count the server answered', async () => {
     const time = clock();
     marker();
-    remember({ ...computers(12, 5), fetchedAt: at(Date.now() - 86_400_000) }, visitor);
+    remember({ ...computers(12, 2), fetchedAt: at(Date.now() - 86_400_000) }, visitor);
     const cdn = held<{ status: number; body: unknown }>();
     const fresh = held<{ status: number; body: unknown }>();
     mockApi({ me: visitor, state: (url) => (url.search ? fresh.promise : cdn.promise), routes: { 'POST comment': () => ok({ ok: true, id: 1, comments: 9 }) } });
     history.replaceState(null, '', '/workshop#part-b/create');
     const first = render(<App data={buildData()} />);
-    // 5 comments, 3 of them history lines.
     expect(within(itemOf('Create and delete a computer')).getByLabelText('2 comments')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('textbox', { name: 'Comment' })).toBeEnabled());
     await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), 'Mine.');
     await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
-    await waitFor(() => expect(within(itemOf('Create and delete a computer')).getByLabelText('6 comments')).toBeInTheDocument());
+    await waitFor(() => expect(within(itemOf('Create and delete a computer')).getByLabelText('9 comments')).toBeInTheDocument());
     await act(async () => cdn.release(ok({ ...computers(12, 8), fetchedAt: at(Date.now() - 5 * 60_000) })));
-    expect(within(itemOf('Create and delete a computer')).getByLabelText('6 comments')).toBeInTheDocument();
-    // Seconds later, an answer that already counts it: still 6.
+    expect(within(itemOf('Create and delete a computer')).getByLabelText('9 comments')).toBeInTheDocument();
+    // Seconds later, an answer that already counts it: still 9.
     time.advance(5_000);
     await act(async () => fresh.release(ok({ ...computers(12, 9), fetchedAt: at(Date.now()) })));
     await waitFor(() => expect(stored().comments).toBe(9));
-    expect(within(itemOf('Create and delete a computer')).getByLabelText('6 comments')).toBeInTheDocument();
+    expect(within(itemOf('Create and delete a computer')).getByLabelText('9 comments')).toBeInTheDocument();
     first.unmount();
     // Over a minute later, the server's own count.
     time.advance(2 * 60_000);
     mockApi({ me: visitor, state: () => ok({ ...computers(12, 11), fetchedAt: at(Date.now()) }) });
     render(<App data={buildData()} />);
-    await waitFor(() => expect(within(itemOf('Create and delete a computer')).getByLabelText('8 comments')).toBeInTheDocument());
+    await waitFor(() => expect(within(itemOf('Create and delete a computer')).getByLabelText('11 comments')).toBeInTheDocument());
   });
 
   it('keep a new suggestion over a remembered state and a cached answer that lack it', async () => {
@@ -414,7 +413,7 @@ describe('the page\'s own writes over an answer', () => {
         expect(kept.issues[12].up).toBe(model.up);
         expect(kept.old).toBeUndefined();
         let up = model.up;
-        let comments = 5;
+        let comments = 2;
         for (const write of writes) {
           if (Date.now() - write.at >= 24 * 3600_000 || model.fetched > write.at + 60_000) continue;
           if (write.up !== undefined) up = write.up;
