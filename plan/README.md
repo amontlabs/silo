@@ -109,6 +109,9 @@ its id. Its `README.md` says what the part is for, why it is so, and gives one e
 sentences by id and never repeats them. What concerns the whole product sits at the root, in the
 same shape.
 
+A part may be named like the word it is about (`record`, `boundary`, `engine`). `plan show` on
+that id shows the part, with the word's meaning.
+
 ## Keys
 
 In this order. A key in brackets is optional: it is absent, never empty.
