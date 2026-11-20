@@ -33,6 +33,7 @@
 // again, and older ones are dropped, since GitHub's answer already holds them.
 import { GitHubError, nextLink } from './github.mjs';
 import { clean, commentIssue, commentOf, cut, kindOf, LABELS, readBody, reasonOf } from './issues.mjs';
+import { issuesByEntry } from '../../tools/workshop/model/index.js';
 
 export const SNAPSHOT = {
   maxAge: 30_000,
@@ -90,17 +91,34 @@ function firstLine(text) {
   return cut(line, SNAPSHOT.latestText);
 }
 
-// The newest comments across every entry, newest first.
-function latestOf(snapshot) {
+// The entry issues held, by the entry their marker names, lowest number first.
+function entryIssuesOf(snapshot) {
+  const named = [];
+  for (const [number, issue] of snapshot.issues) if (issue.summary.kind === 'entry') named.push({ number, entry: issue.summary.entry });
+  return issuesByEntry(named);
+}
+
+// The thread of each entry of the plan that has one, by id: the suggestion it was written from when that
+// is a Workshop suggestion, else the lowest-numbered entry issue that names it.
+function threadsOf(snapshot, entries) {
+  const threads = new Map();
+  for (const [id, numbers] of entryIssuesOf(snapshot)) if (entries.has(id)) threads.set(id, numbers[0]);
+  for (const entry of entries.values()) {
+    if (entry.suggestedIn && snapshot.issues.get(entry.suggestedIn)?.summary.kind === 'suggestion') threads.set(entry.id, entry.suggestedIn);
+  }
+  return threads;
+}
+
+// The newest comments across the threads of the plan's entries, newest first.
+function latestOf(snapshot, threads) {
   const all = [];
-  for (const [number, entry] of snapshot.issues) {
-    if (entry.summary.kind !== 'entry' || !entry.summary.entry) continue;
-    for (const comment of entry.comments.values()) all.push([number, entry, comment]);
+  for (const [id, number] of threads) {
+    for (const comment of snapshot.issues.get(number).comments.values()) all.push([number, id, comment]);
   }
   all.sort((a, b) => byAge(b[2], a[2]));
-  return all.slice(0, SNAPSHOT.latest).map(([number, entry, comment]) => ({
+  return all.slice(0, SNAPSHOT.latest).map(([number, id, comment]) => ({
     n: number,
-    entry: entry.summary.entry,
+    entry: id,
     author: comment.author,
     bot: comment.bot,
     createdAt: comment.createdAt,
@@ -115,8 +133,9 @@ function latestOf(snapshot) {
 // `afterRefresh()` runs, detached, after each successful refresh.
 // `wall()` is the real clock for the floor, the lost-refresh limit and the waits.
 // `app()` is the Workshop's App, `{ id, login }`: its comments are marked as the bot's.
+// `entries` are the plan's entries by id (see entries.mjs): the state names the thread of each.
 export function createSnapshot({
-  repo, request, app = () => null, now = Date.now, wall = Date.now, log = () => {},
+  repo, request, app = () => null, entries = new Map(), now = Date.now, wall = Date.now, log = () => {},
   detach = (fn) => fn(), keepAlive = () => {}, afterRefresh = () => {},
 }) {
   let current = null;
@@ -432,7 +451,8 @@ export function createSnapshot({
     if (!snapshot.stateAnswer || snapshot.stateAnswer.version !== snapshot.version) {
       const issues = {};
       for (const [number, entry] of snapshot.issues) issues[number] = entry.summary;
-      snapshot.stateAnswer = { version: snapshot.version, body: { repo, fetchedAt: new Date(snapshot.at).toISOString(), issues, latest: latestOf(snapshot) } };
+      const threads = threadsOf(snapshot, entries);
+      snapshot.stateAnswer = { version: snapshot.version, body: { repo, fetchedAt: new Date(snapshot.at).toISOString(), issues, threads: Object.fromEntries(threads), latest: latestOf(snapshot, threads) } };
     }
     return snapshot.stateAnswer.body;
   }
@@ -450,6 +470,13 @@ export function createSnapshot({
       more: entry.summary.comments > comments.length,
       comments,
     };
+  }
+
+  // The entry issues the current snapshot holds that name `id`, lowest number first, and when that
+  // snapshot's refresh began; null without a snapshot.
+  function held(id) {
+    if (!current) return null;
+    return { startedAt: current.startedAt, numbers: entryIssuesOf(current).get(id) ?? [] };
   }
 
   // Records a patch and applies it to the current snapshot. `apply(snapshot)` must be safe to run
@@ -491,6 +518,16 @@ export function createSnapshot({
     up(number, delta) {
       count(number, 'up', delta);
     },
+    // A comment's 👍 count moves only from the value it had when the write happened.
+    commentUp(number, id, delta) {
+      const from = current?.issues.get(number)?.comments.get(id)?.up;
+      if (from === undefined) return;
+      const to = Math.max(0, from + delta);
+      record(onEntry(number, (entry) => {
+        const comment = entry.comments.get(id);
+        if (comment?.up === from) entry.comments.set(id, { ...comment, up: to });
+      }));
+    },
     issue(issue, kind) {
       const reduced = reduceIssue({ ...issue, labels: [{ name: `workshop:${kind}` }] });
       if (!reduced) return;
@@ -511,5 +548,5 @@ export function createSnapshot({
     }
   }
 
-  return { read, stateAnswer, issueAnswer, patch, idle, refreshSoon };
+  return { read, stateAnswer, issueAnswer, held, patch, idle, refreshSoon };
 }

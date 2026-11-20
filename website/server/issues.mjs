@@ -57,7 +57,8 @@ export function reasonOf(issue) {
   return issue.state === 'closed' && (issue.state_reason === 'completed' || issue.state_reason === 'not_planned') ? issue.state_reason : null;
 }
 
-// A comment as `issue` returns it.
+// A comment as `issue` returns it, with `up`, its 👍 count from the reaction summary GitHub returns with
+// the comment.
 export function commentOf(comment, app) {
   const full = comment.body || '';
   const text = fresh(clean(cut(full, CUTS.comment)));
@@ -69,6 +70,7 @@ export function commentOf(comment, app) {
     bot,
     createdAt: comment.created_at,
     text,
+    up: countOf(comment.reactions?.['+1']) ?? 0,
     ...(full.length > CUTS.comment ? { cut: true } : {}),
   };
 }
@@ -77,4 +79,9 @@ export function commentOf(comment, app) {
 export function commentIssue(comment) {
   const match = /\/issues\/(\d+)$/.exec(comment.issue_url || '');
   return match ? Number(match[1]) : null;
+}
+
+// A count GitHub gave, or null when it gave none.
+export function countOf(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
 }

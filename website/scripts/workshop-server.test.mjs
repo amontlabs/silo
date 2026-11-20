@@ -19,8 +19,9 @@ import { createFakeGitHub, FAKE_APP, seedDemo } from './fake-github.mjs';
 import { DEFAULT_OUTPUT, ENDPOINTS, HANDLER, prepareVercel, RUNTIME } from './prepare-vercel.mjs';
 import { loadEntries, startDev } from './workshop-dev.mjs';
 import { readEntryMarker, withoutMarkers } from '../../tools/workshop/model/index.js';
+import { planEntries } from './plan-entries.mjs';
 
-import { count, retiredNumber, entryNumber, FAILED, issueOf, ORIGIN, SESSION, setup, START, withBudget } from './workshop-test-support.mjs';
+import { count, retiredNumber, entryNumber, FAILED, issueOf, ORIGIN, PLAN_ENTRIES, SESSION, setup, START, withBudget } from './workshop-test-support.mjs';
 
 test('App JWT is RS256 with the App ID, and the installation token is cached until shortly before it expires', async () => {
   const t = await setup();
@@ -166,9 +167,9 @@ test('GET vote reads the person\'s own reaction with their token, privately', as
     const c = t.client();
     await c.signIn('visitor-fake');
     const on = await c.call('GET', 'vote?n=1');
-    assert.deepEqual(on.json, { on: true });
+    assert.deepEqual(on.json, { on: true, comments: [] });
     assert.equal(on.headers['Cache-Control'], 'private, no-store');
-    assert.deepEqual((await c.call('GET', 'vote?n=2')).json, { on: false });
+    assert.deepEqual((await c.call('GET', 'vote?n=2')).json, { on: false, comments: [] });
     assert.equal((await c.call('GET', 'vote?n=7')).status, 404);
     assert.equal(count(t.fake, 'GET', /reactions$/, 'installation'), 0);
   } finally { await t.close(); }
@@ -231,7 +232,7 @@ test('comment, vote and suggest write as the signed-in person', async () => {
 
     assert.equal((await c.call('POST', 'vote', { body: { n: 2, on: true } })).status, 200);
     assert.deepEqual(issueOf(t.fake, 2).reactions.map((r) => r.user.login).sort(), ['owner-fake', 'visitor-fake']);
-    assert.deepEqual((await c.call('GET', 'vote?n=2')).json, { on: true });
+    assert.deepEqual((await c.call('GET', 'vote?n=2')).json, { on: true, comments: [] });
     assert.equal((await c.call('POST', 'vote', { body: { n: 2, on: false } })).status, 200);
     assert.deepEqual(issueOf(t.fake, 2).reactions.map((r) => r.user.login), ['owner-fake'], 'only their own reaction removed');
 
@@ -549,7 +550,7 @@ test('no response and no log line carries a token, a code, the client secret or 
 // Model: random operations by random people on random issues, a refused verdict
 // among them. After every step, only Workshop issues have changed, and no entry's
 // labels or state have: nothing the server does sets a verdict.
-test('model: writes only reach Workshop issues and never change an entry', async () => {
+test('model: writes only reach Workshop issues, never change an entry, and an entry has one thread', async () => {
   const t = await setup();
   try {
     const owner = t.client();
@@ -567,14 +568,33 @@ test('model: writes only reach Workshop issues and never change an entry', async
     const rand = (k) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % k; };
     const numbers = [1, 2, 3, 4, 5, 6, 7, 8, built, 99];
     const verdicts = ['take', 'later', 'drop', null, 'refine'];
+    // The reference model of each entry's thread: the issue its marker names, the suggestion it was
+    // written from, or the one the first write on it opens; never a second one.
+    const threads = new Map([['engine-service', 1], ['calls-and-events', 2], ['vm-runtime', 3], ['share-link', 6]]);
+    const ids = [...PLAN_ENTRIES.map((entry) => entry.id), 'nope'];
+    const markerIssues = (id) => [...t.fake.state.issues.values()].filter((i) => i.labels.includes('workshop:entry') && readEntryMarker(i.body) === id).length;
     for (let step = 0; step < 200; step += 1) {
       t.clock.t += 3_000;
       const who = rand(2) ? owner : visitor;
       const isOwner = who === owner;
       const n = numbers[rand(numbers.length)];
-      const op = rand(4);
+      const op = rand(5);
       let response;
-      if (op === 0) {
+      if (op === 4) {
+        const id = ids[rand(ids.length)];
+        const on = rand(2) === 0;
+        response = rand(2) ? await who.call('POST', 'comment', { body: { entry: id, text: `e ${step}` } }) : await who.call('POST', 'vote', { body: { entry: id, on } });
+        if (id === 'nope') {
+          assert.equal(response.status, 404);
+        } else {
+          assert.equal(response.status, 200, response.body);
+          if (!threads.has(id) && response.json.n !== undefined) threads.set(id, response.json.n);
+          if (threads.has(id)) assert.equal(response.json.n, threads.get(id), `${id} at step ${step}`);
+          else assert.deepEqual(response.json, { ok: true, up: 0 }, 'removing a 👍 where there is no thread');
+          if (threads.has(id) && ![1, 2, 3, 6].includes(threads.get(id))) workshop.add(threads.get(id));
+        }
+        for (const entry of PLAN_ENTRIES) assert.equal(markerIssues(entry.id), entry.suggestedIn ? 0 : threads.has(entry.id) ? 1 : 0, `${entry.id} at step ${step}`);
+      } else if (op === 0) {
         const verdict = verdicts[rand(verdicts.length)];
         response = await who.call('POST', 'verdict', { body: { n, verdict } });
         assert.deepEqual([response.status, response.json.error], [404, 'not_found'], `${isOwner ? 'owner' : 'visitor'} #${n}`);
@@ -598,6 +618,7 @@ test('model: writes only reach Workshop issues and never change an entry', async
       const done = issueOf(t.fake, built);
       assert.deepEqual([done.labels, done.state, done.state_reason], [['workshop:entry'], 'closed', 'completed'], `built entry at step ${step}`);
     }
+    assert.ok(threads.has('fork-computers') && threads.has('which-distro'), 'the entries without an issue got one');
     // Comments and votes were the only writes the built entry took.
     const after = issueOf(t.fake, built);
     assert.deepEqual(JSON.stringify({ ...after, comments: 0, reactions: 0 }), JSON.stringify({ ...JSON.parse(builtBefore), comments: 0, reactions: 0 }));
@@ -742,7 +763,11 @@ test('Build Output layout: static site, one Node.js function at every endpoint, 
       }
     } finally { await rm(clean, { recursive: true, force: true }); }
     const serverFiles = (await readdir(join(main, 'website', 'server'))).sort();
-    assert.deepEqual(serverFiles, ['app-auth.mjs', 'config.mjs', 'github.mjs', 'issues.mjs', 'node.mjs', 'session.mjs', 'snapshot.mjs', 'workshop.mjs']);
+    assert.deepEqual(serverFiles, ['app-auth.mjs', 'config.mjs', 'entries.mjs', 'github.mjs', 'issues.mjs', 'node.mjs', 'plan-entries.json', 'session.mjs', 'snapshot.mjs', 'workshop.mjs']);
+    // The plan's entries, made from the plan at build time, beside the server.
+    const shippedEntries = JSON.parse(await readFile(join(main, 'website', 'server', 'plan-entries.json'), 'utf8'));
+    assert.deepEqual(shippedEntries, planEntries());
+    assert.ok(shippedEntries.length > 100 && shippedEntries.every((e) => ['decision', 'feature'].includes(e.kind) && e.title));
 
     // The packaged entry point loads and answers on its own.
     const saved = Object.fromEntries(Object.keys(process.env).filter((k) => k.startsWith('WORKSHOP_')).map((k) => [k, process.env[k]]));
@@ -819,6 +844,14 @@ test('workshop-dev --fake serves the site and the API on one port, with sign-in 
       body: JSON.stringify({ n: 1, text: 'From the dev server.' }),
     });
     assert.equal(comment.status, 200);
+    // The dev server knows the plan's entries: a write may name one.
+    const onEntry = await fetch(dev.origin + '/api/workshop/comment', {
+      method: 'POST',
+      headers: { cookie: session, origin: dev.origin, 'x-workshop': '1', 'content-type': 'application/json' },
+      body: JSON.stringify({ entry: 'fixture-only', text: 'On an entry.' }),
+    });
+    assert.equal(onEntry.status, 200);
+    assert.equal((await onEntry.json()).n, Number(Object.entries(state.issues).find(([, i]) => i.entry === 'fixture-only')[0]));
   } finally {
     await dev.close();
     await rm(site, { recursive: true, force: true });
@@ -979,7 +1012,8 @@ test('a comment of the Workshop App is an ordinary comment: marked as the bot\'s
 });
 
 test('state: latest is the newest 30 comments across entries, newest first, each with its first line', async () => {
-  const t = await setup();
+  // Here no entry of the plan was written from the suggestion #6, so its comments are not an entry's.
+  const t = await setup({ entries: PLAN_ENTRIES.filter((entry) => !entry.suggestedIn) });
   try {
     t.fake.addComment(6, 'visitor-fake', 'On a suggestion, not listed.', START + 500_000);
     let at = START + 1000;

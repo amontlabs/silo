@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as model from '../model/index.js';
-import { entryMarker, readEntryMarker, withoutMarkers } from '../model/index.js';
+import { entryMarker, issuesByEntry, readEntryMarker, withoutMarkers } from '../model/index.js';
 
 test('the entry marker', () => {
   const body = `Text\n\n${entryMarker('fork')}`;
@@ -12,6 +12,11 @@ test('the entry marker', () => {
   assert.equal(readEntryMarker('Text'), null);
   assert.equal(withoutMarkers(body), 'Text');
   assert.throws(() => entryMarker('Bad Id'));
+});
+
+test('the issues of each entry, lowest number first', () => {
+  const byEntry = issuesByEntry([{ number: 9, entry: 'fork' }, { number: 3, entry: 'fork' }, { number: 4, entry: null }, { number: 5, entry: 'run' }, { number: 3, entry: 'fork' }]);
+  assert.deepEqual([...byEntry], [['fork', [3, 9]], ['run', [5]]]);
 });
 
 test('the model holds no history comment', () => {

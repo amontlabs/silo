@@ -17,7 +17,7 @@ import { UsageError, parseArgs } from './args.js';
 export const COMMANDS = [
   { name: 'setup', usage: 'workshop setup [--org <org>] [--site <url>] [--replace]', what: 'Creates the Workshop GitHub App.' },
   { name: 'store', usage: 'workshop store [--replace]', what: "Stores the App's credentials from vercel.env in the Keychain." },
-  { name: 'doctor', usage: 'workshop doctor', what: 'Checks the credentials, the App and the labels.' },
+  { name: 'doctor', usage: 'workshop doctor', what: 'Checks the credentials, the App, the labels and the entries\' issues.' },
   { name: 'decline', usage: 'workshop decline <issue> --why "…"', what: 'Closes a suggestion as not planned.' },
 ];
 
@@ -127,6 +127,7 @@ async function doctorCommand(ctx, argv) {
     `Installed on ${deps.repo}: ${report.installed ? 'yes' : 'no'}`,
     `Permissions: ${report.permissions ? Object.entries(report.permissions).map(([k, v]) => `${k} ${v}`).join(', ') || 'none' : 'unknown'}`,
     ...(report.labels ? Object.entries(report.labels).map(([name, ok]) => `Label ${name}: ${ok ? 'yes' : 'missing'}`) : ['Labels: unknown']),
+    ...(report.duplicates ? [`Entries with several issues: ${Object.keys(report.duplicates).length}`] : []),
     ...report.problems.map((problem) => `Problem: ${problem}`),
   ];
   emit(ctx, flags.has('json'), { ok: report.problems.length === 0, ...report }, lines.join('\n'));

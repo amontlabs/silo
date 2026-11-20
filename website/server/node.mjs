@@ -1,6 +1,7 @@
 // Runs the Workshop API on Node's http request and response objects, as both
 // Vercel's Node.js launcher and the local server provide them.
 import { readConfig } from './config.mjs';
+import { ENTRIES_FILE, loadPlanEntries } from './entries.mjs';
 import { createWorkshop } from './workshop.mjs';
 
 export const MAX_BODY = 64 * 1024;
@@ -67,6 +68,11 @@ let shared = null;
 // The handler for the deployed function, built once per instance from the environment.
 export async function vercelHandler(req, res) {
   // Work that outlives the response (snapshot refreshes, label retries) is handed to Vercel's waitUntil.
-  shared ??= createNodeHandler(createWorkshop({ config: readConfig(process.env), keepAlive: (promise) => waitUntil(promise) }));
+  // The plan's entries ship beside the server; without them, a write naming an entry answers 404.
+  if (!shared) {
+    const { entries, problem } = loadPlanEntries();
+    if (problem) console.log(JSON.stringify({ workshop: { config: problem, variable: ENTRIES_FILE } }));
+    shared = createNodeHandler(createWorkshop({ config: readConfig(process.env), entries, keepAlive: (promise) => waitUntil(promise) }));
+  }
   return shared(req, res);
 }

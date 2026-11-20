@@ -19,11 +19,22 @@ be used.
 | `workshop` | The commands, one line each. |
 | `workshop setup [--org <org>] [--site <url>] [--replace]` | Creates the App (below). |
 | `workshop store [--replace]` | Finishes a setup whose Keychain step failed, from `vercel.env`. |
-| `workshop doctor` | Where each credential comes from (never a value), whether the App is public and installed, its permissions, and whether the labels something still sets exist. Exit 1 on a problem. |
+| `workshop doctor` | Where each credential comes from (never a value), whether the App is public and installed, its permissions, whether the two labels the site sets exist, and the entries that several issues name. Exit 1 on a problem. |
 | `workshop decline <issue> --why "…"` | Closes an open suggestion as not planned, the reason as the bot's comment. Refuses an issue that is not an open suggestion (an entry, an issue without the suggestion label, a closed one). A run stopped after the comment and run again posts no second comment. |
 
-`doctor` checks one label: `workshop:suggestion`, which the site puts on each new suggestion.
-Nothing else sets a label any more, so nothing else is checked.
+`doctor` checks both labels: `workshop:suggestion`, which the site puts on each new suggestion, and
+`workshop:entry`, the label of an entry's thread, which the bot opens. GitHub's documentation of
+"Create an issue" says only that labels set by someone without push access are silently dropped
+([REST API, issues](https://docs.github.com/en/rest/issues/issues#create-an-issue), read
+2026-11-20). Neither it nor "Add labels to an issue"
+([REST API, labels](https://docs.github.com/en/rest/issues/labels#add-labels-to-an-issue)) says
+that a label that does not exist is created. So the labels must exist, and a missing one is a
+problem that names it: create it on GitHub, in the repository's labels. When the site opens a
+thread and GitHub drops the label, the App creates it.
+
+`doctor` also reads every issue labelled `workshop:entry` and reports each entry that several of
+them name, with their numbers. The lowest number is the entry's thread and the site ignores the
+others: move what matters to the thread and remove the label from the others.
 
 ## The App
 
@@ -42,15 +53,18 @@ or logged.
 
 ## The issues already on GitHub
 
-Two labels: `workshop:suggestion` on a person's suggestion, and `workshop:entry` on an older issue
-the bot created for one feature. Label names read from GitHub are compared ignoring
-capitalisation. An entry's issue ends with `<!-- silo-entry: <id> -->`. The bot once wrote a comment
+Two labels: `workshop:suggestion` on a person's suggestion, and `workshop:entry` on an entry's
+thread, the issue the bot opens at the first comment or 👍 on one entry of the plan. A thread is
+never made by hand: an older issue someone labels by hand is found by the site only at the next
+refresh of its snapshot. Label names read from GitHub are compared ignoring capitalisation. An
+entry's issue ends with `<!-- silo-entry: <id> -->`. When several issues name one entry, the
+lowest number is its thread (`issuesByEntry` in `model/markers.js`). The bot once wrote a comment
 on an issue for each change of its entry; that comment is read as any other comment now, and the
 history of an entry comes from git (`tools/plan/history`).
 
 ## Modules
 
-- `model/`: the names and labels, and the entry marker with its reader. Plain ESM; it imports nothing outside its folder and no `node:`
+- `model/`: the names and labels, the entry marker with its reader, and the issues of each entry. Plain ESM; it imports nothing outside its folder and no `node:`
   module (a test enforces it). The site's server imports it, and the site's function ships this
   folder with `package.json` and nothing else of `tools/`.
 - `github/`: the REST client, the App's JWT and installation token, credentials, the Keychain,
@@ -59,5 +73,8 @@ history of an entry comes from git (`tools/plan/history`).
 
 ## What the site does with GitHub
 
-No push acts on GitHub. The site reads issues, comments, votes and suggestions, writes comments,
-votes and suggestions as the person signed in, and puts `workshop:suggestion` on a new suggestion.
+No push acts on GitHub. The site reads issues, comments, votes and suggestions. As the person
+signed in, it writes comments, votes, votes on comments and suggestions. As the bot, it puts
+`workshop:suggestion` on a new suggestion, and it opens an entry's thread, labelled
+`workshop:entry`, at the first comment or 👍 on that entry. See `website/README.md`, "Storage" and
+"Writing to an entry".

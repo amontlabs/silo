@@ -386,13 +386,14 @@ test('a session has 60 reads a minute', async () => {
   try {
     const owner = t.client();
     await owner.signIn('owner-fake');
-    for (let i = 0; i < 25; i += 1) {
+    for (let i = 0; i < 20; i += 1) {
       const response = await owner.call('GET', `vote?n=${entryNumber}`);
       assert.equal(response.status, 200, `read ${i}: ${response.body}`);
     }
+    assert.equal((await owner.call('GET', `vote?n=${entryNumber}`)).status, 429, 'the 61st read');
     t.clock.t += 61_000;
-    // A vote read is two reads: the issue, then its reactions.
-    await withBudget({ sessionReadsPerMinute: 4 }, async () => {
+    // A vote read is three reads: the issue, its reactions, and the person's 👍 on its comments.
+    await withBudget({ sessionReadsPerMinute: 6 }, async () => {
       for (let i = 0; i < 2; i += 1) assert.equal((await owner.call('GET', `vote?n=${entryNumber}`)).status, 200);
       const before = t.fake.state.requests.length;
       const refused = await owner.call('GET', `vote?n=${entryNumber}`);

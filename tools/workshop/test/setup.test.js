@@ -311,7 +311,7 @@ test('the setup server refuses any Host but 127.0.0.1 or localhost on its port',
   assert.match(result.stderr, /timed out/);
 });
 
-test('doctor: sources only, the App public and installed, its permissions, and only the label something still sets', async (t) => {
+test('doctor: sources only, the App public and installed, its permissions, the labels the site sets, and entries with several issues', async (t) => {
   const fake = await startFake();
   t.after(fake.stop);
   const box = sandbox(t);
@@ -321,13 +321,26 @@ test('doctor: sources only, the App public and installed, its permissions, and o
   assert.deepEqual(report.credentials, { WORKSHOP_APP_ID: 'keychain', WORKSHOP_CLIENT_ID: 'missing', WORKSHOP_CLIENT_SECRET: 'missing', WORKSHOP_PRIVATE_KEY: 'keychain' });
   assert.equal(report.public, true);
   assert.equal(report.installed, true);
-  assert.deepEqual(Object.keys(report.labels), ['workshop:suggestion']);
-  assert.match(report.problems.join('\n'), /labels missing \(create them on GitHub, in the repository's labels\): workshop:suggestion$/m);
-  fake.labels.push({ name: 'Workshop:Suggestion' });
+  assert.deepEqual(Object.keys(report.labels), ['workshop:entry', 'workshop:suggestion']);
+  assert.match(report.problems.join('\n'), /labels missing \(create them on GitHub, in the repository's labels\): workshop:entry, workshop:suggestion$/m);
+  assert.deepEqual(report.duplicates, {});
+  fake.labels.push({ name: 'Workshop:Suggestion' }, { name: 'workshop:entry' });
   const ok = await run(['doctor'], { fake, box });
   assert.equal(ok.code, 0, ok.stdout);
   assert.match(ok.stdout, /^Label workshop:suggestion: yes$/m);
-  assert.doesNotMatch(ok.stdout, /workshop:entry/);
+  assert.match(ok.stdout, /^Label workshop:entry: yes$/m);
+  assert.match(ok.stdout, /^Entries with several issues: 0$/m);
+
+  // Two issues name one entry: the lowest number is its thread, and the other is a problem.
+  const first = fake.addIssue({ title: 'Fork', body: 'Feature.\n\n<!-- silo-entry: fork -->', labels: ['workshop:entry'], user: fake.bot });
+  fake.addIssue({ title: 'Other', body: 'Feature.\n\n<!-- silo-entry: other -->', labels: ['workshop:entry'], user: fake.bot });
+  const second = fake.addIssue({ title: 'Fork', body: 'Feature.\n\n<!-- silo-entry: fork -->', labels: ['workshop:entry'], user: fake.bot });
+  fake.addIssue({ title: 'Fork, unlabelled', body: 'Feature.\n\n<!-- silo-entry: fork -->', labels: [], user: fake.bot });
+  const twice = await run(['doctor', '--json'], { fake, box });
+  assert.equal(twice.code, 1);
+  const found = JSON.parse(twice.stdout);
+  assert.deepEqual(found.duplicates, { fork: [first.number, second.number] });
+  assert.match(found.problems.join('\n'), new RegExp(`the entry fork has several issues: #${first.number}, #${second.number}\\. #${first.number} is its thread`));
   fake.public = false;
   assert.match((await run(['doctor'], { fake, box })).stdout, /Public: no/);
 });

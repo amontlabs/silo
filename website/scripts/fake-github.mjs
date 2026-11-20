@@ -1,7 +1,7 @@
 // A fake GitHub for the Workshop's tests and for `workshop-dev.mjs --fake`:
 // the App and installation tokens, the user authorization flow with expiring
-// tokens and PKCE, and the issue, comment, reaction and label
-// endpoints the Workshop uses. State lives in memory.
+// tokens and PKCE, the issue, comment, reaction and label endpoints the
+// Workshop uses, and the one GraphQL query it sends. State lives in memory.
 import { createHash, generateKeyPairSync, randomBytes, verify } from 'node:crypto';
 import { createServer } from 'node:http';
 
@@ -25,6 +25,8 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     nextIssue: 1,
     nextId: 1000,
     rateLimited: false,
+    // Labels the repository lacks: GitHub drops them from a new issue or an added label, until one is created.
+    missingLabels: new Set(),
     secondaryLimited: false,
     failNext: 0,
     hook: null,
@@ -70,7 +72,7 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
   // `at` (milliseconds) dates the comment; without it, now.
   function addComment(number, author, body, at) {
     const issue = state.issues.get(number);
-    const comment = { id: state.nextId++, user: author ? state.users.get(author) : bot, body, created_at: iso(at), updated_at: iso(at) };
+    const comment = { id: state.nextId++, user: author ? state.users.get(author) : bot, body, created_at: iso(at), updated_at: iso(at), reactions: [] };
     issue.comments.push(comment);
     return comment;
   }
@@ -90,7 +92,24 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
       id: comment.id, body: comment.body, created_at: comment.created_at, updated_at: comment.updated_at,
       user: publicUser(comment.user), issue_url: `${baseUrl}/repos/${repo}/issues/${number}`,
       performed_via_github_app: comment.user === bot ? { id: Number(FAKE_APP.appId), slug: FAKE_APP.slug } : null,
+      reactions: { '+1': comment.reactions.filter((r) => r.content === '+1').length },
     };
+  }
+
+  // The issue and the comment of a comment id, or null.
+  function findComment(id) {
+    for (const issue of state.issues.values()) {
+      const comment = issue.comments.find((c) => c.id === id);
+      if (comment) return { issue, comment };
+    }
+    return null;
+  }
+
+  // A 👍 by `login` on comment `id`, as a person gives one.
+  function reactToComment(id, login) {
+    const { comment } = findComment(id);
+    const user = state.users.get(login);
+    if (!comment.reactions.some((r) => r.user.id === user.id && r.content === '+1')) comment.reactions.push({ id: state.nextId++, content: '+1', user });
   }
 
   // One page of a listing, with Link and ETag headers; a matching If-None-Match answers 304.
@@ -305,9 +324,60 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     }
     if (path === `/repos/${repo}/issues` && req.method === 'POST') {
       const body = await readBody(req);
-      if (who.kind !== 'user') return json(res, 403, { message: 'Forbidden' });
-      const issue = addIssue({ title: body.title, body: body.body || '', labels: canWrite(who) ? body.labels || [] : [], author: who.user.login });
+      if (who.kind !== 'user' && who.kind !== 'installation') return json(res, 403, { message: 'Forbidden' });
+      // Labels are silently dropped for anyone without push access, as GitHub documents, and so is a missing label.
+      const labels = canWrite(who) ? (body.labels || []).filter((name) => !state.missingLabels.has(name)) : [];
+      const issue = addIssue({ title: body.title, body: body.body || '', labels, author: who.kind === 'user' ? who.user.login : null });
       return json(res, 201, issueJson(issue));
+    }
+    // The one query the Workshop sends: the person's 👍 on the latest 100 comments of an issue.
+    if (path === '/graphql' && req.method === 'POST') {
+      const body = await readBody(req);
+      if (who.kind !== 'user') return json(res, 403, { message: 'Forbidden' });
+      const { owner, name, number } = body.variables || {};
+      if (!/comments\(last: 100\)/.test(body.query || '') || `${owner}/${name}` !== repo) return json(res, 200, { errors: [{ message: 'unknown query' }] });
+      const issue = state.issues.get(number);
+      if (!issue || issue.pull_request) return json(res, 200, { data: { repository: { issue: null } }, errors: [{ type: 'NOT_FOUND', message: 'Could not resolve to an Issue.' }] });
+      const nodes = issue.comments.slice(-100).map((c) => ({
+        fullDatabaseId: String(c.id),
+        reactionGroups: [{ content: 'THUMBS_UP', viewerHasReacted: c.reactions.some((r) => r.content === '+1' && r.user.id === who.user.id) }],
+      }));
+      return json(res, 200, { data: { repository: { issue: { comments: { nodes } } } } });
+    }
+    if (path === `/repos/${repo}/labels` && req.method === 'POST') {
+      const body = await readBody(req);
+      if (!canWrite(who)) return json(res, 403, { message: 'Forbidden' });
+      if (!state.missingLabels.has(body.name)) return json(res, 422, { message: 'Validation Failed', errors: [{ code: 'already_exists' }] });
+      state.missingLabels.delete(body.name);
+      return json(res, 201, { name: body.name, color: body.color, description: body.description });
+    }
+    const commentMatch = path.match(new RegExp(`^/repos/${repo}/issues/comments/(\\d+)(/reactions(?:/(\\d+))?)?$`));
+    if (commentMatch) {
+      const found = findComment(Number(commentMatch[1]));
+      if (!found) return json(res, 404, { message: 'Not Found' });
+      const { issue: parent, comment } = found;
+      if (!commentMatch[2] && req.method === 'GET') return json(res, 200, commentJson(parent.number, comment));
+      if (commentMatch[2] && !commentMatch[3] && req.method === 'GET') {
+        const content = url.searchParams.get('content');
+        return listPage(req, res, url, comment.reactions.filter((r) => !content || r.content === content).map((r) => ({ id: r.id, content: r.content, user: publicUser(r.user) })), record);
+      }
+      if (commentMatch[2] && !commentMatch[3] && req.method === 'POST') {
+        if (who.kind !== 'user' || (parent.locked && !canWrite(who))) return json(res, 403, { message: 'Forbidden' });
+        const body = await readBody(req);
+        const existing = comment.reactions.find((r) => r.user.id === who.user.id && r.content === body.content);
+        if (existing) return json(res, 200, { id: existing.id, content: existing.content });
+        const reaction = { id: state.nextId++, content: body.content, user: who.user };
+        comment.reactions.push(reaction);
+        return json(res, 201, { id: reaction.id, content: reaction.content });
+      }
+      if (commentMatch[3] && req.method === 'DELETE') {
+        const index = comment.reactions.findIndex((r) => r.id === Number(commentMatch[3]));
+        if (index < 0) return json(res, 404, { message: 'Not Found' });
+        if (who.kind !== 'user' || comment.reactions[index].user.id !== who.user.id) return json(res, 403, { message: 'Forbidden' });
+        comment.reactions.splice(index, 1);
+        return json(res, 204);
+      }
+      return json(res, 404, { message: 'Not Found' });
     }
 
     const issueMatch = path.match(new RegExp(`^/repos/${repo}/issues/(\\d+)(/.*)?$`));
@@ -344,7 +414,7 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     if (rest === '/labels' && req.method === 'POST') {
       if (!canWrite(who)) return json(res, 403, { message: 'Forbidden' });
       const body = await readBody(req);
-      issue.labels = [...new Set([...issue.labels, ...body.labels])];
+      issue.labels = [...new Set([...issue.labels, ...body.labels.filter((name) => !state.missingLabels.has(name))])];
       return json(res, 200, issue.labels.map((name) => ({ name })));
     }
     if (rest === '/comments' && req.method === 'GET') {
@@ -355,7 +425,7 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     if (rest === '/comments' && req.method === 'POST') {
       if (issue.locked && !canWrite(who)) return json(res, 403, { message: 'Issue is locked' });
       const body = await readBody(req);
-      const comment = { id: state.nextId++, user: who.user, body: body.body, created_at: iso(), updated_at: iso() };
+      const comment = { id: state.nextId++, user: who.user, body: body.body, created_at: iso(), updated_at: iso(), reactions: [] };
       issue.comments.push(comment);
       return json(res, 201, commentJson(issue.number, comment));
     }
@@ -398,6 +468,7 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     editComment,
     deleteComment,
     react,
+    reactToComment,
     repo,
     get url() { return baseUrl; },
     async listen(port = 0, host = '127.0.0.1') {
