@@ -1,22 +1,28 @@
 # Third-party files
 
 The kit is the Fjord explainer kit, copied at its commit 7ce714b533 without its examples/. These files in it
-were made by others. Each built film inlines all of them.
+were made by others, and this repository's MIT licence does not cover them. Each built film inlines
+all of them.
 
 | File | What | Made by | Licence | Licence text here |
 |---|---|---|---|---|
-| `kit/vendor/gsap.min.js` | GSAP 3.15.0, the animation library | GreenSock | GreenSock's standard licence, <https://gsap.com/standard-license>, named in the file's header | No |
-| `kit/vendor/MotionPathPlugin.min.js` | GSAP plugin, 3.15.0 | GreenSock | The same | No |
-| `kit/vendor/DrawSVGPlugin.min.js` | GSAP plugin, 3.15.0 | GreenSock | The same | No |
-| `kit/vendor/MorphSVGPlugin.min.js` | GSAP plugin, 3.15.0 | GreenSock | The same | No |
-| `kit/vendor/CustomEase.min.js` | GSAP plugin, 3.15.0 | GreenSock | The same | No |
-| `kit/vendor/icons.js` | Icon paths from lucide-static 1.60.0 | Lucide Contributors | ISC, named in the file's header | No |
-| `kit/fonts/geist-regular.otf` | Geist, regular | The Geist Project Authors (Vercel), copyright 2024 | SIL Open Font License 1.1 (the font's own metadata names its authors; the licence is the Geist project's) | No |
-| `kit/fonts/geist-medium.otf` | Geist, medium | The same | The same | No |
-| `kit/fonts/geist-mono.ttf` | Geist Mono | The same | The same | No |
+| `kit/vendor/gsap.min.js` | GSAP 3.15.0, the animation library | GreenSock, owned by Webflow | GSAP's standard licence, <https://gsap.com/standard-license>, named in the file's header | No: see below |
+| `kit/vendor/MotionPathPlugin.min.js` | GSAP plugin, 3.15.0 | The same | The same | The same |
+| `kit/vendor/DrawSVGPlugin.min.js` | GSAP plugin, 3.15.0 | The same | The same | The same |
+| `kit/vendor/MorphSVGPlugin.min.js` | GSAP plugin, 3.15.0 | The same | The same | The same |
+| `kit/vendor/CustomEase.min.js` | GSAP plugin, 3.15.0 | The same | The same | The same |
+| `kit/vendor/icons.js` | Icon paths from lucide-static 1.60.0 | Lucide Icons and Contributors. Some icons come from Feather, by Cole Bemis | ISC, and MIT for the icons from Feather | [`licences/lucide.txt`](licences/lucide.txt) |
+| `kit/fonts/geist-regular.otf` | Geist, regular | The Geist Project Authors (Vercel) | SIL Open Font License 1.1 | [`licences/geist.txt`](licences/geist.txt) |
+| `kit/fonts/geist-medium.otf` | Geist, medium | The same | The same | The same |
+| `kit/fonts/geist-mono.ttf` | Geist Mono | The same | The same | The same |
 
-No licence text is in the kit. Each licence above is named from the file's header or the font's
-metadata, not from a copy of its text.
+`licences/lucide.txt` is the `LICENSE` file of the package lucide-static 1.60.0. `licences/geist.txt`
+is `OFL.txt` of <https://github.com/vercel/geist-font>, as it stood on 20 November 2026.
+
+GSAP stays Webflow's property. Its licence (last modified 30 May 2025) allows using GSAP "on any
+website, web application, or digital interface", which is what the films do. It asks for no copy of
+its text, only that the notices in the files stay, and they are unchanged here. It does not say
+whether the files may be kept in a public repository.
 
 The spoken sentences under each film's `voice/` were made on this Mac by the Kokoro-82M speech
 model (`mlx-community/Kokoro-82M-bf16`), voice Heart (`af_heart`). The model is not in this

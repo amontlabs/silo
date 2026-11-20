@@ -32,7 +32,7 @@ once the film carries it. The fifth film needs a new script.
 README.md            this file
 .gitignore           every out/, the Python environment, caches, index.html, the kit's renders, voice.py's temporary folders
 index.html           made by tools/index.py, not tracked: the films, in order
-kit/                 the Fjord explainer kit, copied at its commit 7ce714b533 without its examples/; NOTICE.md lists its third-party files
+kit/                 the Fjord explainer kit, copied at its commit 7ce714b533 without its examples/; NOTICE.md lists its third-party files, licences/ holds their licence texts
 player/              the player as used here: kit.js (patched copy), voice.js, page.html, page.css, page.js
 tools/
   voice.py           narration.json → voice/ clips + voice.json

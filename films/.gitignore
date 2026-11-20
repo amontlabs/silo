@@ -11,6 +11,7 @@ __pycache__/
 /kit/*
 !/kit/CLAUDE.md
 !/kit/NOTICE.md
+!/kit/licences/
 !/kit/audit.py
 !/kit/guard.sh
 !/kit/render.sh
