@@ -409,8 +409,15 @@ What a person sees:
   `POST comment-vote`.
 - The count the server answers for a vote on a comment is applied to a `GET issue` answer unless that answer
   was fetched more than a minute after the vote (`writes.ts`).
+- A click on a 👍, a row's or a comment's, shows at once: the button takes the working look (accent ink and
+  border, the thumb pulsing, no pulse with reduced motion; it keeps its size) and says `aria-busy` until the
+  answer, and a second click on it does nothing meanwhile. When the page knows the person's vote on the row (a
+  row with no thread has none, else `GET vote` has answered), the pressed state and the count change at the click,
+  before anything is sent; when it does not, `GET vote` is asked first and they change when it answers, before
+  the vote is sent, so a person taking their 👍 back never sees the count go up. A row's own change is laid over
+  the count shown, so a newer `state` moves the count under it. The count the server answers replaces it.
 - A refusal takes back the page's own change, one up or one down from the count shown by then, and says
-  "Vote: not saved." with the server's words.
+  "Vote: not saved." with the server's words. A thread found closed (403 `closed`) takes it back too.
 - The strip under the tiles links to what is left out (every dropped decision
   and feature of the parts), to "The whole product" (`#product`: the decisions
   of `plan/decisions/`, with their own counts), to Latest, and to the suggestions. Latest (`#latest`) lists the newest 30
