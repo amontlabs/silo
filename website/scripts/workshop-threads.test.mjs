@@ -195,7 +195,7 @@ test('the `open` ceiling refuses an opening it has no room for, 429 with the wai
   const t = await setup({ entries: [...PLAN_ENTRIES, ...MANY] });
   try {
     const c = await signedIn(t);
-    // Four calls a minute: one opening is three, so the second has no room for itself and its confirming read.
+    // Four calls a minute: one opening is three, so the second has no room for itself and the read after it.
     await withBudget({ openCallsPerMinute: 4 }, async () => {
       assert.equal((await c.call('POST', 'comment', { body: { entry: 'm0', text: 'x' } })).status, 200);
       const before = t.fake.state.requests.length;
@@ -214,11 +214,11 @@ test('the `open` ceiling refuses an opening it has no room for, 429 with the wai
   } finally { await t.close(); }
 });
 
-test('a confirming read paid for in one minute and run in the next is counted in the next, never refused', async () => {
+test('a read after an opening paid for in one minute and run in the next is counted in the next, never refused', async () => {
   const t = await setup({ entries: [...PLAN_ENTRIES, ...MANY] });
   try {
     const c = await signedIn(t);
-    // Three calls a minute: one opening, whose confirming read runs a minute after it was charged.
+    // Three calls a minute: one opening, whose read after it runs a minute after it was charged.
     await withBudget({ openCallsPerMinute: 3 }, async () => {
       let next = null;
       t.fake.state.hook = (r) => {
@@ -231,12 +231,12 @@ test('a confirming read paid for in one minute and run in the next is counted in
       };
       assert.equal((await c.call('POST', 'comment', { body: { entry: 'm0', text: 'x' } })).status, 200);
       assert.ok(next !== null);
-      // In the new minute the confirming read is already one call, so a second opening has no room.
+      // In the new minute the read after the opening is already one call, so a second opening has no room.
       const refused = await c.call('POST', 'comment', { body: { entry: 'm1', text: 'x' } });
       assert.deepEqual([refused.status, refused.json.message], [429, 'The Workshop is busy. Try again in a minute.']);
       assert.equal(created(t).length, 1);
       const calls = openCalls(t, next);
-      assert.deepEqual(calls.map((r) => r.method), ['GET', 'GET'], 'the confirming read and the second opening\'s first read');
+      assert.deepEqual(calls.map((r) => r.method), ['GET', 'GET'], 'the read after the opening and the second opening\'s first read');
       assert.ok(calls.length <= BUDGET.openCallsPerMinute);
     });
   } finally { t.fake.state.hook = null; await t.close(); }
@@ -426,7 +426,7 @@ test('two instances opening one entry at the same moment: both writes land on th
   } finally { t.fake.state.hook = null; await t.close(); }
 });
 
-test('the read after an opening failing: the person\'s write is not made, and the next try finds the issue', async () => {
+test('the read after an opening failing: the person\'s write goes on the issue just opened, and the next write finds it', async () => {
   const t = await setup();
   try {
     const c = await signedIn(t);
@@ -440,13 +440,14 @@ test('the read after an opening failing: the person\'s write is not made, and th
       }
       return null;
     };
-    const answer = await c.call('POST', 'comment', { body: { entry: 'fork-computers', text: 'Wait.' } });
+    const answer = await c.call('POST', 'comment', { body: { entry: 'fork-computers', text: 'Here.' } });
     t.fake.state.hook = null;
-    assert.equal(answer.status, 502);
-    assert.match(answer.json.message, /Try again/);
+    assert.ok(failed);
+    assert.equal(answer.status, 200, answer.body);
     const [n] = entryIssues(t, 'fork-computers');
-    assert.deepEqual(issueOf(t.fake, n).comments, [], 'no write on an issue the second read did not confirm');
-    const again = await c.call('POST', 'comment', { body: { entry: 'fork-computers', text: 'Wait.' } });
+    assert.equal(answer.json.n, n);
+    assert.deepEqual(issueOf(t.fake, n).comments.map((x) => x.body), ['Here.']);
+    const again = await c.call('POST', 'vote', { body: { entry: 'fork-computers', on: true } });
     assert.deepEqual([again.status, again.json.n], [200, n]);
     assert.equal(created(t).length, 1);
   } finally { t.fake.state.hook = null; await t.close(); }
@@ -521,29 +522,225 @@ test('every answer to a write naming an entry whose thread the server knows carr
   } finally { t.fake.state.hook = null; await t.close(); }
 });
 
-test('the read after an opening succeeding without the issue just opened: the person\'s write is not made', async () => {
+// GitHub's list by label lags by `ms` from now on. The clock first moves past it, so that the issues
+// seeded at the start are listed.
+function lagging(t, ms) {
+  t.clock.t += ms;
+  t.fake.state.listLag = ms;
+}
+
+// A refresh of the snapshot that starts now, waited for; the state it answers.
+async function refreshed(t, c) {
+  t.clock.t += 31_000;
+  const state = await c.call('GET', 'state?fresh=1');
+  assert.equal(state.status, 200);
+  assert.equal(state.json.old, undefined, 'the refresh ran');
+  return state.json;
+}
+
+test('GitHub\'s list by label lagging: the first 👍 and the first comment on an entry answer 200 at once, on the issue the App just opened', async () => {
   const t = await setup();
   try {
     const c = await signedIn(t);
-    let opened = false;
-    let emptied = false;
+    lagging(t, 60_000);
+    const vote = await c.call('POST', 'vote', { body: { entry: 'which-distro', on: true } });
+    assert.equal(vote.status, 200, vote.body);
+    assert.deepEqual(entryIssues(t, 'which-distro'), [vote.json.n]);
+    assert.deepEqual(issueOf(t.fake, vote.json.n).reactions.map((r) => r.user.login), ['visitor-fake']);
+    assert.deepEqual(vote.json, { ok: true, up: 1, n: vote.json.n });
+
+    const comment = await c.call('POST', 'comment', { body: { entry: 'fork-computers', text: 'First.' } });
+    assert.equal(comment.status, 200, comment.body);
+    assert.deepEqual(entryIssues(t, 'fork-computers'), [comment.json.n]);
+    assert.deepEqual(issueOf(t.fake, comment.json.n).comments.map((x) => x.body), ['First.']);
+    assert.equal(created(t).length, 2);
+
+    // The list did not show either issue to the read after its opening.
+    const after = t.fake.state.requests.filter((r) => r.kind === 'installation' && r.method === 'GET' && ISSUES.test(r.path) && !/[?&]page=/.test(r.query));
+    assert.equal(after.length, 4, 'a read before and a read after each opening');
+    const threads = (await c.call('GET', 'state')).json.threads;
+    assert.deepEqual([threads['which-distro'], threads['fork-computers']], [vote.json.n, comment.json.n]);
+  } finally { await t.close(); }
+});
+
+test('GitHub\'s list by label lagging: later writes from the same instance, before and after a refresh that read the lagging list, go on the same issue', async () => {
+  const t = await setup();
+  try {
+    const c = await signedIn(t);
+    const other = await signedIn(t, 'owner-fake');
+    lagging(t, 5 * 60_000);
+    const first = await c.call('POST', 'vote', { body: { entry: 'fork-computers', on: true } });
+    assert.equal(first.status, 200, first.body);
+    const n = first.json.n;
+
+    // At once, while the list still lags.
+    const second = await other.call('POST', 'comment', { body: { entry: 'fork-computers', text: 'Right after.' } });
+    assert.deepEqual([second.status, second.json.n], [200, n], second.body);
+
+    // A refresh that began after the opening, whose list does not show the issue.
+    const state = await refreshed(t, c);
+    assert.equal(state.threads['fork-computers'], n);
+    assert.deepEqual([state.issues[n].up, state.issues[n].comments], [1, 1], 'what was written on it is kept');
+    const third = await c.call('POST', 'comment', { body: { entry: 'fork-computers', text: 'After the refresh.' } });
+    assert.deepEqual([third.status, third.json.n], [200, n], third.body);
+
+    assert.equal(created(t).length, 1);
+    assert.deepEqual(entryIssues(t, 'fork-computers'), [n]);
+    assert.deepEqual(issueOf(t.fake, n).comments.map((x) => x.body), ['Right after.', 'After the refresh.']);
+  } finally { await t.close(); }
+});
+
+test('GitHub\'s list by label lagging: when the read after the opening shows a lower issue for the entry, that one is the thread and the App closes its own', async () => {
+  const t = await setup();
+  try {
+    const c = await signedIn(t);
+    lagging(t, 60_000);
+    let lower = null;
+    // Another instance opened an issue for the entry just before, and the list already shows it.
     t.fake.state.hook = (r) => {
-      if (r.method === 'POST' && ISSUES.test(r.path)) opened = true;
-      else if (opened && !emptied && r.method === 'GET' && ISSUES.test(r.path) && r.kind === 'installation') {
-        emptied = true;
-        return { status: 200, body: [] };
-      }
+      if (lower || r.method !== 'POST' || !ISSUES.test(r.path)) return null;
+      lower = t.fake.addIssue({ title: 'Fork a computer', body: 'Feature.\n\n<!-- silo-entry: fork-computers -->', labels: ['workshop:entry'] });
+      lower.labelChanged.set('workshop:entry', t.clock.t - 60_000);
       return null;
     };
-    const answer = await c.call('POST', 'comment', { body: { entry: 'fork-computers', text: 'Not yet.' } });
+    const answer = await c.call('POST', 'comment', { body: { entry: 'fork-computers', text: 'Which one?' } });
     t.fake.state.hook = null;
-    assert.equal(answer.status, 502, answer.body);
-    assert.match(answer.json.message, /Try again/);
-    assert.equal(Object.hasOwn(answer.json, 'n'), false);
-    const [n] = entryIssues(t, 'fork-computers');
-    assert.deepEqual(issueOf(t.fake, n).comments, []);
-    const again = await c.call('POST', 'comment', { body: { entry: 'fork-computers', text: 'Not yet.' } });
-    assert.deepEqual([again.status, again.json.n], [200, n]);
+    assert.deepEqual([answer.status, answer.json.n], [200, lower.number], answer.body);
+    assert.deepEqual(issueOf(t.fake, lower.number).comments.map((x) => x.body), ['Which one?']);
+    const own = issueOf(t.fake, lower.number + 1);
+    assert.deepEqual([own.state, own.state_reason, own.labels, own.comments.length], ['closed', 'not_planned', [], 0]);
+    assert.deepEqual(entryIssues(t, 'fork-computers'), [lower.number]);
+
+    // The closed issue is no thread, before and after a refresh.
+    for (const state of [(await c.call('GET', 'state')).json, await refreshed(t, c)]) {
+      assert.equal(state.threads['fork-computers'], lower.number);
+      assert.equal(state.issues[own.number], undefined);
+    }
+    const again = await c.call('POST', 'vote', { body: { entry: 'fork-computers', on: true } });
+    assert.deepEqual([again.status, again.json.n], [200, lower.number]);
     assert.equal(created(t).length, 1);
   } finally { t.fake.state.hook = null; await t.close(); }
+});
+
+test('a thread this instance opened stays known until a refresh\'s own list shows it, and is forgotten ten minutes after the opening when none does', async () => {
+  const t = await setup();
+  try {
+    const c = await signedIn(t);
+    // Shown by a refresh: from then on it is an ordinary issue, gone from the snapshot once the list
+    // no longer returns it.
+    lagging(t, 30_000);
+    const shown = (await c.call('POST', 'comment', { body: { entry: 'fork-computers', text: 'x' } })).json.n;
+    assert.equal((await refreshed(t, c)).threads['fork-computers'], shown);
+    issueOf(t.fake, shown).labels = [];
+    assert.equal((await refreshed(t, c)).threads['fork-computers'], undefined);
+
+    // Never shown: kept by every refresh until ten minutes after the opening.
+    t.fake.state.listLag = 20 * 60_000;
+    const opened = t.clock.t;
+    const hidden = (await c.call('POST', 'comment', { body: { entry: 'which-distro', text: 'x' } })).json.n;
+    // `refreshed` moves the clock 31 seconds on: these refreshes begin 9 and 10 minutes after the opening.
+    t.clock.t = opened + 9 * 60_000 - 31_000;
+    assert.equal((await refreshed(t, c)).threads['which-distro'], hidden);
+    t.clock.t = opened + 10 * 60_000 - 31_000;
+    assert.equal((await refreshed(t, c)).threads['which-distro'], undefined);
+  } finally { await t.close(); }
+});
+
+test('an issue the list returns without the label in its own labels is no thread and no Workshop issue', async () => {
+  const t = await setup();
+  try {
+    const c = await signedIn(t);
+    lagging(t, 5 * 60_000);
+    // The label of engine-service's thread is removed; the list still returns the issue, without it.
+    t.fake.setLabels(issueOf(t.fake, 1), []);
+    const listed = await fetch(`${t.fake.url}/repos/amontlabs/silo/issues?labels=workshop:entry&state=all`, { headers: { authorization: `token ${[...t.fake.state.tokens].find(([, v]) => v.kind === 'installation')[0]}` } }).then((r) => r.json());
+    assert.deepEqual(listed.find((i) => i.number === 1)?.labels, []);
+    const state = await refreshed(t, c);
+    assert.equal(state.issues[1], undefined);
+    assert.equal(state.threads['engine-service'], undefined);
+    const answer = await c.call('POST', 'comment', { body: { entry: 'engine-service', text: 'Where now?' } });
+    assert.equal(answer.status, 200, answer.body);
+    assert.notEqual(answer.json.n, 1);
+    assert.deepEqual(entryIssues(t, 'engine-service'), [answer.json.n]);
+    assert.equal(issueOf(t.fake, 1).comments.length, 2, 'nothing written on the unlabelled one');
+  } finally { await t.close(); }
+});
+
+test('a request whose deadline passes after the opening carries n, and the next try goes on that issue', async () => {
+  const t = await setup();
+  try {
+    const short = createWorkshop({ config: t.config, entries: readPlanEntries(PLAN_ENTRIES), now: () => t.clock.t, log: () => {}, deadlineMs: 400 });
+    const c = t.client(short);
+    await c.signIn('visitor-fake');
+    await c.call('GET', 'state');
+    await short.idle();
+    let opened = false;
+    t.fake.state.hook = (r) => {
+      if (r.method === 'POST' && ISSUES.test(r.path)) opened = true;
+      else if (opened && r.method === 'GET' && ISSUES.test(r.path) && r.kind === 'installation' && !/[?&]page=/.test(r.query)) return { delay: 800 };
+      return null;
+    };
+    const late = await c.call('POST', 'comment', { body: { entry: 'fork-computers', text: 'Late.' } });
+    const [n] = entryIssues(t, 'fork-computers');
+    assert.deepEqual([late.status, late.json.n], [502, n], late.body);
+    await short.idle();
+    t.fake.state.hook = null;
+    const again = await c.call('POST', 'comment', { body: { entry: 'fork-computers', text: 'Late.' } });
+    assert.deepEqual([again.status, again.json.n], [200, n], again.body);
+    assert.equal(created(t).length, 1);
+    await short.idle();
+  } finally { t.fake.state.hook = null; await t.close(); }
+});
+
+// A small seeded generator, so that a failing sequence can be run again.
+function random(seed) {
+  let x = seed >>> 0;
+  return (n) => {
+    x = (Math.imul(x, 1664525) + 1013904223) >>> 0;
+    return x % n;
+  };
+}
+
+test('model: whatever the lag of the list, the refreshes and the writes, one instance opens one issue per entry and every write goes on it', async () => {
+  const ids = ['fork-computers', 'which-distro', ...MORE.map((entry) => entry.id)];
+  // Each run has one lag: a list that has shown an issue does not hide it again.
+  for (const [seed, lag] of [[1, 0], [7, 30_000], [42, 120_000], [5, 120_000]]) {
+    const t = await setup({ entries: [...PLAN_ENTRIES, ...MORE] });
+    try {
+      const pick = random(seed);
+      const people = [await signedIn(t), await signedIn(t, 'owner-fake')];
+      lagging(t, lag);
+      // The reference: the thread each entry has once a write named it.
+      const threads = new Map();
+      const steps = [`seed ${seed}, lag ${lag}`];
+      for (let step = 0; step < 30; step += 1) {
+        t.clock.t += 4_000 + pick(36_000);
+        const op = pick(5);
+        if (op === 0) {
+          steps.push('refresh');
+          const state = (await people[0].call('GET', 'state?fresh=1')).json;
+          for (const [id, n] of threads) assert.equal(state.threads[id], n, `${steps.join(', ')}: ${id} in the state`);
+        } else {
+          const id = ids[pick(ids.length)];
+          const c = people[pick(people.length)];
+          const kind = pick(3);
+          const body = kind === 0 ? { entry: id, text: `step ${step}` } : { entry: id, on: kind === 1 };
+          steps.push(`${kind === 0 ? 'comment' : kind === 1 ? 'vote' : 'unvote'} ${id}`);
+          const answer = await c.call('POST', kind === 0 ? 'comment' : 'vote', { body });
+          assert.equal(answer.status, 200, `${steps.join(', ')}: ${answer.body}`);
+          if (answer.json.n !== undefined) {
+            if (!threads.has(id)) threads.set(id, answer.json.n);
+            assert.equal(answer.json.n, threads.get(id), `${steps.join(', ')}: the write's thread`);
+          } else {
+            assert.ok(kind === 2 && !threads.has(id), `${steps.join(', ')}: only removing a 👍 from an entry with no thread names none`);
+          }
+        }
+        for (const id of ids) {
+          const issues = [...t.fake.state.issues.values()].filter((i) => readEntryMarker(i.body) === id);
+          assert.deepEqual(issues.map((i) => i.number), threads.has(id) ? [threads.get(id)] : [], `${steps.join(', ')}: the issues of ${id}`);
+        }
+      }
+      await t.workshop.idle();
+    } finally { await t.close(); }
+  }
 });

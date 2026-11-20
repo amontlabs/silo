@@ -31,6 +31,9 @@
 // Writes patch the snapshot at once. Each patch is kept with its time: after a
 // refresh swaps in, the patches made since that refresh began are applied
 // again, and older ones are dropped, since GitHub's answer already holds them.
+// An entry's thread this instance opened is kept apart: GitHub's list by label
+// may miss a new issue for some time, so the thread stays in every snapshot
+// until a refresh's own list shows its number, and at most 10 minutes.
 import { GitHubError, nextLink } from './github.mjs';
 import { clean, commentIssue, commentOf, cut, kindOf, LABELS, readBody, reasonOf } from './issues.mjs';
 import { issuesByEntry } from '../../tools/workshop/model/index.js';
@@ -56,6 +59,7 @@ export const SNAPSHOT = {
   commentsPerIssue: 100,
   comments: 5000,
   patches: 500,
+  openedFor: 10 * 60_000,
 };
 
 const byAge = (a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id - b.id);
@@ -154,6 +158,9 @@ export function createSnapshot({
   let commentPages = new Map();
   let patches = [];
   let waiters = [];
+  // The entry threads this instance opened that no refresh's list has shown yet, by number:
+  // { at, entry, reduced }.
+  const opened = new Map();
 
   function entryOf(reduced, previous) {
     return {
@@ -281,7 +288,26 @@ export function createSnapshot({
     }
   }
 
+  // Forgets the opened threads held for 10 minutes or more.
+  function expireOpened() {
+    for (const [number, thread] of opened) if (now() - thread.at >= SNAPSHOT.openedFor) opened.delete(number);
+  }
+
+  // Puts an opened thread into `snapshot` unless it holds that number, carrying what `previous` held
+  // of it (the comments and counts written since the opening).
+  function placeOpened(snapshot, number, previous) {
+    if (snapshot.issues.has(number) || snapshot.issues.size >= SNAPSHOT.issues) return;
+    const held = previous?.issues.get(number);
+    snapshot.issues.set(number, entryOf(held ?? opened.get(number).reduced, held));
+    snapshot.version += 1;
+  }
+
+  // The new snapshot replaces the current one. An opened thread its own list shows is an ordinary
+  // issue from then on; one it does not show is carried over, until 10 minutes after the opening.
   function swapIn(snapshot) {
+    for (const number of opened.keys()) if (snapshot.issues.has(number)) opened.delete(number);
+    expireOpened();
+    for (const number of opened.keys()) placeOpened(snapshot, number, current);
     patches = patches.filter((patch) => patch.at >= snapshot.startedAt);
     for (const patch of patches) patch.apply(snapshot);
     current = snapshot;
@@ -472,11 +498,15 @@ export function createSnapshot({
     };
   }
 
-  // The entry issues the current snapshot holds that name `id`, lowest number first, and when that
-  // snapshot's refresh began; null without a snapshot.
+  // The entry issues held that name `id`, lowest number first: those of the current snapshot and the
+  // threads this instance opened. `startedAt` is when the snapshot's refresh began, null without a
+  // snapshot. Null when nothing is held at all.
   function held(id) {
-    if (!current) return null;
-    return { startedAt: current.startedAt, numbers: entryIssuesOf(current).get(id) ?? [] };
+    expireOpened();
+    const mine = [...opened].filter(([, thread]) => thread.entry === id).map(([number]) => number);
+    if (!current && !mine.length) return null;
+    const numbers = new Set([...(current ? entryIssuesOf(current).get(id) ?? [] : []), ...mine]);
+    return { startedAt: current ? current.startedAt : null, numbers: [...numbers].sort((a, b) => a - b) };
   }
 
   // Records a patch and applies it to the current snapshot. `apply(snapshot)` must be safe to run
@@ -536,6 +566,19 @@ export function createSnapshot({
         snapshot.issues.set(issue.number, entryOf(reduced, null));
         snapshot.version += 1;
       });
+    },
+    // An entry's thread this instance just opened, as GitHub's POST answered it with its label: held
+    // until a refresh's own list shows it, and at most SNAPSHOT.openedFor.
+    opened(issue) {
+      const reduced = reduceIssue({ ...issue, labels: [{ name: LABELS.entry }] });
+      if (!reduced?.summary.entry) return;
+      opened.set(issue.number, { at: now(), entry: reduced.summary.entry, reduced });
+      if (current) placeOpened(current, issue.number, current);
+    },
+    // An issue this instance opened and then closed: it is no thread, so it leaves the snapshot.
+    retired(number) {
+      opened.delete(number);
+      if (current?.issues.delete(number)) current.version += 1;
     },
   };
 

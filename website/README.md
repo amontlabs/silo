@@ -565,19 +565,30 @@ an id of the plan, never both. With `entry`:
   issue. When the issue still lacks it, the App closes the issue, and the
   answer is 502 with `"error": "github"`. No open issue without the label is
   left behind.
-- After the opening, the App reads the entry issues again. That read confirms
-  the opening only when it shows the issue just opened. When it fails, has no
-  room left in the ceiling below, or does not show that issue, the person's
-  write is not made: the answer is an error that says to try again, and the
-  next try finds the issue. No write goes to an issue that this read has not
-  shown to be the lowest for the entry.
-- When that read shows a lower issue for the entry, another instance opened
-  one at the same moment. The lower one is the thread, and the person's write
-  goes on it. The App closes the issue it opened, as not planned, and takes
-  the label `workshop:entry` off it.
+- Once GitHub has answered the opening and the issue carries its label, that
+  issue is the entry's thread for this instance. The server puts it in the
+  snapshot at once, before any read. GitHub's list of issues by label does not
+  show a new issue at once: on 2026-11-20 it showed one about 30 seconds after
+  it was opened, and nothing says how long it can take.
+- After the opening, the App reads the entry issues again, to find a lower
+  issue that names the entry. There is one when another instance opened one
+  at the same moment. The lower one is then the thread, and the person's
+  write goes on it. The App closes the issue it opened, as not planned, takes
+  the label `workshop:entry` off it, and takes it out of the snapshot.
+- When that read shows no lower issue, the issue just opened is the thread,
+  whether the read shows it or not. When the read fails, or has no room left
+  in the ceiling below, the issue just opened is the thread too.
 - The person's comment or 👍 then goes on the thread with the person's own
   token. The answer carries `n`.
-- Two requests for the same entry on the same instance share one opening.
+- Two requests for the same entry on the same instance share one opening. A
+  request that comes after it finds the thread in the snapshot.
+- A refresh of the snapshot keeps a thread this instance opened until a
+  refresh's own list shows its number, and at most 10 minutes after the
+  opening. Until then, every write on that entry from this instance goes on
+  it, and no second issue is opened.
+- An issue whose label `workshop:entry` was removed can stay in GitHub's list
+  by label for some time, without the label in its own `labels`. Such an
+  issue is no thread and no Workshop issue.
 - When the issue was opened and the person's write then fails, the issue
   stays. The answer is the error, and it carries `n`. The next try finds the
   issue.
@@ -588,6 +599,12 @@ an id of the plan, never both. With `entry`:
 - When GitHub refuses a write on an entry's thread with a 403, the server
   reads the issue once more. When it is closed or locked, the answer is 403
   `closed`: "This thread is closed on GitHub." No second issue is opened.
+
+What can still happen: two instances that each open an issue for the same
+entry before GitHub's list shows the other's each keep their own issue, and
+each makes its person's write on it. Once the list shows both, the lowest
+number is the thread. The write on the other issue stays on GitHub, and the
+Workshop does not show it. `workshop doctor` reports the entry.
 
 What a write costs on GitHub:
 
@@ -743,13 +760,14 @@ seconds plus the 10 seconds of CDN cache.
   and the refresh fails with that first failure.
 - **Writes.** After a signed-in person's write succeeds, the snapshot is
   patched in place: the new comment, the comment and 👍 counts, a comment's
-  👍 count, a new suggestion. An entry's thread is patched in as soon as the
-  App has opened it. Each patch is kept
+  👍 count, a new suggestion. Each patch is kept
   with its time. When a refresh completes, GitHub's data replaces the snapshot
   and the patches made after that refresh began are applied again; older
   patches are dropped, since GitHub's answer already holds them. A count moves
   only from the value it had when the write happened, so a write GitHub
-  already shows is not counted twice.
+  already shows is not counted twice. An entry's thread the App has just
+  opened is put in at once and kept by a different rule, given under
+  "Writing to an entry": GitHub's list may not show it yet.
 - **When GitHub fails**, times out or asks us to wait, the snapshot keeps
   answering whatever its age, with `"stale": true` once it is over 10 minutes
   old, and no refresh starts before the time GitHub gave, or 60 seconds. With
@@ -805,7 +823,7 @@ instance opens at most 9 threads a minute.
 
 Two things bound the threads the App opens. An entry has one thread, so the
 plan's entries are the most it can open. The `open` ceiling bounds how fast.
-The opening and the first page of the read that confirms it are charged
+The opening and the first page of the read after it are charged
 together, before the opening. When the ceiling has no room for both, the
 answer is 429, "The Workshop is busy. Try again in a minute.", with
 `Retry-After` for the wait, and nothing is opened. A further page of that read
@@ -1113,8 +1131,9 @@ and two instances can briefly show different versions.
 
 The Workshop went live on 2026-11-17. That first deployment showed that
 Vercel's Git build uses `.vercel/output` at the repository root, that Vercel
-follows the symlinked functions and loads the `.cjs` handler. Everything else
-was run against the fake GitHub and in Node. These still depend on the real
+follows the symlinked functions and loads the `.cjs` handler. On 2026-11-20
+it showed that the App opens an entry's issue with its label on the real
+GitHub. Everything else was run against the fake GitHub and in Node. These still depend on the real
 services:
 
 - the token exchange body format: the server sends JSON with
