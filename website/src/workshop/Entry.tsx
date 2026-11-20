@@ -1,5 +1,5 @@
 // One row of a list, and what it shows once open: the text, what the entry says of the plan's lists, its state, its
-// notes, its history and, for a row with a thread, the thread (comments) and the box. A row without a thread draws none of those, not even a placeholder.
+// notes, its history and its thread (comments, their votes) and the box; an entry with no thread yet says so and has the box too.
 // Opening never moves the row or the rows above: the open frame is an overlay and the body grows below.
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -10,6 +10,7 @@ import { RichText, safeHref } from './RichText';
 import { changeLine, changePhrase, isDecided, relativeTime, shortDate } from './plan';
 import type { Change, EntryFacts, Facts, Row, Statement } from './plan';
 import { formatHash, placeOf } from './routes';
+import type { Comment } from './api';
 import type { Detail, Workshop } from './useWorkshop';
 
 /** How long the closing body stays in place for its animation. */
@@ -175,21 +176,15 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
   );
 }
 
-/** Whether a row has a thread on GitHub, or may have one once the live state answers: a suggestion, or an entry while entries have threads. */
-export function threaded(row: Row, ctx: EntryContext): boolean {
-  return row.kind === 'suggestion' || ctx.w.plan.threads;
-}
-
 function Vote({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const { w } = ctx;
-  if (!threaded(row, ctx)) return null;
   if (w.waiting) return <i className="ws-ph ws-ph-vote" aria-hidden="true" />;
   if (!w.liveOk || row.up === null) return null;
   const on = row.issue !== null && w.votes[row.issue] === true;
-  const busy = row.issue !== null && w.votePending.has(row.issue);
+  const busy = w.votePending.has(row.key);
   if (!w.me) return <a className="ws-vote ws-late-s" href={ctx.signIn} title="Sign in to vote" aria-label={`${row.up} votes, sign in to vote`}>👍 {row.up}</a>;
   return (
-    <button type="button" className={`ws-vote ws-late-s${on ? ' on' : ''}${busy ? ' ws-pending' : ''}`} aria-pressed={on} aria-busy={busy} aria-label={`${row.up} votes`} onClick={() => void w.toggleVote(row)} disabled={busy || (row.issue ?? 0) <= 0}>
+    <button type="button" className={`ws-vote ws-late-s${on ? ' on' : ''}${busy ? ' ws-pending' : ''}`} aria-pressed={on} aria-busy={busy} aria-label={`${row.up} votes`} onClick={() => void w.toggleVote(row)} disabled={busy}>
       👍 {row.up}
     </button>
   );
@@ -201,7 +196,7 @@ function Side({ row, ctx }: { row: Row; ctx: EntryContext }) {
   return (
     <span className="ws-side">
       {row.kind === 'suggestion' && row.author ? <span className="ws-by">{row.author}</span> : null}
-      <span className="ws-votes" aria-busy={(w.waiting && threaded(row, ctx)) || undefined}><Vote row={row} ctx={ctx} /></span>
+      <span className="ws-votes" aria-busy={w.waiting || undefined}><Vote row={row} ctx={ctx} /></span>
       <span className="ws-talks">{showComments ? <span className="ws-late-s" aria-label={`${row.comments} comments`}>💬 {row.comments}</span> : null}</span>
     </span>
   );
@@ -309,6 +304,22 @@ function ReplaceLines({ row, ctx, only }: { row: Row; ctx: EntryContext; only: (
   );
 }
 
+/** The 👍 under a comment: its count and, signed in, the button; signed out, the count asks to sign in as the row's vote does. */
+function CommentVote({ row, comment, ctx }: { row: Row; comment: Comment; ctx: EntryContext }) {
+  const { w } = ctx;
+  const up = comment.up ?? 0;
+  if (!w.me) return <a className="ws-vote ws-cvote" href={ctx.signIn} title="Sign in to vote" aria-label={`${up} votes on this comment, sign in to vote`}>👍 {up}</a>;
+  const id = comment.id;
+  const real = row.issue !== null && typeof id === 'number';
+  const on = real && (w.commentVotes[row.issue as number] ?? []).includes(id);
+  const busy = real && w.commentVotePending.has(`${row.issue}:${id}`);
+  return (
+    <button type="button" className={`ws-vote ws-cvote${on ? ' on' : ''}${busy ? ' ws-pending' : ''}`} aria-pressed={on} aria-busy={busy} aria-label={`${up} votes on this comment`} disabled={!real || busy} onClick={() => void w.toggleCommentVote(row, comment)}>
+      👍 {up}
+    </button>
+  );
+}
+
 function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detail | undefined }) {
   const { w } = ctx;
   // Until the first answer, the box's room is held.
@@ -331,22 +342,27 @@ function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
       </div>
     );
   }
-  if (row.issue === null || row.issue <= 0) return null;
-  const n = row.issue;
+  const n = row.issue !== null && row.issue > 0 ? row.issue : null;
+  if (n === null && (row.kind !== 'entry' || !w.liveOk)) return null;
   const repo = w.live.state?.repo ?? DEFAULT_REPO;
-  const url = (typeof detail === 'object' && safeHref(detail.url)) || safeHref(`${DEFAULT_WEB}/${repo}/issues/${n}`);
+  const url = n === null ? null : (typeof detail === 'object' && safeHref(detail.url)) || safeHref(`${DEFAULT_WEB}/${repo}/issues/${n}`);
   const github = url ? <a className="ws-gh" href={url} target="_blank" rel="noopener noreferrer">GitHub #{n} ↗</a> : null;
   if (!w.liveOk) return <div className="ws-talk"><div className="ws-box">{github}</div></div>;
-  let box: ReactNode = <div className="ws-box">{github}</div>;
+  // An entry with no thread yet has no issue to link to; the room of the link is kept, so the row taking its thread moves nothing.
+  const room = n === null ? <span className="ws-gh ws-room" aria-hidden="true">GitHub #000 ↗</span> : github;
+  const closed = row.closed;
+  let box: ReactNode = <div className="ws-box">{room}</div>;
   // Until `me` answers, the session marker says which of the two shapes to keep the room of; without it the
   // visitor is signed out, so the panel opens at its final size.
   const signedOut = w.me === null || (w.me === undefined && !hasSessionHint());
-  if (w.me || (w.me === undefined && !signedOut)) {
+  if (closed) {
+    box = <p className="ws-quiet ws-closed">This thread is closed on GitHub.{github ? <> {github}</> : null}</p>;
+  } else if (w.me || (w.me === undefined && !signedOut)) {
     box = (
       <form className="ws-box" onSubmit={(event) => void w.sendComment(row, event)}>
         <textarea aria-label="Comment" disabled={!w.me} placeholder="Add a comment" maxLength={5000} rows={1} value={w.drafts[row.key] ?? ''} onChange={(event) => w.setDrafts((current) => ({ ...current, [row.key]: event.target.value }))} />
         <button type="submit" className="ws-btn" disabled={!(w.drafts[row.key] ?? '').trim()}>Comment</button>
-        {github}
+        {room}
       </form>
     );
   } else if (signedOut) {
@@ -358,30 +374,33 @@ function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
           <a className="ws-gh-alt ws-late-s" href={url} target="_blank" rel="noopener noreferrer" title={`GitHub #${n}`}>
             or comment directly on GitHub<svg className="out" aria-hidden="true"><use href="#out" /></svg>
           </a>
-        ) : null}
+        ) : <span className="ws-gh-alt ws-room" aria-hidden="true">or comment directly on GitHub<svg className="out"><use href="#out" /></svg></span>}
       </>
     );
   }
   // While the thread loads, each comment the count announces holds its place.
   const loading = detail === undefined || detail === 'loading';
   const ghostComments = loading ? Math.min(row.comments ?? 0, 20) : 0;
+  const sending = w.sending[row.key] ?? [];
+  const comments = typeof detail === 'object' ? detail.comments : [];
+  const none = row.kind === 'entry' && (row.comments ?? 0) === 0 && !comments.length && !sending.length;
   return (
     <div className="ws-talk" aria-busy={ghostComments > 0 ? 'true' : undefined}>
       {Array.from({ length: ghostComments }, (_, i) => <div className="ws-c-ghost" key={`c${i}`} aria-hidden="true" />)}
       {detail === 'error' ? <p className="ws-quiet">Comments could not load.</p> : null}
       {typeof detail === 'object' && detail.more && url ? <a className="ws-gh ws-earlier" href={url} target="_blank" rel="noopener noreferrer">Earlier comments on GitHub ↗</a> : null}
-      {typeof detail === 'object'
-        ? detail.comments.map((comment) => (
-          <div className="ws-c" key={comment.id}>
-            <i aria-hidden="true">{initials(comment.author)}</i>
-            <div>
-              <b>{comment.author} <small>{relativeTime(comment.createdAt)}</small></b>
-              <RichText text={comment.text} />
-            </div>
+      {none ? <p className="ws-quiet ws-none">No comments yet.</p> : null}
+      {comments.map((comment) => (
+        <div className="ws-c" key={comment.id}>
+          <i aria-hidden="true">{initials(comment.author)}</i>
+          <div>
+            <b>{comment.author} <small>{relativeTime(comment.createdAt)}</small></b>
+            <RichText text={comment.text} />
+            <CommentVote row={row} comment={comment} ctx={ctx} />
           </div>
-        ))
-        : null}
-      {(w.sending[n] ?? []).map((comment) => (
+        </div>
+      ))}
+      {sending.map((comment) => (
         <div className="ws-c ws-pending" key={comment.id} aria-busy="true">
           <i aria-hidden="true">{initials(comment.author)}</i>
           <div>
@@ -671,7 +690,7 @@ function Body({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
       <StateLine row={row} />
       <ReplaceLines row={row} ctx={ctx} only={(label) => label === 'Replaced by'} />
       {row.kind === 'entry' ? <Extras row={row} ctx={ctx} /> : null}
-      {threaded(row, ctx) ? <Talk row={row} ctx={ctx} detail={detail} /> : null}
+      <Talk row={row} ctx={ctx} detail={detail} />
     </div>
   );
 }

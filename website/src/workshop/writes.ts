@@ -6,7 +6,10 @@
 // it twice. The state shown is the newest answer with every write applied in order, except the writes the answer
 // was fetched more than a minute after (a minute's room for the server's clock); a write is dropped after a day.
 // Applying is repeatable: the same answer and the same list give the same state. The page's own comments are
-// added to an `issue` answer that does not carry them yet, for six minutes.
+// added to an `issue` answer that does not carry them yet, for six minutes, and so is the 👍 count the server answered
+// for a comment's vote.
+// A write that opened an entry's thread says so (`opens`): the answer a cached state gave does not hold the thread yet,
+// so the thread is added to it, never replacing one it already has.
 import type { Comment } from './api';
 import type { LiveIssue, LiveState } from './plan';
 
@@ -25,14 +28,18 @@ export interface Write {
   at: number;
   /** Values set on the issue; a whole issue for a new suggestion. */
   set: Partial<LiveIssue>;
+  /** The entry whose thread this write made or found, with the issue as it was before the write. */
+  opens?: { entry: string; issue: LiveIssue };
 }
 
 interface Store {
   writes: Write[];
   comments: { n: number; at: number; comment: Comment }[];
+  /** The 👍 count of a comment as the server answered it for the person's own vote. */
+  ups: { n: number; id: string | number; at: number; up: number }[];
 }
 
-const empty = (): Store => ({ writes: [], comments: [] });
+const empty = (): Store => ({ writes: [], comments: [], ups: [] });
 // The store as last written, used only once storage has refused it: the page keeps its writes until it reloads.
 let held: Store | null = null;
 let refused = false;
@@ -41,15 +48,17 @@ function fresh(store: Store, now: number): Store {
   return {
     writes: store.writes.filter((write) => now >= write.at && now - write.at < KEEP_FIELDS_MS),
     comments: store.comments.filter((kept) => now >= kept.at && now - kept.at < KEEP_MS),
+    ups: store.ups.filter((kept) => now >= kept.at && now - kept.at < KEEP_MS),
   };
 }
 
 function valid(raw: unknown): Store {
   const store = empty();
   if (typeof raw !== 'object' || raw === null) return store;
-  const { writes, comments } = raw as Partial<Store>;
+  const { writes, comments, ups } = raw as Partial<Store>;
   if (Array.isArray(writes)) store.writes = writes.filter((w) => w && typeof w.n === 'number' && typeof w.at === 'number' && typeof w.set === 'object' && w.set !== null);
   if (Array.isArray(comments)) store.comments = comments.filter((c) => c && typeof c.n === 'number' && typeof c.at === 'number' && c.comment);
+  if (Array.isArray(ups)) store.ups = ups.filter((u) => u && typeof u.n === 'number' && typeof u.at === 'number' && typeof u.up === 'number' && (typeof u.id === 'number' || typeof u.id === 'string'));
   return store;
 }
 
@@ -103,6 +112,14 @@ export function keep(write$: Omit<Write, 'at'>, now: number, comment?: Comment) 
   write(store);
 }
 
+/** Keeps the 👍 count the server answered for the person's vote on a comment. */
+export function keepCommentUp(n: number, id: string | number, up: number, now: number) {
+  if (n <= 0) return;
+  const store = read(now);
+  store.ups.push({ n, id, at: now, up });
+  write(store);
+}
+
 function isWhole(issue: Partial<LiveIssue>): issue is LiveIssue {
   return typeof issue.kind === 'string' && typeof issue.title === 'string' && typeof issue.state === 'string'
     && typeof issue.up === 'number' && typeof issue.comments === 'number';
@@ -114,12 +131,16 @@ export function applyKept(state: LiveState, now: number): LiveState {
   const writes = read(now).writes.filter((write) => !(fetched > write.at + NEWER_MS)).sort((a, b) => a.at - b.at);
   if (!writes.length) return state;
   const issues = { ...state.issues };
+  const threads = { ...state.threads };
   for (const write of writes) {
+    const opens = write.opens;
+    if (opens && !(write.n in issues)) issues[write.n] = opens.issue;
+    if (opens && threads[opens.entry] === undefined) threads[opens.entry] = write.n;
     const issue = issues[write.n];
     if (issue) issues[write.n] = { ...issue, ...write.set };
     else if (isWhole(write.set)) issues[write.n] = write.set;
   }
-  return { ...state, issues };
+  return { ...state, issues, threads };
 }
 
 /** The answer to keep after another: the newer of the two by `fetchedAt`, as the server sent it. */
@@ -129,9 +150,16 @@ export function newerAnswer(current: LiveState | null, answer: LiveState): LiveS
   return { ...next, issues: next.issues ?? {} };
 }
 
-/** The page's own comments that a cached answer does not carry yet. */
+/** The page's own comments that a cached answer does not carry yet, and the 👍 counts the server answered for the person's own votes. */
 export function keptComments(n: number, comments: Comment[], now: number): Comment[] {
-  const mine = read(now).comments.filter((kept) => kept.n === n).map((kept) => kept.comment);
+  const store = read(now);
+  const mine = store.comments.filter((kept) => kept.n === n).map((kept) => kept.comment);
   const missing = mine.filter((own) => !comments.some((c) => c.author === own.author && c.text.trim() === own.text.trim()));
-  return missing.length ? [...comments, ...missing] : comments;
+  const all = missing.length ? [...comments, ...missing] : comments;
+  const ups = store.ups.filter((kept) => kept.n === n).sort((a, b) => a.at - b.at);
+  if (!ups.length) return all;
+  return all.map((comment) => {
+    const set = ups.filter((kept) => String(kept.id) === String(comment.id)).pop();
+    return set ? { ...comment, up: set.up } : comment;
+  });
 }

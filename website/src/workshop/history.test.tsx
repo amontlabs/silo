@@ -69,11 +69,10 @@ describe('the closed line of History', () => {
     expect(none.data.shallow).toBe(false);
   });
 
-  it('is there while the entries have no thread: the history needs none', async () => {
+  it('is there for an entry with no thread yet: the history needs none', async () => {
     mockApi({ me: owner });
     window.history.replaceState(null, '', '/workshop#part-a/core');
     const data = buildDataFrom(planFiles(), { map: EXAMPLE_MAP, history: source({ core: [change(1, '2026-11-12T09:00:00Z', ['added'])] }) });
-    expect(data.threads).toBe(false);
     render(<App data={data} loadHistory={() => Promise.resolve({ core: [change(1, '2026-11-12T09:00:00Z', ['added'])] })} />);
     await waitFor(() => expect(rowButton(CORE)).toHaveAttribute('aria-expanded', 'true'));
     await userEvent.click(historyButton(itemOf(CORE)));

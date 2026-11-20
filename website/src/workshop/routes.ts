@@ -1,5 +1,5 @@
 // Addresses: `#<part>` and `#<part>/<entry id>`, `#product` (the decisions of the whole product), `#suggested` and
-// `#left`, each with an optional open row, and `#latest` while entries have threads. The older `#entry-<id>` and `#issue-<n>` still open that row where it now lives.
+// `#left`, each with an optional open row, and `#latest`. The older `#entry-<id>` and `#issue-<n>` still open that row where it now lives.
 import type { Plan, Row } from './plan.ts';
 
 export type Place =
@@ -86,7 +86,7 @@ export function resolveHash(hash: string, plan: Plan, rows: Map<string, Row>): {
     // Issues may only appear with the live state, so those wait.
     return place.kind === 'part' && !/^issue-/.test(tail) ? { place, key: null } : null;
   };
-  if (head === 'latest') return plan.threads ? { place: { kind: 'latest' }, key: null } : null;
+  if (head === 'latest') return { place: { kind: 'latest' }, key: null };
   if (head === 'suggested' || head === 'left' || head === 'product') return named({ kind: head });
   if (plan.parts.some((group) => group.part.id === head)) return named({ kind: 'part', part: head });
   const loose = tail ? rowNamed(rows, tail) : rows.get(head);

@@ -1,4 +1,4 @@
-// The Workshop while the plan holds no part, as the real build draws it: no map, no threads.
+// The Workshop while the plan holds no part, as the real build draws it: no map.
 import { act, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
@@ -36,8 +36,8 @@ describe('the Workshop with an empty plan', () => {
     // The issue of a feature the plan no longer holds shows nowhere; people's suggestions still count.
     expect(screen.queryByText('Gone')).toBeNull();
     expect(screen.getByRole('link', { name: '2 suggested' })).toHaveAttribute('href', '#suggested');
-    // Entries have no threads in the real build: nothing to show under Latest, so no link to it.
-    expect(screen.queryByRole('link', { name: 'Latest' })).toBeNull();
+    // Latest is there whatever the plan holds.
+    expect(screen.getByRole('link', { name: 'Latest' })).toHaveAttribute('href', '#latest');
     expect(screen.queryByRole('link', { name: /Left out/ })).toBeNull();
     expect(screen.getByRole('link', { name: 'Suggest a feature' })).toBeInTheDocument();
 

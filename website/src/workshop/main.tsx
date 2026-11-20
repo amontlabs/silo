@@ -6,7 +6,7 @@ import { takeOver } from './takeover';
 import './workshop.css';
 
 // The plan as the page holds it, for scripts/load-check.mjs, which reads from it what the page must show (its parts,
-// the whole product's rows, whether entries have threads). It is the public plan, already in this script.
+// the whole product's rows). It is the public plan, already in this script.
 (window as Window & { __workshopData?: unknown }).__workshopData = data;
 
 const loadNotes = () => import('virtual:workshop-notes').then((module) => module.default);

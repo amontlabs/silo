@@ -230,12 +230,12 @@ const FACTS = new WeakMap<BuildData, Facts>();
 const HISTORIES = new WeakMap<BuildData, Histories>();
 
 /**
- * The fixture plan drawn on the example map, with entries' threads on: what the tests exercise. `history` is the one
+ * The fixture plan drawn on the example map, as the tests exercise it. `history` is the one
  * the test writes by hand: no git process starts, and an entry it does not name has no change.
  */
 export function buildData(options?: Parameters<typeof planFiles>[0], history: HistorySource | null = null): BuildData {
   const files = planFiles(options);
-  const data = buildDataFrom(files, { map: EXAMPLE_MAP, threads: true, history });
+  const data = buildDataFrom(files, { map: EXAMPLE_MAP, history });
   NOTES.set(data, notesFrom(files));
   FACTS.set(data, factsFrom(files));
   HISTORIES.set(data, historiesFrom(files, history));
@@ -265,12 +265,18 @@ export function issue(fields: Partial<LiveIssue>): LiveIssue {
 
 export const SHA = { a: 'a'.repeat(40), b: 'b'.repeat(40), c: 'c'.repeat(40), d: 'd'.repeat(40) };
 
-/** Live state: `core` has votes, `create` has votes and comments. */
-export function liveState(extra: Record<string, LiveIssue> = {}, latest: LiveLatest[] = []): LiveState {
-  return {
-    repo: 'amontlabs/silo',
-    fetchedAt: new Date(Date.now()).toISOString(),
-    issues: {
+/** The thread of each entry the issues name: the lowest number for each entry id. */
+export function threadsOf(issues: Record<string, LiveIssue>): Record<string, number> {
+  const threads: Record<string, number> = {};
+  for (const [key, issue] of Object.entries(issues)) {
+    if (issue.kind === 'entry' && issue.entry && (threads[issue.entry] === undefined || Number(key) < threads[issue.entry])) threads[issue.entry] = Number(key);
+  }
+  return threads;
+}
+
+/** Live state: `core` has votes, `create` has votes and comments. `threads` is the issue of each entry named, unless given. */
+export function liveState(extra: Record<string, LiveIssue> = {}, latest: LiveLatest[] = [], threads?: Record<string, number>): LiveState {
+  const issues: Record<string, LiveIssue> = {
       10: issue({ entry: 'core', title: 'The engine runs on its own', up: 8 }),
       11: issue({ entry: 'calls', title: 'Every call defined once', up: 3 }),
       12: issue({ entry: 'create', title: 'Create and delete a computer', up: 12, comments: 2 }),
@@ -282,7 +288,6 @@ export function liveState(extra: Record<string, LiveIssue> = {}, latest: LiveLat
       30: issue({ kind: 'suggestion', title: 'Start a task from Slack', up: 9, author: 'devin-oss', bot: false }),
       31: issue({ kind: 'suggestion', title: 'Share a base computer', up: 14, author: 'mara-k', bot: false }),
       ...extra,
-    },
-    latest,
   };
+  return { repo: 'amontlabs/silo', fetchedAt: new Date(Date.now()).toISOString(), issues, threads: threads ?? threadsOf(issues), latest };
 }

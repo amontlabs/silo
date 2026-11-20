@@ -32,11 +32,8 @@ export interface AppProps {
   accountSlot?: Element | null | false;
 }
 
-/**
- * Sign-in, the signed-in login with "Sign out", or a placeholder while it is not known who is signed in. `tip`: whether
- * sign-in carries the tooltip that points to GitHub, which only entries with threads give a reason to (BuildData.threads).
- */
-export function Account({ me, signIn, tip, onSignOut }: { me: Me | null | undefined; signIn: string; tip: boolean; onSignOut?: () => void }) {
+/** Sign-in with its tooltip that points to GitHub, the signed-in login with "Sign out", or a placeholder while it is not known who is signed in. */
+export function Account({ me, signIn, onSignOut }: { me: Me | null | undefined; signIn: string; onSignOut?: () => void }) {
   // Each its own node (keys), so what replaces the placeholder arrives in place instead of the same node moving.
   if (me === undefined) return <span key="placeholder" className="ws-ph ws-ph-account" aria-hidden="true" />;
   if (me) {
@@ -46,10 +43,6 @@ export function Account({ me, signIn, tip, onSignOut }: { me: Me | null | undefi
         <button type="button" className="ws-link" onClick={onSignOut}>Sign out</button>
       </span>
     );
-  }
-  if (!tip) {
-    // Without threads, signing in serves suggestions only, which "Sign in to suggest" says where it is offered.
-    return <span key="signin" className="ws-signin-wrap"><a className="button small" href={signIn}><SignInLabel /></a></span>;
   }
   return <SignIn key="signin" href={signIn} />;
 }
@@ -444,9 +437,8 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     wantedHash.current = null;
     const canonical = formatHash(resolved.place, resolved.key);
     if (location.hash && canonical !== location.hash) history.replaceState(history.state, '', address(canonical));
-    // While the live state loads, the named row waits closed: it would grow when votes and comments arrive. Without
-    // threads an entry has nothing that arrives, and opens at once.
-    const hold = resolved.key !== null && holdingRef.current && plan.threads;
+    // While the live state loads, the named row waits closed: it would grow when votes and comments arrive.
+    const hold = resolved.key !== null && holdingRef.current;
     settle(resolved.place, hold ? null : resolved.key);
     if (hold) heldOpen.current = resolved.key;
     focusNext.current = resolved.key && !hold ? { kind: 'reveal', key: resolved.key } : null;
@@ -621,7 +613,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     w, signIn, open: openKeys,
     onToggle: (row) => (openKeys.has(row.key) ? closeRow(row.key) : openRow(row.key)),
   };
-  const account = <Account me={w.me} signIn={signIn} tip={plan.threads} onSignOut={() => void w.signOut()} />;
+  const account = <Account me={w.me} signIn={signIn} onSignOut={() => void w.signOut()} />;
 
   const notes = (
     <>
@@ -694,7 +686,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
             <div className="ws-under-left">
               {plan.left.length ? <a className="ws-fold-link" href="#left" onClick={link({ kind: 'left' })}>Left out · {plan.left.length}</a> : null}
               {plan.product.length ? <a className="ws-fold-link" href="#product" onClick={link({ kind: 'product' })}>The whole product</a> : null}
-              {plan.threads ? <a className="ws-fold-link" href="#latest" onClick={link({ kind: 'latest' })}>Latest</a> : null}
+              <a className="ws-fold-link" href="#latest" onClick={link({ kind: 'latest' })}>Latest</a>
               {suggested ? <a className="ws-fold-link ws-late-s" href="#suggested" onClick={link({ kind: 'suggested' })}>{suggested} suggested</a> : null}
               {notes}
             </div>

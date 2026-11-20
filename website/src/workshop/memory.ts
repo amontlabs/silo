@@ -23,10 +23,11 @@ function isLatest(value: unknown): boolean {
   return isObject(value) && typeof value.n === 'number' && typeof value.entry === 'string' && typeof value.author === 'string' && typeof value.createdAt === 'string';
 }
 
-/** A state with the shape the page reads, whatever wrote it. */
+/** A state with the shape the page reads, whatever wrote it. One without `threads`, from before entries had them, is not shown. */
 export function isState(value: unknown): value is LiveState {
   return isObject(value) && typeof value.repo === 'string' && typeof value.fetchedAt === 'string' && Number.isFinite(Date.parse(value.fetchedAt))
     && isObject(value.issues) && Object.values(value.issues).every(isIssue)
+    && isObject(value.threads) && Object.values(value.threads).every((n) => typeof n === 'number' && Number.isSafeInteger(n))
     && (value.latest === undefined || (Array.isArray(value.latest) && value.latest.every(isLatest)));
 }
 

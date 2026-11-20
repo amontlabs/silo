@@ -89,14 +89,32 @@ describe('the plan by part', () => {
     expect(names(allRows(gone))).not.toContain('Gone');
   });
 
-  it('matches no issue to an entry while entries have no threads; suggestions still come', () => {
-    const data = buildDataFrom(planFiles());
-    const plan = buildPlan(data, liveState({}, [{ n: 12, entry: 'create', author: 'mara-k', bot: false, createdAt: '2026-11-16T10:00:00Z', text: 'Hello' }]));
-    expect(plan.threads).toBe(false);
-    expect(allRows(plan).filter((row) => row.kind === 'entry').every((row) => row.issue === null && row.up === null && row.comments === null)).toBe(true);
-    expect(plan.latest).toEqual([]);
-    expect(names(plan.suggestions)).toEqual(['Share a base computer', 'Start a task from Slack']);
+  it('takes an entry\'s thread from the state\'s `threads` alone, never from an issue that merely names the entry', () => {
+    const plan = buildPlan(buildData(), liveState({ 50: issue({ entry: 'exec', title: 'Run a command, again', up: 9 }) }, [], { core: 10, create: 12 }));
+    const row = (id: string) => allRows(plan).find((r) => r.key === `entry-${id}`)!;
+    expect([row('core').issue, row('core').up]).toEqual([10, 8]);
+    expect([row('create').issue, row('create').up, row('create').comments]).toEqual([12, 12, 2]);
+    // No thread named: no issue, and a count of 0 once a state is shown; nothing without a state.
+    expect([row('exec').issue, row('exec').up, row('exec').comments]).toEqual([null, 0, 0]);
+    const none = buildPlan(buildData(), null);
+    expect(allRows(none).filter((r) => r.kind === 'entry').every((r) => r.issue === null && r.up === null && r.comments === null)).toBe(true);
   });
+
+  it('shows a feature written from a suggestion once, as the feature, with that issue as its thread', () => {
+    const state = liveState({}, [], { core: 10, fork: 31 });
+    const plan = buildPlan(buildData(), state);
+    expect(names(plan.suggestions)).toEqual(['Start a task from Slack']);
+    const fork = allRows(plan).find((r) => r.key === 'entry-fork')!;
+    expect([fork.issue, fork.up]).toEqual([31, 14]);
+    expect(allRows(plan).filter((r) => r.issue === 31)).toHaveLength(1);
+  });
+
+  it('marks a row closed when its thread is closed on GitHub', () => {
+    const plan = buildPlan(buildData(), liveState({ 10: issue({ entry: 'core', title: 'x', state: 'closed', reason: 'completed', closedAt: '2026-11-18T00:00:00Z' }) }));
+    expect(allRows(plan).find((r) => r.key === 'entry-core')!.closed).toBe(true);
+    expect(allRows(plan).find((r) => r.key === 'entry-create')!.closed).toBe(false);
+  });
+
 
   it('sorts suggestions by votes with dropped ones last', () => {
     const plan = buildPlan(buildData(), liveState({
@@ -175,10 +193,6 @@ describe('Latest: comments and changes merged by time', () => {
     expect(plan.latest.filter((item) => item.text)).toHaveLength(5);
   });
 
-  it('has no Latest without threads, whatever the history', () => {
-    const data = { ...buildData(), threads: false };
-    expect(buildPlan(data, liveState({}, [comment(12, 'create', '2026-11-17T10:00:00Z', 'Hello')]), { core: [change('c1', '2026-11-17T10:00:00Z')] }).latest).toEqual([]);
-  });
 });
 
 describe('the phrases of a change', () => {

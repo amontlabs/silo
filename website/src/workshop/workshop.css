@@ -467,6 +467,12 @@
 .ws-gh-alt { justify-self: start; display: inline-flex; align-items: center; margin-top: -4px; padding: 4px 0; font: 12px/1.5 var(--mono); color: var(--muted); }
 .ws-gh-alt:hover { color: var(--accent-ink); }
 .ws-gh-alt .out { stroke: currentColor; }
+/* Under a comment: its 👍 count, pressed like a row's. */
+.ws .ws-cvote { display: inline-block; margin: 3px 0 -4px -5px; padding: 4px 5px; }
+/* An entry with no comment yet, and one whose thread is closed: one line each, the height of the line under the sign-in box. */
+.ws-none { margin: 0 0 -4px; padding: 4px 0; font: 12px/1.5 var(--mono); }
+.ws-closed { margin: 2px 0 0; font: 12px/1.5 var(--mono); color: var(--muted); }
+.ws-closed .ws-gh { line-height: inherit; margin-left: 6px; }
 
 /* An entry's notes and, for the owner, its decisions: one line of toggles under the text, closed by default. */
 .ws-extras { margin-top: 10px; max-width: 720px; }
@@ -543,7 +549,7 @@
 .ws-ph-row .ws-name .ws-ph { display: inline-block; width: min(55%, 300px); height: 14px; vertical-align: middle; }
 .ws-ph-row .ws-line:hover { background: none; }
 /* The room of something that comes with the state, held empty. */
-.ws-held { visibility: hidden; }
+.ws-held, .ws-room { visibility: hidden; }
 .ws-ph-notes { display: grid; gap: 7px; padding: 3px 0; }
 .ws-ph-notes .ws-ph { height: 14px; width: min(100%, 520px); }
 .ws-ph-notes .ws-ph:last-child { width: min(70%, 360px); }

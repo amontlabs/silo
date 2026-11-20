@@ -12,9 +12,9 @@
 // frame and the script taking over without a move; at a part's address, the plain view never painted; on a
 // second visit, the remembered state drawn at the takeover without moving anything under the title row.
 // What the page must offer is read from its data (window.__workshopData, set by src/workshop/main.tsx): its parts,
-// the whole product's rows and whether entries have threads; whether it draws a map is read from the page.
+// the whole product's rows; whether it draws a map is read from the page.
 // The places with rows are chosen from the real counts of rows (placesOf): the first part that has rows and the whole
-// product when it has rows. Without threads, an entry's row holds no vote, no count and no placeholder for them. A
+// product when it has rows. A
 // plan with no part is checked at the places it has: the plain view, the whole product when it has rows, and the
 // suggestions.
 // It exits non-zero when the footer rule fails, a first frame lacks what it must hold, or a run's layout shifts
@@ -198,7 +198,6 @@ function firstFrame(first, wants) {
   if (wants.signIn && !first.signIn) problems.push('no sign-in button');
   if (wants.suggest && !first.suggest) problems.push('no "Suggest a feature"');
   if (wants.placeholders && (first.rows === 0 || first.rowsWithPlaceholder !== first.rows)) problems.push(`${first.rowsWithPlaceholder} of ${first.rows} rows have a vote placeholder`);
-  if (wants.noPlaceholders && (first.rows === 0 || first.rowsWithPlaceholder !== 0)) problems.push(`${first.rowsWithPlaceholder} of ${first.rows} rows without a thread have a vote placeholder`);
   if (wants.votes && first.votes === 0) problems.push('no votes');
   if (wants.login && first.login !== wants.login) problems.push(`login ${JSON.stringify(first.login)}, not ${wants.login}`);
   return problems;
@@ -256,27 +255,25 @@ async function visits(browser, options, rows, page$) {
   let passed = true;
   console.log('\nvisits in one browser profile');
   const visitor = await context();
-  // Votes are on entries' threads: without threads, none shows.
-  const threads = page$.threads;
-  passed = report({ ...(await run(browser, plain, size, { ...place, name: `${place.name}, first visit` }, visitor)) }, { signIn: true, placeholders: Boolean(rows) && threads, noPlaceholders: Boolean(rows) && !threads }) && passed;
-  passed = report({ ...(await run(browser, plain, size, { ...place, name: `${place.name}, second visit` }, visitor)) }, { signIn: true, votes: Boolean(rows) && threads }) && passed;
+  passed = report({ ...(await run(browser, plain, size, { ...place, name: `${place.name}, first visit` }, visitor)) }, { signIn: true, placeholders: Boolean(rows) }) && passed;
+  passed = report({ ...(await run(browser, plain, size, { ...place, name: `${place.name}, second visit` }, visitor)) }, { signIn: true, votes: Boolean(rows) }) && passed;
   await visitor.close();
   const person = await context();
   await signIn(person, options.url, 'owner-fake');
-  passed = report({ ...(await run(browser, plain, size, { ...place, name: `${place.name}, owner-fake signed in, second visit` }, person)) }, { votes: Boolean(rows) && threads, login: 'owner-fake' }) && passed;
+  passed = report({ ...(await run(browser, plain, size, { ...place, name: `${place.name}, owner-fake signed in, second visit` }, person)) }, { votes: Boolean(rows), login: 'owner-fake' }) && passed;
   await person.close();
 
   // An entry of the first place with rows opened before the answers: the rows below it do not move when they arrive. The
   // entry has no comments: their number comes with the state, and their lines are not held before it.
   const live = await (await fetch(`${new URL(options.url).origin}/api/workshop/state`)).json();
-  // Without threads no entry has comments: any entry will do.
-  const quiet = threads ? Object.values(live.issues ?? {}).filter((issue) => issue.kind === 'entry' && issue.entry && issue.comments === 0).map((issue) => `entry-${issue.entry}`) : null;
+  // An entry with no thread yet has none either.
+  const talked = Object.values(live.issues ?? {}).filter((issue) => issue.kind === 'entry' && issue.entry && issue.comments > 0).map((issue) => `entry-${issue.entry}`);
   for (const narrow of rows ? [false, true] : []) {
     const view = narrow ? [390, 844] : size;
     const fresh = await browser.newContext({ viewport: { width: view[0], height: view[1] }, deviceScaleFactor: 1, reducedMotion: 'no-preference' });
     let opened = null;
     const open = async (page) => {
-      opened = await page.evaluate((ids) => [...document.querySelectorAll('.ws-detail .ws-item')].map((item) => item.id).find((id) => !ids || ids.includes(id)) ?? null, quiet);
+      opened = await page.evaluate((ids) => [...document.querySelectorAll('.ws-detail .ws-item')].map((item) => item.id).find((id) => !ids.includes(id)) ?? null, talked);
       if (!opened) throw new Error(`${place.name} has no entry without comments`);
       await page.click(`#${opened} .ws-row`);
       await wait(500);
@@ -301,21 +298,19 @@ async function visits(browser, options, rows, page$) {
 
 /**
  * The places to visit, chosen from the page's data (window.__workshopData): `parts` are the parts in order, `entries`
- * the rows, each with its part's id or null for the whole product, and `threads` whether entries have threads (Latest
- * exists only then). Returns `tile`, the first part's id (its tile is drawn whether or not it has rows), or null
+ * the rows, each with its part's id or null for the whole product. Returns `tile`, the first part's id (its tile is drawn whether or not it has rows), or null
  * without parts; `part`, the first part that has rows; `product`, the whole product when it has rows; `rows`, the
  * first of these two (the place that shows entries' rows), or null when the plan has none; and `places`: the plain
  * view, those two, Latest and the suggestions. A part without rows is not visited as a place with rows, so its
  * correct render of zero rows is not refused.
  */
-export function placesOf({ parts, entries, threads }) {
+export function placesOf({ parts, entries }) {
   const count = (id) => entries.filter((entry) => entry.part === id).length;
   const withRows = parts.find((part) => count(part.id) > 0);
   const part = withRows ? { name: `first part with rows (#${withRows.id})`, hash: `#${withRows.id}`, rows: true } : null;
   const product = count(null) ? { name: '#product', hash: '#product', rows: true } : null;
   return {
     tile: parts.length ? parts[0].id : null,
-    threads: Boolean(threads),
     part,
     product,
     rows: part ?? product,
@@ -323,7 +318,7 @@ export function placesOf({ parts, entries, threads }) {
       { name: 'plain view', hash: '' },
       ...(part ? [part] : []),
       ...(product ? [product] : []),
-      ...(threads ? [{ name: '#latest', hash: '#latest' }] : []),
+      { name: '#latest', hash: '#latest' },
       { name: '#suggested', hash: '#suggested' },
     ],
   };
@@ -336,8 +331,8 @@ async function pageOf(browser, url) {
   await page.goto(url);
   await page.waitForFunction(() => window.__workshopData, null, { timeout: 15000 });
   const data = await page.evaluate(() => {
-    const { parts, entries, threads } = window.__workshopData;
-    return { parts: parts.map((part) => ({ id: part.id })), entries: entries.map((entry) => ({ part: entry.part })), threads };
+    const { parts, entries } = window.__workshopData;
+    return { parts: parts.map((part) => ({ id: part.id })), entries: entries.map((entry) => ({ part: entry.part })) };
   });
   await page.waitForSelector('#workshop-root:not([data-prerendered]) .ws', { timeout: 15000 });
   await page.waitForLoadState('networkidle');
@@ -528,14 +523,14 @@ async function main() {
     console.log(`${options.url}, API held ${options.slowApi} ms, script held ${options.slowScript} ms${options.signedIn ? ', signed in' : ''}`);
     for (const size of SIZES) {
       for (const place of list) {
-        // Every run here is a first visit: nothing is remembered, so the first frame has the placeholders (none on a
-        // row without a thread) and, signed out, the sign-in button and "Suggest a feature".
+        // Every run here is a first visit: nothing is remembered, so the first frame has the placeholders and, signed
+        // out, the sign-in button and "Suggest a feature".
         const rows = Boolean(place.rows);
-        const wants = { signIn: !options.signedIn, suggest: place.hash === '', placeholders: rows && page$.threads, noPlaceholders: rows && !page$.threads };
+        const wants = { signIn: !options.signedIn, suggest: place.hash === '', placeholders: rows };
         passed = report(await run(browser, options, size, place), wants) && passed;
       }
     }
-    console.log(`the page: ${page$.mapped ? 'a map' : page$.tile ? 'tiles, no map' : 'no part'}; entries ${page$.threads ? 'have' : 'have no'} threads`);
+    console.log(`the page: ${page$.mapped ? 'a map' : page$.tile ? 'tiles, no map' : 'no part'}`);
     if (page$.tile) passed = (await sideways(browser, options.url, page$.tile, page$.mapped)) && passed;
     passed = (await visits(browser, options, page$.rows, page$)) && passed;
     passed = (await drawnPlain(browser, options, page$.mapped, Boolean(page$.tile))) && passed;

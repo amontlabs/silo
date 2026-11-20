@@ -23,7 +23,7 @@ function threads(data: BuildData): Map<string, Comment[]> {
   data.entries.forEach((feature, index) => {
     const comments: Comment[] = [];
     const at = (days: number) => new Date(Date.parse('2026-11-16T10:00:00Z') - days * 86_400_000 + index * 60_000).toISOString();
-    if (hash(feature.id) % 4 === 0) PEOPLE.forEach(([author, text], i) => comments.push({ id: `${feature.id}-c${i}`, author, avatar: '', bot: false, createdAt: at(2 - i), text }));
+    if (hash(feature.id) % 4 === 0) PEOPLE.forEach(([author, text], i) => comments.push({ id: 5000 + index * 10 + i, author, avatar: '', bot: false, createdAt: at(2 - i), text, up: (hash(author) + index) % 4 }));
     out.set(feature.id, comments);
   });
   return out;
@@ -34,9 +34,13 @@ export function fixtureState(data: BuildData): { state: LiveState; comments: Map
   const comments = new Map<number, Comment[]>();
   const byFeature = threads(data);
   const latest: LiveLatest[] = [];
+  const threadOf: Record<string, number> = {};
   data.entries.forEach((feature, index) => {
+    // Every fifth entry has no thread yet.
+    if (index % 5 === 4) return;
     const thread = byFeature.get(feature.id) ?? [];
     const n = 1000 + index;
+    threadOf[feature.id] = n;
     issues[n] = entryIssue({
       entry: feature.id, title: feature.name, up: (hash(feature.id) % 9) + (index < 40 ? 3 : 0),
       comments: thread.length,
@@ -47,7 +51,7 @@ export function fixtureState(data: BuildData): { state: LiveState; comments: Map
   issues[9001] = entryIssue({ kind: 'suggestion', title: 'Start a task from a Slack message', author: 'mara-k', bot: false, up: 14 });
   issues[9002] = entryIssue({ kind: 'suggestion', title: 'Share one base computer across a team', author: 'devin-oss', bot: false, up: 9 });
   latest.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return { state: { repo: 'amontlabs/silo', fetchedAt: new Date().toISOString(), issues, latest: latest.slice(0, 30) }, comments };
+  return { state: { repo: 'amontlabs/silo', fetchedAt: new Date().toISOString(), issues, threads: threadOf, latest: latest.slice(0, 30) }, comments };
 }
 
 export function installFixture(data: BuildData, params: URLSearchParams): void {
@@ -68,6 +72,6 @@ export function installFixture(data: BuildData, params: URLSearchParams): void {
     number: n, title: state.issues[n]?.title ?? '', body: '', url: `https://github.com/amontlabs/silo/issues/${n}`, up: state.issues[n]?.up ?? 0,
     comments: comments.get(n) ?? [],
   });
-  api.myVote = async () => false;
-  for (const write of ['comment', 'vote', 'logout'] as const) api[write] = async () => ({});
+  api.myVote = async () => ({ on: false, comments: [] });
+  for (const write of ['comment', 'vote', 'commentVote', 'logout'] as const) api[write] = async () => ({});
 }

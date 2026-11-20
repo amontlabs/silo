@@ -20,7 +20,7 @@ export interface Prerendered {
 export function prerender(data: BuildData): Prerendered {
   return {
     root: renderToString(<Boundary data={data}><App data={data} accountSlot={false} /></Boundary>),
-    account: renderToString(<Account me={null} signIn={loginUrl('')} tip={data.threads} />),
+    account: renderToString(<Account me={null} signIn={loginUrl('')} />),
     noscript: renderToString(<NoScript data={data} />),
   };
 }

@@ -17,7 +17,7 @@ import { CUTS, cut, readBody } from '../server/issues.mjs';
 import { SNAPSHOT } from '../server/snapshot.mjs';
 import { createFakeGitHub, FAKE_APP, seedDemo } from './fake-github.mjs';
 import { DEFAULT_OUTPUT, ENDPOINTS, HANDLER, prepareVercel, RUNTIME } from './prepare-vercel.mjs';
-import { loadEntries, startDev } from './workshop-dev.mjs';
+import { loadEntries, SEEDED_ENTRIES, startDev } from './workshop-dev.mjs';
 import { readEntryMarker, withoutMarkers } from '../../tools/workshop/model/index.js';
 import { planEntries } from './plan-entries.mjs';
 
@@ -819,8 +819,13 @@ test('workshop-dev --fake serves the site and the API on one port, with sign-in 
     assert.equal((await fetch(dev.origin + '/%2e%2e/package.json')).status, 404);
     const state = await (await fetch(dev.origin + '/api/workshop/state')).json();
     const entries = Object.values(state.issues).filter((i) => i.kind === 'entry');
-    assert.ok(entries.length >= 3);
-    assert.deepEqual(entries.map((i) => i.entry).sort(), ['calls-and-events', 'engine-service', 'fixture-only', 'vm-runtime']);
+    // Only the first few entries have an issue; the others have no thread yet, so rows without one can be tried.
+    assert.equal(entries.length, SEEDED_ENTRIES);
+    assert.deepEqual(entries.map((i) => i.entry), loadEntries(join(site, 'plan')).slice(0, SEEDED_ENTRIES).map((entry) => entry.id));
+    assert.ok(Object.keys(state.threads).length === SEEDED_ENTRIES);
+    assert.equal(state.threads['fixture-only'], undefined);
+    const voted = Object.values((await (await fetch(dev.origin + '/api/workshop/issue?n=1')).json()).comments).some((comment) => comment.up > 0);
+    assert.ok(voted, 'a seeded comment has votes');
     assert.equal(Object.values(state.issues).some((i) => i.kind === 'decision'), false, 'the retired kind is gone');
 
     const start = await fetch(dev.origin + '/api/workshop/login?return=/workshop', { redirect: 'manual' });
@@ -851,7 +856,11 @@ test('workshop-dev --fake serves the site and the API on one port, with sign-in 
       body: JSON.stringify({ entry: 'fixture-only', text: 'On an entry.' }),
     });
     assert.equal(onEntry.status, 200);
-    assert.equal((await onEntry.json()).n, Number(Object.entries(state.issues).find(([, i]) => i.entry === 'fixture-only')[0]));
+    // An entry with no issue gets one at its first comment.
+    const opened = (await onEntry.json()).n;
+    assert.ok(Number.isInteger(opened) && !Object.keys(state.issues).includes(String(opened)));
+    const after = await (await fetch(dev.origin + '/api/workshop/state')).json();
+    assert.equal(after.threads['fixture-only'], opened);
   } finally {
     await dev.close();
     await rm(site, { recursive: true, force: true });

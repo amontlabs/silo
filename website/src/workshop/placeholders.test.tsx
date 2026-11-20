@@ -4,13 +4,11 @@
 // and nothing says busy.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { App } from './App';
 import type { Comment } from './api';
-import { buildDataFrom } from './data';
-import { buildData, issue, liveState, planFiles } from './fixtures';
-import { EXAMPLE_MAP } from './map-example';
+import { buildData, issue, liveState } from './fixtures';
 import { LATEST_GHOSTS } from './Latest';
 import { detail, itemOf, mockApi, ok, owner, rowButton } from './test-support';
 import type { Reply } from './test-support';
@@ -48,6 +46,8 @@ const VISITS: Visit[] = [
   { name: 'Latest, state and me asked', hash: '#latest', holds: { state: true, me: true }, signedIn: true },
   { name: 'rows and an open entry, state asked, signed out', hash: '#part-b', opens: 'Create and delete a computer', holds: { state: true }, signedIn: false },
   { name: 'suggestions, state asked, signed out', hash: '#suggested', holds: { state: true }, signedIn: false },
+  { name: 'an open entry with no thread, state and me asked', hash: '#part-d', opens: 'One silo command', holds: { state: true, me: true }, signedIn: true },
+  { name: 'an open entry with no thread, state asked, signed out', hash: '#part-d', opens: 'One silo command', holds: { state: true }, signedIn: false },
   { name: 'Latest, state asked, signed out', hash: '#latest', holds: { state: true }, signedIn: false },
   { name: 'suggest form, only me asked', hash: '#suggested', holds: { me: true }, signedIn: true },
   { name: 'rows, only me asked', hash: '#part-b', holds: { me: true }, signedIn: true },
@@ -87,7 +87,6 @@ async function hold(visit: Visit) {
   if (visit.opens) fireEvent.click(rowButton(visit.opens));
   const release = async () => {
     await act(async () => {
-      // Old issues on GitHub whose markers name these entries, with votes and comments: never matched while threads are off.
       state.release(ok(liveState({
         10: issue({ entry: 'core', title: 'The engine runs on its own', up: 8, comments: 5 }),
         40: issue({ entry: 'core-in-zig', title: 'Which language is the core written in?', up: 6, comments: 4 }),
@@ -175,47 +174,31 @@ describe('placeholders while the page waits', () => {
   });
 });
 
-describe('a row without a thread', () => {
-  // The real build: entries have no thread yet (BuildData.threads is false).
-  const unthreaded = () => buildDataFrom(planFiles(), { map: EXAMPLE_MAP });
+describe('a row with no thread yet', () => {
+  const NONE = 'One silo command';
 
-  it('draws no placeholder while the state and `me` are asked, nor once they answer: no vote, no count, no comment box, no GitHub link', async () => {
+  it('holds the room of its vote while the state is asked, then shows a vote of 0, with no link to GitHub', async () => {
     document.cookie = 'workshop-hint=1; path=/';
     const state = held();
     const me = held();
     mockApi({ state: () => state.promise, routes: { 'GET me': () => me.promise } });
-    history.replaceState(null, '', '/workshop#part-a/core-in-zig');
-    render(<App data={unthreaded()} />);
-    await waitFor(() => expect(rowButton('Which language is the core written in?')).toHaveAttribute('aria-expanded', 'true'));
-    fireEvent.click(rowButton('The engine runs on its own'));
-    const rows = () => [...document.querySelectorAll('.ws-detail .ws-item')];
-    const nothingOfAThread = () => {
-      expect(rows().length).toBe(3);
-      for (const row of rows()) {
-        expect(row.querySelector(PLACEHOLDER), row.id).toBeNull();
-        expect(row.querySelector('.ws-vote, .ws-talk, .ws-gh, .ws-gh-alt, textarea, [aria-busy]'), row.id).toBeNull();
-        expect(row.querySelector('.ws-votes')?.childElementCount, row.id).toBe(0);
-        expect(row.querySelector('.ws-talks')?.childElementCount, row.id).toBe(0);
-        expect(row.querySelector('a[href*="github.com"]'), row.id).toBeNull();
-        expect(row.textContent, row.id).not.toMatch(/👍|comments?\b/);
-      }
-    };
-    // Both open rows show their text, their state and, for the decision, its notes.
-    expect(screen.getByText('Zig. It is the core piece.')).toBeInTheDocument();
-    expect(screen.getByText('A background engine owns every computer.')).toBeInTheDocument();
-    expect(screen.getByText('Decided.')).toBeInTheDocument();
-    expect(itemOf('Which language is the core written in?').querySelector('.ws-extras')).not.toBeNull();
-    nothingOfAThread();
+    history.replaceState(null, '', '/workshop#part-d');
+    render(<App data={buildData()} />);
+    await waitFor(() => expect(rowButton(NONE)).toBeInTheDocument());
+    fireEvent.click(rowButton(NONE));
+    const item = itemOf(NONE);
+    expect(item.querySelector('.ws-ph-vote')).not.toBeNull();
+    expect(item.querySelector('.ws-votes')).toHaveAttribute('aria-busy', 'true');
+    expect(item.querySelector('.ws-ph-shape')).not.toBeNull();
+    expect(item.querySelector('a[href*="github.com"]')).toBeNull();
     await act(async () => {
-      // Old issues on GitHub whose markers name these entries, with votes and comments: never matched while threads are off.
-      state.release(ok(liveState({
-        10: issue({ entry: 'core', title: 'The engine runs on its own', up: 8, comments: 5 }),
-        40: issue({ entry: 'core-in-zig', title: 'Which language is the core written in?', up: 6, comments: 4 }),
-        41: issue({ entry: 'calls', title: 'Every call defined once', up: 3, comments: 2 }),
-      })));
+      state.release(ok(liveState()));
       me.release(ok(owner));
     });
     await waitFor(() => expect(document.querySelector('.ws')).toHaveAttribute('data-live', 'answered'));
-    nothingOfAThread();
+    await waitFor(() => expect(within(item).getByRole('button', { name: /0 votes/ })).toBeInTheDocument());
+    expect(item.querySelector(PLACEHOLDER)).toBeNull();
+    expect(within(item).getByText('No comments yet.')).toBeInTheDocument();
+    expect(item.querySelector('a[href*="github.com"]')).toBeNull();
   });
 });

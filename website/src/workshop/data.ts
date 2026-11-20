@@ -55,10 +55,9 @@ export interface HistorySource {
   shallow: boolean;
 }
 
-/** The map, and what the page may do beyond showing the plan: entries' threads (off by default), and the history of its entries (none by default). */
+/** The map, and what the page may do beyond showing the plan: the history of its entries (none by default). */
 export interface BuildOptions {
   map?: MapLayout;
-  threads?: boolean;
   history?: HistorySource | null;
 }
 
@@ -155,7 +154,7 @@ export function toHistories(plan: RawPlan, source: HistorySource | null): Histor
 }
 
 /** The plan object of tools/plan/read, as the page holds it: decisions and features in the order of order.json. */
-export function toBuildData(plan: RawPlan, { map = SILO_MAP, threads = false, history = null }: BuildOptions = {}): BuildData {
+export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null }: BuildOptions = {}): BuildData {
   const entries: Entry[] = ordered(plan).map((raw) => ({
     id: raw.id,
     kind: raw.kind,
@@ -178,7 +177,6 @@ export function toBuildData(plan: RawPlan, { map = SILO_MAP, threads = false, hi
     stages: plan.stages.map((stage) => ({ id: stage.id, title: stage.title, line: stage.line })),
     entries,
     map,
-    threads,
     shallow: history?.shallow === true,
   };
 }
@@ -276,7 +274,7 @@ export function readHistory(repository: string): HistorySource | null {
   return source;
 }
 
-/** Reads the plan of `repository` and returns the page's data for the real build: no threads. */
+/** Reads the plan of `repository` and returns the page's data for the real build. */
 export function readBuildData(repository: string, map: MapLayout = SILO_MAP): BuildData {
   return buildDataFrom(planFilesIn(planDir(repository)), { map, history: readHistory(repository) }, (path) => existsSync(join(repository, path)));
 }

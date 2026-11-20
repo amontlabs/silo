@@ -75,19 +75,6 @@ describe('the first frame', () => {
     expect(calls.some((call) => call.path === 'me')).toBe(false);
   });
 
-  it('gives sign-in no tooltip pointing to GitHub when entries have no thread: signing in serves suggestions only', async () => {
-    mockApi({ state: () => new Promise(() => {}) });
-    history.replaceState(null, '', '/workshop');
-    render(<App data={{ ...buildData(), threads: false }} />);
-    const signIn = screen.getByRole('link', { name: 'Sign in with GitHub' });
-    expect(signIn).not.toHaveAttribute('aria-describedby');
-    expect(document.getElementById('ws-signin-tip')).toBeNull();
-    expect(screen.queryByText('or comment directly on GitHub')).toBeNull();
-    // Where signing in serves, the page says what for.
-    act(() => { history.pushState(null, '', '/workshop#suggested'); dispatchEvent(new HashChangeEvent('hashchange')); });
-    expect(await screen.findByRole('link', { name: 'Sign in to suggest' })).toBeInTheDocument();
-  });
-
   it('forgets a remembered person without the session marker, and when `me` answers signed out', async () => {
     remember(liveState(), owner);
     mockApi();

@@ -49,19 +49,18 @@ test('the built page holds the plain view: the title row, a tile for every part,
     assert.ok(root.includes(escape(part.title)), `the title of ${part.id}`);
   }
   assert.match(root, /class="ws-under"/);
-  // The sample has decisions of the whole product; entries have no threads, so there is no Latest.
+  // The sample has decisions of the whole product; Latest is always there.
   assert.match(root, /href="#product">The whole product</);
-  assert.doesNotMatch(root, /href="#latest"/);
+  assert.match(root, /href="#latest">Latest</);
   assert.match(root, /class="ws-btn ws-suggest" href="#suggested">Suggest a feature</);
   // Nothing of the account is drawn inside the root: it has its place in the header.
   assert.doesNotMatch(root, /ws-account-inline|Sign in/);
 });
 
-test('the header holds sign-in, returning to the plain address, with no tooltip: entries have no thread', () => {
+test('the header holds sign-in, returning to the plain address, with its tooltip', () => {
   const slot = between('<div class="ws-account-slot" id="workshop-account" data-prerendered>', '</div>');
-  assert.match(slot, /^<span class="ws-signin-wrap"><a class="button small" href="\/api\/workshop\/login\?return=%2Fworkshop">/);
-  assert.doesNotMatch(slot, /ws-signin-tip|aria-describedby|GitHub<\/span><\/span>$/);
-  assert.doesNotMatch(html, /comment directly on GitHub/);
+  assert.match(slot, /^<span class="ws-signin-wrap"><a class="button small" href="\/api\/workshop\/login\?return=%2Fworkshop"[^>]*aria-describedby="ws-signin-tip"/);
+  assert.match(slot, /<span class="ws-signin-tip" id="ws-signin-tip" role="tooltip">or comment directly on GitHub<\/span>/);
   assert.equal(html.match(/Sign in/g).length, 1, 'one sign-in button');
 });
 
