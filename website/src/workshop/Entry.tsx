@@ -1,4 +1,4 @@
-// One row of a list, and what it shows once open: the sentence, its notes, its state and, for a row with a thread,
+// One row of a list, and what it shows once open: the text, its notes, its state and, for a row with a thread,
 // the thread (comments and history lines) and the box. A row without a thread draws none of those, not even a placeholder.
 // Opening never moves the row or the rows above: the open frame is an overlay and the body grows below.
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';

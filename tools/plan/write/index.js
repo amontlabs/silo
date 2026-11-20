@@ -26,13 +26,13 @@ export const entryFile = (entry) => `${entry.part ? `${entry.part}/` : ''}${entr
 const listFile = (list) => `${list}.json`;
 
 const LIST_FILE = /^(?:words|principles|(?:[^/]+\/)?properties)\.json$/;
-const CANONICAL_SENTENCE = { word: canonicalWord, principle: canonicalPrinciple, property: canonicalProperty };
+const CANONICAL_STATEMENT = { word: canonicalWord, principle: canonicalPrinciple, property: canonicalProperty };
 
 /** @param {string} name a list's file @returns {'word' | 'principle' | 'property'} */
 const fileKind = (name) => (name === 'words.json' ? 'word' : name === 'principles.json' ? 'principle' : 'property');
 
-/** A sentence's id: a word's comes from the word itself. @param {'word' | 'principle' | 'property'} kind @param {any} sentence */
-const sentenceId = (kind, sentence) => (kind === 'word' ? wordId(sentence.word) : sentence.id);
+/** A statement's id: a word's comes from the word itself. @param {'word' | 'principle' | 'property'} kind @param {any} statement */
+const statementId = (kind, statement) => (kind === 'word' ? wordId(statement.word) : statement.id);
 
 /**
  * The plan as it parsed, the entry `id` and its file, or a refusal: the plan does not read, fails
@@ -72,10 +72,10 @@ const entryText = (kind, value) => canonicalText(kind === 'decision' ? canonical
 
 /**
  * The owner's yes. Puts each `sets` item in its list (the same id is replaced whole, in place; a
- * new id is appended), deletes each sentence `removes` names, takes those ids out of every other
+ * new id is appended), deletes each statement `removes` names, takes those ids out of every other
  * entry's `adds`, and writes `adds` and `"verdict": "take"` in the entry in place of `sets` and
  * `removes`. A taken decision left with neither an `answer` nor an `adds` brought nothing but
- * sentences that are now replaced: it is replaced whole, its file, its notes and its place in
+ * statements that are now replaced: it is replaced whole, its file, its notes and its place in
  * `order.json` deleted. The take is refused when another entry needs such a decision.
  * @param {Map<string, string>} files @param {string} id @param {Options} [options] @returns {Outcome}
  */
@@ -91,13 +91,13 @@ export function take(files, id, options = {}) {
     if (waiting.length) return refused(`${id} needs ${waiting.join(', ')}, not taken yet`);
   }
 
-  // Every list, as arrays of sentences, by file. A part's list that does not exist yet starts empty.
+  // Every list, as arrays of statements, by file. A part's list that does not exist yet starts empty.
   /** @type {Map<string, any[]>} */
   const lists = new Map();
   for (const [name, value] of json) if (LIST_FILE.test(name) && Array.isArray(value)) lists.set(name, structuredClone(value));
-  const locate = (sentence) => {
+  const locate = (statement) => {
     for (const [name, list] of lists) {
-      const index = list.findIndex((item) => isObject(item) && sentenceId(fileKind(name), item) === sentence);
+      const index = list.findIndex((item) => isObject(item) && statementId(fileKind(name), item) === statement);
       if (index !== -1) return { name, list, index };
     }
     return null;
@@ -107,12 +107,12 @@ export function take(files, id, options = {}) {
   const removes = Array.isArray(entry.removes) ? entry.removes : [];
   const setIds = [];
   for (const item of sets) {
-    const { in: list, ...sentence } = item;
+    const { in: list, ...statement } = item;
     const kind = listKind(list);
     const name = listFile(list);
-    const sid = sentenceId(kind, sentence);
+    const sid = statementId(kind, statement);
     setIds.push(sid);
-    const value = CANONICAL_SENTENCE[kind](sentence);
+    const value = CANONICAL_STATEMENT[kind](statement);
     const found = locate(sid);
     if (found && found.name === name) {
       found.list[found.index] = value;
@@ -130,7 +130,7 @@ export function take(files, id, options = {}) {
 
   /** @type {Map<string, string | null>} */
   const changed = new Map();
-  for (const [name, list] of lists) changed.set(name, canonicalText(list.map((item) => (isObject(item) ? CANONICAL_SENTENCE[fileKind(name)](item) : item))));
+  for (const [name, list] of lists) changed.set(name, canonicalText(list.map((item) => (isObject(item) ? CANONICAL_STATEMENT[fileKind(name)](item) : item))));
 
   // An id this entry brings or takes out no longer belongs to the entry that brought it before.
   const moved = new Set([...setIds, ...removes]);
@@ -142,7 +142,7 @@ export function take(files, id, options = {}) {
     const data = structuredClone(json.get(otherFile));
     data.adds = data.adds.filter((sid) => !moved.has(sid));
     if (!data.adds.length) delete data.adds;
-    // A decision whose whole content was its sentences has nothing left once they are replaced.
+    // A decision whose whole content was its statements has nothing left once they are replaced.
     if (other.kind === 'decision' && other.verdict === 'take' && data.answer === undefined && data.adds === undefined) {
       replaced.add(other.id);
       changed.set(otherFile, null);
@@ -155,7 +155,7 @@ export function take(files, id, options = {}) {
       .filter((other) => !replaced.has(other.id))
       .flatMap((other) => (Array.isArray(other.needs) ? other.needs : []).filter((need) => replaced.has(need)).map((need) => `${other.id} needs ${need}`));
     if (needing.length) {
-      return refused(`${id} replaces every sentence ${[...replaced].join(', ')} brought, so ${replaced.size === 1 ? 'that decision would be' : 'those decisions would be'} deleted, but ${needing.join(', ')}: write ${replaced.size === 1 ? 'its' : 'their'} answer or change those needs first`);
+      return refused(`${id} replaces every statement ${[...replaced].join(', ')} brought, so ${replaced.size === 1 ? 'that decision would be' : 'those decisions would be'} deleted, but ${needing.join(', ')}: write ${replaced.size === 1 ? 'its' : 'their'} answer or change those needs first`);
     }
     const order = structuredClone(json.get('order.json'));
     for (const stage of order.stages) stage.entries = stage.entries.filter((other) => !replaced.has(other));
@@ -174,7 +174,7 @@ export function take(files, id, options = {}) {
 
 /**
  * The owner's no: `"verdict": "drop"`, with `sets` and `removes` kept. Refused on a taken entry
- * that has `adds`: its sentences are in force.
+ * that has `adds`: its statements are in force.
  * @param {Map<string, string>} files @param {string} id @param {Options} [options] @returns {Outcome}
  */
 export function drop(files, id, options = {}) {

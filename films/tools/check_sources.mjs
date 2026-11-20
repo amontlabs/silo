@@ -16,7 +16,7 @@ const narration = JSON.parse(fs.readFileSync(path.join(ch, "narration.json"), "u
 let spec = null;
 vm.runInNewContext(fs.readFileSync(path.join(ch, "explainer.js"), "utf8"), { explainer: s => { spec = s; } });
 const bad = [];
-if (!Array.isArray(film.shows) || !film.shows.length) bad.push('film.json has no "shows": the ids of the plan\'s entries and sentences it explains');
+if (!Array.isArray(film.shows) || !film.shows.length) bad.push('film.json has no "shows": the ids of the plan\'s entries and statements it explains');
 if (!spec) bad.push("explainer.js never called explainer({...})");
 else {
   spec.scenes.forEach((s, i) => {

@@ -210,7 +210,7 @@ describe('a row without a thread', () => {
         expect(row.textContent, row.id).not.toMatch(/👍|comments?\b/);
       }
     };
-    // Both open rows show their sentence, their state and, for the decision, its notes.
+    // Both open rows show their text, their state and, for the decision, its notes.
     expect(screen.getByText('Zig. It is the core piece.')).toBeInTheDocument();
     expect(screen.getByText('A background engine owns every computer.')).toBeInTheDocument();
     expect(screen.getByText('Decided.')).toBeInTheDocument();

@@ -2,8 +2,8 @@
 // the key orders of each kind, as the model in plan/README.md gives them.
 
 /**
- * An id of an entry, a sentence, a part or a stage. An entry's id is also its file name. Entries and
- * sentences share one namespace: no decision, feature, word, principle or property shares an id.
+ * An id of an entry, a statement, a part or a stage. An entry's id is also its file name. Entries and
+ * statements share one namespace: no decision, feature, word, principle or property shares an id.
  */
 export const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
@@ -14,7 +14,7 @@ export const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 export const ENTRY_KINDS = Object.freeze(['decision', 'feature']);
 
 /** What holds: one item of a list each, in force. */
-export const SENTENCE_KINDS = Object.freeze(['word', 'principle', 'property']);
+export const STATEMENT_KINDS = Object.freeze(['word', 'principle', 'property']);
 
 export const VERDICTS = Object.freeze(['take', 'drop']);
 
@@ -46,7 +46,7 @@ export const REQUIRED_KEYS = Object.freeze({
 });
 
 /**
- * The sentence kind of a list a `sets` item goes to (`words`, `principles`, `properties` or
+ * The statement kind of a list a `sets` item goes to (`words`, `principles`, `properties` or
  * `<part>/properties`), or null for anything else.
  * @param {unknown} list @returns {'word' | 'principle' | 'property' | null}
  */

@@ -38,7 +38,7 @@ plan/
 A list holds only what the owner said yes to, and all of it is in force. Nothing in a list is a
 draft.
 
-The tool and the rest of this page call an item of a list a **sentence**.
+The tool and the rest of this page call an item of a list a **statement**.
 
 ## The entries hold what is asked and what gets built
 
@@ -51,9 +51,9 @@ Each decision and each feature is one file, named by its id. The tool and the re
 call either one an **entry**. An entry may have notes beside it, in `<id>.md`. They are plain
 prose: where the entry comes from, the options, what was found, and the owner's own words.
 
-## How a sentence gets into a list
+## How a statement gets into a list
 
-Nobody adds a sentence by editing a list. An entry shows the sentence under `sets`, and the tool
+Nobody adds a statement by editing a list. An entry shows the statement under `sets`, and the tool
 writes it into the list when the owner says yes to that entry.
 
 Before the owner's yes, the decision `main-and-its-agents` reads:
@@ -86,16 +86,16 @@ entry, it writes the verdict and replaces `sets` by `adds`, which keeps only the
 }
 ```
 
-So each sentence in a list is in the `adds` of exactly one taken entry, and `plan show main` names
+So each statement in a list is in the `adds` of exactly one taken entry, and `plan show main` names
 that entry.
 
-An entry changes or removes a sentence that is in force in the same way:
+An entry changes or removes a statement that is in force in the same way:
 
-- An item of `sets` with the id of a sentence already in a list replaces that sentence.
-- `removes` lists the ids of the sentences to delete.
+- An item of `sets` with the id of a statement already in a list replaces that statement.
+- `removes` lists the ids of the statements to delete.
 
 Each item of `sets` starts with `in`, the list it goes to: `words`, `principles`, `properties` or
-`<part>/properties`. The keys of the sentence follow.
+`<part>/properties`. The keys of the statement follow.
 
 The text of an entry may use a word that is not in `words.json` yet, when a decision with no
 verdict sets it. The word then has the meaning that decision gives it.
@@ -121,7 +121,7 @@ verdict sets it. The word then has the meaning that decision gives it.
 
 ## Changing what was taken
 
-A taken decision stays in the plan, and so does a built feature. To change a sentence that is in
+A taken decision stays in the plan, and so does a built feature. To change a statement that is in
 force, add a decision that sets the same id with the new text, or that removes it. When the owner
 takes that decision:
 
@@ -129,7 +129,7 @@ takes that decision:
 - An old decision left with no `answer` and no `adds` has nothing left to say, and the take
   deletes it.
 
-A taken decision that added no sentence can be reversed directly, with `plan drop`.
+A taken decision that added no statement can be reversed directly, with `plan drop`.
 
 ## What an entry needs
 
@@ -161,7 +161,7 @@ dealt with, and every entry is in exactly one stage.
 folder named by its id.
 
 A part's `README.md` says what the part is for and why it is designed this way, and gives one
-example. It names sentences by their id and does not repeat them. `PRODUCT.md` does the same for
+example. It names statements by their id and does not repeat them. `PRODUCT.md` does the same for
 the whole product.
 
 A part may have the same id as the word it is about (`record`, `boundary`, `engine`). `plan show`
@@ -175,10 +175,10 @@ on that id prints the part, with the word's meaning.
   `plan check`, and commit it with a subject that starts with `Plan:`.
 - Commit your edits before a verdict: `plan take` and `plan drop` refuse while `plan/` has
   uncommitted changes.
-- The owner's yes to a sentence is for its text: a word's `means`, a principle's `says` and
+- The owner's yes to a statement is for its text: a word's `means`, a principle's `says` and
   `asks`, a property's `says`. A property's `check`, `at` and `from` are not part of that yes.
   Whoever builds the check edits them in the list.
-- A list file is created by the first take that adds a sentence to it. An empty list has no file.
+- A list file is created by the first take that adds a statement to it. An empty list has no file.
 
 ## Reference
 
@@ -221,7 +221,7 @@ These keys hold ids of other items, or paths. The check refuses an id that does 
 | Key | Written on | Holds | Meaning |
 |---|---|---|---|
 | `needs` | a decision or a feature | decisions and features | What must be done first. |
-| `adds` | a taken decision or feature | sentences | The sentences its take wrote into the lists. |
+| `adds` | a taken decision or feature | statements | The statements its take wrote into the lists. |
 | `keeps` | a feature | properties | The properties it must not break. |
 | `from` | a property | one principle | The principle the property follows from. The check notes a property that has none. |
 | `at` | a property | paths of files | The files of its checks, once they exist. Silo promises a property in public only when its checks pass. |
@@ -248,7 +248,7 @@ The tool gives each entry a state.
 | Command | What it does |
 |---|---|
 | `plan` | Prints what is next: the first entry with no verdict, the features ready to build, and the features that wait, each with what it waits for. |
-| `plan show <id>` | Prints one entry or one sentence, with what it links to and what applies to it. This is the brief for whoever works on it. With the id of a part, it prints what is next in that part. |
+| `plan show <id>` | Prints one entry or one statement, with what it links to and what applies to it. This is the brief for whoever works on it. With the id of a part, it prints what is next in that part. |
 | `plan take <id>` | Writes the owner's yes. |
 | `plan drop <id>` | Writes the owner's no. |
 | `plan check` | Checks that the plan's files fit together. The merge gate and the site's build run it. |

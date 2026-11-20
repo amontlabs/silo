@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as model from '../model/index.js';
 import {
-  CHECKS, DECISION_KEYS, DECISION_STATUSES, ENTRY_KINDS, FEATURE_KEYS, FEATURE_STATUSES, ID_PATTERN, PROPERTY_KINDS, SENTENCE_KINDS, VERDICTS,
+  CHECKS, DECISION_KEYS, DECISION_STATUSES, ENTRY_KINDS, FEATURE_KEYS, FEATURE_STATUSES, ID_PATTERN, PROPERTY_KINDS, STATEMENT_KINDS, VERDICTS,
   canonicalDecision, canonicalFeature, canonicalOrder, canonicalPart, canonicalProperty, canonicalSetItem, canonicalText, canonicalWord,
   entryStatus, isDate, isDone, listKind, waitingFor, wordId,
 } from '../model/index.js';
@@ -13,7 +13,7 @@ import { basePlan, canonicalFile } from './helpers.js';
 test('the names of the model', () => {
   assert.deepEqual(VERDICTS, ['take', 'drop']);
   assert.deepEqual(ENTRY_KINDS, ['decision', 'feature']);
-  assert.deepEqual(SENTENCE_KINDS, ['word', 'principle', 'property']);
+  assert.deepEqual(STATEMENT_KINDS, ['word', 'principle', 'property']);
   assert.deepEqual(PROPERTY_KINDS, ['safety', 'liveness', 'measured']);
   assert.deepEqual(CHECKS, ['types', 'model', 'simulator', 'hostile test', 'live check', 'benchmark', 'test', 'assertion']);
   for (const id of ['a', '0', 'linux-vm-engine', 'a'.repeat(63)]) assert.match(id, ID_PATTERN);
@@ -52,7 +52,7 @@ test('the status of a decision, first match wins', () => {
   assert.deepEqual(DECISION_STATUSES, ['dropped', 'taken', 'answered', 'open']);
 });
 
-test('a decision that puts forward only sentences is answered: a sets stands for its answer, an empty one does not', () => {
+test('a decision that puts forward only statements is answered: a sets stands for its answer, an empty one does not', () => {
   const sets = [{ in: 'words', word: 'fork', means: 'A copy of a computer.' }];
   assert.equal(entryStatus({ kind: 'decision', asks: 'Q', sets }, {}), 'answered');
   assert.equal(entryStatus({ kind: 'decision', asks: 'Q', sets: [] }, {}), 'open');

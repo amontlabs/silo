@@ -32,7 +32,7 @@ test('the sample passes the check, so the cases below start from a valid plan', 
   assert.deepEqual(checkFiles(sample()).errors, []);
 });
 
-test('take writes the sentences, adds and the verdict, and the result passes the check', () => {
+test('take writes the statements, adds and the verdict, and the result passes the check', () => {
   const files = sample();
   const before = parse(files, 'record/decisions/losses-show.json');
   const outcome = take(files, 'losses-show');
@@ -47,7 +47,7 @@ test('take writes the sentences, adds and the verdict, and the result passes the
   assert.deepEqual(checkFiles(after).errors, []);
 });
 
-test('take accepts a decision that puts forward only sentences, and refuses one with neither an answer nor a sets', () => {
+test('take accepts a decision that puts forward only statements, and refuses one with neither an answer nor a sets', () => {
   const { answer: _answer, ...onlySets } = basePlan()['record/decisions/losses-show.json'];
   const files = sample({ 'record/decisions/losses-show.json': onlySets });
   assert.deepEqual(checkFiles(files).errors, []);
@@ -119,7 +119,7 @@ test('take on a taken entry says so and changes nothing; on a built feature it r
   }
 });
 
-test('replacing a sentence moves its id out of the earlier entry\'s adds', () => {
+test('replacing a statement moves its id out of the earlier entry\'s adds', () => {
   const files = sample();
   files.set('decisions/sure-enough.json', canonicalText(canonicalDecision({
     asks: 'How sure must a trigger be?',
@@ -139,7 +139,7 @@ test('replacing a sentence moves its id out of the earlier entry\'s adds', () =>
   assert.deepEqual(checkFiles(after).errors, []);
 });
 
-test('a sets item with the id of a sentence of another list of its kind moves it there, and the result passes the check', () => {
+test('a sets item with the id of a statement of another list of its kind moves it there, and the result passes the check', () => {
   const files = sample();
   const entry = parse(files, 'record/decisions/losses-show.json');
   entry.sets[0] = { in: 'engine/properties', id: 'classifier-never-acts', says: 'A classifier never acts on the engine.', kind: 'safety', from: 'less-sure-less-power', check: ['model'] };
@@ -168,7 +168,7 @@ test('one take sets a principle and a property that follows from it', () => {
   assert.deepEqual(checkFiles(after).errors, []);
 });
 
-test('removes deletes the sentence and takes it out of the adds that brought it; an entry that sets nothing gets no adds', () => {
+test('removes deletes the statement and takes it out of the adds that brought it; an entry that sets nothing gets no adds', () => {
   const files = sample();
   files.set('decisions/no-fork.json', canonicalText(canonicalDecision({ asks: 'Is a fork a word of its own?', answer: 'No.', removes: ['fork'] })));
   place(files, 'no-fork');
@@ -181,8 +181,8 @@ test('removes deletes the sentence and takes it out of the adds that brought it;
 });
 
 /**
- * The sample with losses-show taken on its sentence alone (no answer), with notes, and a later
- * decision gap-reworded that sets the same sentence again, not taken yet.
+ * The sample with losses-show taken on its statement alone (no answer), with notes, and a later
+ * decision gap-reworded that sets the same statement again, not taken yet.
  * @param {{ answer?: boolean }} [options] answer: losses-show keeps its answer
  */
 function replacing({ answer = false } = {}) {
@@ -199,7 +199,7 @@ function replacing({ answer = false } = {}) {
   return files;
 }
 
-test('a take that replaces every sentence of a decision taken on sentences alone deletes that decision: its file, its notes and its place in order.json', () => {
+test('a take that replaces every statement of a decision taken on statements alone deletes that decision: its file, its notes and its place in order.json', () => {
   const files = replacing();
   assert.deepEqual(parse(files, 'record/decisions/losses-show.json').adds, ['every-loss-is-a-gap']);
   const outcome = take(files, 'gap-reworded');
@@ -215,7 +215,7 @@ test('a take that replaces every sentence of a decision taken on sentences alone
   assert.deepEqual(checkFiles(after).errors, []);
 });
 
-test('a decision with an answer whose every sentence is replaced stays, with no adds', () => {
+test('a decision with an answer whose every statement is replaced stays, with no adds', () => {
   const files = replacing({ answer: true });
   const outcome = take(files, 'gap-reworded');
   assert.equal(outcome.status, 'done', `${outcome.message} ${JSON.stringify(outcome.errors ?? [])}`);
@@ -240,7 +240,7 @@ test('a take that would delete a decision another entry needs is refused, names 
   assert.equal(outcome.changed.size, 0);
 });
 
-test('drop writes the verdict and keeps sets; it refuses a taken entry that brought sentences', () => {
+test('drop writes the verdict and keeps sets; it refuses a taken entry that brought statements', () => {
   const files = sample();
   const outcome = drop(files, 'losses-show');
   assert.equal(outcome.status, 'done');
@@ -272,11 +272,11 @@ function random(seed) {
 
 const PROPERTY_LISTS = ['properties', 'engine/properties', 'record/properties'];
 
-test('model: any sequence of takes keeps the lists equal to a reference, every sentence in the adds of exactly one taken entry, and every taken decision with an answer or an adds; a decision emptied of its sentences is deleted unless needed', () => {
+test('model: any sequence of takes keeps the lists equal to a reference, every statement in the adds of exactly one taken entry, and every taken decision with an answer or an adds; a decision emptied of its statements is deleted unless needed', () => {
   for (let seed = 1; seed <= 25; seed += 1) {
     const rng = random(seed);
     const files = sample();
-    // The reference: each sentence this test made, by id, with its list, its text and the entry that brought it.
+    // The reference: each statement this test made, by id, with its list, its text and the entry that brought it.
     /** @type {Map<string, { list: string, value: any, by: string }>} */
     const model = new Map();
     // The taken decisions that had no answer: their adds stands for it.
@@ -306,18 +306,18 @@ test('model: any sequence of takes keeps the lists equal to a reference, every s
       }
       const candidates = [...model.keys()].filter((sid) => !used.has(sid));
       const removes = candidates.length && rng.int(3) === 0 ? [rng.pick(candidates)] : [];
-      // A decision that sets sentences may have no answer.
+      // A decision that sets statements may have no answer.
       const answered = !sets.length || rng.int(3) !== 0;
       // Now and then it needs an earlier decision, which a take may then not delete.
       const needs = alive.size && rng.int(3) === 0 ? [rng.pick([...alive.keys()])] : [];
       files.set(`decisions/${id}.json`, canonicalText(canonicalDecision({ asks: `Step ${step}?`, ...(answered ? { answer: 'Yes.' } : {}), ...(needs.length ? { needs } : {}), ...(sets.length ? { sets } : {}), ...(removes.length ? { removes } : {}) })));
       place(files, id);
 
-      // A decision taken on sentences alone whose every sentence this take replaces or removes is
+      // A decision taken on statements alone whose every statement this take replaces or removes is
       // deleted. When another entry needs it the take is refused and writes nothing; with the
       // needed one's answer written, the same take is then done and that one stays.
       const gone = new Set([...used, ...removes]);
-      const emptied = [...onlySets].filter((owner) => [...model].filter(([, sentence]) => sentence.by === owner).every(([sid]) => gone.has(sid)));
+      const emptied = [...onlySets].filter((owner) => [...model].filter(([, statement]) => statement.by === owner).every(([sid]) => gone.has(sid)));
       const needers = [...alive, [id, needs]].filter(([other]) => !emptied.includes(other));
       const needed = emptied.filter((owner) => needers.some(([, list]) => list.includes(owner)));
       let outcome = take(files, id);
@@ -348,17 +348,17 @@ test('model: any sequence of takes keeps the lists equal to a reference, every s
       for (const { in: list, ...value } of sets) model.set(list === 'words' ? wordId(value.word) : value.id, { list, value, by: id });
       for (const sid of removes) model.delete(sid);
 
-      // The lists hold exactly the reference's sentences, with the sample's own around them.
+      // The lists hold exactly the reference's statements, with the sample's own around them.
       const generated = (list, items) => items.filter((item) => (list === 'words' ? wordId(item.word) : item.id).startsWith('gen-'));
       const expected = (list) => [...model.entries()].filter(([, s]) => s.list === list).map(([, s]) => s.value);
       for (const list of ['words', 'principles', ...PROPERTY_LISTS]) {
         const items = files.has(`${list}.json`) ? parse(files, `${list}.json`) : [];
         assert.deepEqual(new Set(generated(list, items).map((w) => JSON.stringify(w))), new Set(expected(list).map((w) => JSON.stringify(w))), `seed ${seed} step ${step}: ${list}`);
       }
-      // Each generated sentence is in the adds of exactly one entry, the one that set it last.
-      for (const [sid, sentence] of model) {
+      // Each generated statement is in the adds of exactly one entry, the one that set it last.
+      for (const [sid, statement] of model) {
         const owners = [...files.keys()].filter((name) => /decisions\/[^/]+\.json$/.test(name)).filter((name) => (parse(files, name).adds ?? []).includes(sid));
-        assert.deepEqual(owners, [`decisions/${sentence.by}.json`], `seed ${seed} step ${step}: ${sid}`);
+        assert.deepEqual(owners, [`decisions/${statement.by}.json`], `seed ${seed} step ${step}: ${sid}`);
       }
       assert.deepEqual(checkFiles(files).errors, [], `seed ${seed} step ${step}: check`);
     }

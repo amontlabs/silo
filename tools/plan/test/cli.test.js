@@ -105,7 +105,7 @@ test('plan: the first entry with no verdict, the features ready and those that w
   });
 });
 
-test('plan: the next decision with no answer shows the sentences it sets; with an answer, the answer', async () => {
+test('plan: the next decision with no answer shows the statements it sets; with an answer, the answer', async () => {
   const files = basePlan();
   const { answer: _answer, ...onlySets } = files['decisions/nothing-without-a-reason.json'];
   files['decisions/nothing-without-a-reason.json'] = onlySets;
@@ -125,7 +125,7 @@ test('plan: the next decision with no answer shows the sentences it sets; with a
   });
 });
 
-test('show: an entry with its needs, what needs it and what binds it; a sentence with who adds and keeps it; an unknown id is 1', async () => {
+test('show: an entry with its needs, what needs it and what binds it; a statement with who adds and keeps it; an unknown id is 1', async () => {
   await withRepo(async (root) => {
     const entry = JSON.parse((await run(root, ['show', 'start-computer', '--json'])).out);
     assert.equal(entry.kind, 'feature');
@@ -144,11 +144,11 @@ test('show: an entry with its needs, what needs it and what binds it; a sentence
     assert.equal(text.code, 0);
     assert.match(text.out, /^feature start-computer \(engine\): taken, stage app, 8 of 8$/m);
 
-    const sentence = JSON.parse((await run(root, ['show', 'precaution-grants-nothing', '--json'])).out);
-    assert.equal(sentence.kind, 'property');
-    assert.equal(sentence.list, 'record/properties');
-    assert.equal(sentence.added_by, 'the-design');
-    assert.deepEqual(sentence.kept_by, ['start-computer']);
+    const statement = JSON.parse((await run(root, ['show', 'precaution-grants-nothing', '--json'])).out);
+    assert.equal(statement.kind, 'property');
+    assert.equal(statement.list, 'record/properties');
+    assert.equal(statement.added_by, 'the-design');
+    assert.deepEqual(statement.kept_by, ['start-computer']);
 
     assert.equal((await run(root, ['show', 'nothing-here'])).code, 1);
   });
@@ -163,8 +163,8 @@ test('show on a part: its taken entries as ids, then the ones with no verdict in
     assert.deepEqual(json.dropped, []);
     assert.equal(json.next, 'model-tool');
     assert.deepEqual(json.open, [
-      { id: 'model-tool', kind: 'decision', status: 'open', sentence: 'Which tool checks the model of access?' },
-      { id: 'linux-vm-engine', kind: 'decision', status: 'answered', sentence: 'Which VM engine runs Linux computers, on a Mac and on a Linux host?' },
+      { id: 'model-tool', kind: 'decision', status: 'open', text: 'Which tool checks the model of access?' },
+      { id: 'linux-vm-engine', kind: 'decision', status: 'answered', text: 'Which VM engine runs Linux computers, on a Mac and on a Linux host?' },
     ]);
     assert.deepEqual(json.properties, []);
 
@@ -280,7 +280,7 @@ test('take commits only the changed files as "Owner: take <id>", and the check p
   });
 });
 
-test('a take that replaces every sentence of a decision taken on sentences alone deletes its file, its notes and its place in order.json in the same commit', async () => {
+test('a take that replaces every statement of a decision taken on statements alone deletes its file, its notes and its place in order.json in the same commit', async () => {
   const files = basePlan();
   const { answer: _answer, ...onlySets } = files['record/decisions/losses-show.json'];
   files['record/decisions/losses-show.json'] = onlySets;
@@ -331,7 +331,7 @@ test('a refused take writes and commits nothing: no answer, uncommitted changes 
   });
 });
 
-test('drop commits "Owner: drop <id>"; dropping a taken entry that brought sentences is refused', async () => {
+test('drop commits "Owner: drop <id>"; dropping a taken entry that brought statements is refused', async () => {
   await withRepo(async (root) => {
     const { code } = await run(root, ['drop', 'no-detour']);
     assert.equal(code, 0);
@@ -502,7 +502,7 @@ test('rule 11: the owner\'s verdict after the change lifts the rule; a later pla
     assert.equal(dropped.code, 0, dropped.err);
     const ok = await run(root, ['check']);
     assert.equal(ok.code, 0, ok.out + ok.err);
-    // A plain edit of the sentence after the owner's verdict: uncommitted, then committed.
+    // A plain edit of the text after the owner's verdict: uncommitted, then committed.
     writeJson(root, name, { ...readJson(root, name), asks: 'What does the record say when Silo missed a report?' });
     const edited = JSON.parse((await run(root, ['check', '--json'])).out);
     assert.deepEqual(edited.errors.map((e) => `${e.file} ${e.field}`), [`plan/${name} asks`]);
@@ -541,7 +541,7 @@ test('a file under plan/ marked assume-unchanged or skip-worktree stops take and
   });
 });
 
-test('rule 11: a take that moves a sentence out of an entry the owner re-ruled leaves that entry exempt', async () => {
+test('rule 11: a take that moves a statement out of an entry the owner re-ruled leaves that entry exempt', async () => {
   await withRepo(async (root) => {
     git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
     const design = 'decisions/the-design.json';

@@ -1,7 +1,7 @@
 # Silo
 
 What Silo is for, and what holds in every part of it. The parts are listed in
-[`parts.json`](parts.json); each has its own page. This page names sentences and decisions by id
+[`parts.json`](parts.json); each has its own page. This page names statements and decisions by id
 and does not repeat them: `plan show <id>` gives each one.
 
 ## For

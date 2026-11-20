@@ -8,11 +8,11 @@ shows it, and the owner rules on it there or in a conversation.
 | | What holds | What is to do |
 |---|---|---|
 | Kinds | words, principles, properties | decisions, features |
-| One is | one sentence in force | one thing the owner rules on |
+| One is | one statement in force | one thing the owner rules on |
 | Lives in | a list, read whole | its own file, with its notes beside it in `<id>.md` |
 | Carries | no status: every line binds | a verdict, and a place in the order |
 
-A sentence enters the first half only through the second: every word, principle and property is
+A statement enters the first half only through the second: every word, principle and property is
 named in the `adds` of exactly one taken decision or feature.
 
 ## What holds
@@ -35,24 +35,24 @@ no word, principle, property, decision or feature shares one.
 
 The file name is the id. The notes hold the research, the options and what was found.
 
-Until it is taken, a decision or a feature shows in full the sentences it would bring:
+Until it is taken, a decision or a feature shows in full the statements it would bring:
 
-- `sets`: sentences to add, or to put in place of the one with the same id. Each item starts with
+- `sets`: statements to add, or to put in place of the one with the same id. Each item starts with
   `in`, the list it goes to (`words`, `principles`, `properties` or `<part>/properties`), then
-  the sentence's own keys.
-- `removes`: ids of sentences to take out of the lists.
+  the statement's own keys.
+- `removes`: ids of statements to take out of the lists.
 
 | `verdict` | Meaning |
 |---|---|
 | absent | Not decided. A decision with no `answer` is open |
-| `take` | The owner said yes to exactly what the entry shows: its sentence, what it sets and what it removes |
+| `take` | The owner said yes to exactly what the entry shows: its statement, what it sets and what it removes |
 | `drop` | The owner said no. The entry stays, and is skipped |
 
 - Only `plan take` and `plan drop` write a verdict, on the owner's word. Taking writes what the
   entry sets into the lists and replaces `sets` by `adds`, the ids it brought, in one commit.
 - A yes to part of an entry splits it first: the part taken, and the rest still to decide.
-- An entry whose sentence changes loses its verdict.
-- A taken decision stays, as a built feature does. When a later entry puts a new sentence in
+- An entry whose statement changes loses its verdict.
+- A taken decision stays, as a built feature does. When a later entry puts a new statement in
   place of one it brought, that id moves to the later entry's `adds`.
 - A decision is taken only after the decisions it needs. A feature may be taken before what it
   needs is built: it waits.
@@ -76,7 +76,7 @@ An entry names another by its id. The check refuses an id that does not exist.
 |---|---|---|---|
 | `from` | a property | a principle | The principle it follows from. A property without one shows as a gap to close |
 | `needs` | a decision, a feature | decisions, features | What must be done first: a decision is done when taken, a feature when built |
-| `adds` | a taken decision or feature | sentences | The sentences it brought into the lists |
+| `adds` | a taken decision or feature | statements | The statements it brought into the lists |
 | `keeps` | a feature | properties | What it must not break |
 | `at` | a property | files | Its checks, once they exist. Silo promises in public only a property whose checks pass |
 
@@ -84,7 +84,7 @@ An entry names another by its id. The check refuses an id that does not exist.
 
 `parts.json` lists the parts of the product: `id`, `title`, `line`. Each part is one folder under
 its id. Its `README.md` says what the part is for, why it is so, and gives one example. It names
-sentences by id and never repeats them. What concerns the whole product sits at the root, in the
+statements by id and never repeats them. What concerns the whole product sits at the root, in the
 same shape.
 
 ## Keys
@@ -116,7 +116,7 @@ In this order. A key in brackets is optional: it is absent, never empty.
 | Command | What |
 |---|---|
 | `plan` | What is next: the first entry with no verdict, the features ready to build, the features that wait and for what |
-| `plan show <id>` | One entry or one sentence, with what it links to and what binds it: the brief for whoever works on it |
+| `plan show <id>` | One entry or one statement, with what it links to and what binds it: the brief for whoever works on it |
 | `plan take <id>` | The owner's yes |
 | `plan drop <id>` | The owner's no |
 | `plan check` | The plan holds together. The merge gate and the site's build run it |

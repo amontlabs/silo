@@ -113,9 +113,9 @@ Each film is one of two kinds, set by `kind` in `film.json`. The script says whi
 - **decides**: what the product does.
 
 Under both kinds, the entries the film shows are printed from `plan/`. An entry not decided shows,
-under its sentence, every sentence a yes would set (the list it goes to, its id or word, and its
+under its text, every statement a yes would set (the list it goes to, its id or word, and its
 `says` or `means`) and every id it would remove, since a yes covers exactly that. Then it has Agree,
-Change and Leave open, and a note. An entry in force, or dropped, shows its sentence and no buttons.
+Change and Leave open, and a note. An entry in force, or dropped, shows its text and no buttons.
 
 ## Making a film from a script
 
@@ -130,8 +130,8 @@ All commands run from `films/`.
    - `kind`: `"teaches"` or `"decides"`, from the script.
    - `title`: the script's title.
    - `line`: the script's answer line. The page shows it under the title.
-   - `shows`: the ids of the plan's entries and sentences the film explains, in the order the page
-     lists them. Find them with `tools/plan/bin/plan show <id>` and in `plan/`. A sentence that a
+   - `shows`: the ids of the plan's entries and statements the film explains, in the order the page
+     lists them. Find them with `tools/plan/bin/plan show <id>` and in `plan/`. A statement that a
      decision not yet taken puts forward under `sets` is shown by that decision's id. A thing the
      film says that no entry holds, a promise included, goes into the plan first, as an entry; the
      film never states it.
@@ -204,8 +204,8 @@ All commands run from `films/`.
       and on any scene shorter than its narration. It prints each scene's length.
    3. **page parts**: the built page shows every part named in `film.json`, with the right number
       of items, and no part that is not there. Every id in `shows` is listed, in order, with its
-      sentence and status from `plan/`. An entry not decided has its three buttons and a note, and
-      every sentence it would set and id it would remove; one in force or dropped has none of
+      text and status from `plan/`. An entry not decided has its three buttons and a note, and
+      every statement it would set and id it would remove; one in force or dropped has none of
       these. `film.json` has no `statements`, no `marks` and no `promises`. The build
       itself stops on an id that `plan/` does not hold.
    4. **stills**: the held frame at the end of every scene, in light and in dark, goes to
@@ -252,7 +252,7 @@ when the owner asks. Change the script first, then go through the steps above fr
 change touches: `narration.json` and the voice for a sentence, `explainer.js` for the picture,
 then the check and the stills.
 
-- A film is changed for a sentence only once that sentence is in force in `plan/`, or when the
+- A film is changed for a statement only once that statement is in force in `plan/`, or when the
   owner asks for it.
 - `shows`, `words` and `test` in `film.json` follow what the film still says. An entry the film no
   longer explains leaves `shows`; one it now explains enters it.
