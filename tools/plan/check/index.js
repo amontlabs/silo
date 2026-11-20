@@ -140,6 +140,8 @@ export function checkFiles(files, { exists } = {}) {
   const partsFile = 'plan/parts.json';
   /** @type {Set<string>} */
   const partIds = new Set();
+  /** @type {Map<string, string>} the field of each part id in parts.json */
+  const partFields = new Map();
   const parts = json.get('parts.json');
   if (parts !== undefined) {
     if (!Array.isArray(parts)) add(partsFile, '-', 'not an array', 'write an array of { id, title, line }');
@@ -153,6 +155,7 @@ export function checkFiles(files, { exists } = {}) {
       else if (RESERVED_PARTS.has(part.id)) add(partsFile, at(field, 'id'), `"${part.id}" is not allowed as a part id`, 'choose another id');
       if (partIds.has(part.id)) add(partsFile, at(field, 'id'), `"${part.id}" appears twice`, 'give each part its own id');
       partIds.add(part.id);
+      if (!partFields.has(part.id)) partFields.set(part.id, at(field, 'id'));
     });
   }
 
@@ -303,6 +306,14 @@ export function checkFiles(files, { exists } = {}) {
   /** @type {Map<string, typeof sentences[number]>} */
   const sentenceById = new Map();
   for (const sentence of sentences) if (!sentenceById.has(sentence.id)) sentenceById.set(sentence.id, sentence);
+  // plan show takes a part's id as it takes an entry's or a sentence's, so a part may not share one.
+  // A word may: a part is often named by the word for its concept, and plan show on the part shows the word.
+  for (const [id, field] of partFields) {
+    const entry = entryFiles.find((item) => item.id === id);
+    const sentence = sentenceById.get(id);
+    if (entry) add(partsFile, field, `the part id "${id}" is also ${entry.file}`, 'give the part or the entry another id');
+    else if (sentence && sentence.kind !== 'word') add(partsFile, field, `the part id "${id}" is also the ${sentence.kind} at ${sentence.file} ${sentence.field}`, `give the part or the ${sentence.kind} another id`);
+  }
   // A sentence an entry sets joins the namespace when taken: it may replace or move a sentence of its own kind only.
   for (const entry of entries.values()) {
     if (!Array.isArray(entry.sets)) continue;
@@ -313,6 +324,7 @@ export function checkFiles(files, { exists } = {}) {
       if (typeof id !== 'string' || !ID_PATTERN.test(id)) return;
       const field = at(`sets[${index}]`, idField(kind));
       if (entries.has(id)) add(entry.file, field, `the id "${id}" is also ${entries.get(id).file}`, 'give the sentence its own id');
+      else if (kind !== 'word' && partIds.has(id)) add(entry.file, field, `the id "${id}" is also a part of plan/parts.json`, `give the ${kind} its own id`);
       else if (sentenceById.has(id) && sentenceById.get(id).kind !== kind) add(entry.file, field, `the id "${id}" is already a ${sentenceById.get(id).kind} of ${sentenceById.get(id).list}`, `give the ${kind} its own id: a sets item replaces or moves a sentence of its own kind only`);
     });
   }

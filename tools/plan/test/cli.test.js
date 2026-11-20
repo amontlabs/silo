@@ -154,6 +154,93 @@ test('show: an entry with its needs, what needs it and what binds it; a sentence
   });
 });
 
+test('show on a part: its taken entries as ids, then the ones with no verdict in order with the next marked, then its properties', async () => {
+  await withRepo(async (root) => {
+    const json = JSON.parse((await run(root, ['show', 'engine', '--json'])).out);
+    assert.equal(json.kind, 'part');
+    assert.equal(json.title, 'The engine');
+    assert.deepEqual(json.taken, ['engine-language', 'start-computer']);
+    assert.deepEqual(json.dropped, []);
+    assert.equal(json.next, 'model-tool');
+    assert.deepEqual(json.open, [
+      { id: 'model-tool', kind: 'decision', status: 'open', sentence: 'Which tool checks the model of access?' },
+      { id: 'linux-vm-engine', kind: 'decision', status: 'answered', sentence: 'Which VM engine runs Linux computers, on a Mac and on a Linux host?' },
+    ]);
+    assert.deepEqual(json.properties, []);
+
+    const { code, out } = await run(root, ['show', 'engine']);
+    assert.equal(code, 0);
+    assert.equal(out, [
+      'part engine: The engine',
+      'What runs the computers, and what it is built with.',
+      '',
+      'Taken: 2',
+      '  engine-language, start-computer',
+      '',
+      'To decide, in order:',
+      'next  model-tool       decision  open       Which tool checks the model of access?',
+      '      linux-vm-engine  decision  answered   Which VM engine runs Linux computers, on a Mac and on a Linux host?',
+      '',
+      'Properties: none.',
+    ].join('\n'));
+
+    const record = JSON.parse((await run(root, ['show', 'record', '--json'])).out);
+    assert.deepEqual(record.taken, []);
+    assert.deepEqual(record.open.map((entry) => entry.id), ['losses-show', 'no-detour']);
+    assert.deepEqual(record.properties[0], { id: 'rule-reads-only-facts', says: 'A rule reads only facts.' });
+    const text = (await run(root, ['show', 'record'])).out;
+    assert.match(text, /^Taken: 0\.$/m);
+    assert.match(text, /^next {2}losses-show {2}decision {2}answered {3}What does the record say when Silo missed something\?$/m);
+    assert.match(text, /^Properties:\n {2}rule-reads-only-facts: A rule reads only facts\.$/m);
+
+    assert.equal((await run(root, ['show', 'engine', '--all'])).code, 2);
+  });
+
+  // A part named by a word: plan show on the id shows the part, with the word.
+  const files = basePlan();
+  files['parts.json'] = [...files['parts.json'], { id: 'fork', title: 'Forks', line: 'Copies of a computer.' }];
+  files['fork/README.md'] = '# Forks\n';
+  await withRepo(async (root) => {
+    const { code, out } = await run(root, ['show', 'fork']);
+    assert.equal(code, 0, out);
+    assert.match(out, /^part fork: Forks\nCopies of a computer\.\nThe word "fork": /);
+    const json = JSON.parse((await run(root, ['show', 'fork', '--json'])).out);
+    assert.equal(json.kind, 'part');
+    assert.equal(json.word.word, 'fork');
+  }, files);
+});
+
+test('show on an entry: the entry and its notes first, then what binds it, the whole product\'s decisions as ids unless --all', async () => {
+  await withRepo(async (root) => {
+    const { out } = await run(root, ['show', 'linux-vm-engine']);
+    const binds = out.indexOf('What binds it:');
+    assert.ok(binds > out.indexOf('Notes:') && out.indexOf('Notes:') > out.indexOf('asks: '), out);
+    assert.ok(out.indexOf('Needed by:') < binds);
+    const after = out.slice(binds);
+    assert.match(after, /^ {2}principle less-sure-less-power: The less sure the trigger, the less it may do\.$/m);
+    assert.doesNotMatch(after, /Asks:/);
+    assert.match(after, /^ {2}decision engine-language \(engine\): Zig\./m);
+    assert.match(after, /^ {2}Taken decisions of the whole product \(plan show linux-vm-engine --all prints them\):\n {4}the-design$/m);
+    assert.doesNotMatch(after, /The design of 18 November/);
+
+    const all = (await run(root, ['show', 'linux-vm-engine', '--all'])).out;
+    assert.match(all, /^ {2}Taken decisions of the whole product:\n {4}decision the-design: The design of 18 November 2026/m);
+
+    // A taken decision with no answer shows the ids it adds.
+    const files = basePlan();
+    const { answer: _answer, ...noAnswer } = files['decisions/the-design.json'];
+    files['decisions/the-design.json'] = noAnswer;
+    files['engine/decisions/linux-vm-engine.json'] = { ...files['engine/decisions/linux-vm-engine.json'], needs: ['the-design'] };
+    await withRepo(async (other) => {
+      const shown = (await run(other, ['show', 'linux-vm-engine'])).out;
+      assert.match(shown, /^ {2}decision the-design: adds computer, fork, boundary, /m);
+      assert.doesNotMatch(shown, /whole product/);
+      const json = JSON.parse((await run(other, ['show', 'linux-vm-engine', '--json'])).out);
+      assert.ok(json.binds.decisions.find((d) => d.id === 'the-design').adds.includes('fork'));
+    }, files);
+  });
+});
+
 test('check: 0 on the sample, 1 with errors, --json, and an entry changed under its verdict against HEAD', async () => {
   await withRepo(async (root) => {
     const ok = await run(root, ['check']);

@@ -12,7 +12,7 @@ import { baseFiles, existsIn, findRoot, git, planFiles, ruledByOwner, uncommitte
 
 export const COMMANDS = [
   { name: '', usage: 'plan', what: 'What is next: the first entry with no verdict, the features ready to build, the features that wait and for what.' },
-  { name: 'show', usage: 'plan show <id>', what: 'One entry or one sentence, with what it links to and what binds it.' },
+  { name: 'show', usage: 'plan show <id>', what: 'One entry, part or sentence. An entry with what it links to and what binds it (--all: the whole product\'s decisions in full); a part with what is next in it.' },
   { name: 'take', usage: 'plan take <id>', what: "The owner's yes: writes what the entry sets into the lists and commits \"Owner: take <id>\"." },
   { name: 'drop', usage: 'plan drop <id>', what: "The owner's no: commits \"Owner: drop <id>\"." },
   { name: 'check', usage: 'plan check', what: 'The plan holds together. The merge gate and the site\'s build run it.' },
@@ -158,11 +158,14 @@ const PLACE_KEYS = ['id', 'kind', 'part', 'stage', 'position', 'notes'];
 
 /** @param {Context} ctx @param {string[]} argv */
 function show(ctx, argv) {
-  const { flags, positional } = parseArgs(argv, {});
-  if (positional.length !== 1) throw new UsageError('usage: plan show <id>');
+  const { flags, positional } = parseArgs(argv, { all: 'flag' });
+  if (positional.length !== 1) throw new UsageError('usage: plan show <id> [--all]');
   const [id] = positional;
   const plan = readPlan(findRoot(ctx.cwd));
-  const report = Object.hasOwn(plan.entries, id) ? showEntry(plan, plan.entries[id]) : showSentence(plan, id);
+  const isEntry = Object.hasOwn(plan.entries, id);
+  if (flags.has('all') && !isEntry) throw new UsageError('--all is for an entry: it prints the taken decisions of the whole product in full');
+  const part = isEntry ? undefined : plan.parts.find((item) => item?.id === id);
+  const report = isEntry ? showEntry(plan, plan.entries[id], flags.has('all')) : part ? showPart(plan, part) : showSentence(plan, id);
   if (!report) throw new Refused(`nothing in the plan has the id "${id}"`);
   if (flags.has('json')) ctx.out(JSON.stringify(report.json, null, 2));
   else ctx.out(report.text.join('\n'));
@@ -172,8 +175,30 @@ function show(ctx, argv) {
 /** @param {unknown} value @returns {string} */
 const inline = (value) => (typeof value === 'string' ? value : Array.isArray(value) && value.every((v) => typeof v === 'string') ? value.join(', ') : JSON.stringify(value));
 
-/** @param {any} plan @param {any} entry */
-function showEntry(plan, entry) {
+/** Ids joined with commas, on lines of at most `width` characters, each line indented. @param {string[]} ids @param {string} indent */
+function wrapIds(ids, indent, width = 100) {
+  const lines = [];
+  let line = '';
+  ids.forEach((id, index) => {
+    const word = index < ids.length - 1 ? `${id},` : id;
+    if (line && indent.length + line.length + 1 + word.length > width) {
+      lines.push(indent + line);
+      line = word;
+    } else line = line ? `${line} ${word}` : word;
+  });
+  if (line) lines.push(indent + line);
+  return lines;
+}
+
+/** A taken decision on one line: its answer, or the ids it adds when it has none. @param {any} decision */
+const decisionLine = (decision) => `  decision ${decision.id}${decision.part ? ` (${decision.part})` : ''}: ${decision.answer ?? `adds ${(decision.adds ?? []).join(', ')}`}`;
+
+/**
+ * An entry, whole, then what binds it. The taken decisions of the whole product that the entry
+ * does not need are shown as ids only, unless `all`: they are many and rarely about the entry.
+ * @param {any} plan @param {any} entry @param {boolean} all
+ */
+function showEntry(plan, entry, all) {
   const total = ordered(plan).length;
   const status = (other) => entryStatus(other, plan.entries);
   const keys = Object.fromEntries(Object.entries(entry).filter(([key]) => !PLACE_KEYS.includes(key)));
@@ -184,7 +209,7 @@ function showEntry(plan, entry) {
   const needed = new Set(entry.needs ?? []);
   const decisions = Object.values(plan.entries)
     .filter((other) => other.id !== entry.id && other.kind === 'decision' && other.verdict === 'take' && (other.part === null || other.part === entry.part || needed.has(other.id)))
-    .map(({ id, part, asks, answer }) => ({ id, part, asks, ...(answer !== undefined ? { answer } : {}) }));
+    .map(({ id, part, asks, answer, adds }) => ({ id, part, asks, ...(answer !== undefined ? { answer } : {}), ...(adds !== undefined ? { adds } : {}) }));
   const json = {
     kind: entry.kind,
     id: entry.id,
@@ -207,13 +232,55 @@ function showEntry(plan, entry) {
   }
   text.push('', needs.length ? 'Needs:' : 'Needs: nothing.');
   for (const need of needs) text.push(`  ${need.id}  ${need.status}`);
-  text.push('', neededBy.length ? 'Needed by:' : 'Needed by: nothing.');
+  text.push(neededBy.length ? 'Needed by:' : 'Needed by: nothing.');
   for (const other of neededBy) text.push(`  ${other.id}  ${other.status}`);
-  text.push('', 'Binds it:');
-  for (const principle of plan.principles) text.push(`  principle ${principle.id}: ${principle.says} Asks: ${principle.asks}`);
-  for (const property of properties) text.push(`  property ${property.id}${property.part ? ` (${property.part})` : ''}: ${property.says}`);
-  for (const decision of decisions) text.push(`  decision ${decision.id}${decision.part ? ` (${decision.part})` : ''}: ${decision.answer ?? decision.asks}`);
   if (entry.notes !== undefined) text.push('', 'Notes:', '', entry.notes.trimEnd());
+  // The decisions of the entry's own part and those it needs are about it; the root's are about everything.
+  const close = decisions.filter((decision) => (entry.part !== null && decision.part === entry.part) || needed.has(decision.id));
+  const whole = decisions.filter((decision) => !close.includes(decision));
+  text.push('', 'What binds it:');
+  for (const principle of plan.principles) text.push(`  principle ${principle.id}: ${principle.says}`);
+  for (const property of properties) text.push(`  property ${property.id}${property.part ? ` (${property.part})` : ''}: ${property.says}`);
+  for (const decision of close) text.push(decisionLine(decision));
+  if (whole.length && all) {
+    text.push('  Taken decisions of the whole product:');
+    for (const decision of whole) text.push(`  ${decisionLine(decision)}`);
+  } else if (whole.length) {
+    text.push(`  Taken decisions of the whole product (plan show ${entry.id} --all prints them):`);
+    text.push(...wrapIds(whole.map((decision) => decision.id), '    '));
+  }
+  return { json, text };
+}
+
+/**
+ * A part: its title and line, its entries in the order (the taken and dropped ones as ids, then
+ * each one with no verdict, the first marked next), and its properties.
+ * @param {any} plan @param {any} part
+ */
+function showPart(plan, part) {
+  const entries = ordered(plan).filter((entry) => entry.part === part.id);
+  const taken = entries.filter((entry) => entry.verdict === 'take').map((entry) => entry.id);
+  const dropped = entries.filter((entry) => entry.verdict === 'drop').map((entry) => entry.id);
+  const open = entries.filter((entry) => entry.verdict === undefined).map((entry) => ({
+    id: entry.id,
+    kind: entry.kind,
+    status: entryStatus(entry, plan.entries),
+    sentence: entry.kind === 'decision' ? entry.asks : entry.name,
+  }));
+  const properties = plan.properties.filter((property) => property.part === part.id).map(({ id, says }) => ({ id, says }));
+  // A part may share its id with the word for its concept: plan show on that id shows both.
+  const word = plan.words.find((item) => item.id === part.id);
+  const json = { kind: 'part', id: part.id, title: part.title, line: part.line, ...(word ? { word: { word: word.word, means: word.means } } : {}), taken, dropped, next: open[0]?.id ?? null, open, properties };
+  const text = [`part ${part.id}: ${part.title}`, part.line, ...(word ? [`The word "${word.word}": ${word.means}`] : []), ''];
+  text.push(`Taken: ${taken.length}${taken.length ? '' : '.'}`, ...wrapIds(taken, '  '));
+  if (dropped.length) text.push(`Dropped: ${dropped.length}`, ...wrapIds(dropped, '  '));
+  text.push('', open.length ? 'To decide, in order:' : 'To decide: nothing. Every entry has a verdict.');
+  const width = Math.max(0, ...open.map((entry) => entry.id.length));
+  open.forEach((entry, index) => {
+    text.push(`${index === 0 ? 'next' : '    '}  ${entry.id.padEnd(width)}  ${entry.kind.padEnd(8)}  ${entry.status.padEnd(9)}  ${entry.sentence}`);
+  });
+  text.push('', properties.length ? 'Properties:' : 'Properties: none.');
+  for (const property of properties) text.push(`  ${property.id}: ${property.says}`);
   return { json, text };
 }
 

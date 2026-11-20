@@ -12,12 +12,12 @@ Node 26, no dependency, no network call. `npm test` runs the tests, which use th
 | Command | What it does |
 |---|---|
 | `plan` | Shows the first entry in the order with no verdict (its kind, its question or its name, and `suggest`; for a decision its `answer`, or when it has none the sentences it sets), the features ready to build, and the features that wait and for what. |
-| `plan show <id>` | For an entry: its keys, its stage and position, each need with its status, what needs it, its notes, and what binds it: every principle, the properties of the root, of its part and in `keeps`, and the taken decisions of the root, of its part and in `needs`. For a sentence: the sentence, the entry whose `adds` brought it, the features that keep it, and the entries that would replace or remove it. |
+| `plan show <id>` | For an entry: first the entry whole (its keys, its `sets` in full, its stage and position, each need with its status, what needs it, its notes), then what binds it, compact: every principle and the properties of the root, of its part and in `keeps` (id and `says`); the taken decisions of its part and in `needs` (id and `answer`, or the ids it adds when it has none); the other taken decisions of the root as ids only, which `--all` prints in full. For a part: its title and line (and the word of the same id with its meaning, when there is one), its taken entries (and its dropped ones) as a count and their ids, then each entry with no verdict in the order of `order.json` (id, kind, status, and its `asks` or `name`), the first marked `next`, then its properties (id and `says`). For a sentence: the sentence, the entry whose `adds` brought it, the features that keep it, and the entries that would replace or remove it. `--json` gives everything, whatever `--all`. |
 | `plan take <id>` | The owner's yes. Writes what the entry sets into the lists, removes what it removes, moves those ids out of the `adds` of the entries that brought them, deletes a taken decision left with neither an `answer` nor an `adds` (its file, its notes and its place in `order.json`), writes `adds` and `"verdict": "take"`, and commits only the changed files as `Owner: take <id>`. |
 | `plan drop <id>` | The owner's no. Writes `"verdict": "drop"`, keeps `sets` and `removes`, and commits `Owner: drop <id>`. |
 | `plan check` | Checks the plan. The merge gate and the site's build run it. |
 
-`plan --help` lists them. `plan`, `plan show` and `plan check` take `--json`. Exit codes: 0 done,
+`plan --help` lists them. `plan`, `plan show` and `plan check` take `--json`; `plan show` on an entry takes `--all`. Exit codes: 0 done,
 1 refused or errors found, 2 wrong use.
 
 `plan take` refuses when the plan fails the check, when `plan/` has uncommitted changes, when the
@@ -52,6 +52,10 @@ Each problem names the file, the field, what is wrong and the fix.
   the model's order), an unknown key, a missing required key, or an optional key that is empty.
 - An id that does not match `^[a-z0-9][a-z0-9-]{0,62}$`, or that two items of the plan share:
   ids are one namespace across decisions, features, words, principles and properties.
+- A part id that is also the id of an entry, a principle or a property, or named `decisions` or
+  `features`, and a principle or property in a `sets` named like a part: `plan show` takes a part's
+  id as it takes the others. A word may share a part's id, since a part is often named by the word
+  for its concept; `plan show` on that id shows the part, with the word's meaning.
 - A `verdict` or `suggest` that is not `take` or `drop`; `sets` or `removes` on a taken entry;
   `adds` on an entry that is not taken; a taken decision with neither an `answer` nor an `adds`,
   or one that needs a decision not taken.
