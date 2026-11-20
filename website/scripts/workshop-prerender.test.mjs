@@ -66,7 +66,7 @@ test('the header holds sign-in, returning to the plain address, with its tooltip
 
 test('without JavaScript every part shows its rows and the whole product its own, after the line that says what needs JavaScript', async () => {
   const noscript = between('<noscript id="workshop-noscript">', '</noscript>');
-  assert.match(noscript, /^<div class="ws-noscript"><p class="ws-quiet">Reading an entry&#x27;s notes, seeing the suggestions, suggesting a feature, voting and commenting on suggestions, and choosing a color theme need JavaScript.<\/p>/);
+  assert.match(noscript, /^<div class="ws-noscript"><p class="ws-quiet">Reading an entry&#x27;s notes, seeing the suggestions, suggesting a feature, voting and commenting, and choosing a color theme need JavaScript.<\/p>/);
   const section = (id) => noscript.slice(noscript.indexOf(`<section data-part="${id}">`), noscript.indexOf('</section>', noscript.indexOf(`<section data-part="${id}">`)));
   for (const part of parts) {
     const rows = section(part.id);

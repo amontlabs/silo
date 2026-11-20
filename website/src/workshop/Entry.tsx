@@ -326,8 +326,10 @@ function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
   if (w.waiting) {
     // Until the first answer: signed out (no session marker), the sign-in box at once and the room of the line
     // under it; otherwise the comment box's own boxes as a placeholder.
+    // An entry holds the room of the shape most of them have: no comment yet, then the box.
     return (
       <div className="ws-talk" aria-busy="true">
+        {row.kind === 'entry' ? <p className="ws-quiet ws-none ws-held" aria-hidden="true">No comments yet.</p> : null}
         {w.me === null ? (
           <>
             <div className="ws-box"><a className="ws-signin" href={ctx.signIn}>Sign in to comment</a></div>

@@ -45,7 +45,15 @@ const rowPart = (key: string) => (key.startsWith('entry-') ? key.slice('entry-'.
 
 /** The row an address's tail names: an entry of the plan by its id first, whatever the id looks like, then a suggestion by its `issue-<n>` key. */
 const rowNamed = (rows: Map<string, Row>, tail: string): Row | undefined =>
-  rows.get(`entry-${tail}`) ?? (/^issue-/.test(tail) ? rows.get(tail) : undefined);
+  rows.get(`entry-${tail}`) ?? (/^issue-/.test(tail) ? rows.get(tail) ?? featureOf(rows, tail) : undefined);
+
+/** The entry whose thread is the issue `issue-<n>` names: a suggestion that became a feature shows as the feature. */
+function featureOf(rows: Map<string, Row>, key: string): Row | undefined {
+  const n = /^issue-(\d+)$/.exec(key)?.[1];
+  if (n === undefined) return undefined;
+  for (const row of rows.values()) if (row.kind === 'entry' && row.issue === Number(n)) return row;
+  return undefined;
+}
 
 export function formatHash(place: Place, key: string | null = null): string {
   const tail = key ? `/${rowPart(key)}` : '';
@@ -89,7 +97,7 @@ export function resolveHash(hash: string, plan: Plan, rows: Map<string, Row>): {
   if (head === 'latest') return { place: { kind: 'latest' }, key: null };
   if (head === 'suggested' || head === 'left' || head === 'product') return named({ kind: head });
   if (plan.parts.some((group) => group.part.id === head)) return named({ kind: 'part', part: head });
-  const loose = tail ? rowNamed(rows, tail) : rows.get(head);
+  const loose = tail ? rowNamed(rows, tail) : rows.get(head) ?? (/^issue-/.test(head) ? featureOf(rows, head) : undefined);
   if (loose && (tail || /^(entry|issue)-/.test(head))) return { place: placeOf(loose), key: loose.key };
   return null;
 }

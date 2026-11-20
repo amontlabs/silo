@@ -25,7 +25,10 @@ const OLD_KEY = 'silo-workshop-writes';
 
 export interface Write {
   n: number;
+  /** When the write was sent: writes apply in the order they were sent, not the order their answers came. */
   at: number;
+  /** Which of two writes sent in the same millisecond came first. */
+  seq?: number;
   /** Values set on the issue; a whole issue for a new suggestion. */
   set: Partial<LiveIssue>;
   /** The entry whose thread this write made or found, with the issue as it was before the write. */
@@ -103,12 +106,12 @@ function write(store: Store) {
   }
 }
 
-/** Keeps a write the server confirmed, and the page's own comment with it. */
-export function keep(write$: Omit<Write, 'at'>, now: number, comment?: Comment) {
+/** Keeps a write the server confirmed, and the page's own comment with it; `at` is when it was sent, else `now`. */
+export function keep(write$: Omit<Write, 'at'>, now: number, comment?: Comment, at: number = now) {
   if (write$.n <= 0) return;
   const store = read(now);
-  store.writes.push({ ...write$, at: now });
-  if (comment) store.comments.push({ n: write$.n, at: now, comment });
+  store.writes.push({ ...write$, at });
+  if (comment) store.comments.push({ n: write$.n, at, comment });
   write(store);
 }
 
@@ -128,7 +131,7 @@ function isWhole(issue: Partial<LiveIssue>): issue is LiveIssue {
 /** The answer with the page's own writes applied, in order, except those it was fetched well after. */
 export function applyKept(state: LiveState, now: number): LiveState {
   const fetched = Date.parse(state.fetchedAt);
-  const writes = read(now).writes.filter((write) => !(fetched > write.at + NEWER_MS)).sort((a, b) => a.at - b.at);
+  const writes = read(now).writes.filter((write) => !(fetched > write.at + NEWER_MS)).sort((a, b) => a.at - b.at || (a.seq ?? 0) - (b.seq ?? 0));
   if (!writes.length) return state;
   const issues = { ...state.issues };
   const threads = { ...state.threads };
@@ -150,13 +153,16 @@ export function newerAnswer(current: LiveState | null, answer: LiveState): LiveS
   return { ...next, issues: next.issues ?? {} };
 }
 
-/** The page's own comments that a cached answer does not carry yet, and the 👍 counts the server answered for the person's own votes. */
+/**
+ * The page's own comments that a cached answer does not carry yet, and the 👍 counts the server answered for the
+ * person's own votes on comments, except those the answer was fetched (`now`) more than a minute after.
+ */
 export function keptComments(n: number, comments: Comment[], now: number): Comment[] {
   const store = read(now);
   const mine = store.comments.filter((kept) => kept.n === n).map((kept) => kept.comment);
   const missing = mine.filter((own) => !comments.some((c) => c.author === own.author && c.text.trim() === own.text.trim()));
   const all = missing.length ? [...comments, ...missing] : comments;
-  const ups = store.ups.filter((kept) => kept.n === n).sort((a, b) => a.at - b.at);
+  const ups = store.ups.filter((kept) => kept.n === n && !(now > kept.at + NEWER_MS)).sort((a, b) => a.at - b.at);
   if (!ups.length) return all;
   return all.map((comment) => {
     const set = ups.filter((kept) => String(kept.id) === String(comment.id)).pop();

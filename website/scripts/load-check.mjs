@@ -267,7 +267,8 @@ async function visits(browser, options, rows, page$) {
   // entry has no comments: their number comes with the state, and their lines are not held before it.
   const live = await (await fetch(`${new URL(options.url).origin}/api/workshop/state`)).json();
   // An entry with no thread yet has none either.
-  const talked = Object.values(live.issues ?? {}).filter((issue) => issue.kind === 'entry' && issue.entry && issue.comments > 0).map((issue) => `entry-${issue.entry}`);
+  // The thread of an entry is what `state.threads` names: a suggestion's issue too, for a feature written from it.
+  const talked = Object.entries(live.threads ?? {}).filter(([, n]) => live.issues?.[n]?.comments > 0).map(([entry]) => `entry-${entry}`);
   for (const narrow of rows ? [false, true] : []) {
     const view = narrow ? [390, 844] : size;
     const fresh = await browser.newContext({ viewport: { width: view[0], height: view[1] }, deviceScaleFactor: 1, reducedMotion: 'no-preference' });

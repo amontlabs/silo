@@ -282,7 +282,7 @@ What a person sees:
   replaces one it has. Never a change to a count: the server
   patches its snapshot in place, so an answer may already count a write made
   after its `fetchedAt`. What the page shows is the answer with every write applied in
-  order, except those the answer was fetched more than a minute after; a write
+  the order it was sent, except those the answer was fetched more than a minute after; a write
   is dropped after a day, the page's own comments and the count the server answered for the
   person's vote on a comment after six minutes. Both are drawn in the
   first frame. The person is used only while the `workshop-hint` cookie is
@@ -301,7 +301,7 @@ What a person sees:
 - While no state is shown and the first answer is to come, placeholders hold the
   room of what is known to come: the vote of every row, the
   header's account when the cookie is there and nobody is remembered, Latest's
-  lines, the comment box of an open row, two rows of suggestions
+  lines, in an open entry's panel "No comments yet." and the comment box (the shape most entries have; a thread with comments makes the panel grow once, as a slow one does), two rows of suggestions
   and the suggest form; notes have their own while their chunk loads. They
   pulse slowly (not with reduced motion), are `aria-hidden`, and their region
   is `aria-busy`. Nothing has a placeholder that may not come (comment counts,
@@ -383,20 +383,29 @@ What a person sees:
   "No comments yet." and then the comment box (signed in) or "Sign in to comment", and no link to
   GitHub, since there is no issue yet; the room of that link stays empty, so the row taking its
   thread moves nothing in the panel. A row whose thread has no comment shows the same line.
-- The first comment or 👍 on a row with no thread yet is sent with `entry` (the id of the
-  entry) instead of `n`. The `n` of the answer becomes the row's thread at once, and the
-  comment or the count shows without a reload; the comment is the whole thread then, and
-  nothing is loaded. The first 👍 works the same on a decision, a feature and a suggestion,
-  whatever its state. A comment that the server answers twice (a retry after an error)
-  shows once.
-- A thread closed on GitHub (`state` says `closed`, or the server answered a comment 403
-  `closed`) shows its comments, no box, and "This thread is closed on GitHub." with the
+- A comment or a 👍 on a decision or a feature is sent with `entry`, the id of the entry, whether or not the
+  page knows its thread. The server finds the thread, or opens it at the first one.
+- A comment or a 👍 on a suggestion is sent with `n`, its issue.
+- The `n` of the answer becomes the row's thread at once, and the comment or the count shows without a reload.
+- A row that takes a thread, or whose thread's number changes, while it is open asks for that thread and for the
+  person's votes, as an opening does.
+- The person's own comment stays shown from the page's kept writes until an answer holds it.
+- The first 👍 works the same on a decision, a feature and a suggestion, whatever its state.
+- A comment that the server answers twice (a retry after an error) shows once.
+- The page applies and keeps its own writes in the order it sent them, not the order their answers came.
+- A thread closed on GitHub shows its comments, no box, and "This thread is closed on GitHub." with the
   link to the issue.
+- A thread is closed when `state` says `closed`.
+- A thread is also closed when the server answers a write 403 `closed`, which it does only to a write that names an entry.
+- That answer carries `n`, which becomes the row's thread when the row had none.
 - Under each comment of a thread are its 👍 count and a button (`up` of `GET issue`). Signed out,
   the count shows and the button asks to sign in, as the row's vote does. Signed in, the button is
   pressed for the comments `GET vote` names. A click changes the count at once and sends
-  `POST comment-vote`; the count the server answers is kept six minutes (`writes.ts`) over an older
-  `GET issue`. A refusal puts the count back and says "Vote: not saved." with the server's words.
+  `POST comment-vote`.
+- The count the server answers for a vote on a comment is applied to a `GET issue` answer unless that answer
+  was fetched more than a minute after the vote (`writes.ts`).
+- A refusal takes back the page's own change, one up or one down from the count shown by then, and says
+  "Vote: not saved." with the server's words.
 - The strip under the tiles links to what is left out (every dropped decision
   and feature of the parts), to "The whole product" (`#product`: the decisions
   of `plan/decisions/`, with their own counts), to Latest, and to the suggestions. Latest (`#latest`) lists the newest 30
@@ -421,7 +430,7 @@ A row named by an address is looked for first
 among the plan's entries, by id, whatever place the address names (an entry
 whose id begins with `issue-` included), and only then among the suggestions;
 the address is then rewritten to where the row is. An entry that no longer
-exists opens its part. The older `#entry-<id>` and `#issue-<n>` open that row
+exists opens its part. `#suggested/issue-<n>` for a suggestion that became a feature opens the feature, where it lives. The older `#entry-<id>` and `#issue-<n>` open that row
 where it now lives. The old list of decisions and its address `#decisions` are
 gone. No part can take the id of a place: the build refuses it (above).
 Back and Forward move between places; opening a row replaces the address.

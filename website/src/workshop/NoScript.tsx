@@ -5,7 +5,7 @@ import { stateText } from './Entry';
 import { allRows, buildPlan } from './plan';
 import type { BuildData, Row } from './plan';
 
-export const NOSCRIPT_LINE = 'Reading an entry\'s notes, seeing the suggestions, suggesting a feature, voting and commenting on suggestions, and choosing a color theme need JavaScript.';
+export const NOSCRIPT_LINE = 'Reading an entry\'s notes, seeing the suggestions, suggesting a feature, voting and commenting, and choosing a color theme need JavaScript.';
 
 function Rows({ rows, all }: { rows: Row[]; all: Map<string, Row> }) {
   return (

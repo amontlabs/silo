@@ -231,13 +231,10 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     setVotes((current) => (n in current ? current : { ...current, [n]: mine.on }));
     setCommentVotes((current) => (n in current ? current : { ...current, [n]: mine.comments }));
   };
-  // One check of the person's own vote per opening of a row, never retried: a failure leaves 👍 off. It waits for
+  // One check of the person's own votes per opening of a row, never retried: a failure leaves 👍 off. It waits for
   // `me` to answer on this visit (not the remembered person), and a session found gone there says nothing.
   const signedInAs = meKnown && answer ? answer.login : null;
-  useEffect(() => {
-    const row = openKey ? rowByKey.get(openKey) : undefined;
-    const n = row?.issue;
-    if (!liveOk || !signedInAs || n == null || n <= 0 || (row?.kind !== 'entry' && row?.kind !== 'suggestion')) return;
+  const askVotes = (n: number) => {
     api.myVote(n).then(
       (mine) => noteVotes(n, mine),
       (error) => {
@@ -249,16 +246,41 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
         }
       },
     );
+  };
+  useEffect(() => {
+    const row = openKey ? rowByKey.get(openKey) : undefined;
+    const n = row?.issue;
+    if (!liveOk || !signedInAs || n == null || n <= 0 || (row?.kind !== 'entry' && row?.kind !== 'suggestion')) return;
+    askVotes(n);
     // Re-rendering, or the plan changing under the same open row, does not ask again.
   }, [openKey, openings, liveOk, signedInAs]);
+  // An open row that takes a thread, or whose thread's number changes, asks for that thread and for the person's votes
+  // as an opening does. Rows open independently, so each open row is followed.
+  const threadAsked = useRef(new Map<string, number | null>());
+  useEffect(() => {
+    const asked = threadAsked.current;
+    for (const key of [...asked.keys()]) if (!openKeys.has(key)) asked.delete(key);
+    for (const key of openKeys) {
+      const n = rowByKey.get(key)?.issue ?? null;
+      const before = asked.get(key);
+      asked.set(key, n);
+      // The opening itself asks; only a thread that arrives under a row already open asks here.
+      if (before === undefined || before === n || n === null || n <= 0 || !liveOk) continue;
+      loadDetail(n, true);
+      if (signedInAs) askVotes(n);
+    }
+  }, [rowByKey, openKeys, liveOk, signedInAs]);
 
   // The count the server answered for a write; an older server answers none, and the count shown moves by one.
   const shownRef = useRef(shownState);
   shownRef.current = shownState;
   const count = (answered: unknown, fallback: number) => (typeof answered === 'number' && Number.isInteger(answered) && answered >= 0 ? answered : fallback);
   /** A write the server confirmed: kept, and shown at once over the answer. */
-  const remember = (write: Omit<Write, 'at'>, comment?: Comment) => {
-    keep(write, Date.now(), comment);
+  const sentRef = useRef(0);
+  /** The moment a write is sent, with its place in the order of sending. */
+  const sending$ = () => ({ at: Date.now(), seq: (sentRef.current += 1) });
+  const remember = (write: Omit<Write, 'at' | 'seq'>, sent: { at: number; seq: number }, comment?: Comment) => {
+    keep({ ...write, seq: sent.seq }, Date.now(), comment, sent.at);
     setWritesTick((tick) => tick + 1);
   };
 
@@ -304,28 +326,30 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     setNotice(`${what}: not saved. ${message}`);
   };
 
-  /** What a write on a row names: its thread, or for an entry with none its id. */
+  /** What a write on a row names: for a decision or a feature its id, so the server finds the thread and says when it is closed; a suggestion by its number. */
   const targetOf = (row: Row): Target | null => {
-    if (row.issue !== null && row.issue > 0) return { n: row.issue };
-    return row.kind === 'entry' ? { entry: row.key.slice('entry-'.length) } : null;
+    if (row.kind === 'entry') return { entry: row.key.slice('entry-'.length) };
+    return row.issue !== null && row.issue > 0 ? { n: row.issue } : null;
   };
-  /** The thread a write answered for an entry that had none, or the row's own. */
+  /** The thread a write answered, else the row's own. */
   const threadOf = (row: Row, answered: { n?: unknown } | undefined): number | null => {
-    if (row.issue !== null && row.issue > 0) return row.issue;
     const n = answered?.n;
-    return typeof n === 'number' && Number.isSafeInteger(n) && n > 0 ? n : null;
+    if (typeof n === 'number' && Number.isSafeInteger(n) && n > 0) return n;
+    return row.issue !== null && row.issue > 0 ? row.issue : null;
   };
-  /** The thread as it stood before the write that opened it; the write's own values are set over it. */
-  const opened = (row: Row): Pick<Write, 'opens'> => (row.issue !== null ? {} : {
+  /** The thread as it stood before the write that made or found it; the write's own values are set over it. */
+  const opened = (row: Row, n: number): Pick<Write, 'opens'> => (row.issue === n ? {} : {
     opens: {
       entry: row.key.slice('entry-'.length),
       issue: { kind: 'entry', entry: row.key.slice('entry-'.length), title: row.name, state: 'open', reason: null, up: 0, comments: 0, author: '', bot: true, createdAt: new Date().toISOString(), closedAt: null },
     },
   });
-  /** A refusal because the thread is closed on GitHub shows the row as closed. */
-  const refusedClosed = (row: Row, error: unknown) => {
+  /** A refusal because the thread is closed on GitHub: the row takes the thread the server names, and shows it closed. */
+  const refusedClosed = (row: Row, error: unknown, sent: { at: number; seq: number }) => {
     if (!(error instanceof ApiError && error.status === 403 && error.code === 'closed')) return false;
     setClosedKeys((current) => new Set(current).add(row.key));
+    const n = error.n ?? row.issue;
+    if (n !== null && n > 0 && row.issue !== n) remember({ n, ...opened(row, n), set: {} }, sent);
     return true;
   };
 
@@ -335,6 +359,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     const text = (drafts[row.key] ?? '').trim();
     const own = ownComment(text);
     if (!target || !text || !own) return;
+    const sent = sending$();
     setDrafts((current) => ({ ...current, [row.key]: '' }));
     startSending(row.key, own);
     setAnnounce('Sending comment');
@@ -344,10 +369,10 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
       if (n === null) throw new Error('No thread answered.');
       const confirmed = { ...own, ...(typeof answered?.id === 'number' ? { id: answered.id } : {}), createdAt: new Date().toISOString() };
       confirmComment(row, n, confirmed);
-      remember({ n, ...opened(row), set: { comments: count(answered?.comments, (shownRef.current?.issues[n]?.comments ?? 0) + 1) } }, confirmed);
+      remember({ n, ...opened(row, n), set: { comments: count(answered?.comments, (shownRef.current?.issues[n]?.comments ?? 0) + 1) } }, sent, confirmed);
     } catch (error) {
       setDrafts((current) => ({ ...current, [row.key]: current[row.key] ? current[row.key] : text }));
-      if (!refusedClosed(row, error)) failed('Comment', error);
+      if (!refusedClosed(row, error, sent)) failed('Comment', error);
     } finally {
       stopSending(row.key, own);
     }
@@ -358,6 +383,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     const target = targetOf(row);
     if (!target || !me || votingRef.current.has(row.key)) return;
     votingRef.current.add(row.key);
+    const sent = sending$();
     setVotePending(new Set(votingRef.current));
     setAnnounce('Sending vote');
     try {
@@ -369,9 +395,9 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
       const n = threadOf(row, answered);
       if (n === null) throw new Error('No thread answered.');
       setVotes((current) => ({ ...current, [n]: on }));
-      remember({ n, ...opened(row), set: { up: count(answered?.up, Math.max(0, (shownRef.current?.issues[n]?.up ?? 0) + (on ? 1 : -1))) } });
+      remember({ n, ...opened(row, n), set: { up: count(answered?.up, Math.max(0, (shownRef.current?.issues[n]?.up ?? 0) + (on ? 1 : -1))) } }, sent);
     } catch (error) {
-      if (!refusedClosed(row, error)) failed('Vote', error);
+      if (!refusedClosed(row, error, sent)) failed('Vote', error);
     } finally {
       votingRef.current.delete(row.key);
       setVotePending(new Set(votingRef.current));
@@ -388,10 +414,11 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     if (commentVotingRef.current.has(pending)) return;
     commentVotingRef.current.add(pending);
     setCommentVotePending(new Set(commentVotingRef.current));
-    const set = (up: number, on: boolean) => {
+    // The page's own change to the count: one up or one down, from the count shown now.
+    const bump = (delta: number, on: boolean) => {
       setDetails((current) => {
         const detail = current[n];
-        return typeof detail === 'object' ? { ...current, [n]: { ...detail, comments: detail.comments.map((c) => (c.id === id ? { ...c, up } : c)) } } : current;
+        return typeof detail === 'object' ? { ...current, [n]: { ...detail, comments: detail.comments.map((c) => (c.id === id ? { ...c, up: Math.max(0, (c.up ?? 0) + delta) } : c)) } } : current;
       });
       setCommentVotes((current) => {
         const others = (current[n] ?? []).filter((other) => other !== id);
@@ -408,14 +435,17 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
       }
       const was = mine.includes(id);
       const on = !was;
-      const before = typeof detailRef.current[n] === 'object' ? ((detailRef.current[n] as IssueDetail).comments.find((c) => c.id === id)?.up ?? comment.up ?? 0) : comment.up ?? 0;
-      const guess = Math.max(0, before + (on ? 1 : -1));
-      set(guess, on);
-      revert = () => set(before, was);
+      const delta = on ? 1 : -1;
+      bump(delta, on);
+      revert = () => bump(-delta, was);
       const answered = await api.commentVote(n, id, on);
-      const up = count(answered?.up, guess);
+      const shown = (detailRef.current[n] as IssueDetail | undefined)?.comments.find((c) => c.id === id)?.up ?? 0;
+      const up = count(answered?.up, shown);
       revert = null;
-      set(up, on);
+      setDetails((current) => {
+        const detail = current[n];
+        return typeof detail === 'object' ? { ...current, [n]: { ...detail, comments: detail.comments.map((c) => (c.id === id ? { ...c, up } : c)) } } : current;
+      });
       keepCommentUp(n, id, up, Date.now());
     } catch (error) {
       revert?.();
@@ -432,6 +462,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     const text = suggestDraft.text.trim();
     if (!title || !me || !live.state) return;
     const id = Date.now() + Math.random();
+    const sent = sending$();
     const author = me.login;
     setSuggestionsSending((current) => [...current, { id, title, author }]);
     setSuggestDraft({ title: '', text: '' });
@@ -440,7 +471,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
       const { number } = await api.suggest(title, text);
       const issue: LiveIssue = { kind: 'suggestion', entry: null, title, state: 'open', reason: null, up: 0, comments: 0, author, bot: false, createdAt: new Date().toISOString(), closedAt: null };
       setDetails((current) => ({ ...current, [number]: { number, title, body: text, url: '', up: 0, comments: [] } }));
-      remember({ n: number, set: issue });
+      remember({ n: number, set: issue }, sent);
     } catch (error) {
       setSuggestDraft({ title, text });
       failed('Suggestion', error);

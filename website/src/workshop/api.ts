@@ -40,7 +40,8 @@ export interface IssueDetail {
 }
 
 export class ApiError extends Error {
-  constructor(readonly status: number, readonly code: string, message: string) {
+  /** `n`: the thread, when the server names it in its refusal of a write on an entry. */
+  constructor(readonly status: number, readonly code: string, message: string, readonly n: number | null = null) {
     super(message);
   }
 }
@@ -78,14 +79,16 @@ async function respond<T>(path: string, init?: RequestInit): Promise<{ body: T; 
   if (!response.ok) {
     let code = 'error';
     let message = FALLBACK[response.status] ?? 'Something went wrong.';
+    let n: number | null = null;
     try {
-      const body = (await response.json()) as { error?: unknown; message?: unknown };
+      const body = (await response.json()) as { error?: unknown; message?: unknown; n?: unknown };
       if (typeof body.error === 'string') code = body.error;
+      if (typeof body.n === 'number' && Number.isSafeInteger(body.n) && body.n > 0) n = body.n;
       if (typeof body.message === 'string' && body.message.trim()) message = body.message;
     } catch {
       // The status alone says enough.
     }
-    throw new ApiError(response.status, code, message);
+    throw new ApiError(response.status, code, message, n);
   }
   return { body: (await response.json()) as T, headers: response.headers };
 }

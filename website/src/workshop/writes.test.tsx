@@ -18,11 +18,11 @@ describe('a signed-in person', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
     expect(screen.getByText('Please keep the defaults small.')).toBeInTheDocument();
     expect(within(itemOf('Create and delete a computer')).getByText('💬 3')).toBeInTheDocument();
-    expect(posts(calls, 'comment')[0]).toMatchObject({ body: { n: 12, text: 'Please keep the defaults small.' }, headers: { 'X-Workshop': '1' } });
+    expect(posts(calls, 'comment')[0]).toMatchObject({ body: { entry: 'create', text: 'Please keep the defaults small.' }, headers: { 'X-Workshop': '1' } });
 
     await userEvent.click(within(itemOf('Create and delete a computer')).getByRole('button', { name: /12 votes/ }));
     await waitFor(() => expect(posts(calls, 'vote')).toHaveLength(1));
-    expect(posts(calls, 'vote')[0].body).toEqual({ n: 12, on: true });
+    expect(posts(calls, 'vote')[0].body).toEqual({ entry: 'create', on: true });
     expect(within(itemOf('Create and delete a computer')).getByRole('button', { name: /13 votes/ })).toHaveAttribute('aria-pressed', 'true');
 
     await userEvent.click(screen.getByRole('button', { name: 'Sign out' }));
