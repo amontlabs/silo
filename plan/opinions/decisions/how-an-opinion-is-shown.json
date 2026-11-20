@@ -1,0 +1,15 @@
+{
+  "asks": "How is an opinion shown?",
+  "answer": "As an opinion, with whose it is. It is never shown as a fact.",
+  "sets": [
+    {
+      "in": "opinions/properties",
+      "id": "opinion-never-shown-as-fact",
+      "says": "An opinion is never shown as a fact.",
+      "kind": "safety",
+      "check": [
+        "test"
+      ]
+    }
+  ]
+}

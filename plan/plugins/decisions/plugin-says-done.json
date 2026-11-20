@@ -1,0 +1,6 @@
+{
+  "asks": "Does a plugin with no output still say it is done?",
+  "needs": [
+    "plugin-declaration"
+  ]
+}

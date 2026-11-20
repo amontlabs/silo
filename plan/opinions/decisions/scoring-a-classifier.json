@@ -1,0 +1,4 @@
+{
+  "asks": "How is a new version of a classifier checked before it replaces the old one?",
+  "answer": "Your answers are also test cases. A new version of a classifier is run on the record and compared with your answers before it replaces the old one."
+}

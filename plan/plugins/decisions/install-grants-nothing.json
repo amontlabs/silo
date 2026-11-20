@@ -1,0 +1,19 @@
+{
+  "asks": "Does installing a plugin grant anything?",
+  "answer": "Installing a plugin grants nothing by itself: every grant in it is shown to you and accepted as a grant.",
+  "needs": [
+    "plugin-declaration"
+  ],
+  "sets": [
+    {
+      "in": "plugins/properties",
+      "id": "installing-grants-nothing",
+      "says": "Installing a plugin grants nothing by itself: every grant in it is shown to you and accepted as a grant.",
+      "kind": "safety",
+      "from": "less-sure-less-power",
+      "check": [
+        "model"
+      ]
+    }
+  ]
+}

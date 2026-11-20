@@ -1,0 +1,4 @@
+{
+  "asks": "How does Silo know whether you or an agent did something in a computer?",
+  "answer": "Anything not descended from an agent program is you. A built-in classifier tells the two apart from the process tree, which is a report: its answer is an opinion."
+}

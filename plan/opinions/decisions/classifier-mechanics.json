@@ -1,0 +1,15 @@
+{
+  "asks": "What must hold of a classifier's mechanics, whatever its opinions are worth?",
+  "answer": "For a classifier that is a pattern or a function and reads the record alone, deleting its opinions and computing them again gives the same opinions.",
+  "sets": [
+    {
+      "in": "opinions/properties",
+      "id": "same-record-same-opinions",
+      "says": "For a classifier that is a pattern or a function and reads the record alone, deleting its opinions and computing them again gives the same opinions.",
+      "kind": "safety",
+      "check": [
+        "test"
+      ]
+    }
+  ]
+}

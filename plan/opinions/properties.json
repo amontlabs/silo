@@ -1,0 +1,28 @@
+[
+  {
+    "id": "opinion-stored-apart",
+    "says": "An opinion is stored apart from the record, says whose it is (the classifier's name and version, or you), and can lag behind the record.",
+    "kind": "safety",
+    "check": [
+      "types"
+    ]
+  },
+  {
+    "id": "your-opinion-kept-as-given",
+    "says": "An opinion you gave yourself is kept as you gave it.",
+    "kind": "safety",
+    "check": [
+      "test"
+    ]
+  },
+  {
+    "id": "classifier-never-acts",
+    "says": "A classifier never acts.",
+    "kind": "safety",
+    "from": "less-sure-less-power",
+    "check": [
+      "model",
+      "simulator"
+    ]
+  }
+]

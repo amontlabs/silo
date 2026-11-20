@@ -1,0 +1,8 @@
+{
+  "asks": "What does an added classifier receive?",
+  "answer": "The facts and reports of the computers you name (as a stream and by query), the opinions about them, and whether each computer is running, paused or stopped.",
+  "needs": [
+    "reading-is-a-grant"
+  ],
+  "verdict": "take"
+}

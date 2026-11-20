@@ -1,0 +1,6 @@
+{
+  "asks": "Who fixes the list of values an opinion may take?",
+  "needs": [
+    "opinion-is-a-value"
+  ]
+}

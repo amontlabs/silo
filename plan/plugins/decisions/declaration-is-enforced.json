@@ -1,0 +1,18 @@
+{
+  "asks": "Does Silo enforce what a plugin declares?",
+  "answer": "The declaration is what the user accepts at install and what Silo enforces afterwards.",
+  "needs": [
+    "plugin-declaration"
+  ],
+  "sets": [
+    {
+      "in": "plugins/properties",
+      "id": "declaration-bounds-a-plugin",
+      "says": "The declaration is what the user accepts at install and what Silo enforces afterwards.",
+      "kind": "safety",
+      "check": [
+        "hostile test"
+      ]
+    }
+  ]
+}

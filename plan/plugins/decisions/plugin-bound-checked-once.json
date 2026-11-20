@@ -1,0 +1,4 @@
+{
+  "asks": "How is the bound on an added piece checked?",
+  "answer": "The property that nothing is granted except by you, or by a rule you set, is checked on every sequence of calls of the model of access, by the simulator on the real core, and by hostile tests on the real boundary. It is checked once for Silo, not once per added piece."
+}

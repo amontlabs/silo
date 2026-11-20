@@ -1,0 +1,28 @@
+{
+  "asks": "Which calls may a plugin use?",
+  "answer": "Silo's calls for plugins are few and none acts: read part of a record, give an opinion, show a panel (a view of the record, in the app), ask the user a question. So \"may use: everything\" is safe.",
+  "needs": [
+    "plugin-declaration"
+  ],
+  "sets": [
+    {
+      "in": "words",
+      "word": "panel",
+      "means": "A view of the record, in the app."
+    },
+    {
+      "in": "plugins/properties",
+      "id": "no-plugin-call-acts",
+      "says": "Silo's calls for plugins are few and none acts: read part of a record, give an opinion, show a panel (a view of the record, in the app), ask the user a question.",
+      "kind": "safety",
+      "from": "less-sure-less-power",
+      "check": [
+        "types"
+      ]
+    }
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The current state of the design recommends it and gives no further reason."
+  }
+}

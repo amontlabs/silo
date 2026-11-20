@@ -1,0 +1,7 @@
+{
+  "asks": "How is your answer to a question kept?",
+  "answer": "It is stored as a path pattern and a kind, so it applies to the past as well as the future. Like everything you do in Silo, that you answered is written in the record.",
+  "needs": [
+    "questions-to-you"
+  ]
+}

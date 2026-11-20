@@ -1,0 +1,5 @@
+{
+  "asks": "What is an added classifier?",
+  "answer": "A program that reads the record and gives opinions: a script, a small model, your own agent. Silo is extended by a client of the engine's calls or by a program inside a computer, and nothing loads into the engine or the app at run time.",
+  "verdict": "take"
+}

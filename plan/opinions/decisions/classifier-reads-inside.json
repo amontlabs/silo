@@ -1,0 +1,4 @@
+{
+  "asks": "May a built-in classifier read content inside a computer?",
+  "answer": "A built-in classifier may also read content inside a computer, such as the state of a Git repository. That content is under the agent's control. This is acceptable for an opinion, and it is the reason a rule never reads one. Such an opinion, and one from a model, can come out differently when it is computed again."
+}

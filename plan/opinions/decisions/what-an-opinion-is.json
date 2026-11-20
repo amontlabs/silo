@@ -1,0 +1,9 @@
+{
+  "asks": "What is an opinion, beside the record?",
+  "answer": "An opinion a classifier computed can be deleted and computed again at any time.",
+  "adds": [
+    "opinion-stored-apart",
+    "your-opinion-kept-as-given"
+  ],
+  "verdict": "take"
+}
