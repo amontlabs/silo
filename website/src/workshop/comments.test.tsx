@@ -91,6 +91,10 @@ describe('an opening panel', () => {
       const answer = (n: number) => ok(detail(n, { comments: threadOf(name) }));
       let calls = 0;
       let arrived = false;
+      // A slow answer comes when the test lets it go, so the order of events never depends on the clock.
+      const held: (() => void)[] = [];
+      let let_go = false;
+      const letGo = () => { let_go = true; for (const send of held.splice(0)) send(); };
       mockApi({
         routes: {
           'GET issue': (url) => {
@@ -98,7 +102,12 @@ describe('an opening panel', () => {
             const n = Number(url.searchParams.get('n'));
             if (mode === 'cached') return answer(n);
             if (mode === 'failed then retried' && calls === 1) return refused(502, 'GitHub failed.');
-            return new Promise((resolve) => setTimeout(() => { arrived = true; resolve(answer(n)); }, mode === 'quick' ? HOLD_MS / 4 : HOLD_MS + 100));
+            if (mode === 'quick') return new Promise((resolve) => setTimeout(() => { arrived = true; resolve(answer(n)); }, HOLD_MS / 4));
+            return new Promise((resolve) => {
+              const send = () => { arrived = true; resolve(answer(n)); };
+              if (let_go) send();
+              else held.push(send);
+            });
           },
         },
       });
@@ -135,7 +144,11 @@ describe('an opening panel', () => {
         // A slow panel opens no later than the hold, on its placeholders, and not before the row said it was open.
         await waitFor(() => expect(item.querySelector('.ws-more')).toHaveClass('open'), { timeout: HOLD_MS + 150 });
         if (want.comments > 0) expect(arrived).toBe(false);
+        await waitFor(() => expect(held.length).toBeGreaterThan(0), { timeout: 2000 });
+        letGo();
         await waitFor(() => expect(arrived).toBe(true), { timeout: 2000 });
+        // The thread takes the place of the placeholders once the answer is in, however long the page takes.
+        await waitFor(() => expect(shape(item, want)).toBe('thread'), { timeout: 2000 });
       }
       await waitFor(() => expect(item.querySelector('.ws-more')).toHaveClass('open'), { timeout: HOLD_MS + 150 });
       await wait(HOLD_MS + 20);
