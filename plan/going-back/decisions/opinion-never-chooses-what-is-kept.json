@@ -1,0 +1,8 @@
+{
+  "asks": "May an opinion decide what a checkpoint keeps?",
+  "answer": "No. Leaving history out cannot be undone, so it is destructive, and an opinion triggers only protective actions.",
+  "needs": [
+    "light-checkpoints"
+  ],
+  "verdict": "take"
+}

@@ -1,0 +1,8 @@
+{
+  "asks": "Which of what stays on disk is worth keeping?",
+  "answer": "One question asked of every path: if this vanished, what would bring it back? Anything unknown counts as \"only here\", so a mistake falls on the safe side.",
+  "adds": [
+    "only-here"
+  ],
+  "verdict": "take"
+}

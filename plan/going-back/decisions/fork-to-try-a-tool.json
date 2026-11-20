@@ -1,0 +1,7 @@
+{
+  "asks": "Is a fork made to try a tool or an update?",
+  "answer": "To try a tool or an update before trusting it: install it in a fork, read what it wrote and where it connected, then install it in main, or not, and drop the fork.",
+  "needs": [
+    "when-a-fork-is-made"
+  ]
+}

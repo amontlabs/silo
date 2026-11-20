@@ -1,0 +1,4 @@
+{
+  "name": "Checkpoints with memory",
+  "what": "Checkpoints that keep running programs."
+}

@@ -1,0 +1,5 @@
+{
+  "asks": "Is merging a fork's machine state into main part of the core?",
+  "answer": "Merging a fork's machine state into main, item by item, with conflicts, is not in the core. The view of what changed on a computer since a moment stays, as part of the Disk view.",
+  "verdict": "take"
+}

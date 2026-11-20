@@ -1,0 +1,19 @@
+{
+  "asks": "How long can a dropped computer be brought back?",
+  "answer": "A dropped computer can be brought back until its time in the bin ends. After that nothing of it remains except its record.",
+  "needs": [
+    "drop-and-bin"
+  ],
+  "sets": [
+    {
+      "in": "going-back/properties",
+      "id": "dropped-computer-comes-back",
+      "says": "A dropped computer can be brought back until its time in the bin ends. After that nothing of it remains except its record.",
+      "kind": "safety",
+      "check": [
+        "simulator",
+        "live check"
+      ]
+    }
+  ]
+}

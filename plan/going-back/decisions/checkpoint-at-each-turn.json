@@ -1,0 +1,7 @@
+{
+  "asks": "Is a turn a moment for a checkpoint?",
+  "answer": "When the model traffic can be read, a turn is such a moment.",
+  "needs": [
+    "automatic-checkpoints"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "asks": "How does a fork become main?",
+  "needs": [
+    "how-a-fork-ends",
+    "old-main-kept-aside"
+  ]
+}

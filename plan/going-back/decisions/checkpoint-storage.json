@@ -1,0 +1,15 @@
+{
+  "asks": "Where is a checkpoint stored?",
+  "answer": "A checkpoint is stored where the agent in the computer cannot reach it. It never changes once saved.",
+  "sets": [
+    {
+      "in": "going-back/properties",
+      "id": "checkpoint-never-changes",
+      "says": "A checkpoint never changes, and nothing inside a computer can reach it.",
+      "kind": "safety",
+      "check": [
+        "hostile test"
+      ]
+    }
+  ]
+}

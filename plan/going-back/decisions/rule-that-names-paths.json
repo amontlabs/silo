@@ -1,0 +1,7 @@
+{
+  "asks": "Does Silo offer a rule that names the paths to leave out of long history?",
+  "needs": [
+    "opinion-never-chooses-what-is-kept",
+    "partial-checkpoint-says-so"
+  ]
+}

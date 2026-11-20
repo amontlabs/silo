@@ -1,0 +1,15 @@
+{
+  "asks": "How is a fork kept from acting as its parent?",
+  "answer": "A new identity. Its scheduled jobs and named services are off, so it never repeats what its source does.",
+  "sets": [
+    {
+      "in": "going-back/properties",
+      "id": "fork-never-acts-as-parent",
+      "says": "A fork never acts as its parent.",
+      "kind": "safety",
+      "check": [
+        "live check"
+      ]
+    }
+  ]
+}

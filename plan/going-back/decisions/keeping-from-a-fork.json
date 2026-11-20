@@ -1,0 +1,8 @@
+{
+  "asks": "How is something taken from a fork before it ends?",
+  "answer": "Keeping something from a fork means saving its \"only here\" items: push the commits, copy the few files. There is no merge.",
+  "needs": [
+    "what-would-bring-it-back"
+  ],
+  "verdict": "take"
+}

@@ -1,0 +1,8 @@
+{
+  "asks": "How are checkpoints kept light?",
+  "answer": "Checkpoints stay light: what a rebuild brings back would not need a long history.",
+  "needs": [
+    "what-would-bring-it-back"
+  ],
+  "verdict": "take"
+}

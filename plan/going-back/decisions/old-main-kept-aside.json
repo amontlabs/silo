@@ -1,0 +1,9 @@
+{
+  "asks": "What becomes of the old main when a fork becomes main?",
+  "answer": "The old main is kept aside. If main changed since the fork was made, Silo first shows what is only in the old main.",
+  "needs": [
+    "how-a-fork-ends",
+    "what-would-bring-it-back"
+  ],
+  "verdict": "take"
+}

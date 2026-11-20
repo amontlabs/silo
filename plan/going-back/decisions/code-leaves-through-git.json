@@ -1,0 +1,5 @@
+{
+  "asks": "How does code leave a fork?",
+  "answer": "Code leaves a fork through Git at any time.",
+  "verdict": "take"
+}

@@ -1,0 +1,4 @@
+{
+  "asks": "How is a fork made on each system?",
+  "answer": "On a Linux computer, a fork shares blocks. On a macOS computer, it is a clone of the disk and a cold boot."
+}

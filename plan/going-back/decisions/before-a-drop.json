@@ -1,0 +1,9 @@
+{
+  "asks": "What does Silo show before a fork is dropped?",
+  "answer": "Before the drop, Silo shows what is only here, and chosen files can be brought back to the parent. When \"only here\" is empty, Silo's opinion is that a drop loses nothing. Otherwise Silo shows the list.",
+  "needs": [
+    "how-a-fork-ends",
+    "what-would-bring-it-back"
+  ],
+  "verdict": "take"
+}
