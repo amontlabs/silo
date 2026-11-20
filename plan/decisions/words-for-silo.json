@@ -1,0 +1,9 @@
+{
+  "asks": "Which words name Silo's own pieces?",
+  "adds": [
+    "silo",
+    "engine",
+    "probe"
+  ],
+  "verdict": "take"
+}

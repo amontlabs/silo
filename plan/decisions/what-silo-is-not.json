@@ -1,0 +1,5 @@
+{
+  "asks": "What is Silo not?",
+  "answer": "It is not a sandbox around one process on your own machine, and not a project folder on your Mac. It is not a CI product.",
+  "verdict": "take"
+}

@@ -1,0 +1,12 @@
+{
+  "asks": "Must every addition make the result faster to get or to judge?",
+  "answer": "An addition makes the result faster to get, or faster to judge. If neither, it is later.",
+  "sets": [
+    {
+      "in": "principles",
+      "id": "faster-to-get-or-judge",
+      "says": "An addition makes the result faster to get, or faster to judge. If neither, it is later.",
+      "asks": "Does it make the result faster to get, or faster to judge?"
+    }
+  ]
+}

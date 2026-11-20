@@ -1,0 +1,15 @@
+{
+  "asks": "Is \"a bad state cannot be written down\" a principle for every addition?",
+  "answer": "Yes, with the question in what it sets.",
+  "needs": [
+    "bad-state"
+  ],
+  "sets": [
+    {
+      "in": "principles",
+      "id": "no-bad-state",
+      "says": "A bad state cannot be written down.",
+      "asks": "Which state must never exist, and what keeps it from being written?"
+    }
+  ]
+}

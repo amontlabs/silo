@@ -1,0 +1,13 @@
+{
+  "asks": "Which words name an agent's work?",
+  "adds": [
+    "agent-program",
+    "run",
+    "conversation",
+    "turn",
+    "tool-call",
+    "trace",
+    "login"
+  ],
+  "verdict": "take"
+}

@@ -1,0 +1,15 @@
+{
+  "asks": "Which words name the boundary and what waits there?",
+  "adds": [
+    "boundary",
+    "channel",
+    "allow",
+    "hold",
+    "deny",
+    "synchronous",
+    "asynchronous",
+    "ask",
+    "secret"
+  ],
+  "verdict": "take"
+}

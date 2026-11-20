@@ -1,0 +1,11 @@
+{
+  "asks": "Which words name a computer and what is done to it?",
+  "adds": [
+    "computer",
+    "fresh-computer",
+    "drop",
+    "pause",
+    "stop"
+  ],
+  "verdict": "take"
+}

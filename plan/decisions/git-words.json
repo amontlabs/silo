@@ -1,0 +1,10 @@
+{
+  "asks": "Which words name what Silo does to a computer?",
+  "answer": "The words for computers are Git's: checkpoint, fork, restore.",
+  "adds": [
+    "checkpoint",
+    "fork",
+    "restore"
+  ],
+  "verdict": "take"
+}

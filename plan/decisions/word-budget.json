@@ -1,0 +1,11 @@
+{
+  "asks": "What does \"budget\" mean?",
+  "answer": "A limit on what a computer, a conversation or a run may spend.",
+  "sets": [
+    {
+      "in": "words",
+      "word": "budget",
+      "means": "A limit on what a computer, a conversation or a run may spend."
+    }
+  ]
+}

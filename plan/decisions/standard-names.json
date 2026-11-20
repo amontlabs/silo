@@ -1,0 +1,50 @@
+{
+  "asks": "Do these principles carry their standard names?",
+  "answer": "Yes: no privilege escalation, make illegal states unrepresentable, assume breach, reference monitor, least privilege.",
+  "needs": [
+    "escalation-question",
+    "bad-state-question",
+    "hostile-agent-question",
+    "boundary-limits-question",
+    "what-a-piece-is-given"
+  ],
+  "sets": [
+    {
+      "in": "principles",
+      "id": "no-more-than-it-has",
+      "says": "A computer cannot get more than it has.",
+      "asks": "Does it give a computer more than it has? Then who grants it?",
+      "known_as": "no privilege escalation",
+      "why": "Access is handed down, never up."
+    },
+    {
+      "in": "principles",
+      "id": "no-bad-state",
+      "says": "A bad state cannot be written down.",
+      "asks": "Which state must never exist, and what keeps it from being written?",
+      "known_as": "make illegal states unrepresentable"
+    },
+    {
+      "in": "principles",
+      "id": "agent-is-hostile",
+      "says": "The agent is considered hostile.",
+      "asks": "What can a hostile agent do with it?",
+      "known_as": "assume breach"
+    },
+    {
+      "in": "principles",
+      "id": "limits-at-the-boundary",
+      "says": "Limits are set at the boundary, never inside.",
+      "asks": "Does any limit it sets rest on something inside the computer?",
+      "known_as": "reference monitor"
+    },
+    {
+      "in": "principles",
+      "id": "nothing-without-a-reason",
+      "says": "Nothing is given without a reason: no access, no visibility, no resource.",
+      "asks": "What does it need, and why each?",
+      "known_as": "least privilege",
+      "why": "What it does not have, it cannot leak, misuse or be tricked into using."
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "asks": "Which words name what Silo knows?",
+  "adds": [
+    "record",
+    "fact",
+    "report",
+    "opinion",
+    "classifier"
+  ],
+  "verdict": "take"
+}

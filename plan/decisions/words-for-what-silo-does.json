@@ -1,0 +1,12 @@
+{
+  "asks": "Which words name what Silo does?",
+  "adds": [
+    "rule",
+    "precaution",
+    "granting",
+    "destructive",
+    "protective",
+    "alert"
+  ],
+  "verdict": "take"
+}

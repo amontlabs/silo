@@ -1,0 +1,16 @@
+{
+  "asks": "Why is the kind of an action named first?",
+  "answer": "The kind of an action decides who may trigger it.",
+  "needs": [
+    "questions-for-an-addition"
+  ],
+  "sets": [
+    {
+      "in": "principles",
+      "id": "kind-before-design",
+      "says": "The kind of every action is named before the feature is designed.",
+      "asks": "What kind is each of its actions?",
+      "why": "The kind of an action decides who may trigger it."
+    }
+  ]
+}
