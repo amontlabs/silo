@@ -31,24 +31,6 @@ are the promise.
 - Owner: said by the owner, as an idea or a direction.
 - Proposed: Claude's proposal. The owner has not answered it.
 
-## Statements (shown under the film, each with its mark)
-
-1. [Agreed] A rule is triggered by a fact and reads only facts. It is exact, and it may do anything you wrote in it.
-2. [Agreed] A precaution is triggered by a report or an opinion. It can be wrong, so it takes only reversible actions: it never allows, never resumes and never stops a computer. (You first agreed "pause or stop". Stop is destructive, so a precaution no longer stops a computer.)
-3. [Agreed] Who or what triggers something decides what it may do: the less sure the trigger, the less it may do. You can do anything, at any time. A classifier never acts: its opinion leads to an action only through a precaution you set.
-4. [Agreed] A rule or a precaution is synchronous or asynchronous. Synchronous: the thing waits at the boundary for the answer. Asynchronous: nothing waits, and only the computer is left to act on.
-5. [Owner] Through a precaution, a classifier can be asked synchronously on each tool call a model asks for.
-6. [Agreed] A denied tool call changes the model's reply at the boundary, and Silo records the original and the replacement.
-7. [Owner] A classifier can be fooled, and a rule at the boundary cannot be got around. Rules are the promise, and a precaution is extra caution on top.
-8. [Proposed] That a classifier gave an opinion, or that a precaution acted, is recorded as a fact. No rule is ever triggered by such a fact: it would turn an opinion into a grant by a detour.
-9. [Proposed] The wait for a classifier's opinion has a limit too, and Silo ends it itself.
-10. [Agreed] A budget on a computer, and a budget on a conversation, are rules: the boundary sees both, so they are exact. A budget on a run rests on an opinion (which run a call belongs to), so it is a precaution: it can be wrong and it takes only reversible actions.
-11. [Agreed] What Silo does when the Mac or a computer runs low on memory or disk is a rule, because the meters are facts.
-12. [Owner] What raises an alert or a pause lives outside the computer, and the agent should not know what can trigger it.
-13. [Proposed] Like a rule, a precaution is kept outside the computer, and nothing done inside can change it. What a computer may see of the opinions and precautions about it is open.
-14. [Proposed] A rule holds even when the agent knows it by heart: the only way to trigger it or to avoid it is to really do the thing.
-15. [Agreed] A bad state should be impossible to write down: a precaution's type has no granting or destructive action in it.
-
 ## Words introduced (shown under the statements)
 
 - rule: data you set. It is triggered by a fact, it reads only facts, it is exact, and it may do anything you wrote in it.

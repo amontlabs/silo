@@ -30,23 +30,6 @@ and that every action has one of three kinds.
 - Owner: said by the owner, as an idea or a direction.
 - Proposed: Claude's proposal. The owner has not answered it.
 
-## Statements (shown under the film, each with its mark)
-
-1. [Notes] The boundary is the edge of a computer. A channel is one way through it: the network, ports, files, secrets, the screen, the clipboard, repository access. None exists by default.
-2. [Agreed] One thing waiting at the boundary is allowed, held for your answer, or denied. Everything is denied unless a rule allows it.
-3. [Notes] A hold makes only one thing wait: the thing it is about. The computer keeps running. Your yes is a grant.
-4. [Agreed] Rules have no order. Deny beats hold, hold beats allow, and no rule means deny.
-5. [Agreed] Deny forbids one thing and the computer keeps running. Pause and stop act on a whole computer.
-6. [Agreed] Every action has a kind. Granting: a computer can do something it could not just before. Destructive: it ends or erases something, and that cannot be undone. Reversible: neither, so a wrong one costs only time.
-7. [Owner] Anything added to Silo says the kind of each of its actions before it is designed.
-8. [Owner] A hold always ends: by your answer, when the program closes its connection, or at Silo's own limit.
-9. [Proposed] A thing also passes when you say yes to an ask. Your yes is a grant that only you can make.
-10. [Proposed] Stop, restore and drop are destructive because each ends the programs that were running, which no checkpoint keeps. The disk is not lost.
-11. [Notes] A rule is enforced by the engine, outside the computer. Nothing done inside a computer can change its rules.
-12. [Agreed] Rules that live inside an agent program are not a boundary.
-13. [Proposed] An alert is one more action, never a decision at the boundary. A rule that only alerts decides nothing there: the thing is allowed, held or denied by the other rules, and denied when no rule allows it.
-14. [Proposed] Taking back a secret and closing a network are filed as reversible. If they are, a precaution can do them: an opinion alone could cut a computer's network or take a secret away from it.
-
 ## Words introduced (shown under the statements)
 
 - boundary: the edge of a computer. Everything that enters or leaves it passes through parts of Silo that run outside it.

@@ -29,20 +29,6 @@ does not know.
 - Proposed: Claude's proposal. The owner has not answered it.
 - Owner: said by the owner, as an idea or a direction.
 
-## Statements (shown under the film, each with its mark)
-
-1. [Agreed] A fact is one thing Silo saw itself, from outside the computer. It is written once and never changed.
-2. [Agreed] A report is one thing a program inside the computer told Silo. It is written once, as told, and the agent can interfere with it.
-3. [Agreed] Facts and reports, in the order they came, are the record. Nothing in it is changed afterwards.
-4. [Proposed] A line never mixes the two: that a file changed is a fact, and which process changed it is a report that points to that fact.
-5. [Agreed] An opinion is what a classifier, or you, think about the record. It is kept apart from the record, it can be wrong, and it says whose it is. A classifier's opinion is computed from the record, and computed again when the classifier improves.
-6. [Agreed] A classifier is whatever gives an opinion: a pattern, a function, a small model, an agent. It never acts.
-7. [Proposed] Something computed is as sure as its least sure ingredient. A count of facts is as good as a fact, a count of reports is still as told, and it becomes an opinion only when a judgement enters.
-8. [Agreed] A report or an opinion is never stored as a fact.
-9. [Agreed] What the inside reports is set against what Silo saw. What is left over is shown as "unattributed" and is never spread over the rest. Where Silo lost sight, it records a gap.
-10. [Owner] An agent program can also give its own account of what it did. That account is a report too. Setting it against what Silo saw is optional, and how it is built is not settled.
-11. [Proposed] An opinion you gave yourself is kept as you gave it, until you change it. It is never computed again, and it is still an opinion: it can be wrong.
-
 ## Words introduced (shown under the statements)
 
 - fact: one thing Silo saw itself, from outside the computer. Written once.

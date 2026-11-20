@@ -17,16 +17,6 @@ what the core does, what an event and an effect are, and why "wanted" and "seen"
 - Title: One call through the engine
 - Answer: A click becomes one input. The core turns it into new state, an event and an effect.
 
-## Statements (shown under the film, each with the mark "Notes")
-
-1. The engine's state is a few small tables of plain rows. A computer is one row: its number, its name, what is wanted and what was last seen.
-2. Nothing changes the state except an input handled by the core, one at a time. A call from the app is an input. So is a driver's answer, and what a driver sees when a machine stops by itself.
-3. The core is a function. It takes the state and an input, and returns the new state, events and effects. It touches no disk and no network.
-4. An event is a numbered line that says what happened. The app follows the events to know the state.
-5. An effect is a request to a driver. It has no return value. The answer, or a timeout, comes back later as an input.
-6. Each row keeps what is wanted and what was last seen. While they differ, the core issues effects to make them match, or says what it is waiting for. What it does when a computer stops by itself is still open.
-7. The same inputs in the same order always give the same state and the same events. Time and randomness are inputs too.
-
 ## Words introduced (shown under the statements)
 
 - state: what the engine knows right now, kept in tables.
