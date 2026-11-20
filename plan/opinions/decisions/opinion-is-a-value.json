@@ -1,0 +1,8 @@
+{
+  "asks": "What shape does an opinion have?",
+  "answer": "An opinion is a value from a short fixed list, such as safe, not safe, unsure, with an optional explanation in words. A precaution reads only the value. No rule and no precaution reads the explanation, and the app shows it as untrusted text.",
+  "suggest": {
+    "verdict": "take",
+    "why": "The current state of the design recommends it and gives no further reason."
+  }
+}

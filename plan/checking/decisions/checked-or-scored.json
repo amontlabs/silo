@@ -1,0 +1,4 @@
+{
+  "asks": "How is something checked when its right answer is an opinion?",
+  "answer": "A function can only be checked against a statement of what it must do. Where such a statement exists, it is tested or proved. Where the answer is an opinion, it is scored."
+}

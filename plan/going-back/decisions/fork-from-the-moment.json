@@ -1,0 +1,5 @@
+{
+  "asks": "How do you go back on a main shared by several agents?",
+  "answer": "On a main shared by several agents you do not rewind. You fork from the moment. The past is read-only, you continue from it in a fork, main loses nothing, and the result leaves the fork through Git.",
+  "verdict": "take"
+}

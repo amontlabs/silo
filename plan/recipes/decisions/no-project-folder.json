@@ -1,0 +1,5 @@
+{
+  "asks": "Is Silo a folder in a repository?",
+  "answer": "A `.silo` folder in a repository on the Mac, with a flow that starts from a project folder, is not what Silo is.",
+  "verdict": "take"
+}

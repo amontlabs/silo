@@ -1,0 +1,7 @@
+{
+  "asks": "Do assertions stay on in release builds?",
+  "answer": "Assertions stay on in release builds. On a broken assumption the engine stops and restarts from saved state.",
+  "needs": [
+    "when-the-engine-stops"
+  ]
+}

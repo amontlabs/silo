@@ -1,0 +1,7 @@
+{
+  "asks": "When are measurements published?",
+  "answer": "Measurements are published once they hold, each dated and on a named machine.",
+  "needs": [
+    "how-speed-is-measured"
+  ]
+}

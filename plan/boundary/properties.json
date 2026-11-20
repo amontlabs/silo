@@ -1,0 +1,26 @@
+[
+  {
+    "id": "record-shows-what-was-sent",
+    "says": "The record shows what was sent to each host for the traffic Silo opens, and the sizes for the rest, not only which hosts were reached.",
+    "kind": "safety",
+    "check": [
+      "live check"
+    ]
+  },
+  {
+    "id": "new-host-raises-an-alert",
+    "says": "A host seen for the first time raises an alert.",
+    "kind": "safety",
+    "check": [
+      "simulator"
+    ]
+  },
+  {
+    "id": "denied-attempts-are-recorded",
+    "says": "Denied attempts are recorded: the host and the time as facts, the process as a report.",
+    "kind": "safety",
+    "check": [
+      "simulator"
+    ]
+  }
+]

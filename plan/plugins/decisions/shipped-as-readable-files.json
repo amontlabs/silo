@@ -1,0 +1,7 @@
+{
+  "asks": "How are the classifiers and precautions that ship with Silo shipped?",
+  "answer": "Shipping them as files anyone can read.",
+  "needs": [
+    "what-ships-with-silo"
+  ]
+}

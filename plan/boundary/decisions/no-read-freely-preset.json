@@ -1,0 +1,4 @@
+{
+  "asks": "Does Silo offer a preset that lets reads pass and holds writes?",
+  "answer": "A blanket preset \"read freely, hold every write\" is not offered, because a read carries data out too."
+}

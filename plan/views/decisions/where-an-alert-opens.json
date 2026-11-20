@@ -1,0 +1,7 @@
+{
+  "asks": "Where does an alert lead?",
+  "answer": "An alert opens here, on what triggered it, and on the turn that led to it when there is one.",
+  "needs": [
+    "timeline-place"
+  ]
+}

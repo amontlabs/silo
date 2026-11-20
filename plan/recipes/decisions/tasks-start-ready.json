@@ -1,0 +1,5 @@
+{
+  "asks": "What does a task started from outside wait for?",
+  "answer": "A task started from outside starts from a recipe or a checkpoint, so it has no setup to wait for. Updating main after a pull request merges is an ordinary pull, not a Silo feature.",
+  "verdict": "take"
+}

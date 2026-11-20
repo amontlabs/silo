@@ -1,0 +1,5 @@
+{
+  "asks": "How can a classifier's opinion lead to an action?",
+  "answer": "A classifier never acts. Its opinion leads to an action only through a precaution you set.",
+  "verdict": "take"
+}

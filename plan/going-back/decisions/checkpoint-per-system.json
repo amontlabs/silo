@@ -1,0 +1,4 @@
+{
+  "asks": "What is a checkpoint made of on each system?",
+  "answer": "On a Linux computer, a snapshot of the disk. On a macOS computer, a clone of the disk."
+}

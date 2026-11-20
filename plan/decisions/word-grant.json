@@ -1,0 +1,11 @@
+{
+  "asks": "What does \"grant\" mean?",
+  "answer": "To give a computer the ability to do something.",
+  "sets": [
+    {
+      "in": "words",
+      "word": "grant",
+      "means": "To give a computer the ability to do something."
+    }
+  ]
+}

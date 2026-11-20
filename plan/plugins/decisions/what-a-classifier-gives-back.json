@@ -1,0 +1,5 @@
+{
+  "asks": "What does an added classifier give back?",
+  "answer": "Opinions, each pointing at the lines of the record that led to it, so that an alert opens on what triggered it, and on the turn that led to it when there is one. Questions to you.",
+  "verdict": "take"
+}

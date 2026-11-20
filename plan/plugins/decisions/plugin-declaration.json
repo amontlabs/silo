@@ -1,0 +1,20 @@
+{
+  "asks": "What is a plugin?",
+  "answer": "A plugin has a structure that must match what Silo supports. It says when it is triggered, what its input is, where it runs, what its output is, and the rules, and perhaps the precautions, that come with it. Those are put forward at install and accepted explicitly. What happens inside can be anything. Silo provides calls a plugin may use, and a plugin states which it uses, which can be all of them.",
+  "sets": [
+    {
+      "in": "words",
+      "word": "plugin",
+      "means": "A program with a declaration."
+    },
+    {
+      "in": "words",
+      "word": "declaration",
+      "means": "What a plugin says of itself, which the user accepts at install and Silo enforces afterwards. Its standard name is a manifest."
+    }
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The current state of the design recommends it and gives no further reason."
+  }
+}

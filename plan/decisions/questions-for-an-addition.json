@@ -1,0 +1,9 @@
+{
+  "asks": "Which questions does every addition to Silo answer?",
+  "answer": "What kind is each of its actions? What triggers it? What are its bad paths?",
+  "adds": [
+    "less-sure-less-power",
+    "kind-before-design"
+  ],
+  "verdict": "take"
+}

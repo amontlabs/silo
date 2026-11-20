@@ -1,0 +1,5 @@
+{
+  "asks": "Who sets a computer's network policy?",
+  "answer": "The network policy is set by the user, with requests from the agent.",
+  "verdict": "take"
+}

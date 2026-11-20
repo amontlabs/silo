@@ -1,0 +1,7 @@
+{
+  "asks": "What may the core depend on?",
+  "answer": "No dependencies in the core. Established tools sit behind drivers. A new VM engine or device type is a driver, with a fault model and a fake, added without changing the core.",
+  "needs": [
+    "engine-shape"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "asks": "Is every channel a question for an addition?",
+  "answer": "Yes: if something crosses a computer's boundary, who grants it, and what do you see first?",
+  "sets": [
+    {
+      "in": "principles",
+      "id": "every-crossing-is-a-channel",
+      "says": "Every channel through a computer's boundary is listed, has a rule, and none exists by default.",
+      "asks": "Is it a channel? If something crosses a computer's boundary: who grants it, and what do you see first?",
+      "why": "With a virtual machine the boundary is rarely what fails. The channels opened on purpose are."
+    }
+  ]
+}

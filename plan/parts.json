@@ -1,0 +1,67 @@
+[
+  {
+    "id": "computers",
+    "title": "Computers",
+    "line": "A whole virtual machine where your agents work: main, forks and fresh computers, on macOS or Linux."
+  },
+  {
+    "id": "boundary",
+    "title": "The boundary",
+    "line": "The edge of a computer: its channels, and what happens to a request that waits there."
+  },
+  {
+    "id": "record",
+    "title": "The record",
+    "line": "What Silo writes down about a computer: facts and reports, written once."
+  },
+  {
+    "id": "opinions",
+    "title": "Opinions and classifiers",
+    "line": "What a classifier, or you, think about the record. It can be wrong, so it is kept apart."
+  },
+  {
+    "id": "rules",
+    "title": "Rules and precautions",
+    "line": "What Silo does by itself: a rule on a fact, a precaution on a report or an opinion."
+  },
+  {
+    "id": "plugins",
+    "title": "What you can add",
+    "line": "What someone else made, and you add."
+  },
+  {
+    "id": "traffic",
+    "title": "Model traffic and spend",
+    "line": "What an agent program and its model provider say to each other, read at the boundary: model calls, spend, budgets."
+  },
+  {
+    "id": "going-back",
+    "title": "Going back",
+    "line": "Checkpoints taken on their own, restore, forks, and what would bring a path back."
+  },
+  {
+    "id": "views",
+    "title": "What you see",
+    "line": "A short ranked list of what needs you, and four places to look."
+  },
+  {
+    "id": "recipes",
+    "title": "Recipes and tasks",
+    "line": "A text that makes a computer, and a command run in one, with an end."
+  },
+  {
+    "id": "agent-programs",
+    "title": "Agent programs",
+    "line": "The vendors' programs: how they run in a computer, sign in, and are reached from your Mac."
+  },
+  {
+    "id": "engine",
+    "title": "The engine",
+    "line": "The core piece. Everything else only talks to it."
+  },
+  {
+    "id": "checking",
+    "title": "How it is checked",
+    "line": "How Silo shows that a property holds."
+  }
+]

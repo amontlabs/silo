@@ -1,0 +1,4 @@
+{
+  "asks": "How is the result of a check stated?",
+  "answer": "Say what was checked and how: \"checked on every sequence of up to N calls\", \"held in these runs\". Never \"proven\" for the product."
+}

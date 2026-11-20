@@ -1,0 +1,11 @@
+{
+  "asks": "What is a receipt?",
+  "answer": "A receipt is the account of one run, one task or one fork. It is made from the record. The agent does not write it. Its job is to turn an hour of agent work into something a person can judge in a minute.",
+  "sets": [
+    {
+      "in": "words",
+      "word": "receipt",
+      "means": "The account of one run, one task or one fork, made from the record and not by the agent."
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  "asks": "Can a rule deny a tool call by its text?",
+  "answer": "A rule can deny a tool call too, by its exact text. Such a rule is exact about the text only: the same action written another way does not match it. The rule says so as its worst case."
+}

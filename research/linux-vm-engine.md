@@ -2,7 +2,7 @@
 
 Research of 19 November 2026. Every fact is dated by its source; facts change, so check the date
 before relying on one. The design's summary and what is still open are in
-[DESIGN.md, section 9.10](../plan/DESIGN.md#910-the-vm-engine-for-linux-computers-research-19-november-2026).
+[the notes of the decision `linux-vm-engine`](../plan/engine/decisions/linux-vm-engine.md).
 
 The question: which engine runs Silo's Linux computers, on a Mac now and on a Linux host later.
 The candidates that matter are MicroSandbox, libkrun (which MicroSandbox is built on), Apple's

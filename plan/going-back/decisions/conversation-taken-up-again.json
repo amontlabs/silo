@@ -1,0 +1,7 @@
+{
+  "asks": "Can an agent program take its conversation up again after a restore or a fork?",
+  "answer": "An agent program can take the conversation up again there.",
+  "needs": [
+    "whole-computer-grain"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "asks": "What does \"gap\" mean?",
+  "answer": "What was not seen, recorded as such.",
+  "sets": [
+    {
+      "in": "words",
+      "word": "gap",
+      "means": "What was not seen, recorded as such."
+    }
+  ]
+}

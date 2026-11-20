@@ -1,0 +1,5 @@
+{
+  "asks": "Where do computers run?",
+  "answer": "Silo is not limited to devices the user owns. Computers run on the user's own machine first, then on a shared server or in a cloud, and Silo will probably offer a cloud of its own.",
+  "verdict": "take"
+}

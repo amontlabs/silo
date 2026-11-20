@@ -1,0 +1,11 @@
+{
+  "asks": "What does an agent get back when a hold ends without your answer?",
+  "answer": "A hold waits for your answer. If it ends without one, for any reason, the request is refused with a message that says it was held and not answered.",
+  "needs": [
+    "hold-limit"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It covers the owner's two cases: a hold that times out, and one cancelled from inside the computer."
+  }
+}

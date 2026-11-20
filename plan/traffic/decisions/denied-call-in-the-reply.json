@@ -1,0 +1,8 @@
+{
+  "asks": "What happens to the model's reply when Silo denies a tool call?",
+  "answer": "A denied tool call changes the model's reply at the boundary, before the agent program reads it: the tool call is replaced by a refusal. The agent program sends it back with its next request, and the model reads it there. Silo never changes traffic silently: the original and the replacement are both facts.",
+  "adds": [
+    "no-silent-change-to-traffic"
+  ],
+  "verdict": "take"
+}

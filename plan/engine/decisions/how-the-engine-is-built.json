@@ -1,0 +1,4 @@
+{
+  "asks": "How is the engine built?",
+  "answer": "Verification comes first: the simulator and the checks before the features. The first engine files become the pattern every later agent copies, so a person reads those line by line. Coding conventions are mechanical checks, not text in a prompt. A property's statement is written by a person."
+}

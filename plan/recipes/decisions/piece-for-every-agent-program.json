@@ -1,0 +1,7 @@
+{
+  "asks": "How is a piece written once for every agent program?",
+  "answer": "Most pieces are the same for every agent program. Some have a part that differs, because each program keeps its instructions and skills in a different place. The data file of an agent program also says where the program keeps its instructions and skills, so that a piece is written once for every program.",
+  "needs": [
+    "recipe-pieces"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "asks": "Which words name what Silo does?",
+  "answer": "Two words. They say what triggers a thing.",
+  "adds": [
+    "rule",
+    "precaution",
+    "granting",
+    "destructive",
+    "protective"
+  ],
+  "verdict": "take"
+}

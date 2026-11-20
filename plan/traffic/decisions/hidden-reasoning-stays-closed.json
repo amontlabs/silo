@@ -1,0 +1,4 @@
+{
+  "asks": "Does Silo open the model's hidden reasoning?",
+  "answer": "The model's hidden reasoning is never opened. The record says that it passed, and its size."
+}

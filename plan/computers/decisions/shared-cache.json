@@ -1,0 +1,4 @@
+{
+  "asks": "May several computers write to one cache?",
+  "answer": "A cache that several computers can write to is a path between them. It stays out until it has been measured."
+}

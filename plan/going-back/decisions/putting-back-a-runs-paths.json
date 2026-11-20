@@ -1,0 +1,8 @@
+{
+  "asks": "How are one run's paths put back?",
+  "answer": "Silo lists what the run changed, as an opinion. Paths that nobody touched since go back in one step. The others are shown.",
+  "needs": [
+    "one-run-grain"
+  ],
+  "verdict": "take"
+}

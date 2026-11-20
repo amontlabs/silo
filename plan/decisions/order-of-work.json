@@ -1,0 +1,4 @@
+{
+  "asks": "In what order is Silo built?",
+  "answer": "In the order that `order.json` holds, built from the lines in these notes."
+}

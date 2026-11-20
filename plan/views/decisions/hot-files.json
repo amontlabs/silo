@@ -1,0 +1,5 @@
+{
+  "asks": "Does Silo show which paths several runs touch?",
+  "answer": "Hot files: Silo can show which paths every run touches and who is writing what now. Silo ships that map. It does not build the part that splits work between agents.",
+  "verdict": "take"
+}

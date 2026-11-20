@@ -1,0 +1,4 @@
+{
+  "asks": "What does a fork store of its parent's disk?",
+  "answer": "A fork shares its parent's disk at block level and stores only what changes afterwards. So a fork starts with main's build output and pays only for what it rebuilds."
+}

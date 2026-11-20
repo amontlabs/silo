@@ -1,0 +1,15 @@
+{
+  "asks": "Is \"Silo never fills a hole\" a principle for every addition?",
+  "answer": "Yes, with the question in what it sets.",
+  "needs": [
+    "holes"
+  ],
+  "sets": [
+    {
+      "in": "principles",
+      "id": "never-fills-a-hole",
+      "says": "Silo never fills a hole.",
+      "asks": "What does it show when it does not know?"
+    }
+  ]
+}

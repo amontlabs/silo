@@ -1,0 +1,5 @@
+{
+  "asks": "Which language is the engine written in?",
+  "answer": "Zig. The engine is the core piece: performant, secure, easy to reason about. The app, the command line and every tool only talk to it.",
+  "verdict": "take"
+}

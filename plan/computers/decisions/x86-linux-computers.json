@@ -1,0 +1,4 @@
+{
+  "asks": "Where does an x86 Linux computer run?",
+  "answer": "On a Mac, a Linux computer is arm64. Real x86 Linux needs a Linux device as host."
+}

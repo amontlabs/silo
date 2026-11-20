@@ -1,0 +1,11 @@
+{
+  "asks": "Does what ships with Silo use the same declaration?",
+  "answer": "What ships with Silo uses the same declaration: the classifiers, rules and precautions that come installed.",
+  "needs": [
+    "plugin-declaration"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Then the declaration is proven on Silo's own plugins, and they get the same limits."
+  }
+}

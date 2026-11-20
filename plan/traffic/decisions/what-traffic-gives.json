@@ -1,0 +1,4 @@
+{
+  "asks": "What does Silo learn from model traffic?",
+  "answer": "Spend per conversation, budgets that deny, the model that really answered, the tool calls and the turns all come from the traffic between an agent program and its model provider. Telling \"stuck\" from \"working\" comes from that traffic together with the reports of processes."
+}

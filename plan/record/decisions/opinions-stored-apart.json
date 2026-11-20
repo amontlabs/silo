@@ -1,0 +1,4 @@
+{
+  "asks": "How are opinions stored?",
+  "answer": "Opinions are stored apart, with the classifier's version. Deleting every opinion that a pattern or a function computed from the record alone loses nothing."
+}

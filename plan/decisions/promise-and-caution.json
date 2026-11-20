@@ -1,0 +1,14 @@
+{
+  "asks": "Are the rules the promise?",
+  "answer": "The rules are the promise, and a precaution is extra caution on top of them.",
+  "sets": [
+    {
+      "in": "principles",
+      "id": "rules-are-the-promise",
+      "says": "The rules are the promise, and a precaution is extra caution on top of them.",
+      "asks": "Is it a promise or a caution, and does the user see which?",
+      "known_as": "prevention and detection",
+      "why": "A classifier can be fooled, and a rule at the boundary cannot be got around."
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "asks": "What comes back to a computer when Silo refuses a request?",
+  "answer": "When Silo refuses a request, what comes back says so: denied, or not answered. A computer sees nothing else of what watches it.",
+  "sets": [
+    {
+      "in": "words",
+      "word": "refusal",
+      "means": "What comes back to a computer when Silo refuses a request: denied, or not answered."
+    }
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It is worded from the owner's correction."
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "asks": "What does the core know about agents?",
+  "answer": "The core holds nothing about agents.",
+  "needs": [
+    "engine-shape"
+  ]
+}

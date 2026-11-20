@@ -1,0 +1,5 @@
+{
+  "asks": "Are properties checked as Silo is built?",
+  "answer": "Properties are stated and checked as we build: state properties, formal verification, whatever shows what always holds.",
+  "verdict": "take"
+}

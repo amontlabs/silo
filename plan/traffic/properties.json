@@ -1,0 +1,10 @@
+[
+  {
+    "id": "no-silent-change-to-traffic",
+    "says": "Silo changes nothing in traffic without recording the change.",
+    "kind": "safety",
+    "check": [
+      "hostile test"
+    ]
+  }
+]

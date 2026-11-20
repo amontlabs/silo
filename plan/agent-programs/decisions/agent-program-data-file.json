@@ -1,0 +1,4 @@
+{
+  "asks": "What does Silo need to know about an agent program?",
+  "answer": "What Silo needs to know about a program is a small data file: its name, where it keeps its sessions, how it takes a conversation up again."
+}

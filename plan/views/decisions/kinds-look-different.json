@@ -1,0 +1,8 @@
+{
+  "asks": "How does the app show what Silo knows?",
+  "answer": "Facts, reports and opinions look different on screen.",
+  "adds": [
+    "never-shown-as-a-fact"
+  ],
+  "verdict": "take"
+}

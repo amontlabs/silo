@@ -1,0 +1,5 @@
+{
+  "asks": "What does going back promise for one run inside a shared main?",
+  "answer": "One run inside a shared main gets a smaller promise: put back these paths.",
+  "verdict": "take"
+}

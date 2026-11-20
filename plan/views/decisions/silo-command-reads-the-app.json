@@ -1,0 +1,5 @@
+{
+  "asks": "Can a program read what the app shows?",
+  "answer": "Everything the app shows can be read with the `silo` command, as plain text that a program can parse. An agent can then answer \"what did that run do\" from the record and not from guessing.",
+  "verdict": "take"
+}

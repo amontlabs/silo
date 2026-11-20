@@ -1,0 +1,5 @@
+{
+  "asks": "What may a rule do?",
+  "answer": "A rule is triggered by a fact. It is exact, and it may do anything you wrote in it.",
+  "verdict": "take"
+}

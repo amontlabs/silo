@@ -1,0 +1,8 @@
+{
+  "asks": "How is one run's work put back inside a repository?",
+  "answer": "Inside a repository, Git is the tool, and Silo says which commits came from which run, as an opinion.",
+  "needs": [
+    "one-run-grain"
+  ],
+  "verdict": "take"
+}

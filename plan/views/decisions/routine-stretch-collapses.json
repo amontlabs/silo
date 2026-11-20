@@ -1,0 +1,7 @@
+{
+  "asks": "How does the timeline show a routine stretch?",
+  "answer": "A routine stretch collapses into one line with a count. Decisions and thrashing stay visible.",
+  "needs": [
+    "timeline-place"
+  ]
+}

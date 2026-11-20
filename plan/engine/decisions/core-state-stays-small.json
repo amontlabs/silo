@@ -1,0 +1,7 @@
+{
+  "asks": "Where is the history of a computer kept?",
+  "answer": "The record is also the history and the audit journal. The core's own saved state stays small.",
+  "needs": [
+    "two-paths"
+  ]
+}

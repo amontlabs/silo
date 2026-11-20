@@ -1,0 +1,7 @@
+{
+  "asks": "How are old automatic checkpoints thinned?",
+  "answer": "Old automatic checkpoints are thinned by a rule on their age and number, which are facts, and removing them really frees space.",
+  "needs": [
+    "automatic-checkpoints"
+  ]
+}

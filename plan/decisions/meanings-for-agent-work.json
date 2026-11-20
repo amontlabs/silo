@@ -1,0 +1,30 @@
+{
+  "asks": "What do these words for an agent's work mean: agent program, tool call, login?",
+  "needs": [
+    "words-for-agent-work"
+  ],
+  "sets": [
+    {
+      "in": "words",
+      "word": "agent program",
+      "means": "Claude Code, Codex and the like.",
+      "not": [
+        "harness"
+      ]
+    },
+    {
+      "in": "words",
+      "word": "tool call",
+      "means": "One thing a turn asked for: a command, a file edit, a search."
+    },
+    {
+      "in": "words",
+      "word": "login",
+      "means": "A sign-in to a model provider, by subscription or by key."
+    }
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The word is agreed; this meaning is the record's own word list, which carries no mark."
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "asks": "In which format is a recipe written?",
+  "answer": "A recipe is written in an existing format that people know and models write correctly. Making one can start from a project's Dockerfile or devcontainer."
+}

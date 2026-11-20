@@ -1,0 +1,5 @@
+{
+  "asks": "Are reads of files recorded?",
+  "answer": "Reads of files are not recorded: a build reads everything, and it would be noise. What entered a model's context is counted in the model traffic, in tokens.",
+  "verdict": "take"
+}

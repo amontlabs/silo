@@ -1,0 +1,13 @@
+[
+  {
+    "id": "less-sure-less-power",
+    "says": "The less sure the trigger, the less it may do.",
+    "asks": "What triggers it: you, a fact, or something less sure?",
+    "why": "A wrong grant lets something out that cannot be taken back. A wrong pause costs time."
+  },
+  {
+    "id": "kind-before-design",
+    "says": "The kind of every action is named before the feature is designed.",
+    "asks": "What kind is each of its actions?"
+  }
+]

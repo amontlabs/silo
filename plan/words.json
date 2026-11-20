@@ -1,0 +1,112 @@
+[
+  {
+    "word": "main",
+    "means": "One long-lived computer where your agents work."
+  },
+  {
+    "word": "bin",
+    "means": "Where a dropped computer waits."
+  },
+  {
+    "word": "probe",
+    "means": "A small part of Silo that runs inside the computer."
+  },
+  {
+    "word": "boundary",
+    "means": "The edge of a computer.",
+    "not": [
+      "door"
+    ]
+  },
+  {
+    "word": "channel",
+    "means": "One way through the boundary.",
+    "not": [
+      "door"
+    ]
+  },
+  {
+    "word": "record",
+    "means": "Facts and reports are written once, and together they are the record."
+  },
+  {
+    "word": "fact",
+    "means": "One thing Silo saw itself, from outside the computer. Written once.",
+    "not": [
+      "outside fact"
+    ]
+  },
+  {
+    "word": "report",
+    "means": "One thing a program inside the computer told Silo. Written once. An agent with full access can interfere with it.",
+    "not": [
+      "inside fact"
+    ]
+  },
+  {
+    "word": "opinion",
+    "means": "What a classifier, or you, think about facts and reports. It can be wrong, and it says whose it is.",
+    "not": [
+      "label"
+    ]
+  },
+  {
+    "word": "classifier",
+    "means": "Whatever gives an opinion."
+  },
+  {
+    "word": "rule",
+    "means": "A rule is triggered by a fact. It is exact, and it may do anything you wrote in it."
+  },
+  {
+    "word": "precaution",
+    "means": "A precaution is triggered by a report or an opinion. It can be wrong, so it takes only protective actions."
+  },
+  {
+    "word": "granting",
+    "means": "Said of an action after which a computer can do something it could not just before."
+  },
+  {
+    "word": "destructive",
+    "means": "Said of an action that ends or erases something, and that cannot be undone."
+  },
+  {
+    "word": "protective",
+    "means": "Said of an action that grants nothing and destroys nothing. A wrong one costs only time.",
+    "not": [
+      "reversible"
+    ]
+  },
+  {
+    "word": "synchronous",
+    "means": "The request waits at the boundary for the answer."
+  },
+  {
+    "word": "asynchronous",
+    "means": "Nothing waits."
+  },
+  {
+    "word": "run",
+    "means": "One launch of an agent program, and every process descended from it."
+  },
+  {
+    "word": "conversation",
+    "means": "A sequence of turns with one model."
+  },
+  {
+    "word": "turn",
+    "means": "One reply of the model."
+  },
+  {
+    "word": "tool call",
+    "means": "One thing the reply asked for."
+  },
+  {
+    "word": "trace",
+    "means": "What it left: processes, file changes, connections."
+  },
+  {
+    "word": "engine",
+    "means": "The core piece of Silo. The app, the command line and every tool only talk to it."
+  }
+]

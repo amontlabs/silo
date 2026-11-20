@@ -1,0 +1,5 @@
+{
+  "asks": "How is speed measured?",
+  "answer": "Measure distributions, with repeated interleaved runs. One run before and one after proves nothing on a laptop.",
+  "verdict": "take"
+}

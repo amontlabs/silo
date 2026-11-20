@@ -1,0 +1,5 @@
+{
+  "asks": "Is a denied tool call matched to the agent's next call?",
+  "answer": "A denied tool call is not matched to the agent's next call. Each call is judged on its own.",
+  "verdict": "take"
+}

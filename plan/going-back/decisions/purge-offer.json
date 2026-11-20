@@ -1,0 +1,8 @@
+{
+  "asks": "What does purge offer?",
+  "answer": "Purge offers what a rebuild brings back, biggest first.",
+  "needs": [
+    "what-would-bring-it-back"
+  ],
+  "verdict": "take"
+}

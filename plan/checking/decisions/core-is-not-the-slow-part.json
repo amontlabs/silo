@@ -1,0 +1,5 @@
+{
+  "asks": "Which part of Silo is the slow part?",
+  "answer": "The core will never be the slow part. Starting virtual machines, copying disks and the network are.",
+  "verdict": "take"
+}

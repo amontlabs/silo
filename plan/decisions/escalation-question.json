@@ -1,0 +1,16 @@
+{
+  "asks": "Is \"a computer cannot get more than it has\" a principle for every addition?",
+  "answer": "Yes, with the question in what it sets.",
+  "needs": [
+    "what-an-agent-inside-may-do"
+  ],
+  "sets": [
+    {
+      "in": "principles",
+      "id": "no-more-than-it-has",
+      "says": "A computer cannot get more than it has.",
+      "asks": "Does it give a computer more than it has? Then who grants it?",
+      "why": "Access is handed down, never up."
+    }
+  ]
+}

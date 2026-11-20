@@ -1,0 +1,15 @@
+{
+  "asks": "May keeping the record make a computer wait?",
+  "answer": "Observing never makes a computer wait. Enforcing may: a connection waits for its rule. So may a synchronous precaution.",
+  "sets": [
+    {
+      "in": "record/properties",
+      "id": "observing-never-waits",
+      "says": "Observing never makes a computer wait.",
+      "kind": "safety",
+      "check": [
+        "live check"
+      ]
+    }
+  ]
+}

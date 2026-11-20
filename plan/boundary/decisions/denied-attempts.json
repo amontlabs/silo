@@ -1,0 +1,8 @@
+{
+  "asks": "What does the record keep of a denied attempt to reach a host?",
+  "answer": "Denied attempts are recorded: the host and the time as facts, the process as a report.",
+  "adds": [
+    "denied-attempts-are-recorded"
+  ],
+  "verdict": "take"
+}

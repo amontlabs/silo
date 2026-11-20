@@ -1,0 +1,15 @@
+{
+  "asks": "What does the engine give up when a failure forces a choice?",
+  "answer": "When a failure forces a choice, the engine takes longer and never loses state or work.",
+  "sets": [
+    {
+      "in": "engine/properties",
+      "id": "accepted-call-never-forgotten",
+      "says": "A call the engine has accepted is never forgotten: it is carried out, or it fails with a reason.",
+      "kind": "safety",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}

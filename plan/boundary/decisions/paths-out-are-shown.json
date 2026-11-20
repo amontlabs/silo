@@ -1,0 +1,15 @@
+{
+  "asks": "Does Silo show every path by which data can leave a computer?",
+  "answer": "Every path by which data can leave a computer is among the paths Silo shows for it.",
+  "sets": [
+    {
+      "in": "boundary/properties",
+      "id": "every-way-out-is-shown",
+      "says": "Every path by which data can leave a computer is among the paths Silo shows for it.",
+      "kind": "safety",
+      "check": [
+        "hostile test"
+      ]
+    }
+  ]
+}

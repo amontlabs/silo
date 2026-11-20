@@ -1,0 +1,12 @@
+{
+  "asks": "Which words name an agent's work?",
+  "answer": "One word per idea.",
+  "adds": [
+    "run",
+    "conversation",
+    "turn",
+    "tool-call",
+    "trace"
+  ],
+  "verdict": "take"
+}

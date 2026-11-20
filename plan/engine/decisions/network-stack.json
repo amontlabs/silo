@@ -1,0 +1,4 @@
+{
+  "asks": "What carries a computer's network at the boundary?",
+  "answer": "Silo's network stack, on Linux and on macOS computers. Never Apple's NAT."
+}

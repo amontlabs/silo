@@ -1,0 +1,18 @@
+{
+  "asks": "How much may keeping the record slow a computer?",
+  "answer": "Keeping the record slows a computer by no more than a stated amount.",
+  "needs": [
+    "record-speed-cost"
+  ],
+  "sets": [
+    {
+      "in": "record/properties",
+      "id": "record-overhead-is-bounded",
+      "says": "Keeping the record slows a computer by no more than a stated amount.",
+      "kind": "measured",
+      "check": [
+        "benchmark"
+      ]
+    }
+  ]
+}

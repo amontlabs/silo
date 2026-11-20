@@ -1,0 +1,8 @@
+{
+  "asks": "Who rewinds one run's conversation?",
+  "answer": "Rewinding one run's conversation stays the agent program's job.",
+  "needs": [
+    "one-run-grain"
+  ],
+  "verdict": "take"
+}

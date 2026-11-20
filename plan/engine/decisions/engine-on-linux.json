@@ -1,0 +1,5 @@
+{
+  "asks": "Does the engine run on Linux?",
+  "answer": "The engine also runs on Linux, to use a Linux machine as a host.",
+  "verdict": "take"
+}

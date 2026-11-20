@@ -1,0 +1,7 @@
+{
+  "asks": "Does the limit of two macOS computers bind tasks?",
+  "answer": "The limit of two macOS computers applies.",
+  "needs": [
+    "tasks-test-your-changes"
+  ]
+}

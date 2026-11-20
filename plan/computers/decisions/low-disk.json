@@ -1,0 +1,6 @@
+{
+  "asks": "What does Silo do when disk runs low?",
+  "needs": [
+    "low-memory-or-disk"
+  ]
+}

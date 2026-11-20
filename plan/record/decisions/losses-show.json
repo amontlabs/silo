@@ -1,0 +1,15 @@
+{
+  "asks": "What does the record say when Silo missed something?",
+  "answer": "A source that loses facts or reports records a gap. What Silo shows of a run says how it was captured and how complete it is.",
+  "sets": [
+    {
+      "in": "record/properties",
+      "id": "every-loss-is-a-gap",
+      "says": "Every loss of facts or reports is itself recorded as a gap.",
+      "kind": "safety",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}

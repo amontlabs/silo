@@ -1,0 +1,5 @@
+{
+  "asks": "Is a fork the usual place for an agent to work?",
+  "answer": "Several agents working in one main is the normal case. A fork is the exception.",
+  "verdict": "take"
+}

@@ -1,0 +1,7 @@
+{
+  "asks": "May the agent's own summary be shown beside a receipt?",
+  "answer": "The agent's own summary can be shown beside it, marked as the agent's. A summary written by an agent is untrusted content.",
+  "needs": [
+    "what-a-receipt-is"
+  ]
+}

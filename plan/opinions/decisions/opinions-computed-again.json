@@ -1,0 +1,5 @@
+{
+  "asks": "What happens to the opinions when a classifier improves?",
+  "answer": "Everything that is a matter of judgement (what can be rebuilt, which run did it, what looks wrong) is a classifier on top. A better classifier replaces a worse one and the opinions are computed again. Nothing is migrated.",
+  "verdict": "take"
+}

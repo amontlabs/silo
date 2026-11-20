@@ -1,0 +1,8 @@
+{
+  "asks": "Who may use the Workshop?",
+  "answer": "The Workshop is a public page of silo.amontlabs.com that shows the plan as a map of the product's parts. The owner decides there; anyone signed in with GitHub can comment, vote and suggest features. Visitors see the plan.",
+  "suggest": {
+    "verdict": "take",
+    "why": "On 20 November 2026 the owner asked for decisions to be entries of the public plan, each with a public thread"
+  }
+}

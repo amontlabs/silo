@@ -1,0 +1,5 @@
+{
+  "asks": "What does going back to a whole computer at one moment promise?",
+  "answer": "A whole computer at one moment is consistent, because the agents' conversations are files on that disk. A restore or a fork returns the disk and the conversations to the same moment.",
+  "verdict": "take"
+}

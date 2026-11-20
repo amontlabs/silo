@@ -1,0 +1,15 @@
+{
+  "asks": "What does a budget on a computer or on a conversation promise?",
+  "answer": "A budget on a computer or on a conversation denies or holds what it meters: once it is reached, no further metered request leaves.",
+  "sets": [
+    {
+      "in": "traffic/properties",
+      "id": "budget-stops-what-it-meters",
+      "says": "A budget on a computer or on a conversation denies or holds what it meters: once it is reached, no further metered request leaves.",
+      "kind": "safety",
+      "check": [
+        "hostile test"
+      ]
+    }
+  ]
+}

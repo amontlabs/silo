@@ -1,0 +1,5 @@
+{
+  "asks": "Where does Silo see an agent's tool calls?",
+  "answer": "Every tool call is already visible at the boundary, when the model traffic can be read. It is in the model's reply, and its result is in the next request. That needs three or four provider formats, not one adapter per agent program. The exception is a local model running inside the computer, whose calls never cross the boundary.",
+  "verdict": "take"
+}

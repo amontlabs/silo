@@ -1,0 +1,11 @@
+{
+  "asks": "How does Silo know that lines are missing?",
+  "answer": "Every source numbers what it writes. A missing number is a gap, and a gap is a fact.",
+  "sets": [
+    {
+      "in": "words",
+      "word": "line",
+      "means": "One row of the record."
+    }
+  ]
+}

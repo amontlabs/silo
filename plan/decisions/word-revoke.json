@@ -1,0 +1,11 @@
+{
+  "asks": "What does \"revoke\" mean?",
+  "answer": "To take back from a computer the ability to do something.",
+  "sets": [
+    {
+      "in": "words",
+      "word": "revoke",
+      "means": "To take back from a computer the ability to do something."
+    }
+  ]
+}

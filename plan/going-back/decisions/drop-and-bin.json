@@ -1,0 +1,11 @@
+{
+  "asks": "What becomes of a dropped computer?",
+  "answer": "A dropped computer waits in a bin.",
+  "needs": [
+    "how-a-fork-ends"
+  ],
+  "adds": [
+    "bin"
+  ],
+  "verdict": "take"
+}

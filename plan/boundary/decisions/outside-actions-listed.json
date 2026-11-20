@@ -1,0 +1,4 @@
+{
+  "asks": "Does Silo know which calls change something elsewhere?",
+  "answer": "Calls that change something elsewhere (\"outside actions\") are listed."
+}

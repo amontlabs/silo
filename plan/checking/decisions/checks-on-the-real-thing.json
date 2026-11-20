@@ -1,0 +1,7 @@
+{
+  "asks": "What checks the real drivers and the real boundary?",
+  "answer": "The simulator checks the core against the fakes. The real drivers and the real boundary need their own hostile tests and live checks. A model is not the code, and the core is not the boundary. The virtual machine engine and the network stack are checked by hostile tests on the real thing.",
+  "needs": [
+    "core-simulator"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "asks": "Does stopping a computer or taking back its access wait for an ask?",
+  "answer": "Stopping a computer, taking back a secret or closing a network never waits for an ask.",
+  "sets": [
+    {
+      "in": "boundary/properties",
+      "id": "stop-and-revoke-never-wait",
+      "says": "Stopping a computer, taking back a secret or closing a network never waits for an ask.",
+      "kind": "safety",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  "asks": "What does Silo not build?",
+  "answer": "It writes no agent program of its own and bundles none. It runs the vendors' programs, unmodified. It never chooses or switches a model. It does no orchestration and passes no messages between agents. It builds no chat window. It does not hide or wrap the agent program's own interface. It builds no board for tracking work. It is not a memory system for agents. An agent's memory is the files of its computer."
+}

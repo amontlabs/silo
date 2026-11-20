@@ -1,0 +1,18 @@
+{
+  "asks": "How do files go in or out of a computer?",
+  "answer": "Files go in or out only through a channel you grant.",
+  "needs": [
+    "device-not-shared"
+  ],
+  "sets": [
+    {
+      "in": "computers/properties",
+      "id": "files-cross-only-by-channel",
+      "says": "Files go in or out only through a channel you grant.",
+      "kind": "safety",
+      "check": [
+        "hostile test"
+      ]
+    }
+  ]
+}

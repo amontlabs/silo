@@ -1,0 +1,5 @@
+{
+  "asks": "When are checkpoints taken?",
+  "answer": "Silo takes checkpoints on its own while agents work: at intervals, and at moments the engine sees, such as each ask. Nobody has to remember.",
+  "verdict": "take"
+}

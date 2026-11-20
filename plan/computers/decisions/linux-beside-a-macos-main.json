@@ -1,0 +1,18 @@
+{
+  "asks": "How is a Linux computer made beside a macOS main?",
+  "answer": "A Linux computer is never a copy of a macOS main. It is made from a recipe, and the code reaches it as a commit.",
+  "needs": [
+    "main-on-macos-first"
+  ],
+  "sets": [
+    {
+      "in": "computers/properties",
+      "id": "linux-never-copies-macos-main",
+      "says": "A Linux computer is never a copy of a macOS main.",
+      "kind": "safety",
+      "check": [
+        "types"
+      ]
+    }
+  ]
+}

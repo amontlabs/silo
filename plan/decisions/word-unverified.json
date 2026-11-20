@@ -1,0 +1,14 @@
+{
+  "asks": "What does \"unverified\" mean?",
+  "answer": "Said of a report Silo could not check.",
+  "sets": [
+    {
+      "in": "words",
+      "word": "unverified",
+      "means": "Said of a report Silo could not check.",
+      "not": [
+        "as told"
+      ]
+    }
+  ]
+}

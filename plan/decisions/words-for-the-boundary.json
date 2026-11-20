@@ -1,0 +1,11 @@
+{
+  "asks": "Which words name the boundary and what waits there?",
+  "answer": "One word per idea.",
+  "adds": [
+    "boundary",
+    "channel",
+    "synchronous",
+    "asynchronous"
+  ],
+  "verdict": "take"
+}

@@ -1,0 +1,18 @@
+{
+  "asks": "What limits the engine's tables and memory?",
+  "answer": "Limits are part of the model. Tables have a fixed size. Reaching a limit fails with a named error. No memory is allocated in the core after start.",
+  "needs": [
+    "engine-state"
+  ],
+  "sets": [
+    {
+      "in": "engine/properties",
+      "id": "nothing-grows-without-limit",
+      "says": "Nothing grows without limit.",
+      "kind": "safety",
+      "check": [
+        "assertion"
+      ]
+    }
+  ]
+}

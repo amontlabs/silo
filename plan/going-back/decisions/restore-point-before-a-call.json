@@ -1,0 +1,4 @@
+{
+  "asks": "Which moment does a restore use around a tool call?",
+  "answer": "A restore to a moment in the middle of a tool call can repeat an outside action, so the moment before the call is the one to use."
+}

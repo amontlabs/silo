@@ -1,0 +1,13 @@
+{
+  "asks": "Does every addition have to do without a new noun?",
+  "answer": "Everything is a computer or is defined through one, or it is something Silo knows, or something Silo does.",
+  "sets": [
+    {
+      "in": "principles",
+      "id": "no-new-noun",
+      "says": "Everything is a computer or is defined through one, or it is something Silo knows, or something Silo does.",
+      "asks": "Does it need a new noun?",
+      "why": "An addition that needs another noun deserves suspicion."
+    }
+  ]
+}

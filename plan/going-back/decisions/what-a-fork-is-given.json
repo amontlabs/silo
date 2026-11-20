@@ -1,0 +1,15 @@
+{
+  "asks": "What is a fork given?",
+  "answer": "No secrets, and read-only repository access, unless you, or a rule you set, give it more. Never more than its parent has.",
+  "sets": [
+    {
+      "in": "going-back/properties",
+      "id": "fork-never-more-than-parent",
+      "says": "A fork never has more than its parent.",
+      "kind": "safety",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}

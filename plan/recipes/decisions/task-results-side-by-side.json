@@ -1,0 +1,8 @@
+{
+  "asks": "How do the results of a task come back?",
+  "answer": "The results come back as receipts, side by side.",
+  "needs": [
+    "tasks-test-your-changes",
+    "task-receipt"
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "asks": "Does Silo undo one agent's work among several, automatically?",
+  "answer": "Undoing one agent's work among several, automatically, is what every agent program attempts and gets wrong. This design does not attempt it.",
+  "verdict": "take"
+}

@@ -1,0 +1,4 @@
+{
+  "asks": "Is what Silo sees of a computer the same on macOS and Linux?",
+  "answer": "What the boundary sees (network, model calls, secrets, spend, checkpoints, the screen) is the same for both systems. What is reported from inside (which process wrote which file) has to be built once per system."
+}

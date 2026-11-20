@@ -1,0 +1,5 @@
+{
+  "asks": "What is the shape of Silo?",
+  "answer": "One long-lived computer, main, where your agents work. The record of everything that happens in it. This is the core of the product. Going back: checkpoints, taken on their own, that you can restore or fork from. Forks for the moments that call for one: a risky try, a tool to test before trusting it. A fresh computer serves a task that must run on a clean machine.",
+  "verdict": "take"
+}

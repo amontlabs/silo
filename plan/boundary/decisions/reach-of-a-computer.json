@@ -1,0 +1,15 @@
+{
+  "asks": "Can a computer reach more than what was granted?",
+  "answer": "What a computer can reach is never more than what you, or a rule you set, grant.",
+  "sets": [
+    {
+      "in": "boundary/properties",
+      "id": "reach-never-more-than-granted",
+      "says": "What a computer can reach is never more than what you, or a rule you set, grant.",
+      "kind": "safety",
+      "check": [
+        "hostile test"
+      ]
+    }
+  ]
+}

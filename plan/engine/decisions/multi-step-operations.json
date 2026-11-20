@@ -1,0 +1,18 @@
+{
+  "asks": "How does an operation of several steps survive a crash?",
+  "answer": "Every multi-step operation advances through explicit steps, each safe to stop after. At start each driver says what really exists, and the engine reconciles.",
+  "needs": [
+    "engine-reconciles"
+  ],
+  "sets": [
+    {
+      "in": "engine/properties",
+      "id": "crash-finishes-or-rolls-back",
+      "says": "After a crash, every operation is finished or rolled back.",
+      "kind": "liveness",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}

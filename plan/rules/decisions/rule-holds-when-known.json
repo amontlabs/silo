@@ -1,0 +1,7 @@
+{
+  "asks": "Does a rule still hold when the agent knows it?",
+  "answer": "A rule does not depend on that. It holds even when the agent knows it by heart, because the only way to trigger it or to avoid it is to really do the action.",
+  "needs": [
+    "where-precautions-live"
+  ]
+}

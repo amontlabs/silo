@@ -1,0 +1,7 @@
+{
+  "asks": "Which process does what for a synchronous precaution?",
+  "answer": "For a synchronous precaution, the helper makes the request wait and keeps the limit of that wait. The recorder gets the classifier's opinion and applies the precaution, and the answer goes back to the helper. A precaution's pause is a call to the core.",
+  "needs": [
+    "processes"
+  ]
+}

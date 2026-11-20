@@ -1,0 +1,15 @@
+{
+  "asks": "Is \"a computer is a computer\" a principle for every addition?",
+  "answer": "Yes, with the question in what it sets.",
+  "needs": [
+    "one-kind-of-computer"
+  ],
+  "sets": [
+    {
+      "in": "principles",
+      "id": "one-kind-of-thing",
+      "says": "A computer is a computer, whatever its system and whichever device runs it. Differences are only those the platform forces.",
+      "asks": "Is it the same on every system and device? If not, which platform forces the difference?"
+    }
+  ]
+}

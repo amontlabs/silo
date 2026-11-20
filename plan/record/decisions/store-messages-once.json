@@ -1,0 +1,5 @@
+{
+  "asks": "How does the record store what is sent to a model provider?",
+  "answer": "Silo stores each retained message once by hash and records which messages each request sent. A request is then a short list of hashes.",
+  "verdict": "take"
+}

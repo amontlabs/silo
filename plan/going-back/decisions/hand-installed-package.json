@@ -1,0 +1,8 @@
+{
+  "asks": "What becomes of a package installed by hand?",
+  "answer": "A package installed by hand and absent from the computer's recipe is \"only here\". Silo offers to add it to the recipe.",
+  "needs": [
+    "what-would-bring-it-back"
+  ],
+  "verdict": "take"
+}

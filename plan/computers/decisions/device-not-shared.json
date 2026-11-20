@@ -1,0 +1,8 @@
+{
+  "asks": "Is anything from your device shared into a computer?",
+  "answer": "Nothing from your device is shared into a computer.",
+  "adds": [
+    "nothing-shared-from-your-device"
+  ],
+  "verdict": "take"
+}

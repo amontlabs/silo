@@ -1,0 +1,18 @@
+{
+  "asks": "Can anything done inside a computer change its rules?",
+  "answer": "A rule is enforced by the engine, outside the computer, and nothing done inside a computer can change its rules.",
+  "needs": [
+    "how-a-rule-is-enforced"
+  ],
+  "sets": [
+    {
+      "in": "rules/properties",
+      "id": "inside-cannot-change-rules",
+      "says": "Nothing done inside a computer can change its rules.",
+      "kind": "safety",
+      "check": [
+        "hostile test"
+      ]
+    }
+  ]
+}

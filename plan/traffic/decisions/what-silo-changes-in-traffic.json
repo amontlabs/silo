@@ -1,0 +1,4 @@
+{
+  "asks": "What does Silo change in model traffic?",
+  "answer": "Silo reads this traffic. It changes nothing in it except a secret it swaps in, and a tool call that was denied, which is replaced by a refusal the model can read."
+}

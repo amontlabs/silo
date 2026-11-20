@@ -1,0 +1,15 @@
+{
+  "asks": "Which processes does stopping a computer end?",
+  "answer": "Stopping or dropping a computer ends every process started in it, detached ones included.",
+  "sets": [
+    {
+      "in": "computers/properties",
+      "id": "stop-ends-every-process",
+      "says": "Stopping a computer ends every process in it.",
+      "kind": "safety",
+      "check": [
+        "live check"
+      ]
+    }
+  ]
+}

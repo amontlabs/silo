@@ -1,0 +1,89 @@
+[
+  {
+    "id": "rule-reads-only-facts",
+    "says": "A rule reads only facts.",
+    "kind": "safety",
+    "from": "less-sure-less-power",
+    "check": [
+      "simulator"
+    ]
+  },
+  {
+    "id": "report-never-stored-as-fact",
+    "says": "A report or an opinion is never stored as a fact.",
+    "kind": "safety",
+    "from": "less-sure-less-power",
+    "check": [
+      "types"
+    ]
+  },
+  {
+    "id": "precaution-grants-nothing",
+    "says": "A precaution grants nothing and destroys nothing.",
+    "kind": "safety",
+    "from": "less-sure-less-power",
+    "check": [
+      "types",
+      "simulator"
+    ]
+  },
+  {
+    "id": "grant-needs-a-fact-or-you",
+    "says": "A grant, or anything destructive, needs a fact or you.",
+    "kind": "safety",
+    "from": "less-sure-less-power",
+    "check": [
+      "model",
+      "simulator"
+    ]
+  },
+  {
+    "id": "deny-beats-hold-beats-allow",
+    "says": "Deny beats hold, hold beats allow, and no rule means deny.",
+    "kind": "safety",
+    "check": [
+      "model"
+    ]
+  },
+  {
+    "id": "rule-order-never-matters",
+    "says": "The order in which rules were written never changes the result, and a new rule never overrides a deny or a hold that already applies.",
+    "kind": "safety",
+    "check": [
+      "model"
+    ]
+  },
+  {
+    "id": "rule-decisions-are-recorded",
+    "says": "A rule is enforced by the engine, outside the computer, and each decision is recorded with the version of the rule.",
+    "kind": "safety",
+    "check": [
+      "simulator"
+    ]
+  },
+  {
+    "id": "proposed-rule-changes-nothing",
+    "says": "A proposal changes nothing until you accept it.",
+    "kind": "safety",
+    "check": [
+      "model"
+    ]
+  },
+  {
+    "id": "every-action-has-a-kind",
+    "says": "Every action Silo can take is filed as granting, destructive or protective.",
+    "kind": "safety",
+    "from": "kind-before-design",
+    "check": [
+      "types"
+    ]
+  },
+  {
+    "id": "allow-hold-deny-only-synchronous",
+    "says": "Allow, hold and deny act on one request that is still waiting, so they exist only in the synchronous case.",
+    "kind": "safety",
+    "check": [
+      "types"
+    ]
+  }
+]

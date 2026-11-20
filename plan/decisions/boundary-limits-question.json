@@ -1,0 +1,15 @@
+{
+  "asks": "Is \"limits are set at the boundary\" a principle for every addition?",
+  "answer": "Yes, with the question in what it sets.",
+  "needs": [
+    "where-limits-are-set"
+  ],
+  "sets": [
+    {
+      "in": "principles",
+      "id": "limits-at-the-boundary",
+      "says": "Limits are set at the boundary, never inside.",
+      "asks": "Does any limit it sets rest on something inside the computer?"
+    }
+  ]
+}

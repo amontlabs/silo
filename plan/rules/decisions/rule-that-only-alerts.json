@@ -1,0 +1,18 @@
+{
+  "asks": "What happens to a request when a rule only alerts?",
+  "answer": "An alert is one more action, never a decision at the boundary. A rule that only alerts decides nothing there: the request is allowed, held or denied by the other rules, and denied when no rule allows it.",
+  "needs": [
+    "which-rule-wins"
+  ],
+  "sets": [
+    {
+      "in": "rules/properties",
+      "id": "alert-is-never-a-decision",
+      "says": "An alert is one more action, never a decision at the boundary.",
+      "kind": "safety",
+      "check": [
+        "model"
+      ]
+    }
+  ]
+}

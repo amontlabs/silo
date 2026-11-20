@@ -1,0 +1,18 @@
+{
+  "asks": "How does a client follow the engine?",
+  "answer": "Events are numbered. A client is the state at number N plus every event after N.",
+  "needs": [
+    "engine-shape"
+  ],
+  "sets": [
+    {
+      "in": "engine/properties",
+      "id": "app-shows-only-real-states",
+      "says": "The app never shows a state the engine never had.",
+      "kind": "safety",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}

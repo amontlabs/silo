@@ -1,0 +1,4 @@
+{
+  "asks": "Is a small formal model of access written and checked before the first engine code?",
+  "answer": "A model of access comes early. The tables of who holds what, the calls that touch them, and one property: nothing is granted except by the user, or by a rule the user set. A model checker tries every sequence of calls among a few computers, secrets and hosts. It costs little, it finds flaws in the design before any code exists, and it is short enough for a person to read. The simulator then compares the Zig core with it. The notes suggest waiting for the starter before proving anything; that still holds for proof, and this is not proof."
+}

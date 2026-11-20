@@ -1,0 +1,7 @@
+{
+  "asks": "What form does the engine's state take?",
+  "answer": "State is a small set of flat tables of plain rows that refer to each other by id.",
+  "needs": [
+    "engine-shape"
+  ]
+}
