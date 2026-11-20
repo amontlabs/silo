@@ -39,13 +39,12 @@ async function signInMany(t, prefix, n) {
 test('visitors write 20 times a minute without a permission read; the owner, known to decide, writes 60 in one minute on one read', async () => {
   const t = await setup();
   try {
+    assert.equal(BUDGET.writesPerMinute, 20);
     const visitors = await signInMany(t, 'visitor', 5);
     for (const visitor of visitors) {
       const answers = [];
       for (let i = 0; i < 25; i += 1) answers.push((await visitor.call('POST', 'vote', { body: { n: entryNumber, on: i % 2 === 0 } })).status);
-      assert.ok(answers.every((status) => [200, 429].includes(status)), answers.join(' '));
-      assert.ok(answers.filter((status) => status === 200).length <= BUDGET.writesPerMinute);
-      assert.equal(answers.at(-1), 429);
+      assert.deepEqual(answers, [...Array(20).fill(200), ...Array(5).fill(429)], answers.join(' '));
     }
     assert.equal(count(t.fake, 'GET', /permission$/), 0, 'a write never reads the permission');
     const owner = t.client();

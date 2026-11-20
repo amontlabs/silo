@@ -11,10 +11,10 @@ import { assertNoSecrets, fakeKeychain, run, sandbox, secretsOf } from './setup-
 const unescape = (s) => s.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 
 /** Starts `workshop setup`, plays the browser and GitHub's two clicks, and returns the command's result. */
-async function driveSetup({ fake, box, keychain, args = [], tamper }) {
+async function driveSetup({ fake, box, keychain, args = [], tamper, overrides = {} }) {
   let opened;
   const opening = new Promise((resolve) => (opened = resolve));
-  const running = run(['setup', ...args], { fake, box, keychain, overrides: { openBrowser: (url) => opened(url) } });
+  const running = run(['setup', ...args], { fake, box, keychain, overrides: { openBrowser: (url) => opened(url), ...overrides } });
   const local = await Promise.race([opening, running.then((r) => ({ finished: r }))]);
   if (local.finished) return { result: local.finished };
   const html = await (await fetch(local)).text();
@@ -126,6 +126,29 @@ test('a callback with the wrong state is refused and the code is not exchanged',
   assert.equal(callbackStatus, 200);
   assert.equal(result.code, 0);
   assert.equal(fake.log.filter((r) => r.path.includes('/conversions')).length, 1);
+});
+
+test('a conversion GitHub answers with 502 shows the code neither in the page nor in the output', async (t) => {
+  const fake = await startFake();
+  t.after(fake.stop);
+  const box = sandbox(t);
+  const keychain = fakeKeychain();
+  const codes = [];
+  const failing = async (input, init) => {
+    const match = new URL(String(input)).pathname.match(/^\/app-manifests\/([^/]+)\/conversions$/);
+    if (!match) return globalThis.fetch(input, init);
+    codes.push(decodeURIComponent(match[1]));
+    return new Response('{"message":"Bad Gateway"}', { status: 502, headers: { 'content-type': 'application/json' } });
+  };
+  const { result, page, callbackStatus } = await driveSetup({ fake, box, keychain, overrides: { fetch: failing } });
+  assert.equal(codes.length, 1);
+  assert.equal(callbackStatus, 502);
+  assert.equal(result.code, 3);
+  assert.match(page, /502/);
+  assert.match(result.stderr, /502/);
+  assert.match(page + result.stderr, /the App conversion/);
+  assert.ok(!(page + result.stdout + result.stderr).includes(codes[0]), 'the conversion code appeared');
+  assert.equal(keychain.store.size, 0);
 });
 
 test('setup rejects a site that is not https', async (t) => {

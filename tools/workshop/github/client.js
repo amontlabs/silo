@@ -1,7 +1,8 @@
 // A small GitHub REST client: the App JWT, the repository's installation
 // token (so every write is the bot's), pagination, rate-limit detection and
 // pacing of writes (one a second by default). Error messages carry the status
-// and path only, never a token or a response body.
+// and path only, never a token or a response body; a request whose path holds a
+// secret names a step instead, and its errors never carry the path.
 import { appJwt } from './jwt.js';
 import { RateLimited, Unavailable } from './errors.js';
 
@@ -49,10 +50,12 @@ export class GitHub {
 
   /**
    * @param {string} method @param {string} path
-   * @param {{ body?: unknown, auth?: string | null, allow?: number[] }} [options]
+   * @param {{ body?: unknown, auth?: string | null, allow?: number[], step?: string }} [options]
+   * `step` names the request in errors in place of its path, for a path that holds a secret.
    */
-  async request(method, path, { body, auth = this.token ? `token ${this.token}` : null, allow = [] } = {}) {
+  async request(method, path, { body, auth = this.token ? `token ${this.token}` : null, allow = [], step } = {}) {
     const url = path.startsWith('http') ? path : `${this.api}${path}`;
+    const where = step ?? `${method} ${new URL(url).pathname}`;
     if (method !== 'GET' && this.writeDelayMs > 0) {
       const wait = this.lastWrite + this.writeDelayMs - Date.now();
       if (wait > 0) await this.sleep(wait);
@@ -65,7 +68,7 @@ export class GitHub {
     try {
       response = await this.fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
     } catch {
-      throw new Unavailable(`could not reach GitHub (${method} ${new URL(url).pathname})`);
+      throw new Unavailable(`could not reach GitHub (${where})`);
     } finally {
       if (method !== 'GET') this.lastWrite = Date.now();
     }
@@ -74,14 +77,14 @@ export class GitHub {
     if (allow.includes(response.status)) return { status: response.status, data: null, headers: response.headers };
     if (!response.ok) {
       if (response.status === 403 && /rate limit/i.test(await response.text())) throw new RateLimited(new Date(Date.now() + 60_000));
-      throw new Unavailable(`GitHub answered ${response.status} to ${method} ${new URL(url).pathname}`);
+      throw new Unavailable(`GitHub answered ${response.status} to ${where}`);
     }
     const text = await response.text();
     let data = null;
     try {
       data = text ? JSON.parse(text) : null;
     } catch {
-      throw new Unavailable(`GitHub answered ${method} ${new URL(url).pathname} with something that is not JSON`);
+      throw new Unavailable(`GitHub answered ${where} with something that is not JSON`);
     }
     return { status: response.status, data, headers: response.headers };
   }

@@ -172,7 +172,9 @@ export async function setup({ org, site, replace, deps }) {
 }
 
 async function exchange({ gh, code, origin, deps, web }) {
-  const { data } = await gh.request('POST', `/app-manifests/${encodeURIComponent(code)}/conversions`, { auth: null });
+  // The path holds the code, which GitHub exchanges for the App's private key
+  // and client secret: errors name the step, never the path.
+  const { data } = await gh.request('POST', `/app-manifests/${encodeURIComponent(code)}/conversions`, { auth: null, step: 'the App conversion' });
   const values = {
     WORKSHOP_APP_ID: String(data?.id ?? ''),
     WORKSHOP_CLIENT_ID: data?.client_id ?? '',
