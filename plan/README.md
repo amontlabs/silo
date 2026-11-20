@@ -50,7 +50,9 @@ The tool and the rest of this page call an item of a list a **statement**.
 
 Each decision and each feature is one file, named by its id. The tool and the rest of this page
 call either one an **entry**. An entry may have notes beside it, in `<id>.md`. They are plain
-prose: where the entry comes from, the options, what was found, and the owner's own words.
+prose: where the entry comes from, the options, what was found, and the owner's own words. Each
+part of the notes says whether it is the owner's or an agent's. A part that does not say is an
+agent's.
 
 ## How a statement gets into a list
 
@@ -116,9 +118,9 @@ verdict sets it. The word then has the meaning that decision gives it.
 - "Not now" is not a verdict. The entry moves to a later stage, as "The order" says below.
 - When the owner says yes to part of an entry, split the entry first. One entry holds the part the
   owner agreed to, and is taken. The other holds the rest, and keeps no verdict.
-- A verdict is for the text the owner saw. An entry with no verdict can be edited freely. When
-  you change the question, answer, name, description, `replaces`, `sets` or `removes` of an entry
-  that has a verdict, remove the verdict in the same edit, so that the owner answers the new text.
+- A verdict is for the text the owner saw. When you change the question, answer, name,
+  description, `replaces`, `sets` or `removes` of an entry that has a verdict, remove the verdict
+  in the same edit, so that the owner answers the new text.
 
 ## Changing what was taken
 

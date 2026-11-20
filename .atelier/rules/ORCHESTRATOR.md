@@ -36,6 +36,7 @@ One session works on one entry of the plan, a decision or a feature, from discus
 Start with `git pull` and `plan`, then `plan show <id>` for the entry at hand: it prints the entry, what it links to and what binds it.
 
 Discussing:
+- A proposal is shown to the owner in the conversation first, and written into an entry once the owner has reacted.
 - What we agree goes in the entry's file and its notes, not only in the chat.
 - Anything about another entry goes in that entry's notes. A new question or idea gets its own entry: a file in its part, and its place in `plan/order.json`.
 - A statement the owner has not taken is never written into a list: it sits under `sets` of the entry that proposes it.

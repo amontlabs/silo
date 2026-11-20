@@ -10,8 +10,20 @@ The examples come from Silo's own design. Its words are in `plan/words.json`.
 
 - **A design is solid only when everything in it is clear, complete, thorough and simple to
   picture.** Until then keep working on it: think it through and take the time.
-- **The owner gives a direction in rough words.** Understand it, define it properly and explain it
-  back. The right definition feels obvious once stated.
+- **The owner gives a direction in rough words.** Understand it and define it properly. The right
+  definition feels obvious once stated.
+
+## Before you design
+
+Two steps come first, in this order.
+
+1. **Explain the owner's direction back in one sentence,** before you design anything from it.
+2. **Look for how it is already done.** When a known practice does the same job, take it as the
+   model and say exactly what differs.
+   - Right: the words for computers are Git's. What differs: Git versions files and Silo versions
+     something alive, so a fork must not act as its parent.
+
+Derive something new only when neither settles it.
 
 ## Concepts
 
@@ -45,35 +57,31 @@ The examples come from Silo's own design. Its words are in `plan/words.json`.
    - Wrong: "Silo acts only on facts." Clean on paper, and people want an opinion to be able to
      pause a computer.
    - Right: an opinion can act, through a precaution.
-8. **Start from how it is already done.** When a known practice does the same job, take it as the
-   model and say exactly what differs.
-   - Right: the words for computers are Git's. What differs: Git versions files and Silo versions
-     something alive, so a fork must not act as its parent.
-9. **Decide, with an opinion.** Lay out the real options, choose one, and say what it costs and
+8. **Decide, with an opinion.** Lay out the real options, choose one, and say what it costs and
    which agreed line it changes.
-10. **Bad paths first.** Errors, timeouts, crashes and missing answers are designed from the
-    first line, each with explicit handling. A bad state should be impossible to write down, and
-    the language should enforce it where it can.
-    - Wrong: a table of defaults for failures, added once the good path is designed.
-    - Right: a precaution's type has no granting or destructive action in it.
-11. **Aim for the best design, then find out how.** Whether it can be built, or is allowed, is a
+9. **Bad paths first.** Errors, timeouts, crashes and missing answers are designed from the
+   first line, each with explicit handling. A bad state should be impossible to write down, and
+   the language should enforce it where it can.
+   - Wrong: a table of defaults for failures, added once the good path is designed.
+   - Right: a precaution's type has no granting or destructive action in it.
+10. **Aim for the best design, then find out how.** Whether it can be built, or is allowed, is a
     separate question: note it and research it. Mark an untested mechanism as to find out, and
     never write a promise with no known way to keep it.
     - Wrong: "A computer can always learn what happened to its requests", written as a promise
       when nobody knew how.
     - Right: the target is stated, and its mechanism is marked "to find out".
-12. **Sort each thing: ground work, detail or feature.** Ground work is what the rest stands on,
+11. **Sort each thing: ground work, detail or feature.** Ground work is what the rest stands on,
     so it is settled before anything is built on it. A default, or how one piece is built, is
     settled when that piece is built. A feature waits for its stage. Say which, and flag what
     must be right from the start even though its details come later.
     - Right: what a precaution does when a classifier is unsure is a default. That an error comes
       back when a wait ends must be right from the start.
-13. **A smell is a finding.** When the owner or you sense one, stop and find the word doing
+12. **A smell is a finding.** When the owner or you sense one, stop and find the word doing
     several jobs, or the concept cut in the wrong place.
-14. **If a design needs a likeness to hold together, it is not clean.**
+13. **If a design needs a likeness to hold together, it is not clean.**
     - Wrong: "An opinion can pause a computer but cannot hold a request", held together only by
       "a pause is a kind of hold".
-15. **Give each reason at its true size.** A reason that is too broad gets challenged and falls.
+14. **Give each reason at its true size.** A reason that is too broad gets challenged and falls.
     - Wrong: "A classifier runs in a computer of its own."
     - Right: "Someone else's code never runs outside a boundary."
 
