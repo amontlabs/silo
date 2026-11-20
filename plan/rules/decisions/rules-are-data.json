@@ -1,0 +1,4 @@
+{
+  "asks": "Does setting a rule or a precaution require writing code?",
+  "answer": "A rule or a precaution is data. Each is set by picking among choices, and can be shown and set as text through the command line. Using Silo never requires writing code."
+}

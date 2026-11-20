@@ -1,0 +1,8 @@
+{
+  "asks": "May Silo propose rules to you?",
+  "answer": "Silo can propose rules from the record, such as the list of hosts a computer actually used. A proposal changes nothing until you accept it.",
+  "adds": [
+    "proposed-rule-changes-nothing"
+  ],
+  "verdict": "take"
+}

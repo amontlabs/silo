@@ -1,0 +1,4 @@
+{
+  "asks": "Does a rule state its worst case?",
+  "answer": "Each rule states its worst case when it is set."
+}

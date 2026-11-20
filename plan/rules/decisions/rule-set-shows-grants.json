@@ -1,0 +1,7 @@
+{
+  "asks": "What does Silo show before a set of rules is switched on?",
+  "answer": "Before a set is switched on, Silo shows what it grants.",
+  "needs": [
+    "rule-sets"
+  ]
+}

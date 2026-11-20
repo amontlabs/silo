@@ -1,0 +1,8 @@
+{
+  "asks": "What may a precaution do?",
+  "answer": "A precaution pauses and never stops. It can alert you, take a checkpoint, pause a computer, and deny or hold a request that is still waiting. It never allows, never resumes and never stops a computer.",
+  "needs": [
+    "kinds-of-action"
+  ],
+  "verdict": "take"
+}

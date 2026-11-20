@@ -1,0 +1,11 @@
+{
+  "asks": "What may a report or an opinion lead Silo to do?",
+  "answer": "A report or an opinion may trigger only what can be undone.",
+  "adds": [
+    "rule-reads-only-facts",
+    "report-never-stored-as-fact",
+    "precaution-grants-nothing",
+    "grant-needs-a-fact-or-you"
+  ],
+  "verdict": "take"
+}

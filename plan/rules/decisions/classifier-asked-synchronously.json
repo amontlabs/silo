@@ -1,0 +1,7 @@
+{
+  "asks": "Can a classifier be asked about each tool call before it runs?",
+  "answer": "A classifier is asked where the model's replies come in, and each tool call the model asks for waits for its opinion.",
+  "needs": [
+    "what-a-precaution-may-do"
+  ]
+}

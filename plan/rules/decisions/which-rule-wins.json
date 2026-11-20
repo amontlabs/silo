@@ -1,0 +1,9 @@
+{
+  "asks": "When several rules apply to one request, which one wins?",
+  "answer": "At the boundary a rule allows, holds or denies the one request that is waiting. Rules have no order.",
+  "adds": [
+    "deny-beats-hold-beats-allow",
+    "rule-order-never-matters"
+  ],
+  "verdict": "take"
+}

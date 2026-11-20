@@ -1,0 +1,19 @@
+{
+  "asks": "Can anything done inside a computer change its precautions?",
+  "answer": "A precaution is kept outside in the same way, and nothing done inside can change it.",
+  "needs": [
+    "where-precautions-live"
+  ],
+  "sets": [
+    {
+      "in": "rules/properties",
+      "id": "inside-cannot-change-precautions",
+      "says": "Nothing done inside a computer can change its precautions.",
+      "kind": "safety",
+      "from": "limits-at-the-boundary",
+      "check": [
+        "hostile test"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "asks": "Does it matter to a rule or a precaution whether a request waits?",
+  "answer": "Timing and trigger are independent. The limit on kinds comes only from rule or precaution.",
+  "needs": [
+    "kinds-of-action"
+  ],
+  "adds": [
+    "allow-hold-deny-only-synchronous"
+  ],
+  "verdict": "take"
+}

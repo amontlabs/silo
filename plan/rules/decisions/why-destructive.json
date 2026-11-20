@@ -1,0 +1,7 @@
+{
+  "asks": "Why are stop, restore and drop destructive?",
+  "answer": "Stop, restore and drop are destructive for what they end: the programs running in the computer, which no checkpoint keeps.",
+  "needs": [
+    "kinds-of-action"
+  ]
+}

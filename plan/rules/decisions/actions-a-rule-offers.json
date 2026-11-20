@@ -1,0 +1,8 @@
+{
+  "asks": "Which actions does Silo offer inside a rule?",
+  "answer": "Which of these actions Silo offers inside a rule is a product choice taken from real use, not a law. A rule that forks or restores is not planned.",
+  "needs": [
+    "kinds-of-action"
+  ],
+  "verdict": "take"
+}
