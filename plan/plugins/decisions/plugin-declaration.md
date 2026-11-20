@@ -22,3 +22,6 @@ An older text called a plugin a package through which pieces made by someone els
 not carried: what it brings is now said by the declaration.
 
 On 20 November 2026 the owner asked to see the declaration as an idiomatic example.
+
+The owner, on the example shown on 20 November 2026: field names such as "given" and "gives-back"
+are an anomaly in a technical product. A declaration uses the standard names.

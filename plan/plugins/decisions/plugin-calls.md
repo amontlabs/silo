@@ -13,3 +13,14 @@ to design now.
 
 An agent's note: reading is already a grant (`reading-is-a-grant`, taken), so "may use:
 everything" cannot be harmless. The last sentence of this decision's answer contradicts it.
+
+## The owner's second answer (20 November 2026)
+
+- The categories are what the owner meant, and no more than this: a plugin needs a list of
+  authorizations, well organised, like the scopes of a token on GitHub. Installing it shows
+  precisely which ones it needs.
+- A hunch of the owner: "probably this should be tied to rules, and maybe it's actually a set of
+  rules it requires you to approve."
+- No call is settled now, and no example of one is written: "Trying to have idiomatic examples
+  here can only have us write poor API decisions that we should just think of later." The owner
+  wants only the areas a plugin's calls would touch.
