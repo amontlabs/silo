@@ -7,7 +7,6 @@
       "id": "fork-never-more-than-parent",
       "says": "A fork never has more than its parent.",
       "kind": "safety",
-      "from": "no-more-than-it-has",
       "check": [
         "simulator"
       ]

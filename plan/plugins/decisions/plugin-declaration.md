@@ -16,7 +16,7 @@ manifest, and permissions.
 The owner's list for the interface of an added piece: what it receives, what it can fetch from
 Silo, how it hooks in, how it sends things outside or into the app, and extra tools it brings.
 
-The owner's word "triggered" in the answer is the one `wakes-on` would replace for a plugin.
+The owner's word "triggered" in the answer is the one `plugin-wakes-on` would replace for a plugin.
 
 An older text called a plugin a package through which pieces made by someone else arrive. That is
 not carried: what it brings is now said by the declaration.

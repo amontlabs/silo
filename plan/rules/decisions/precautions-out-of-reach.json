@@ -10,7 +10,6 @@
       "id": "inside-cannot-change-precautions",
       "says": "Nothing done inside a computer can change its precautions.",
       "kind": "safety",
-      "from": "limits-at-the-boundary",
       "check": [
         "hostile test"
       ]

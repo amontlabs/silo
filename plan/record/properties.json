@@ -3,7 +3,6 @@
     "id": "books-balance",
     "says": "What runs are shown to have written adds up to what the boundary saw change. What is left over is shown as \"unattributed\". It is never spread over the runs.",
     "kind": "safety",
-    "from": "never-fills-a-hole",
     "check": [
       "live check"
     ]

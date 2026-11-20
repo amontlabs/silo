@@ -4,11 +4,16 @@
   "sets": [
     {
       "in": "words",
-      "word": "matched, mismatch",
-      "means": "Said of a report that the facts agree with, or disagree with.",
+      "word": "matched",
+      "means": "Said of a report that the facts agree with.",
       "not": [
         "corroborated"
       ]
+    },
+    {
+      "in": "words",
+      "word": "mismatch",
+      "means": "Said of a report that the facts disagree with."
     }
   ],
   "suggest": {

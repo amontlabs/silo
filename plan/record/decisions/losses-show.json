@@ -7,7 +7,6 @@
       "id": "every-loss-is-a-gap",
       "says": "Every loss of facts or reports is itself recorded as a gap.",
       "kind": "safety",
-      "from": "never-fills-a-hole",
       "check": [
         "simulator"
       ]

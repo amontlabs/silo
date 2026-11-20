@@ -7,7 +7,6 @@
       "id": "reach-never-more-than-granted",
       "says": "What a computer can reach is never more than what you, or a rule you set, grant.",
       "kind": "safety",
-      "from": "no-more-than-it-has",
       "check": [
         "hostile test"
       ]

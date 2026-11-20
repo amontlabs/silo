@@ -208,7 +208,7 @@
         "plugin-declaration",
         "declaration-is-enforced",
         "plugin-calls",
-        "wakes-on",
+        "plugin-wakes-on",
         "shipped-plugins-declare",
         "read-grant-names-its-part",
         "request-waits-only-by-precaution",
