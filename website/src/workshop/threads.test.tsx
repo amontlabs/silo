@@ -121,6 +121,25 @@ describe('a row with no thread yet', () => {
     expect(within(item).getAllByText('Once.')).toHaveLength(1);
   });
 
+  it('shows a first 👍 pressed with a count of 1 at once, and takes the thread when the answer brings it', async () => {
+    let release: () => void = () => {};
+    const { item, calls } = await open('#part-b', GUARD, {
+      me: owner,
+      routes: { 'POST vote': () => new Promise((resolve) => { release = () => resolve(ok({ ok: true, up: 1, n: 44 })); }) },
+    });
+    fireEvent.click(within(item).getByRole('button', { name: /0 votes/ }));
+    const pending = within(item).getByRole('button', { name: /1 votes/ });
+    expect(pending).toHaveAttribute('aria-pressed', 'true');
+    expect(pending).toHaveClass('ws-pending');
+    expect(within(item).queryByRole('link', { name: /GitHub #44/ })).toBeNull();
+    await waitFor(() => expect(posts(calls, 'vote')).toHaveLength(1));
+    await act(async () => release());
+    expect(within(item).getByRole('link', { name: 'GitHub #44 ↗' })).toBeInTheDocument();
+    const done = within(item).getByRole('button', { name: /1 votes/ });
+    expect(done).toHaveAttribute('aria-pressed', 'true');
+    expect(done).not.toHaveClass('ws-pending');
+  });
+
   it('keeps one 👍 while a first vote is on its way', async () => {
     let release: () => void = () => {};
     const { item, calls } = await open('#part-b', GUARD, {

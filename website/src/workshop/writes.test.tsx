@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { apiConfig } from './api';
@@ -137,19 +137,109 @@ describe('writes the server has not confirmed', () => {
     expect(localStorage.getItem('silo-workshop-writes-2')).toContain('On its way.');
   });
 
-  it('show a vote being sent as pending with the count unchanged', async () => {
+  // The 👍 of "Run a command" (4 votes, thread 13), asked in these tests with the API's answers held back.
+  const exec = () => within(itemOf('Run a command'));
+  const mine = (on: boolean) => () => ok({ on, comments: [] });
+
+  it('show a vote the page knows as pressed and one up in the same frame, before any answer', async () => {
     const answer = deferred();
     const calls = mockApi({ me: visitor, routes: { 'POST vote': answer.route } });
     history.replaceState(null, '', '/workshop#part-b/exec');
     await renderApp();
     await waitFor(() => expect(calls.some((call) => call.path === 'vote' && call.method === 'GET')).toBe(true));
-    await userEvent.click(within(itemOf('Run a command')).getByRole('button', { name: /4 votes/ }));
-    await waitFor(() => expect(posts(calls, 'vote')).toHaveLength(1));
-    const button = within(itemOf('Run a command')).getByRole('button', { name: /4 votes/ });
+    fireEvent.click(exec().getByRole('button', { name: /4 votes/ }));
+    // No await between the click and what is read: this is the frame of the click.
+    const button = exec().getByRole('button', { name: /5 votes/ });
+    expect(button).toHaveAttribute('aria-pressed', 'true');
+    expect(button).toHaveAttribute('aria-busy', 'true');
     expect(button).toBeDisabled();
     expect(button).toHaveClass('ws-pending');
-    await act(async () => answer.release(ok()));
-    expect(within(itemOf('Run a command')).getByRole('button', { name: /5 votes/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(announced()).toBe('Sending vote');
+    await waitFor(() => expect(posts(calls, 'vote')).toHaveLength(1));
+    expect(posts(calls, 'vote')[0].body).toEqual({ entry: 'exec', on: true });
+    // A second click while the request runs does nothing.
+    fireEvent.click(button);
+    expect(posts(calls, 'vote')).toHaveLength(1);
+    expect(localStorage.getItem('silo-workshop-writes-2')).toBeNull();
+    // The server's count then replaces the page's own.
+    await act(async () => answer.release(ok({ ok: true, up: 9 })));
+    const done = exec().getByRole('button', { name: /9 votes/ });
+    expect(done).toHaveAttribute('aria-pressed', 'true');
+    expect(done).not.toHaveClass('ws-pending');
+    expect(done).toBeEnabled();
+  });
+
+  it('show a vote taken back as released and one down in the same frame', async () => {
+    const answer = deferred();
+    const calls = mockApi({ me: visitor, routes: { 'GET vote': mine(true), 'POST vote': answer.route } });
+    history.replaceState(null, '', '/workshop#part-b/exec');
+    await renderApp();
+    await waitFor(() => expect(exec().getByRole('button', { name: /4 votes/ })).toHaveAttribute('aria-pressed', 'true'));
+    fireEvent.click(exec().getByRole('button', { name: /4 votes/ }));
+    expect(exec().queryByRole('button', { name: /5 votes/ })).toBeNull();
+    const button = exec().getByRole('button', { name: /3 votes/ });
+    expect(button).toHaveAttribute('aria-pressed', 'false');
+    expect(button).toHaveClass('ws-pending');
+    await waitFor(() => expect(posts(calls, 'vote')).toHaveLength(1));
+    expect(posts(calls, 'vote')[0].body).toEqual({ entry: 'exec', on: false });
+    await act(async () => answer.release(ok({ ok: true, up: 3 })));
+    expect(exec().getByRole('button', { name: /3 votes/ })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('show a vote the page does not know yet as working, and change it once `GET vote` has answered', async () => {
+    const asked = deferred();
+    const answer = deferred();
+    const calls = mockApi({ me: visitor, routes: { 'GET vote': asked.route, 'POST vote': answer.route } });
+    history.replaceState(null, '', '/workshop#part-b');
+    await renderApp();
+    fireEvent.click(exec().getByRole('button', { name: /4 votes/ }));
+    // Working at once, and nothing guessed: the count and the pressed state stay as they are.
+    const waiting = exec().getByRole('button', { name: /4 votes/ });
+    expect(waiting).toHaveClass('ws-pending');
+    expect(waiting).toHaveAttribute('aria-busy', 'true');
+    expect(waiting).toHaveAttribute('aria-pressed', 'false');
+    expect(posts(calls, 'vote')).toHaveLength(0);
+    await act(async () => asked.release(ok({ on: true, comments: [] })));
+    // The person had given their 👍: the click takes it back, and the count never went up.
+    expect(exec().queryByRole('button', { name: /5 votes/ })).toBeNull();
+    const taken = exec().getByRole('button', { name: /3 votes/ });
+    expect(taken).toHaveAttribute('aria-pressed', 'false');
+    expect(taken).toHaveClass('ws-pending');
+    await waitFor(() => expect(posts(calls, 'vote')).toHaveLength(1));
+    expect(posts(calls, 'vote')[0].body).toEqual({ entry: 'exec', on: false });
+    await act(async () => answer.release(ok({ ok: true, up: 3 })));
+    expect(exec().getByRole('button', { name: /3 votes/ })).not.toHaveClass('ws-pending');
+  });
+
+  it('put a refused vote back to the pressed state and the count it had, and say why', async () => {
+    const answer = deferred();
+    const calls = mockApi({ me: visitor, routes: { 'POST vote': answer.route } });
+    history.replaceState(null, '', '/workshop#part-b/exec');
+    await renderApp();
+    await waitFor(() => expect(calls.some((call) => call.path === 'vote' && call.method === 'GET')).toBe(true));
+    fireEvent.click(exec().getByRole('button', { name: /4 votes/ }));
+    expect(exec().getByRole('button', { name: /5 votes/ })).toHaveAttribute('aria-pressed', 'true');
+    await act(async () => answer.release(refused(429, 'GitHub is busy. Try again in a minute.')));
+    expect(await screen.findByText('Vote: not saved. GitHub is busy. Try again in a minute.')).toBeInTheDocument();
+    const back = exec().getByRole('button', { name: /4 votes/ });
+    expect(back).toHaveAttribute('aria-pressed', 'false');
+    expect(back).toBeEnabled();
+    expect(back).not.toHaveClass('ws-pending');
+  });
+
+  it('put a vote on a thread found closed back too, and show the thread closed', async () => {
+    const answer = deferred();
+    const calls = mockApi({ me: visitor, routes: { 'POST vote': answer.route } });
+    history.replaceState(null, '', '/workshop#part-b/exec');
+    await renderApp();
+    await waitFor(() => expect(calls.some((call) => call.path === 'vote' && call.method === 'GET')).toBe(true));
+    fireEvent.click(exec().getByRole('button', { name: /4 votes/ }));
+    expect(exec().getByRole('button', { name: /5 votes/ })).toBeInTheDocument();
+    await act(async () => answer.release({ status: 403, body: { error: 'closed', message: 'This thread is closed on GitHub.', n: 13 } }));
+    expect(await exec().findByText(/This thread is closed on GitHub\./)).toBeInTheDocument();
+    const back = exec().getByRole('button', { name: /4 votes/ });
+    expect(back).toHaveAttribute('aria-pressed', 'false');
+    expect(back).not.toHaveClass('ws-pending');
   });
 
   it('check the person\'s vote once per opening, never retrying a failure', async () => {
@@ -203,7 +293,7 @@ describe('a refused write', () => {
       async make() {
         await userEvent.click(within(itemOf(VOTED)).getByRole('button', { name: /4 votes/ }));
       },
-      during: () => expect(within(itemOf(VOTED)).getByRole('button', { name: /4 votes/ })).toBeDisabled(),
+      during: () => expect(within(itemOf(VOTED)).getByRole('button', { name: /5 votes/ })).toBeDisabled(),
       undone: () => {
         // Still four votes, not marked as mine (signed out, the thumb is a link instead of a button).
         const thumb = within(itemOf(VOTED)).getByLabelText(/4 votes/);

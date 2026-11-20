@@ -338,6 +338,9 @@
 .ws-pending { opacity: .55; }
 .ws-item.ws-pending .ws-line:hover { background: none; }
 .ws-vote.ws-pending { cursor: default; }
+/* A vote that is out: accent ink and border, the thumb pulsing; not dimmed, and the button keeps its size. */
+.ws .ws-vote.ws-pending { opacity: 1; color: var(--accent-ink); border-color: var(--accent-ink); }
+.ws .ws-vote.ws-pending > span:first-child { animation: ws-pulse 1.6s ease-in-out infinite; }
 
 /* the error boundary's plain list */
 .ws-plain section { padding: 0 24px 18px; }

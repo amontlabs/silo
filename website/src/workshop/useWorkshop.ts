@@ -61,6 +61,11 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   // Writes the server has not answered yet, by the key of the row (an entry may have no thread yet). Nothing here counts as done.
   const [sending, setSending] = useState<Record<string, Comment[]>>({});
   const [votePending, setVotePending] = useState<ReadonlySet<string>>(new Set());
+  // The page's own change to a row's 👍 while its vote is out: the pressed state it shows and the count's change
+  // (one up or one down), by the key of the row. It is laid over the row's count, so a newer `state` or `issue`
+  // answer moves the count under it without the change being lost or counted twice, and it is gone once the
+  // server has answered or refused.
+  const [voteOwn, setVoteOwn] = useState<Record<string, { on: boolean; delta: number }>>({});
   const [commentVotePending, setCommentVotePending] = useState<ReadonlySet<string>>(new Set());
   const [suggestionsSending, setSuggestionsSending] = useState<{ id: number; title: string; author: string }[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -379,6 +384,15 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   };
 
   const votingRef = useRef(new Set<string>());
+  const setOwnVote = (key: string, own: { on: boolean; delta: number } | null) => setVoteOwn((current) => {
+    const { [key]: _gone, ...rest } = current;
+    return own ? { ...rest, [key]: own } : rest;
+  });
+  /**
+   * The person's 👍 on a row. When the page knows the person's vote on it, the pressed state and the count change
+   * before anything is sent; when it does not, `GET vote` is asked first (the row shows it is working) and they
+   * change when that answer is in. The server's count then replaces the page's own; a refusal takes it back.
+   */
   const toggleVote = async (row: Row) => {
     const target = targetOf(row);
     if (!target || !me || votingRef.current.has(row.key)) return;
@@ -391,6 +405,9 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
       const known = row.issue !== null ? votes[row.issue] : false;
       const was = known !== undefined ? known : row.issue !== null ? (await api.myVote(row.issue)).on : false;
       const on = !was;
+      // The count never goes below 0: a 👍 taken back from a count of 0 changes nothing shown.
+      const shown = row.up ?? 0;
+      setOwnVote(row.key, { on, delta: on ? 1 : Math.max(0, shown - 1) - shown });
       const answered = await api.vote(target, on);
       const n = threadOf(row, answered);
       if (n === null) throw new Error('No thread answered.');
@@ -400,6 +417,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
       if (!refusedClosed(row, error, sent)) failed('Vote', error);
     } finally {
       votingRef.current.delete(row.key);
+      setOwnVote(row.key, null);
       setVotePending(new Set(votingRef.current));
     }
   };
@@ -494,7 +512,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   };
 
   return {
-    live, liveOk, waiting, offline, settled, me, retry, plan, rowByKey, details, prefetch, notes, wantNotes, facts, wantFacts, histories, wantHistory, fetchNow, sending, votePending,
+    live, liveOk, waiting, offline, settled, me, retry, plan, rowByKey, details, prefetch, notes, wantNotes, facts, wantFacts, histories, wantHistory, fetchNow, sending, votePending, voteOwn,
     votes, commentVotes, commentVotePending, toggleCommentVote, suggestionsSending, notice, drafts, setDrafts, suggestDraft,
     setSuggestDraft, announce, setAnnounce, signinFailed, sendComment, toggleVote,
     sendSuggestion, signOut,

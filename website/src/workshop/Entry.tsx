@@ -185,12 +185,15 @@ function Vote({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const { w } = ctx;
   if (w.waiting) return <i className="ws-ph ws-ph-vote" aria-hidden="true" />;
   if (!w.liveOk || row.up === null) return null;
-  const on = row.issue !== null && w.votes[row.issue] === true;
-  const busy = w.votePending.has(row.key);
   if (!w.me) return <a className="ws-vote ws-late-s" href={ctx.signIn} title="Sign in to vote" aria-label={`${row.up} votes, sign in to vote`}><Thumb up={row.up} /></a>;
+  // While the person's vote is out, the page's own change to it is what shows.
+  const own = w.voteOwn[row.key];
+  const on = own ? own.on : row.issue !== null && w.votes[row.issue] === true;
+  const up = Math.max(0, row.up + (own?.delta ?? 0));
+  const busy = w.votePending.has(row.key);
   return (
-    <button type="button" className={`ws-vote ws-late-s${on ? ' on' : ''}${busy ? ' ws-pending' : ''}`} aria-pressed={on} aria-busy={busy} aria-label={`${row.up} votes`} onClick={() => void w.toggleVote(row)} disabled={busy}>
-      <Thumb up={row.up} />
+    <button type="button" className={`ws-vote ws-late-s${on ? ' on' : ''}${busy ? ' ws-pending' : ''}`} aria-pressed={on} aria-busy={busy} aria-label={`${up} votes`} onClick={() => void w.toggleVote(row)} disabled={busy}>
+      <Thumb up={up} />
     </button>
   );
 }
