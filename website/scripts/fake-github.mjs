@@ -4,7 +4,7 @@
 // endpoints the Workshop uses. State lives in memory.
 import { createHash, generateKeyPairSync, randomBytes, verify } from 'node:crypto';
 import { createServer } from 'node:http';
-import { changeComment } from '../../tools/plan/model/index.js';
+import { changeComment } from '../../tools/workshop/model/index.js';
 
 export const FAKE_APP = { appId: '1001', slug: 'silo-workshop', clientId: 'Iv1.fakeclient', installationId: 7, repoId: 4242 };
 

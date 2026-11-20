@@ -31,7 +31,7 @@ test('anonymous reads cannot make a signed-in person\'s request answer 429', asy
         [visitor, 'comment', { n: 1, text: 'still here' }],
         [visitor, 'vote', { n: 1, on: true }],
         [visitor, 'suggest', { title: 'Still possible', text: 'x' }],
-        [owner, 'verdict', { n: entryNumber, verdict: 'take' }],
+        [owner, 'comment', { n: entryNumber, text: 'the owner too' }],
       ]) {
         const response = await who.call('POST', path, { body });
         assert.equal(response.status, 200, `${path} ${response.body}`);
@@ -110,7 +110,7 @@ test('every handler has one deadline for all its GitHub calls, and answers 502 w
     t.fake.state.hook = (r) => (r.kind === 'user' ? { delay: 250 } : null);
     const started = Date.now();
     const response = await quick.handle({
-      method: 'POST', url: '/api/workshop/verdict', headers: { origin: ORIGIN, 'x-workshop': '1', cookie }, body: JSON.stringify({ n: entryNumber, verdict: 'take' }),
+      method: 'POST', url: '/api/workshop/comment', headers: { origin: ORIGIN, 'x-workshop': '1', cookie }, body: JSON.stringify({ n: entryNumber, text: 'Too slow.' }),
     });
     assert.equal(response.status, 502);
     assert.equal(JSON.parse(response.body).error, 'github_failed');
@@ -126,13 +126,11 @@ test('every handler has one deadline for all its GitHub calls, and answers 502 w
   } finally { t.fake.state.hook = null; await t.close(); }
 });
 
-test('patches survive a refresh already in flight, are not counted twice, and a drop sets closedAt', async () => {
+test('patches survive a refresh already in flight and are not counted twice', async () => {
   const t = await setup();
   try {
     const visitor = t.client();
     await visitor.signIn('visitor-fake');
-    const owner = t.client();
-    await owner.signIn('owner-fake');
     const reader = t.client();
     await reader.call('GET', 'state');
     t.clock.t += 61_000;
@@ -152,12 +150,6 @@ test('patches survive a refresh already in flight, are not counted twice, and a 
     await t.workshop.idle();
     state = (await reader.call('GET', 'state')).json.issues;
     assert.equal(state[3].comments, 2, 'a patch older than the refresh gives way to GitHub');
-
-    assert.equal((await owner.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'drop' } })).status, 200);
-    state = (await reader.call('GET', 'state')).json.issues;
-    assert.equal(typeof state[entryNumber].closedAt, 'string');
-    assert.equal((await owner.call('POST', 'verdict', { body: { n: entryNumber, verdict: null } })).status, 200);
-    assert.equal((await reader.call('GET', 'state')).json.issues[entryNumber].closedAt, null);
   } finally { t.fake.state.hook = null; await t.close(); }
 });
 

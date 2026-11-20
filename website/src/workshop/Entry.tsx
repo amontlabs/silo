@@ -4,7 +4,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { hasSessionHint } from './api';
-import { compareLink, featureFileAt } from '../../../tools/plan/model/index.js';
+import { compareLink, featureFileAt } from '../../../tools/workshop/model/index.js';
 import { Markdown } from './Markdown';
 import { RichText, safeHref } from './RichText';
 import { awaitsVerdict, changesText, changeWords, isDecided, relativeTime, shortDate } from './plan';

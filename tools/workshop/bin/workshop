@@ -1,0 +1,4 @@
+#!/usr/bin/env node
+// Entry point: the command lives in cli/main.js.
+const { main } = await import('../cli/main.js');
+process.exitCode = await main(process.argv.slice(2));

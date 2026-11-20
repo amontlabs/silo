@@ -10,7 +10,7 @@ import { assertNoSecrets, fakeKeychain, run, sandbox, secretsOf } from './setup-
 
 const unescape = (s) => s.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 
-/** Starts `plan setup`, plays the browser and GitHub's two clicks, and returns the command's result. */
+/** Starts `workshop setup`, plays the browser and GitHub's two clicks, and returns the command's result. */
 async function driveSetup({ fake, box, keychain, args = [], tamper }) {
   let opened;
   const opening = new Promise((resolve) => (opened = resolve));
@@ -186,7 +186,7 @@ for (const okStores of [0, 2]) {
     const flaky = flakyKeychain(okStores);
     const first = await driveSetup({ fake, box, keychain: flaky });
     assert.equal(first.result.code, 1);
-    assert.match(first.result.stderr, /the App silo-workshop exists on GitHub and its credentials are in .*vercel\.env.*run `plan store`/);
+    assert.match(first.result.stderr, /the App silo-workshop exists on GitHub and its credentials are in .*vercel\.env.*run `workshop store`/);
     assert.equal(flaky.keychain.store.size, okStores);
     const envPath = vercelEnvPath(box.home);
     assert.equal(statSync(envPath).mode & 0o777, 0o600);
@@ -197,7 +197,7 @@ for (const okStores of [0, 2]) {
     for (const args of [[], ['--replace']]) {
       const retry = await driveSetup({ fake, box, keychain: flaky, args });
       assert.equal(retry.result.code, 1);
-      assert.match(retry.result.stderr, /run `plan store` to finish/);
+      assert.match(retry.result.stderr, /run `workshop store` to finish/);
     }
     assert.equal(fake.manifests.length, 1, 'never a second App');
 
@@ -230,7 +230,7 @@ test('a Keychain holding another App than vercel.env: setup --replace refuses an
   for (const [name, value] of Object.entries(other)) keychain.set(name, value);
   const refused = await driveSetup({ fake, box, keychain, args: ['--replace'] });
   assert.equal(refused.result.code, 1);
-  assert.match(refused.result.stderr, /holds App 4242 but the Keychain holds App 999: run `plan store --replace` .* or delete .*vercel\.env/);
+  assert.match(refused.result.stderr, /holds App 4242 but the Keychain holds App 999: run `workshop store --replace` .* or delete .*vercel\.env/);
   assert.equal(fake.manifests.length, 1);
   const storeRefused = await run(['store'], { fake, box, keychain });
   assert.equal(storeRefused.code, 1);
@@ -242,7 +242,7 @@ test('a Keychain holding another App than vercel.env: setup --replace refuses an
   keychain.store.clear();
   keychain.set('WORKSHOP_APP_ID', '999');
   const partial = await driveSetup({ fake, box, keychain, args: ['--replace'] });
-  assert.match(partial.result.stderr, /run `plan store` to finish/);
+  assert.match(partial.result.stderr, /run `workshop store` to finish/);
   assert.equal((await run(['store'], { fake, box, keychain })).code, 0);
   assert.equal(keychain.get('WORKSHOP_APP_ID'), fake.appId);
   assert.equal(keychain.store.size, 4);
@@ -288,7 +288,7 @@ test('the setup server refuses any Host but 127.0.0.1 or localhost on its port',
   assert.match(result.stderr, /timed out/);
 });
 
-test('doctor: sources only, the App public and installed, its permissions, the six labels', async (t) => {
+test('doctor: sources only, the App public and installed, its permissions, and only the label something still sets', async (t) => {
   const fake = await startFake();
   t.after(fake.stop);
   const box = sandbox(t);
@@ -298,12 +298,13 @@ test('doctor: sources only, the App public and installed, its permissions, the s
   assert.deepEqual(report.credentials, { WORKSHOP_APP_ID: 'keychain', WORKSHOP_CLIENT_ID: 'missing', WORKSHOP_CLIENT_SECRET: 'missing', WORKSHOP_PRIVATE_KEY: 'keychain' });
   assert.equal(report.public, true);
   assert.equal(report.installed, true);
-  assert.deepEqual(Object.keys(report.labels), ['workshop:entry', 'workshop:suggestion', 'verdict:take', 'verdict:later', 'verdict:drop', 'workshop:building']);
-  assert.match(report.problems.join('\n'), /labels missing \(plan sync creates them\): workshop:entry, .*workshop:building/);
-  for (const name of Object.keys(report.labels)) fake.labels.push({ name });
+  assert.deepEqual(Object.keys(report.labels), ['workshop:suggestion']);
+  assert.match(report.problems.join('\n'), /labels missing \(create them on GitHub, in the repository's labels\): workshop:suggestion$/m);
+  fake.labels.push({ name: 'Workshop:Suggestion' });
   const ok = await run(['doctor'], { fake, box });
   assert.equal(ok.code, 0, ok.stdout);
-  assert.match(ok.stdout, /Label workshop:building: yes/);
+  assert.match(ok.stdout, /^Label workshop:suggestion: yes$/m);
+  assert.doesNotMatch(ok.stdout, /verdict:|workshop:entry|workshop:building/);
   fake.public = false;
   assert.match((await run(['doctor'], { fake, box })).stdout, /Public: no/);
 });

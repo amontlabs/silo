@@ -6,7 +6,7 @@ export class Failure extends Error {}
 /** GitHub, or the credentials to reach it, could not be used: exit 3. */
 export class Unavailable extends Failure {}
 
-/** No credentials are configured on this machine: exit 3 for a GitHub command, "not available" for live state. */
+/** No credentials are configured on this machine: exit 3. */
 export class NotConfigured extends Unavailable {}
 
 /** GitHub refused for its rate limit; `resetAt` is a Date or null. */
@@ -18,5 +18,3 @@ export class RateLimited extends Unavailable {
   }
 }
 
-/** The feature has no issue on GitHub yet. */
-export class NoIssue extends Failure {}

@@ -18,9 +18,7 @@ import { SNAPSHOT } from '../server/snapshot.mjs';
 import { createFakeGitHub, FAKE_APP, progressOf, seedDemo } from './fake-github.mjs';
 import { DEFAULT_OUTPUT, ENDPOINTS, HANDLER, prepareVercel, RUNTIME } from './prepare-vercel.mjs';
 import { loadFeatures, progressLine, startDev } from './workshop-dev.mjs';
-import { changeComment, readChange, readEntryMarker, withoutMarkers } from '../../tools/plan/model/index.js';
-import { checkFiles } from '../../tools/plan/check/index.js';
-import { loadDir } from '../../tools/plan/read/index.js';
+import { changeComment, readChange, readEntryMarker, withoutMarkers } from '../../tools/workshop/model/index.js';
 
 import { count, retiredNumber, entryNumber, FAILED, issueOf, ORIGIN, SESSION, setup, START, withBudget } from './workshop-test-support.mjs';
 
@@ -204,10 +202,10 @@ test('a signed-in person spends the installation token only on the permission ch
     await visitor.call('POST', 'comment', { body: { n: 1, text: 'hi' } });
     await visitor.call('POST', 'vote', { body: { n: 1, on: false } });
     await visitor.call('POST', 'vote', { body: { n: 1, on: true } });
-    await visitor.call('POST', 'verdict', { body: { n: 1, verdict: 'take' } });
-    await visitor.call('POST', 'verdict', { body: { n: 1, verdict: 'take' } });
+    await visitor.call('GET', 'me');
+    await visitor.call('GET', 'me');
     await visitor.call('POST', 'suggest', { body: { title: 'T', text: 'x' } });
-    await owner.call('POST', 'verdict', { body: { n: 2, verdict: 'later' } });
+    await owner.call('GET', 'me');
     await t.workshop.idle();
     const refreshes = /^\/repos\/amontlabs\/silo\/issues(\/comments)?$/;
     const installation = t.fake.state.requests.slice(before).filter((r) => r.kind === 'installation' && !(r.method === 'GET' && refreshes.test(r.path)));
@@ -291,43 +289,6 @@ test('a suggestion whose label fails twice answers 502 with the issue number and
   } finally { t.fake.state.hook = null; await t.close(); }
 });
 
-test('verdict transitions change only the verdict labels, one by one, with the person\'s token', async () => {
-  const t = await setup();
-  try {
-    const c = t.client();
-    await c.signIn('owner-fake');
-    const issue = issueOf(t.fake, entryNumber);
-    issue.labels.push('other-label');
-    const steps = [
-      ['take', ['workshop:entry', 'other-label', 'verdict:take'], 'open'],
-      ['later', ['workshop:entry', 'other-label', 'verdict:later'], 'open'],
-      ['drop', ['workshop:entry', 'other-label', 'verdict:drop'], 'closed'],
-      [null, ['workshop:entry', 'other-label'], 'open'],
-    ];
-    for (const [verdict, labels, state] of steps) {
-      const before = t.fake.state.requests.length;
-      issue.labels.push('added-meanwhile');
-      const response = await c.call('POST', 'verdict', { body: { n: entryNumber, verdict } });
-      assert.equal(response.status, 200, response.body);
-      assert.deepEqual([...issue.labels].sort(), [...labels, 'added-meanwhile'].sort(), 'a label added by someone else survives');
-      issue.labels = issue.labels.filter((l) => l !== 'added-meanwhile');
-      assert.equal(issue.state, state);
-      if (verdict === 'drop') assert.equal(issue.state_reason, 'not_planned');
-      const calls = t.fake.state.requests.slice(before).filter((r) => r.method !== 'GET');
-      assert.ok(calls.every((r) => r.kind === 'user' && r.login === 'owner-fake'));
-      assert.ok(calls.every((r) => /\/labels(\/[^/]+)?$/.test(r.path) || r.method === 'PATCH'));
-    }
-    const labels = [...issue.labels];
-    const comments = issue.comments.length;
-    for (const body of [{ verdict: 'refine' }, { verdict: 'take', note: 'Narrow it to Linux.' }, { verdict: null, note: 'x' }]) {
-      const refused = await c.call('POST', 'verdict', { body: { n: entryNumber, ...body } });
-      assert.deepEqual([refused.status, refused.json.error], [400, 'bad_input'], JSON.stringify(body));
-    }
-    assert.deepEqual(issue.labels, labels);
-    assert.equal(issue.comments.length, comments, 'a verdict never posts a comment');
-  } finally { await t.close(); }
-});
-
 test('an issue with only the retired decision label is not a Workshop issue', async () => {
   const t = await setup();
   try {
@@ -340,7 +301,6 @@ test('an issue with only the retired decision label is not a Workshop issue', as
       assert.equal((await c.call('POST', 'comment', { body: { n, text: 'x' } })).status, 404);
       assert.equal((await c.call('GET', `vote?n=${n}`)).status, 404);
       assert.equal((await c.call('POST', 'vote', { body: { n, on: true } })).status, 404);
-      assert.equal((await c.call('POST', 'verdict', { body: { n, verdict: 'take' } })).status, 404);
     }
     assert.equal(issueOf(t.fake, retiredNumber).comments.length, 1, 'nothing was written');
     // Beside one kind label it is ignored: the issue is an entry.
@@ -352,17 +312,26 @@ test('an issue with only the retired decision label is not a Workshop issue', as
   } finally { await t.close(); }
 });
 
-test('there is no decide endpoint any more', async () => {
+test('there is no decide or verdict endpoint: the owner\'s verdict lives in the plan\'s files only', async () => {
   const t = await setup();
   try {
     const c = t.client();
     await c.signIn('owner-fake');
+    assert.equal((await c.call('GET', 'me')).json.canDecide, true);
     const before = JSON.stringify([...t.fake.state.issues.values()]);
+    const requests = t.fake.state.requests.length;
     const post = await c.call('POST', 'decide', { body: { n: retiredNumber, text: 'Debian.' } });
     assert.deepEqual([post.status, post.json.error], [404, 'not_found']);
     assert.equal((await c.call('GET', 'decide')).status, 404);
+    for (const verdict of ['take', 'later', 'drop', null]) {
+      const response = await c.call('POST', 'verdict', { body: { n: entryNumber, verdict } });
+      assert.deepEqual([response.status, response.json.error], [404, 'not_found']);
+    }
+    assert.equal((await c.call('GET', 'verdict')).status, 404);
     assert.equal(JSON.stringify([...t.fake.state.issues.values()]), before);
+    assert.equal(t.fake.state.requests.slice(requests).filter((r) => r.method !== 'GET').length, 0, 'nothing was written on GitHub');
     assert.equal(ENDPOINTS.includes('decide'), false);
+    assert.equal(ENDPOINTS.includes('verdict'), false);
   } finally { await t.close(); }
 });
 
@@ -383,17 +352,13 @@ test('every refusal in the contract', async () => {
       [anonymous, 'comment', { n: 1, text: 'x' }, {}, 401, 'signed_out'],
       [anonymous, 'vote', { n: 1, on: true }, {}, 401, 'signed_out'],
       [anonymous, 'suggest', { title: 'x', text: 'y' }, {}, 401, 'signed_out'],
-      [anonymous, 'verdict', { n: 1, verdict: 'take' }, {}, 401, 'signed_out'],
-      [visitor, 'verdict', { n: 1, verdict: 'take' }, {}, 403, 'cannot_decide'],
       [visitor, 'comment', { n: 4, text: 'x' }, {}, 404, 'not_found'],
       [visitor, 'vote', { n: 5, on: true }, {}, 404, 'not_found'],
       [visitor, 'comment', { n: 7, text: 'x' }, {}, 404, 'not_found'],
       [visitor, 'vote', { n: 7, on: true }, {}, 404, 'not_found'],
       [visitor, 'comment', { n: 8, text: 'x' }, {}, 404, 'not_found'],
-      [owner, 'verdict', { n: 7, verdict: 'take' }, {}, 404, 'not_found'],
-      [owner, 'verdict', { n: 4, verdict: 'take' }, {}, 404, 'not_found'],
-      [owner, 'verdict', { n: 6, verdict: 'take' }, {}, 404, 'not_found'],
       [owner, 'decide', { n: 4, text: 'x' }, {}, 404, 'not_found'],
+      [owner, 'verdict', { n: 1, verdict: 'take' }, {}, 404, 'not_found'],
       [visitor, 'comment', { n: 1, text: 'x'.repeat(5001) }, {}, 400, 'too_long'],
       [visitor, 'comment', { n: 1, text: '   ' }, {}, 400, 'empty'],
       [visitor, 'comment', { n: '1', text: 'x' }, {}, 400, 'bad_input'],
@@ -403,12 +368,6 @@ test('every refusal in the contract', async () => {
       [visitor, 'suggest', { title: 'two\nlines', text: 'y' }, {}, 400, 'bad_input'],
       [visitor, 'suggest', { title: 'bell\u0007', text: 'y' }, {}, 400, 'bad_input'],
       [visitor, 'suggest', { title: 'separator\u2028', text: 'y' }, {}, 400, 'bad_input'],
-      [owner, 'verdict', { n: 1 }, {}, 400, 'bad_input'],
-      [owner, 'verdict', { n: 1, verdict: 'refine' }, {}, 400, 'bad_input'],
-      [owner, 'verdict', { n: 1, verdict: 'refine', note: 'Narrow it.' }, {}, 400, 'bad_input'],
-      [owner, 'verdict', { n: 1, verdict: 'take', note: 'x' }, {}, 400, 'bad_input'],
-      [owner, 'verdict', { n: 1, verdict: null, note: '' }, {}, 400, 'bad_input'],
-      [owner, 'verdict', { n: 1, verdict: 'maybe' }, {}, 400, 'bad_input'],
     ];
     for (const [who, path, body, headers, status, code] of cases) {
       const response = await who.call('POST', path, { body, headers });
@@ -606,11 +565,10 @@ test('no response and no log line carries a token, a code, the client secret or 
   } finally { await t.close(); }
 });
 
-// Model: random operations by random people on random issues. After every step,
-// only Workshop issues have changed, an entry carries at most one verdict label
-// that matches the model, it is closed as not planned exactly when dropped, and
-// a built entry (closed as completed) is never changed by a verdict.
-test('model: writes only reach Workshop issues and keep verdicts consistent', async () => {
+// Model: random operations by random people on random issues, a refused verdict
+// among them. After every step, only Workshop issues have changed, and no entry's
+// verdict label or state has: nothing the server does sets a verdict.
+test('model: writes only reach Workshop issues and never change a verdict', async () => {
   const t = await setup();
   try {
     const owner = t.client();
@@ -638,14 +596,7 @@ test('model: writes only reach Workshop issues and keep verdicts consistent', as
       if (op === 0) {
         const verdict = verdicts[rand(verdicts.length)];
         response = await who.call('POST', 'verdict', { body: { n, verdict } });
-        if (isOwner && model.has(n) && verdict !== 'refine') {
-          assert.equal(response.status, 200, response.body);
-          model.set(n, { verdict, dropped: verdict === 'drop' });
-        } else if (isOwner && n === built && verdict !== 'refine') {
-          assert.deepEqual([response.status, response.json.error], [409, 'built']);
-        } else {
-          assert.notEqual(response.status, 200);
-        }
+        assert.deepEqual([response.status, response.json.error], [404, 'not_found'], `${isOwner ? 'owner' : 'visitor'} #${n}`);
       } else if (op === 1) {
         response = await who.call('POST', 'comment', { body: { n, text: `c ${step}` } });
         assert.equal(response.status === 200, workshop.has(n), response.body);
@@ -728,16 +679,19 @@ async function writePlan(dir) {
   await writeFile(join(dir, 'order.json'), json({ stages: [{ id: 'start', title: 'Start', line: 'The first things.', features: FIXTURE_FEATURES.map(([id]) => id) }] }));
   await writeFile(join(dir, 'decisions.json'), json([]));
   for (const [id, name, what] of FIXTURE_FEATURES) await writeFile(join(dir, 'features', `${id}.json`), json({ name, what, area: 'part-a', needs: [] }));
+  // The plan tool is loaded only by the tests that write a plan: the server's own tests never need it.
+  const { checkFiles } = await import('../../tools/plan/check/index.js');
+  const { loadDir } = await import('../../tools/plan/read/index.js');
   const found = checkFiles(loadDir(dir));
   assert.deepEqual(found.errors, [], 'the fixture plan is valid');
 }
 
-async function fixtureSite(page = 'workshop/index.html') {
+async function fixtureSite(page = 'workshop/index.html', { plan = false } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'workshop-site-'));
   await mkdir(join(dir, 'dist', 'workshop'), { recursive: true });
   await writeFile(join(dir, 'dist', 'index.html'), '<!doctype html><title>Silo</title>');
   if (page) await writeFile(join(dir, 'dist', page), '<!doctype html><title>Workshop</title>');
-  await writePlan(join(dir, 'plan'));
+  if (plan) await writePlan(join(dir, 'plan'));
   return dir;
 }
 
@@ -782,11 +736,11 @@ test('Build Output layout: static site, one Node.js function at every endpoint, 
     assert.deepEqual((await readdir(main)).sort(), ['.vc-config.json', 'tools', 'website']);
     // No package ships: the server runs on Node's standard library.
     assert.deepEqual((await readdir(join(main, 'website'))).sort(), ['api', 'server']);
-    // The plan's model ships beside the server, at its place in the repository, as ESM.
-    const model = (await readdir(new URL('../../tools/plan/model/', import.meta.url))).filter((name) => name.endsWith('.js')).sort();
+    // The Workshop's model ships beside the server, at its place in the repository, as ESM; nothing of the plan tool ships.
+    const model = (await readdir(new URL('../../tools/workshop/model/', import.meta.url))).filter((name) => name.endsWith('.js')).sort();
     assert.ok(model.includes('index.js') && model.includes('markers.js'));
-    assert.deepEqual((await listFiles(join(main, 'tools'))).sort(), ['plan/package.json', ...model.map((name) => `plan/model/${name}`)].sort());
-    assert.equal(JSON.parse(await readFile(join(main, 'tools', 'plan', 'package.json'), 'utf8')).type, 'module');
+    assert.deepEqual((await listFiles(join(main, 'tools'))).sort(), ['workshop/package.json', ...model.map((name) => `workshop/model/${name}`)].sort());
+    assert.equal(JSON.parse(await readFile(join(main, 'tools', 'workshop', 'package.json'), 'utf8')).type, 'module');
 
     // The packaged function runs on its own, from a clean folder with nothing above it to resolve from.
     const clean = await mkdtemp(join(tmpdir(), 'workshop-func-'));
@@ -844,7 +798,7 @@ async function freePort() {
 }
 
 test('workshop-dev --fake serves the site and the API on one port, with sign-in through the fake GitHub', async () => {
-  const site = await fixtureSite();
+  const site = await fixtureSite(undefined, { plan: true });
   await writeFile(join(site, 'dist', 'workshop', 'index.html'), '<!doctype html><head><title>Workshop</title></head>');
   const dev = await startDev({ fake: true, port: await freePort(), distDir: join(site, 'dist'), planDir: join(site, 'plan'), log: () => {} });
   try {
@@ -977,49 +931,6 @@ test('unlabelled suggestions are retried after a successful suggestion or a refr
     await t.workshop.idle();
     assert.equal(count(t.fake, 'POST', /\/labels$/, 'installation'), labels, 'the list is empty now');
   } finally { BUDGET.labelCallsPerMinute = saved; t.fake.state.hook = null; await t.close(); }
-});
-
-test('verdict: a failed change leaves everything as it was; a built entry is refused 409 before any change', async () => {
-  const t = await setup();
-  try {
-    const c = t.client();
-    await c.signIn('owner-fake');
-    const issue = issueOf(t.fake, entryNumber);
-    t.fake.state.hook = (r) => (r.method === 'PATCH' ? { status: 500 } : null);
-    assert.equal((await c.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'drop' } })).status, 502);
-    assert.equal(issue.comments.length, 0, 'a verdict posts no comment');
-    t.fake.state.hook = null;
-    assert.equal((await c.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'drop' } })).status, 200);
-    assert.equal(issue.comments.length, 0, 'a verdict posts no comment');
-    assert.deepEqual([issue.state, issue.state_reason], ['closed', 'not_planned']);
-  } finally { t.fake.state.hook = null; await t.close(); }
-});
-
-test('verdict on a built entry (closed as completed) is refused 409 built: labels, state and GitHub untouched', async () => {
-  const t = await setup();
-  try {
-    const c = t.client();
-    await c.signIn('owner-fake');
-    const built = issueOf(t.fake, 3);
-    Object.assign(built, { state: 'closed', state_reason: 'completed', labels: ['workshop:entry', 'verdict:take', 'other-label'] });
-    await c.call('GET', 'me');
-    t.clock.t += 61_000;
-    await settle(t, c);
-    const snapshot = JSON.stringify(built);
-    const state = JSON.stringify((await c.call('GET', 'state')).json.issues);
-    const before = t.fake.state.requests.length;
-    for (const verdict of ['take', 'later', 'drop', null]) {
-      const response = await c.call('POST', 'verdict', { body: { n: 3, verdict } });
-      assert.deepEqual([response.status, response.json.error], [409, 'built'], String(verdict));
-    }
-    assert.equal(JSON.stringify(built), snapshot);
-    const writes = t.fake.state.requests.slice(before).filter((r) => r.method !== 'GET');
-    assert.deepEqual(writes, [], 'no write call reached GitHub');
-    assert.equal(JSON.stringify((await c.call('GET', 'state')).json.issues), state, 'the snapshot is untouched');
-    // Closed as not planned is not built: its verdict still changes.
-    Object.assign(built, { state_reason: 'not_planned' });
-    assert.equal((await c.call('POST', 'verdict', { body: { n: 3, verdict: 'later' } })).status, 200);
-  } finally { await t.close(); }
 });
 
 async function settle(t, client) {
@@ -1165,23 +1076,23 @@ test('configuration: a non-canonical secret or a bad key is not_configured at th
   }
 });
 
-test('packaging ships server/ and api/ at any depth and the plan model, and refuses any other file the function loads', async () => {
+test('packaging ships server/ and api/ at any depth and the model of the Workshop, and refuses any other file the function loads', async () => {
   const root = await mkdtemp(join(tmpdir(), 'workshop-repo-'));
   try {
     const site = join(root, 'website');
     const here = new URL('..', import.meta.url).pathname;
     for (const part of ['server', 'api']) await cp(join(here, part), join(site, part), { recursive: true });
-    await cp(new URL('../../tools/plan/model', import.meta.url).pathname, join(root, 'tools', 'plan', 'model'), { recursive: true });
-    await cp(new URL('../../tools/plan/package.json', import.meta.url).pathname, join(root, 'tools', 'plan', 'package.json'));
+    await cp(new URL('../../tools/workshop/model', import.meta.url).pathname, join(root, 'tools', 'workshop', 'model'), { recursive: true });
+    await cp(new URL('../../tools/workshop/package.json', import.meta.url).pathname, join(root, 'tools', 'workshop', 'package.json'));
     const dist = await fixtureSite();
     try {
       const fine = await prepareVercel({ siteDir: site, distDir: join(dist, 'dist'), outputDir: join(root, 'a', '.vercel', 'output') });
-      assert.ok(fine.files.includes(join('tools', 'plan', 'model', 'status.js')));
-      await mkdir(join(root, 'tools', 'plan', 'read'), { recursive: true });
-      await writeFile(join(root, 'tools', 'plan', 'read', 'x.js'), 'export const x = 1;\n');
+      assert.ok(fine.files.includes(join('tools', 'workshop', 'model', 'comments.js')));
+      await mkdir(join(root, 'tools', 'plan', 'model'), { recursive: true });
+      await writeFile(join(root, 'tools', 'plan', 'model', 'x.js'), 'export const x = 1;\n');
       const config = join(site, 'server', 'config.mjs');
       const original = await readFile(config, 'utf8');
-      await writeFile(config, `import '../../tools/plan/read/x.js';\n${original}`);
+      await writeFile(config, `import '../../tools/plan/model/x.js';\n${original}`);
       await assert.rejects(prepareVercel({ siteDir: site, distDir: join(dist, 'dist'), outputDir: join(root, 'b', '.vercel', 'output') }), /outside website\//);
       await assert.rejects(lstat(join(root, 'b', '.vercel', 'output')), 'nothing is written');
       // A file deeper in server/ or api/ ships; any other file in website/ is refused by name.
@@ -1258,7 +1169,7 @@ test('API answers forbid framing; route names are own properties only', async ()
 });
 
 test('the local server survives //, an aborted POST body and /api/workshop/constructor, and forbids framing', async () => {
-  const site = await fixtureSite();
+  const site = await fixtureSite(undefined, { plan: true });
   const dev = await startDev({ fake: true, port: await freePort(), distDir: join(site, 'dist'), planDir: join(site, 'plan'), log: () => {} });
   const { port } = new URL(dev.origin);
   const raw = (text) => new Promise((resolve) => {

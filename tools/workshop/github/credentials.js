@@ -73,6 +73,6 @@ export function lookup(names, { env, home, keychain }) {
 export function appCredentials(deps) {
   const { values, sources } = lookup(['WORKSHOP_APP_ID', 'WORKSHOP_PRIVATE_KEY'], deps);
   const missing = Object.keys(sources).filter((name) => !sources[name]);
-  if (missing.length) throw new NotConfigured(`missing ${missing.join(' and ')}: run \`plan setup\`, or see tools/plan/README.md`);
+  if (missing.length) throw new NotConfigured(`missing ${missing.join(' and ')}: run \`workshop setup\`, or see tools/workshop/README.md`);
   return { appId: values.WORKSHOP_APP_ID, privateKey: values.WORKSHOP_PRIVATE_KEY, sources };
 }

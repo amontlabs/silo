@@ -58,7 +58,7 @@ export class GitHub {
       if (wait > 0) await this.sleep(wait);
     }
     /** @type {Record<string, string>} */
-    const headers = { accept: 'application/vnd.github+json', 'x-github-api-version': API_VERSION, 'user-agent': 'silo-plan' };
+    const headers = { accept: 'application/vnd.github+json', 'x-github-api-version': API_VERSION, 'user-agent': 'silo-workshop' };
     if (auth) headers.authorization = auth;
     if (body !== undefined) headers['content-type'] = 'application/json';
     let response;

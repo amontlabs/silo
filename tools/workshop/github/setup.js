@@ -1,4 +1,4 @@
-// `plan setup`: registers the "Silo Workshop" App with GitHub's
+// `workshop setup`: registers the "Silo Workshop" App with GitHub's
 // app-manifest flow. A server on 127.0.0.1 serves a page whose form posts the
 // manifest to GitHub; GitHub sends the browser back to our local callback with
 // a one-hour `code` (and our `state`), which is exchanged for the App's id,
@@ -24,7 +24,7 @@ export function manifest({ site, redirectUrl }) {
   return {
     name: 'Silo Workshop',
     url: `${site}/workshop`,
-    description: 'Votes, comments and the owner’s decisions on the Silo plan, stored as issues of amontlabs/silo.',
+    description: 'Votes, comments and suggestions on the Silo plan, stored as issues of amontlabs/silo.',
     redirect_url: redirectUrl,
     callback_urls: [`${site}/api/workshop/callback`],
     public: true,
@@ -74,10 +74,10 @@ function setupRefusal(state, replace, deps) {
       return replace ? null : `Workshop credentials already exist in the Keychain; pass --replace to register a new App`;
     }
     if (state.complete) {
-      return `${state.path} holds App ${state.appIds.env} but the Keychain holds App ${state.appIds.keychain}: run \`plan store --replace\` to put the App of ${state.path} in the Keychain, or delete ${state.path} to keep the Keychain's, then run setup again`;
+      return `${state.path} holds App ${state.appIds.env} but the Keychain holds App ${state.appIds.keychain}: run \`workshop store --replace\` to put the App of ${state.path} in the Keychain, or delete ${state.path} to keep the Keychain's, then run setup again`;
     }
     // A setup that made the App but did not finish storing it: finishing never needs a second App.
-    return `${state.path} holds the credentials of App ${state.appIds.env}, which the Keychain does not fully hold: run \`plan store\` to finish storing them`;
+    return `${state.path} holds the credentials of App ${state.appIds.env}, which the Keychain does not fully hold: run \`workshop store\` to finish storing them`;
   }
   if (replace) return null;
   if (state.held.length) return `Workshop credentials already exist in the Keychain; pass --replace to register a new App`;
@@ -200,7 +200,7 @@ async function exchange({ gh, code, origin, deps, web }) {
   } catch (error) {
     throw new Failure(
       `the App ${slug} exists on GitHub and its credentials are in ${path}, but the Keychain failed (${error.message}); ` +
-        `run \`plan store\` to finish, then install it: ${installUrl}`,
+        `run \`workshop store\` to finish, then install it: ${installUrl}`,
     );
   }
   return { app: slug, installUrl, envFile: path };
@@ -216,7 +216,7 @@ export function readVercelEnv(path) {
   try {
     stat = statSync(path);
   } catch {
-    throw new Failure(`${path} does not exist: run \`plan setup\` first`);
+    throw new Failure(`${path} does not exist: run \`workshop setup\` first`);
   }
   if ((stat.mode & 0o077) !== 0) throw new Failure(`${path} must be readable only by you (chmod 600); refusing to read it`);
   const values = {};
@@ -235,11 +235,11 @@ export function readVercelEnv(path) {
   return values;
 }
 
-/** `plan store`: puts the four App credentials from vercel.env into the Keychain. */
+/** `workshop store`: puts the four App credentials from vercel.env into the Keychain. */
 export function store({ replace, deps }) {
   if (!deps.keychain.available()) throw new Failure('the Keychain is locked or unavailable');
   const state = credentialState(deps);
-  if (!state.env) throw new Failure(`${state.path} does not exist: run \`plan setup\` first`);
+  if (!state.env) throw new Failure(`${state.path} does not exist: run \`workshop setup\` first`);
   if (state.complete && state.matches) return { stored: [], from: state.path, already: true };
   if (state.complete && !replace) {
     throw new Failure(`the Keychain holds a complete set for App ${state.appIds.keychain}, not the App ${state.appIds.env} of ${state.path}; pass --replace to overwrite it`);
@@ -252,7 +252,7 @@ export function store({ replace, deps }) {
 
 /** Replaces a file in one step, so an interrupted run never leaves half a file. */
 function writeText(path, text, mode) {
-  const temp = `${path}.plan-${process.pid}.tmp`;
+  const temp = `${path}.workshop-${process.pid}.tmp`;
   writeFileSync(temp, text, mode === undefined ? undefined : { mode });
   renameSync(temp, path);
 }
