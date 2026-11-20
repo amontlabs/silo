@@ -429,16 +429,56 @@ and nothing is written at run time apart from GitHub issues.
 
 | Label | What the issue is |
 | --- | --- |
-| `workshop:entry` | An older issue the bot created for one feature. Nothing creates these any more. The body ends with `<!-- silo-entry: <id> -->`; the server removes it before answering. |
+| `workshop:entry` | The thread of one entry of the plan, a decision or a feature. The bot opens it. Its body ends with `<!-- silo-entry: <id> -->`; the server removes that line before answering. |
 | `workshop:suggestion` | A feature suggested by a visitor. |
+
+Votes are 👍 reactions on an issue. Comments are issue comments, and a vote on
+a comment is a 👍 reaction on that comment.
+
+**An entry's thread** is the issue that holds the comments and votes on one
+entry of the plan. An entry gets one only when someone writes on it: the first
+comment or 👍 on the feature `moving-main` opens an issue titled "Moving main",
+labelled `workshop:entry`, with this body:
+
+```
+Feature of the Silo plan: https://silo.amontlabs.com/workshop#computers/moving-main
+
+<!-- silo-entry: moving-main -->
+```
+
+A decision's issue says "Decision of the Silo plan" and takes the decision's
+question as its title. A title longer than 120 characters is cut at a word and
+ends with "…". The link names the entry's part, or `product` for an entry of
+the whole product. The server finds an entry's thread in this order:
+
+1. The entry's file has `suggested_in: N`, and issue N is a Workshop
+   suggestion: issue N is the thread. A feature written from a suggestion so
+   keeps the suggestion's conversation.
+2. An issue labelled `workshop:entry` ends with the entry's marker: that issue
+   is the thread. When several issues name the same entry, the lowest number
+   is the thread and the server ignores the others. `workshop doctor` reports
+   them.
+3. Otherwise the entry has no thread yet.
+
+An entry's thread that is closed or locked on GitHub stays its thread.
+
+**The plan's entries.** The server knows the plan from `plan-entries.json`,
+which `prepare-vercel.mjs` makes from `plan/` at build time and ships beside
+the server. For each entry it holds the id, the kind, the title (a decision's
+`asks`, a feature's `name`), the part (null for the whole product) and
+`suggestedIn`. The server never takes an id or a title from the page: a write
+names an entry by its id, and the server looks the id up in this file. The
+local server makes the same list from the plan when it starts. A deployed
+function without the file logs it and answers 404 to any write that names an
+entry.
 
 An issue that carries the retired label `workshop:decision` is not part of the
 Workshop. An entry's status comes from its file alone. A suggestion's status
 comes from its issue alone: open is not decided, closed as "not planned" is
-dropped, closed as "completed" is built. Votes are 👍 reactions and comments are
-issue comments. GitHub holds only what people add: comments, suggestions and
-votes. The history of an entry is read from git when the site is built. A
-comment is marked `bot` when it is by the Workshop's own App: its
+dropped, closed as "completed" is built. GitHub holds only what people add
+(comments, suggestions and votes) and the threads the bot opens for them. The
+history of an entry is read from git when the site is built. A comment is
+marked `bot` when it is by the Workshop's own App: its
 `performed_via_github_app` id is the configured App id (`WORKSHOP_APP_ID`), or
 its author is the App's account, `<slug>[bot]` (the slug read from the
 installation). It is otherwise an ordinary comment.
@@ -450,29 +490,77 @@ JSON.
 
 | Endpoint | Who | What |
 | --- | --- | --- |
-| `GET state`, `GET state?fresh=1` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, 👍 count, comment count, author, dates. `latest`: the newest 30 comments held on entries, newest first, each `{ n, entry, author, bot, createdAt, text }`, `text` its first line cut to 140 characters. `"old": true` when the snapshot it was answered from was over 30 seconds old; the field is absent otherwise. `fresh=1` (that exact value) waits for fresh numbers first, as described under the snapshot below. |
+| `GET state`, `GET state?fresh=1` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, 👍 count, comment count, author, dates. `reason` is `not_planned` for a closed issue that was closed as not planned (a dropped suggestion), `completed` for one closed as completed (a built suggestion), and null otherwise. `threads`: the issue number of each entry's thread, by entry id, for the entries of the plan that have one. `latest`: the newest 30 comments held on entries' threads, newest first, each `{ n, entry, author, bot, createdAt, text }`, `text` its first line cut to 140 characters. `"old": true` when the snapshot it was answered from was over 30 seconds old; the field is absent otherwise. `fresh=1` (that exact value) waits for fresh numbers first, as described under the snapshot below. |
 | `GET me` | signed in | `{ login, avatar }`, read from the session cookie alone: it calls nothing on GitHub. 401, with the `workshop-hint` cookie cleared, only when there is no valid session. |
-| `GET issue?n=` | anyone | Body text (first 20,000 characters), 👍 count from the issue's reaction summary, and the latest 100 comments held, oldest first, as plain text; `more: true` when GitHub counts more. The same public answer for everyone. |
-| `GET vote?n=` | signed in | `{ on }`: whether the person has given a 👍, read with their own token. |
+| `GET issue?n=` | anyone | Body text (first 20,000 characters), 👍 count from the issue's reaction summary, and the latest 100 comments held, oldest first, as plain text; `more: true` when GitHub counts more. Each comment has `up`, its 👍 count, from the reaction summary GitHub returns with the comment. The same public answer for everyone. |
+| `GET vote?n=` | signed in | `{ on, comments }`. `on` says whether the person has given the issue a 👍. `comments` lists the ids of the issue's latest 100 comments the person has given a 👍. Both are read with the person's own token: the 👍 on comments in one GraphQL query. |
 | `GET login?return=` | anyone | Redirects to GitHub. `return` must be a path under `/workshop`. |
 | `GET callback` | GitHub | Finishes sign-in and redirects to the return path. |
 | `POST logout` | anyone | Revokes the person's whole grant for the App (all their sessions), then clears the cookies whatever happened. Answers `{ "ok": true, "revoked": true\|false }`. |
-| `POST comment {n, text}` | signed in | Comments as that person. Answers `{ "ok": true, id, comments }`: `comments` is the comment count GitHub gave in the issue read made before posting, plus 1 when this request posted the comment (not when it was found already posted); absent when that read gave no count. |
-| `POST vote {n, on}` | signed in | Adds or removes that person's 👍. Answers `{ "ok": true, up }`: `up` is the 👍 count from the issue's reaction summary in the read made before writing, plus 1 when GitHub created the reaction (a 👍 already there adds nothing), minus the person's 👍 removed, never below 0; absent when that read gave no count. Neither answer costs a GitHub call of its own. |
+| `POST comment {n, text}`, `POST comment {entry, text}` | signed in | Comments as that person. Answers `{ "ok": true, id, comments }`: `comments` is the comment count GitHub gave in the issue read made before posting, plus 1 when this request posted the comment (not when it was found already posted); absent when that read gave no count. With `entry`, see "Writing to an entry" below. |
+| `POST vote {n, on}`, `POST vote {entry, on}` | signed in | Adds or removes that person's 👍. Answers `{ "ok": true, up }`: `up` is the 👍 count from the issue's reaction summary in the read made before writing, plus 1 when GitHub created the reaction (a 👍 already there adds nothing), minus the person's 👍 removed, never below 0; absent when that read gave no count. Neither answer costs a GitHub call of its own. With `entry`, see "Writing to an entry" below. |
+| `POST comment-vote {n, comment, on}` | signed in | Adds or removes that person's 👍 on comment `comment` of issue `n`, with their token. `n` must be a Workshop issue and `comment` one of its comments, else 404. Answers `{ "ok": true, up }`, `up` counted as `POST vote` counts it, from the comment read before the write. |
 | `POST suggest {title, text}` | signed in | Opens an issue as that person and labels it `workshop:suggestion`. Returns `{ number }`. |
 
 A comment that the same person posted on that issue in the last five minutes is
 not posted again.
 
+### Writing to an entry
+
+`POST comment` and `POST vote` take either `n`, an issue number, or `entry`,
+an id of the plan, never both. With `entry`:
+
+- An id that is no entry of the plan answers 404, before any call to GitHub.
+- When the entry has a thread, the write goes on it as it would with that
+  thread's `n`, and the answer carries `n`.
+- When the entry has no thread, the server first reads the entry issues on
+  GitHub with the App's token: the newest pages, until they reach issues the
+  snapshot already held a minute before its refresh began; the snapshot
+  gives the older ones. A thread another instance has just opened is found
+  this way. Without a snapshot, it reads every page.
+- When that read finds none, the App opens the issue described under
+  "Storage", labelled `workshop:entry`. The App then reads the entry issues
+  again: when another instance opened one at the same moment, the lowest
+  number is the thread. The person's comment or 👍 then goes on the thread
+  with the person's own token. The answer carries `n`.
+- Two requests for the same entry on the same instance share one opening.
+- When the issue was opened and the person's write then fails, the issue
+  stays. The answer is the error, and it carries `n`. The next try finds the
+  issue.
+- `POST vote {entry, on: false}` on an entry with no thread answers
+  `{ "ok": true, "up": 0 }` and opens nothing.
+- A write on an entry's thread that is closed or locked, and that GitHub
+  refuses, answers 403 `closed`: "This thread is closed on GitHub." No second
+  issue is opened.
+
+What a write costs on GitHub:
+
+| Write | Calls with the App's token | Calls with the person's token |
+| --- | --- | --- |
+| The first comment on an entry | 3: the read of entry issues, the opening, the read again | 1: the comment |
+| The first 👍 on an entry | 3, the same | 1: the 👍 |
+| A comment on an entry whose thread the snapshot holds | 0 | 3: the issue, the person's recent comments on it, the comment |
+| A 👍 on an entry whose thread the snapshot holds | 0 | 2: the issue, the 👍 |
+
+Each read of entry issues is one page when the snapshot is fresh, and one
+more page for each 100 entry issues opened since. An entry written from a
+suggestion costs one more read with the person's token: the suggestion's
+issue. The App's token is never used to write a person's words, and a
+person's token is never used to open an issue for an entry.
+
 Errors are `{ "error": code, "message": plain words }` with 400 (bad input),
-401 (not signed in, or the session is gone), 403 (not allowed, or a request
-from another site), 404 (not a Workshop issue), 405, 413 (body over 64 KB),
-429 (GitHub's rate limit or one of ours), 502 (GitHub failed or took over 8
-seconds) and 503 `not_configured` (missing or invalid App settings). A
-suggestion whose issue was created but could not be labelled answers 502 with
-`"error": "github"` and the issue's `number`. `login` and `callback` never
-answer JSON: any failure redirects to `/workshop?signin=failed`; cancelling on
-GitHub returns to the page.
+401 (not signed in, or the session is gone), 403 (not allowed, `closed` for
+an entry's thread closed on GitHub, or a request from another site), 404 (not
+a Workshop issue, not an entry of the plan, or not a comment of that issue),
+405, 413 (body over 64 KB), 429 (GitHub's rate limit or one of ours), 502
+(GitHub failed or took over 8 seconds) and 503 `not_configured` (missing or
+invalid App settings). A write naming an entry whose thread was found or
+opened carries the thread's `n` in its error too. A suggestion whose issue
+was created but could not be labelled answers 502 with `"error": "github"`
+and the issue's `number`. An entry's issue that GitHub created without the
+label `workshop:entry` answers 502 with `"error": "github"`; nothing is
+written on it. `login` and `callback` never answer JSON: any failure redirects
+to `/workshop?signin=failed`; cancelling on GitHub returns to the page.
 
 Each comment is cut to 5,000 characters and then carries `"cut": true`. Every
 marker is read with the readers of `tools/workshop/model/` on the whole body or
@@ -592,12 +680,18 @@ seconds plus the 10 seconds of CDN cache.
   first, at most 10 pages; more than that schedules a full reload), and merge
   them by id. The first comment page is asked for at the same time as the
   issue lists; GitHub's answer is reduced to Workshop comments as soon as the
-  lists are read, and the next pages are asked for only then. When an issue
+  lists are read, and the next pages are asked for only then. Each comment
+  keeps its 👍 count from the reaction summary GitHub returns with it. The
+  refreshes in between ask by update time, and this code does not count on a
+  👍 changing a comment's update time: a 👍 given on GitHub itself shows at
+  the next full reload, within 10 minutes. One given through the Workshop
+  shows at once, from the patch. When an issue
   list or the comment listing fails, the refresh's other calls are aborted,
   and the refresh fails with that first failure.
 - **Writes.** After a signed-in person's write succeeds, the snapshot is
-  patched in place: the new comment, the comment and 👍 counts, a new
-  suggestion. Each patch is kept
+  patched in place: the new comment, the comment and 👍 counts, a comment's
+  👍 count, a new suggestion. An entry's thread is patched in as soon as the
+  App has opened it. Each patch is kept
   with its time. When a refresh completes, GitHub's data replaces the snapshot
   and the patches made after that refresh began are applied again; older
   patches are dropped, since GitHub's answer already holds them. A count moves
@@ -625,7 +719,8 @@ URL each time and always counts.
 ### The installation token and its ceilings
 
 The installation token is spent only on the snapshot refresh, the repository
-lookup at sign-in and labelling a suggestion. Each has
+lookup at sign-in, labelling a suggestion, and opening an entry's thread (with
+the reads of entry issues before and after it). Each has
 its own ceiling per instance, so that no use can starve another, and nothing
 a visitor does without signing in can make `suggest`,
 `comment`, `vote` or `me` answer 429:
@@ -635,15 +730,22 @@ a visitor does without signing in can make `suggest`,
 | Snapshot refresh | 40 |
 | Repository lookup at sign-in (once per instance, then remembered) | 4 |
 | Labelling a suggestion, and the label retries (charged per call) | 20 |
+| Opening an entry's thread: the reads of entry issues and the opening (charged per call) | 10 |
 
-Worst case per instance per hour: (40 + 4 + 20) × 60 = 64 × 60 =
-3,840 calls, below the installation's 5,000. The largest refresh is 20 issue
-pages + 15 comment pages = 35 calls, which fits in a minute's 40, and 64 calls
-a minute is far below GitHub's secondary limit of 900 points a minute for
-`GET` requests. Calls to GitHub's token endpoint are not installation calls;
+Worst case per instance per hour: (40 + 4 + 20 + 10) × 60 = 74 × 60 =
+4,440 calls, below the installation's 5,000. The largest refresh is 20 issue
+pages + 15 comment pages = 35 calls, which fits in a minute's 40. GitHub's
+secondary limit is 900 points a minute, a `GET` costing 1 point and a `POST`
+5: at most 30 of the 74 calls a minute are `POST`s (labels and openings),
+which is 30 × 5 + 44 = 194 points. Calls to GitHub's token endpoint are not installation calls;
 new sign-ins have a ceiling of 30 a minute and token refreshes of existing
 sessions a separate one of 60, so made-up sign-ins cannot stop sessions from
 refreshing.
+
+An opening costs 3 calls when the snapshot is fresh (a read, the opening, a
+read), so the ceiling allows 3 openings a minute on an instance. The read
+before an opening also runs for a write on an entry that the snapshot holds
+no thread for, and finds the thread when another instance opened it.
 
 With each of the two lists on one page, a refresh is 3 calls (2 list pages,
 which are `304` and free when unchanged, and 1 `since` comment call, which
@@ -661,8 +763,8 @@ always counts against GitHub's limit):
 **The limit is shared by every instance.** The 5,000 calls an hour belong to
 the installation, and every warm instance spends from them. At about 130 calls
 an hour each, about 38 warm instances that are all idle use up the hour;
-two instances spending at their ceilings (3,840 an hour each) use it up in
-about 40 minutes. Nothing in this code can prevent that: instances do not
+two instances spending at their ceilings (4,440 an hour each) use it up in
+about 34 minutes. Nothing in this code can prevent that: instances do not
 know about each other. When it happens, GitHub answers with a rate limit, every
 instance keeps serving its snapshot (stale after 10 minutes), and the
 snapshots catch up when the hour resets.
@@ -676,10 +778,17 @@ snapshots catch up when the hour resets.
   GitHub with the installation token until the time GitHub gave (at most an
   hour).
 - Each signed-in person may make 20 writes a minute per instance. Sign-out
-  counts as a write. A person may make 3 suggestions a minute and 10 an hour; an attempt
-  counts only when the issue was created.
-- Each session may make 60 GitHub calls a minute for reads (`GET vote` and the
-  reads before a write); more answer 429. The reads a whole action needs are checked before its first
+  counts as a write, and so does a vote on a comment. A person may make 3
+  suggestions a minute and 10 an hour; an attempt counts only when the issue
+  was created.
+- A person may cause 5 openings of an entry's thread an hour per instance,
+  and all people together 30. An opening counts only when the issue was
+  created. A write that would cause one more answers 429 with plain words:
+  "You have started too many new threads this hour." or "Too many new threads
+  were started on the Workshop this hour." A write on an entry that has a
+  thread is no opening.
+- Each session may make 60 GitHub calls a minute for reads (`GET vote`, its
+  GraphQL query, and the reads before a write); more answer 429. The reads a whole action needs are checked before its first
   call.
 - A session GitHub has rejected (a 401, an invalid refresh token, a revoked
   grant) is remembered by a hash of its token for a day (at most 10,000) and
@@ -717,11 +826,13 @@ snapshots catch up when the hour resets.
 | `website/server/app-auth.mjs` | App JWT (RS256, Node's `crypto`) and the cached installation token. |
 | `website/server/session.mjs` | Sealed cookies (AES-256-GCM). |
 | `website/server/issues.mjs` | Kinds, the markers (read with `tools/workshop/model/`), which comments are the App's own, and the cuts. |
+| `website/server/entries.mjs` | Reads `plan-entries.json`, the plan's entries the server knows. |
 | `website/server/snapshot.mjs` | The in-memory snapshot that answers every anonymous read, and its refresh. |
 | `website/server/workshop.mjs` | Every endpoint, independent of the HTTP server. |
 | `website/server/node.mjs` | Adapter for Node's `req`/`res`, used by Vercel and the local server. |
 | `website/api/workshop.cjs` | Vercel's entry point. |
 | `website/scripts/prepare-vercel.mjs` | Writes the Build Output (static site, function, routes). |
+| `website/scripts/plan-entries.mjs` | Makes the list of the plan's entries from `plan/`, for `prepare-vercel.mjs` and the local server. |
 | `website/scripts/workshop-dev.mjs` | Local server for the site and the API. |
 | `website/scripts/fake-github.mjs` | Fake GitHub used by the tests and by `--fake`. |
 | `website/scripts/workshop-test-support.mjs` | Shared test setup: the fake GitHub on a controllable clock and a client with a cookie jar. |
@@ -730,12 +841,13 @@ snapshots catch up when the hour resets.
 | `website/scripts/workshop-limits.test.mjs` | Ceilings, `me`, sign-out, deadlines, patch timing, cleaned output, the App not installed. |
 | `website/scripts/workshop-refresh.test.mjs` | Refreshes started by writes, coalescing, the floor, the idle refresh, what each read waits for and its headers, the parallel refresh and its failures. |
 | `website/scripts/workshop-abuse.test.mjs` | What a visitor or a replayed cookie can make the server do, memory, waits and retries. |
+| `website/scripts/workshop-threads.test.mjs` | Entries' threads: opening, finding, sharing, limits, failures, closed threads, `suggested_in`; votes on comments. |
 
 All of them run with the website's `npm test`.
 
 The server uses Node's standard library (`crypto`, `fetch`, `http`) and no
 package. `prepare-vercel.mjs` refuses a file the function would load from
-`website/node_modules/`, and the whole function is 19 files, about 100 KB.
+`website/node_modules/`, and the whole function is 15 files, about 170 KB, of which 70 KB are `plan-entries.json`.
 
 ## Build and deploy
 
@@ -758,7 +870,11 @@ following Vercel's
   model, `tools/workshop/model/*.js` with `tools/workshop/package.json` (which
   makes it ESM). The script finds what loads by loading the entry point in a separate
   process with a resolve hook, and refuses by name, before writing anything,
-  any other file it loads, in `website/` or outside it. The other
+  any other file it loads, in `website/` or outside it. Beside the server it
+  writes `website/server/plan-entries.json`, the plan's entries made from
+  `plan/` (or the plan `WORKSHOP_PLAN` names), read and checked with
+  `tools/plan` as the page's build reads them; a plan with a problem stops
+  the script before it writes anything. The other
   endpoints (`me.func`, `issue.func`, `vote.func`, …) are symlinks to it, so
   Vercel creates one function served at every `/api/workshop/<endpoint>` path,
   as the [primitives reference](https://vercel.com/docs/build-output-api/primitives#functions)
@@ -832,8 +948,9 @@ Then generate a private key and a client secret, and install the App on
 credentials; `workshop store` finishes a setup whose Keychain step failed. The
 repository needs the label `workshop:suggestion`, which the site puts on each
 new suggestion; `workshop doctor` checks the credentials, the installation, the
-permissions and that label. `workshop:entry` stays on older issues and nothing
-sets it. `workshop decline <issue> --why "…"` closes a suggestion as
+permissions and that label. It also needs the label `workshop:entry`, which
+the site puts on each entry's thread it opens; `workshop doctor` checks it too.
+`workshop decline <issue> --why "…"` closes a suggestion as
 not planned, with the reason as the bot's comment.
 
 For local work against the real GitHub, create a second App the same way with
