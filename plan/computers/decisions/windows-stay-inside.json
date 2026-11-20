@@ -1,0 +1,15 @@
+{
+  "asks": "Can a window an agent opens appear on your device?",
+  "answer": "Windows and apps an agent opens stay inside the computer. They never take the focus or the screen on your device unless you open them.",
+  "sets": [
+    {
+      "in": "computers/properties",
+      "id": "windows-stay-inside-the-computer",
+      "says": "Windows and apps an agent opens stay inside the computer. They never take the focus or the screen on your device unless you open them.",
+      "kind": "safety",
+      "check": [
+        "live check"
+      ]
+    }
+  ]
+}

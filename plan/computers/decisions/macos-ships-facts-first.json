@@ -1,0 +1,7 @@
+{
+  "asks": "What ships on macOS if reports from inside are not ready there?",
+  "answer": "If the inside half is not ready on macOS, the first version there ships with facts only, and no reports. That is still most of the product, and the facts say where they were seen.",
+  "needs": [
+    "record-halves-per-system"
+  ]
+}

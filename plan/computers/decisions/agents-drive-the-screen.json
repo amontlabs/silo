@@ -1,0 +1,5 @@
+{
+  "asks": "Can an agent drive the screen of a macOS computer?",
+  "answer": "An agent can drive the screen of a macOS computer as well as a Linux desktop.",
+  "verdict": "take"
+}

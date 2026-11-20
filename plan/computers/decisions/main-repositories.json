@@ -1,0 +1,5 @@
+{
+  "asks": "How many repositories does main hold?",
+  "answer": "Main holds several repositories, not one.",
+  "verdict": "take"
+}

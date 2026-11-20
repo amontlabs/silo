@@ -1,0 +1,8 @@
+{
+  "asks": "Does an idle computer keep the memory it was given?",
+  "answer": "A computer that is idle gives memory back to the Mac.",
+  "adds": [
+    "idle-computer-gives-memory-back"
+  ],
+  "verdict": "take"
+}

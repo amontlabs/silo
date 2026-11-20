@@ -1,0 +1,15 @@
+{
+  "asks": "Does the engine's core know which system a computer runs?",
+  "answer": "The engine core stays neutral. Nothing in the core knows which system a computer runs.",
+  "sets": [
+    {
+      "in": "computers/properties",
+      "id": "core-knows-no-system",
+      "says": "Nothing in the core knows which system a computer runs.",
+      "kind": "safety",
+      "check": [
+        "test"
+      ]
+    }
+  ]
+}

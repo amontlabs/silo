@@ -1,0 +1,4 @@
+{
+  "asks": "What load is one device sized for?",
+  "answer": "Sizing aims at about 16 agents running at once on one device as the heavy case, and one or two forks as the common case."
+}

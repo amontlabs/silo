@@ -1,0 +1,8 @@
+{
+  "asks": "Where do the user's agents work?",
+  "answer": "There is one main computer, and the user's agents live in it. Forks and fresh computers serve tasks.",
+  "adds": [
+    "main"
+  ],
+  "verdict": "take"
+}

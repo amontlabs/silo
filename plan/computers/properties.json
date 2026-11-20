@@ -1,0 +1,18 @@
+[
+  {
+    "id": "nothing-shared-from-your-device",
+    "says": "Nothing from your device is shared into a computer.",
+    "kind": "safety",
+    "check": [
+      "hostile test"
+    ]
+  },
+  {
+    "id": "idle-computer-gives-memory-back",
+    "says": "A computer that is idle gives memory back to the Mac.",
+    "kind": "liveness",
+    "check": [
+      "live check"
+    ]
+  }
+]
