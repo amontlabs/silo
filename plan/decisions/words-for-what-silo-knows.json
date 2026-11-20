@@ -1,5 +1,6 @@
 {
   "asks": "Which words name what Silo knows?",
+  "answer": "Three words. They say how Silo knows a thing, not where it happened: a file change happens inside a computer and is seen from outside, so it is a fact.",
   "adds": [
     "record",
     "fact",

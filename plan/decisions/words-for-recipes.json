@@ -1,5 +1,6 @@
 {
   "asks": "Which words name how a computer is made and used for one job?",
+  "answer": "One word per idea.",
   "adds": [
     "recipe",
     "task"

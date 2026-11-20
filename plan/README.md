@@ -72,6 +72,8 @@ order they are dealt with. Every decision and every feature is in exactly one st
 - The owner is shown the first entry with no verdict.
 - An entry that is not for now is moved to a later stage. No verdict means "later".
 - An entry comes after everything it needs.
+- Features are sorted so that the most certain and most useful come first, and every cut from the
+  top is a product.
 
 ## Links
 
