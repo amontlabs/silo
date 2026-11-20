@@ -1,0 +1,30 @@
+[
+  {
+    "id": "rule-reads-only-facts",
+    "says": "A rule reads only facts.",
+    "kind": "safety",
+    "from": "less-sure-less-power",
+    "check": "simulator"
+  },
+  {
+    "id": "nothing-told-passes-as-seen",
+    "says": "A report or an opinion is never stored as a fact.",
+    "kind": "safety",
+    "from": "less-sure-less-power",
+    "check": "types"
+  },
+  {
+    "id": "precaution-grants-nothing",
+    "says": "A precaution grants nothing and destroys nothing.",
+    "kind": "safety",
+    "from": "less-sure-less-power",
+    "check": "types"
+  },
+  {
+    "id": "classifier-never-acts",
+    "says": "A classifier never acts.",
+    "kind": "safety",
+    "from": "less-sure-less-power",
+    "check": "model"
+  }
+]

@@ -1,0 +1,32 @@
+{
+  "stages": [
+    {
+      "id": "ground",
+      "title": "The ground",
+      "line": "What Silo is and what always holds in it.",
+      "entries": [
+        "the-design",
+        "engine-language",
+        "nothing-without-a-reason",
+        "losses-show",
+        "no-detour",
+        "model-tool",
+        "linux-vm-engine"
+      ]
+    },
+    {
+      "id": "app",
+      "title": "The app",
+      "line": "The features, in the order they are built.",
+      "entries": [
+        "start-computer"
+      ]
+    },
+    {
+      "id": "later",
+      "title": "Later",
+      "line": "Ideas that are not for now.",
+      "entries": []
+    }
+  ]
+}

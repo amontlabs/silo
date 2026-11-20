@@ -1,0 +1,51 @@
+[
+  {
+    "word": "computer",
+    "means": "A virtual machine that Silo runs. It has macOS or Linux inside."
+  },
+  {
+    "word": "fork",
+    "means": "A copy of a computer, or of one of its checkpoints, that then lives its own life."
+  },
+  {
+    "word": "boundary",
+    "means": "The edge of a computer. Everything that enters or leaves it passes through parts of Silo that run outside it.",
+    "not": [
+      "wall"
+    ]
+  },
+  {
+    "word": "channel",
+    "means": "One way through the boundary. None exists by default.",
+    "not": [
+      "door"
+    ]
+  },
+  {
+    "word": "fact",
+    "means": "One thing Silo saw itself, from outside the computer. Written once."
+  },
+  {
+    "word": "report",
+    "means": "One thing a program inside the computer told Silo. Written once. The agent can interfere with it."
+  },
+  {
+    "word": "opinion",
+    "means": "What a classifier, or you, think about facts and reports. It can be wrong, and it says whose it is.",
+    "not": [
+      "label",
+      "guess"
+    ]
+  },
+  {
+    "word": "rule",
+    "means": "Data you set. It is triggered by a fact, so it is exact."
+  },
+  {
+    "word": "precaution",
+    "means": "Data you set. It is triggered by a report or an opinion, so it can be wrong.",
+    "not": [
+      "watch"
+    ]
+  }
+]

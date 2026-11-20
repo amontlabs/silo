@@ -1,0 +1,15 @@
+{
+  "name": "Start a computer",
+  "what": "Boot a Linux computer from an image, with no channel open.",
+  "needs": [
+    "engine-language",
+    "linux-vm-engine"
+  ],
+  "keeps": [
+    "precaution-grants-nothing"
+  ],
+  "surfaces": {
+    "cli": "silo start"
+  },
+  "verdict": "take"
+}
