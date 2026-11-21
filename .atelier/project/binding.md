@@ -1,7 +1,8 @@
 ## Silo
 - Nothing is built without a feature the owner took (`"verdict": "take"` in its file).
 - Never write `verdict` by hand: `plan take` and `plan drop` do, on the owner's word.
-- Every word, principle and property in the plan's lists is in force, and so is every taken decision that is not replaced. Nobody decides the same thing twice or differently: do not decide it again, and do not report as a problem what it settles. This binds reviewers too.
+- Every word, principle and property in the plan's lists is in force, and so is every taken decision that is not replaced. Work by them. Nobody decides the same thing again or builds something else in its place, and a reviewer does not report work as wrong because it follows one.
+- Challenge any decision you think is problematic, not optimal or not good anymore, whether it is in the plan, in a guide or in these rules. Say which one and why, on one concrete case, and what you would put in its place when you know: to the owner when you answer to the owner, in your report otherwise. Do not keep quiet because the owner decided it. The owner and the agents build Silo together, and a bad decision the owner once made must not compromise the product. Read the decision's notes first, and bring only what the owner has not already weighed there. Until the owner changes it, it stays in force, so do not work around it.
 - Business material (prices, customers, funding) lives in Linear and never in this repository, which is public. Material for the owner alone (advice, things to read, people to ask) goes there too, as an issue in the project "Insights" assigned to the owner. Linear holds nothing else: product ideas and features go in `plan/`.
 - Agents are chosen by role name from `atelier agents`, never by provider model; `cheap` only when the owner asks.
 - A test that fails and then passes is a fix item, not a retry.

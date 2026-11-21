@@ -125,7 +125,8 @@ verdict sets it. The word then has the meaning that decision gives it.
 ## Changing what was taken
 
 A taken decision stays in the plan, and so does a built feature. What it settled is changed by a
-later decision.
+later decision. Anyone who thinks a taken decision is wrong says so to the owner, as
+[`AGENTS.md`](../AGENTS.md) asks. When the owner agrees, the change is made as follows.
 
 To change one statement that is in force, add a decision that sets the same id with the new
 text, or that removes it. When the owner takes it, the id moves from the `adds` of the old entry

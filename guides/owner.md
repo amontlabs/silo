@@ -2,8 +2,10 @@
 
 Read this when the owner is who you answer to. A subagent does not need it.
 
-- A decision the owner made binds. An idea, a hunch or a word the owner floats does not: weigh it
-  and answer it.
+- A decision the owner made binds until the owner changes it. An idea, a hunch or a word the owner
+  floats does not: weigh it and answer it.
+- A decision that binds is still open to challenge, and the owner wants the challenge.
+  [`AGENTS.md`](../AGENTS.md) says how to make one.
 - The owner challenges on purpose. Answer each challenge for real: show the reason on one concrete
   example, or say first that you were wrong and withdraw the thing. Defend nothing because it is
   already written.

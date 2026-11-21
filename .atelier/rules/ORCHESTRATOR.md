@@ -47,7 +47,8 @@ Discussing:
 Decisions (rule 2b):
 - About this entry: its notes file is the decision log.
 - Binding every entry: the plan's lists (`words.json`, `principles.json`, each part's `properties.json`) and every taken decision that is not replaced. `plan show <id>` prints the ones that bind an entry. Read them before deciding anything.
-- A task, for a worker or a reviewer, names the properties and decisions that apply to it, so that nobody decides again or flags what was decided on purpose.
+- A task, for a worker or a reviewer, names the properties and decisions that apply to it, so that nobody decides again or reports as a defect what was decided on purpose.
+- A challenge to a decision, yours or one from a worker's or a reviewer's report, goes to the owner in the conversation as soon as you have it. Write it and the owner's answer in that decision's notes. When the owner agrees, the change is a new decision, as "Changing what was taken" in `plan/README.md` says.
 
 Building, only a feature the owner took:
 1. `plan show <id>`: every entry it needs is done.
