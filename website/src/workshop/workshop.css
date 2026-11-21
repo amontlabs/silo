@@ -598,6 +598,9 @@ html.vt-back::view-transition-new(board) { animation: ws-appear .2s ease both; }
    until the script draws the place (the head script of workshop/index.html sets ws-hold). The footer waits hidden
    too: it shows where that place puts it rather than moving there from under the plain view. */
 .ws-hold #workshop-root[data-prerendered] .ws > :not(.ws-top), .ws-hold .workshop-shell:has(#workshop-root[data-prerendered]) .ws-foot { visibility: hidden; }
+/* The title row's tools too (the places, the search, the switch): such an address may name All or a search, and the
+   build drew the map's switch and a closed search. They show once the script has drawn them as the address asks. */
+.ws-hold #workshop-root[data-prerendered] .ws-top .ws-tools { visibility: hidden; }
 
 /* What arrives after the first frames fades in where it stands. */
 .ws-arr-s .ws-late-s, .ws-arr-p .ws-late-p, .ws-status.ws-in, #workshop-account.ws-arr-p > * { animation: ws-appear .15s ease-out both; }

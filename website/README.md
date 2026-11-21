@@ -357,7 +357,8 @@ its script arrives:
   plain address when the page remembers that the person left it on All, the head script
   sets `ws-hold` before first paint: what is under the title row stays hidden
   with its room kept, and the footer with it, until the script has drawn that
-  place.
+  place; so do the title row's tools (the places, the search and the switch),
+  which such an address may show otherwise (All, a search).
 - When the script gives the page no account (a script fails to load, it has not
   taken over after 4 s, or the page fails to render and shows the plain list),
   `ws-bare` goes on `<html>`: everything the build drew shows, and the drawn
