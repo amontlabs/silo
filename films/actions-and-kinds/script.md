@@ -14,28 +14,22 @@ Length: short and clear, with no hard limit. A scene takes the time its idea nee
 
 ## What he should understand at the end
 
-What can happen to one thing at the boundary (allow, hold, deny), where the rules that decide it
+What can happen to one request at the boundary (allow, hold, deny), where the rules that decide it
 are kept, how a hold ends, how that differs from what happens to a whole computer (pause, stop),
 and that every action has one of three kinds.
 
 ## Title and answer line
 
 - Title: Actions and their kinds
-- Answer: At the boundary it allows, holds or denies. Every action is granting, destructive or reversible.
-
-## Marks used
-
-- Agreed: put forward in the discussions of 18 and 19 November 2026 and accepted by the owner. Not yet recorded as a decision.
-- Notes: proposed in the plan's notes before these discussions. The design relies on it and keeps it. It is still a proposal.
-- Owner: said by the owner, as an idea or a direction.
-- Proposed: Claude's proposal. The owner has not answered it.
+- Answer: At the boundary it allows, holds or denies. Every action is granting, destructive or protective.
 
 ## Words introduced (shown under the statements)
 
 - boundary: the edge of a computer. Everything that enters or leaves it passes through parts of Silo that run outside it.
 - channel: one way through the boundary. None exists by default.
 - rule: data you set. At the boundary it allows, holds or denies. The next film says what triggers it.
-- allow, hold, deny: what happens to one thing waiting at the boundary: it passes, it waits for your answer, or it is refused.
+- request: what waits at the boundary.
+- allow, hold, deny: what happens to one request waiting at the boundary: it passes, it waits for your answer, or it is refused.
 - ask: what a hold shows you: a request that waits for your answer.
 - grant: to give a computer the ability to do something. Its opposite is to revoke. The words come from access control.
 - alert: what Silo raises for your attention.
@@ -45,9 +39,9 @@ and that every action has one of three kinds.
 - restore: put a computer back to a checkpoint.
 - fork: a copy of a computer, or of one of its checkpoints, that then lives its own life.
 - drop: remove a fork. It goes to the bin first.
-- bin: where a dropped fork waits for a time before it is removed for good.
+- bin: where a dropped computer waits for a time before it is removed for good.
 - secret: a value a computer can use and cannot read.
-- granting, destructive, reversible: the three kinds of action.
+- granting, destructive, protective: the three kinds of action.
 
 ## How things look
 
@@ -92,7 +86,7 @@ Picture: the network channel, large. A small list beside it: "Allow: crates.io" 
 api.stripe.com". Three attempts, one after the other, each as the voice says its word. A link to
 `crates.io` is drawn and flows: allowed. A link toward `api.stripe.com` stops at the boundary, with
 a small timer at its tip. A chip "ask" travels to you along a dashed link that starts from the
-frame of the channel, not from the tip of the held link: held. The held thing itself goes nowhere. A link toward `paste.rs` is drawn only as far as the boundary
+frame of the channel, not from the tip of the held link: held. The held request itself goes nowhere. A link toward `paste.rs` is drawn only as far as the boundary
 and is cut there in red. It never reaches the host, and nothing flows along it: denied. Under the third, the words "no rule allows it". Hero
 moment: the three outcomes side by side.
 
@@ -111,9 +105,9 @@ Added to that picture (the rest of the scene stays as it is):
 ### Scene 3. Caption: "A hold waits for you, and always ends."  Source: statement 3
 
 Narration:
-1. "A hold makes only one thing wait: the thing it is about. The computer keeps running."
+1. "A hold makes only one thing wait: the request it is about. The computer keeps running."
 2. "What you see is an ask. Your yes is a grant. The ask says exactly what it lets pass."
-3. "And a hold always ends. If you do not answer, Silo ends it at its own limit. The thing is denied, with an error the agent program can read."
+3. "And a hold always ends. If you do not answer, Silo ends it at its own limit. The request is denied, with an error the agent program can read."
 4. "If the agent program gives up first and closes its connection, Silo sees that too."
 
 Picture: the held link toward `api.stripe.com`, stopped at the boundary, with a small timer on it.
@@ -133,7 +127,6 @@ Narration:
 1. "Rules have no order."
 2. "If one rule allows and another denies, deny wins. Hold beats allow. With no rule at all, it is denied."
 3. "So the order in which you wrote them never changes the result."
-4. "An alert is one more action, never a decision. A rule that only alerts leaves the thing to the other rules."
 
 Picture: two rule cards, side by side, with no numbers and no arrows between them: "allow
 registry.npmjs.org" and "deny packages younger than 7 days". A request chip
@@ -141,9 +134,6 @@ registry.npmjs.org" and "deny packages younger than 7 days". A request chip
 up in the plain ink colour, not in the blue of an allowed link, the deny card wins, and the request is cut there in red. Nothing reaches the registry. Then the two cards swap
 places, the same request arrives again, and the result is the same. Under them, small:
 `deny > hold > allow`, and `no rule = deny`. Hero moment: the same result after the swap.
-On the fourth sentence, a third small line appears under `deny > hold > allow` and
-`no rule = deny`, in the same style: `alert = one more action, not a decision`, with a quiet mark
-"proposed" beside it. It stays.
 
 ### Scene 5. Caption: "Deny: one thing. Pause and stop: the whole computer."  Source: statement 5
 
@@ -168,24 +158,16 @@ Narration:
 2. "Granting: the computer can do something it could not just before."
 3. "Destructive: it ends or erases something, and that cannot be undone."
 4. "Stop, restore and drop are here because each ends the programs that were running. The disk is not lost."
-5. "Reversible: it grants nothing and destroys nothing. A wrong one costs only time."
-6. "Two of these are still for you to agree: taking back a secret, and closing a network. If they are reversible, a precaution can do them."
-7. "Anything added to Silo says the kind of each of its actions first."
+5. "Protective: it grants nothing and destroys nothing. A wrong one costs only time."
+6. "Anything added to Silo says the kind of each of its actions first."
 
 Picture: three columns appear one by one, each as the voice names it, each with its actions as
 chips. The three headings are in the same colour. Amber is kept for what needs your attention: a hold,
 an ask, an alert. Granting: allow, resume, start, fork, give a secret, open a port or any other channel, let
-a classifier read a record. Destructive: stop, restore, drop. Reversible: alert, checkpoint, hold,
+a classifier read a record. Destructive: stop, restore, drop. Protective: alert, checkpoint, hold,
 deny, pause, take back a secret, close a network or any other channel. Under the destructive
-column, small: "each ends the running programs; the disk is not lost". Under the granting column,
-small: "your yes to an ask: only you". Under the reversible column, small: "if these two are
-reversible, a precaution can do them". Six things carry a quiet mark "proposed", because the owner has not agreed them yet: the chips
-`start` and `take back a secret`, the whole chip `close a network or any other channel`, which is
-drawn in one tone because all of it is proposed, the words "or any other channel" in the granting
-column, the line "your yes to an ask: only you", and the line under the destructive column, whose
-mark stands under both of its lines. The chip `let a
-classifier read a record` stays without a mark. The three columns stay on screen at the
-end. Hero moment: the three columns complete.
+column, small: "each ends the running programs; the disk is not lost". The three columns stay on
+screen at the end. Hero moment: the three columns complete.
 
 ## Kind of chapter: decides
 

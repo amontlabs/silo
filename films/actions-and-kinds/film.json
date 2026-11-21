@@ -2,13 +2,14 @@
   "id": "actions-and-kinds",
   "kind": "decides",
   "title": "Actions and their kinds",
-  "line": "At the boundary it allows, holds or denies. Every action is granting, destructive or reversible.",
+  "line": "At the boundary it allows, holds or denies. Every action is granting, destructive or protective.",
   "shows": [
     "channel-list",
     "which-rule-wins",
     "what-an-ask-holds",
     "deny-beats-hold-beats-allow",
     "meanings-for-the-boundary",
+    "word-request",
     "meanings-for-computers",
     "kinds-of-action",
     "kind-before-design",
@@ -16,8 +17,7 @@
     "yes-to-an-ask",
     "why-destructive",
     "rules-out-of-reach",
-    "rules-inside-are-no-boundary",
-    "rule-that-only-alerts"
+    "rules-inside-are-no-boundary"
   ],
   "words": [
     {
@@ -33,8 +33,12 @@
       "means": "data you set. At the boundary it allows, holds or denies. The next film says what triggers it."
     },
     {
+      "word": "request",
+      "means": "what waits at the boundary."
+    },
+    {
       "word": "allow, hold, deny",
-      "means": "what happens to one thing waiting at the boundary: it passes, it waits for your answer, or it is refused."
+      "means": "what happens to one request waiting at the boundary: it passes, it waits for your answer, or it is refused."
     },
     {
       "word": "ask",
@@ -74,14 +78,14 @@
     },
     {
       "word": "bin",
-      "means": "where a dropped fork waits for a time before it is removed for good."
+      "means": "where a dropped computer waits for a time before it is removed for good."
     },
     {
       "word": "secret",
       "means": "a value a computer can use and cannot read."
     },
     {
-      "word": "granting, destructive, reversible",
+      "word": "granting, destructive, protective",
       "means": "the three kinds of action."
     }
   ],

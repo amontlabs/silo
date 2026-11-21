@@ -1,19 +1,19 @@
 explainer({
   title: "Actions and their kinds",
-  answer: "At the boundary it allows, holds or denies. Every action is granting, destructive or reversible.",
+  answer: "At the boundary it allows, holds or denies. Every action is granting, destructive or protective.",
   scenes: [
     { caption: "The boundary, and the channels through it.",
       source: "The boundary is the edge of a computer. A channel is one way through it: the network, ports, files, secrets, the screen, the clipboard, repository access. None exists by default." },
     { caption: "Allow, hold or deny.",
-      source: "One thing waiting at the boundary is allowed, held for your answer, or denied. Everything is denied unless a rule allows it." },
+      source: "One request waiting at the boundary is allowed, held for your answer, or denied. Everything is denied unless a rule allows it." },
     { caption: "A hold waits for you, and always ends.",
-      source: "A hold makes only one thing wait: the thing it is about. The computer keeps running. Your yes is a grant." },
+      source: "A hold makes only one thing wait: the request it is about. The computer keeps running. Your yes is a grant." },
     { caption: "Rules have no order.",
       source: "Rules have no order. Deny beats hold, hold beats allow, and no rule means deny." },
     { caption: "Deny: one thing. Pause and stop: the whole computer.",
       source: "Deny forbids one thing and the computer keeps running. Pause and stop act on a whole computer." },
     { caption: "Every action has a kind.",
-      source: "Every action has a kind. Granting: a computer can do something it could not just before. Destructive: it ends or erases something, and that cannot be undone. Reversible: neither, so a wrong one costs only time." },
+      source: "Every action has a kind. Granting: a computer can do something it could not just before. Destructive: it ends or erases something, and that cannot be undone. Protective: neither, so a wrong one costs only time." },
   ],
   build(K, tl, scene, V) {
     const NS = "http://www.w3.org/2000/svg";
@@ -54,7 +54,7 @@ explainer({
       tl.fromTo(d, { opacity: 1 }, { opacity: 0.18, duration: 0.42, repeat: n - 1, yoyo: true, ease: "sine.inOut", immediateRender: false }, S(s) + t0 + i * 0.16);
       if (lit) tl.set(d, { opacity: 1 }, S(s) + t1);
     }));
-    // A link drawn only as far as the boundary, its middle: the thing waits there and nothing passes.
+    // A link drawn only as far as the boundary, its middle: the request waits there and nothing passes.
     // Each such link is placed so that its middle lies on the boundary.
     const toEdge = (lk, s, t, dur = 0.6) => {
       Object.assign(lk, { _shown: true, _op: 1 });
@@ -62,7 +62,7 @@ explainer({
       tl.set(lk, { opacity: 1 }, S(s) + t);
       tl.fromTo(lk.path, { drawSVG: "0% 0%" }, { drawSVG: "0% 50%", duration: dur, ease: "power2.inOut", immediateRender: false }, S(s) + t);
     };
-    // The rest of that link, once the thing is let through.
+    // The rest of that link, once the request is let through.
     const onward = (lk, s, t, dur = 0.6) => {
       tl.to(lk.path, { drawSVG: "0% 100%", duration: dur, ease: "power2.inOut" }, S(s) + t);
       if (lk.head) tl.to(lk.head, { opacity: 1, duration: 0.2 }, S(s) + t + dur - 0.15);
@@ -79,11 +79,6 @@ explainer({
       tl.to(chip, { motionPath: { path: lk.path, start: 0, end: stop }, duration: dur, ease: "power2.inOut", immediateRender: false }, S(s) + t);
     };
     const side = { from: "right", to: "left" };
-    // The quiet mark "proposed", beside or under what it marks, in type large enough to read.
-    const proposed = (p, at) => {
-      const c = K.chip(0, 0, "proposed", { tone: "muted", size: 14 }), a = p.at(at);
-      return place(c, at === "right" ? a.x + 12 + c.w / 2 : a.x, at === "bottom" ? a.y + 10 + c.h / 2 : a.y);
-    };
 
     // ---------- the world of scenes 1 and 2: the computer "main", its edge, and the outside on the right ----------
     const E = 900;                                   // main's right edge: the boundary where the channels sit
@@ -205,7 +200,7 @@ explainer({
     K.appear(L.r, { from: "fade", at: V.at(2, 0) });
     K.appear([L.a, L.h], { at: "<0.2", stagger: 0.1 });
     toEdge(L.lk, 2, V.word(2, 0, "makes only"));
-    K.appear(L.timer, { from: "pop", at: V.word(2, 0, "the thing it is about") });
+    K.appear(L.timer, { from: "pop", at: V.word(2, 0, "the request it is about") });
     K.appear(L.p, { at: V.at(2, 1) - 0.3, stagger: 0.12 });
     K.pulse(L.p, { tone: "accent", at: V.word(2, 1, "keeps running") });
     K.appear(you3, { from: "pop", at: V.at(2, 2) });
@@ -245,10 +240,8 @@ explainer({
     // ---------- scene 4: two rules, no order ----------
     const allowRule = K.card(395, 140, "allow registry.npmjs.org", { icon: "check", w: 420 });
     const denyRule = K.card(885, 140, "deny packages younger than 7 days", { icon: "ban", w: 420 });
-    const order = K.text(640, 232, "deny > hold > allow", { size: 18, color: "muted", mono: true });
-    const none = K.text(640, 266, "no rule = deny", { size: 18, color: "muted", mono: true });
-    const alertLine = K.text(640, 300, "alert = one more action, not a decision", { size: 18, color: "muted", mono: true });
-    const pAlert = proposed(alertLine, "right");
+    const order = K.text(640, 243, "deny > hold > allow", { size: 18, color: "muted", mono: true });
+    const none = K.text(640, 277, "no rule = deny", { size: 18, color: "muted", mono: true });
     const main4 = computer(355, 470, 470, 230);                    // x 120..590
     const agent4 = K.actor(220, 470, "agent", "agent");
     const registry = K.card(919 + 135, 470, "registry.npmjs.org", { icon: "globe", w: 270 });
@@ -281,8 +274,6 @@ explainer({
     toBoundary(ask2, req2, 3, tSwap + 1.6);
     K.pulse([allowRule, denyRule], { tone: "ink", at: tSwap + 2.6 });
     K.cut(req2, { at: ">" });
-    K.appear(alertLine, { from: "fade", at: V.at(3, 5) });
-    K.appear(pAlert, { from: "pop", at: V.word(3, 5, "never a decision") });
 
     // ---------- scene 5: three copies of main ----------
     const xs = [240, 640, 1040];
@@ -300,7 +291,7 @@ explainer({
     // 5. Deny acts on one thing; pause and stop on the whole computer. Each label comes with its change.
     //    Hero: the three computers side by side.
     scene(4);
-    K.hide([allowRule, denyRule, order, none, alertLine, pAlert, main4, agent4, registry, req2, ask2], { at: 0 });
+    K.hide([allowRule, denyRule, order, none, main4, agent4, registry, req2, ask2], { at: 0 });
     K.appear(mains[0], { from: "fade", at: V.at(4, 0) - 0.2 });
     K.appear(progs[0], { at: "<0.2", stagger: 0.1 });
     K.appear(paste5, { at: "<0.2" });
@@ -335,46 +326,24 @@ explainer({
     });
     const G = col(235, "Granting", ["allow", "resume", "start", "fork", "give a secret", "open a port or any other channel", "let a classifier read a record"]);
     const Dst = col(640, "Destructive", ["stop", "restore", "drop"]);
-    const Rv = col(1045, "Reversible", ["alert", "checkpoint", "hold", "deny", "pause", "take back a secret", "close a network or any other channel"]);
-    // In the granting column the words "or any other channel" are quieter than the rest of their chip: they are what is
-    // proposed. The reversible chip "close a network or any other channel" stays in one tone: all of it is proposed.
-    const quiet = (c, plain, rest) => {
-      const t = c.label; t.textContent = "";
-      svg("tspan", {}, t).textContent = plain;
-      svg("tspan", { fill: K.tone("muted") }, t).textContent = rest;
-    };
-    quiet(G.chips[5], "open a port ", "or any other channel");
-    const yesOnly = K.text(235, 568, "your yes to an ask: only you", { size: 17, color: "muted" });
+    const Rv = col(1045, "Protective", ["alert", "checkpoint", "hold", "deny", "pause", "take back a secret", "close a network or any other channel"]);
     const d1 = K.text(640, 340, "each ends the running programs;", { size: 17, color: "muted" });
     const d2 = K.text(640, 368, "the disk is not lost", { size: 17, color: "muted" });
-    const pStart = proposed(G.chips[2], "right"), pOpen = proposed(G.chips[5], "right"), pYes = proposed(yesOnly, "right");
-    const pD = proposed(d2, "bottom"), pClose = proposed(Rv.chips[6], "bottom");   // pD: centred under both lines
-    const pTake = proposed(Rv.chips[5], "right");
-    const r1 = K.text(1045, 588, "if these two are reversible,", { size: 17, color: "muted" });
-    const r2 = K.text(1045, 616, "a precaution can do them", { size: 17, color: "muted" });
 
     // 6. Three columns, each as the voice names it. Hero: the three columns complete.
     scene(5);
-    K.camera([G.head, Rv.head, ...G.chips, ...Rv.chips, yesOnly, pYes, pOpen, pClose, pTake, r2], { pad: 50, at: 0 });
+    K.camera([G.head, Dst.head, Rv.head, ...G.chips, ...Dst.chips, ...Rv.chips, d1, d2], { pad: 50, at: 0 });
     K.hide([...mains, ...progs.flat(), paste5, deny5, ...tags, resume, disk, start], { at: V.word(5, 0, "has a kind") - 0.3 });
     K.appear(G.head, { from: "fade", at: V.at(5, 1) });
     K.appear(G.chips, { at: "<0.3", stagger: 0.12 });
-    K.appear([pStart, pOpen], { from: "pop", at: ">", stagger: 0.1 });
-    K.appear(yesOnly, { from: "fade", at: V.end(5, 1) - 0.4 });
-    K.appear(pYes, { from: "pop", at: ">-0.2" });
     K.appear(Dst.head, { from: "fade", at: V.at(5, 2) });
     K.appear(Dst.chips, { at: "<0.3", stagger: 0.12 });
     K.pulse(Dst.chips, { tone: "ink", at: V.word(5, 3, "Stop, restore and drop") });
     K.appear(d1, { from: "fade", at: V.word(5, 3, "each ends") });
     K.appear(d2, { from: "fade", at: V.at(5, 4) });
-    K.appear(pD, { from: "pop", at: ">-0.2" });
     K.appear(Rv.head, { from: "fade", at: V.at(5, 5) });
     K.appear(Rv.chips, { at: "<0.3", stagger: 0.12 });
     K.pulse(Rv.head, { tone: "muted", at: V.word(5, 6, "costs only time") });
-    K.appear(pTake, { from: "pop", at: V.word(5, 7, "taking back a secret") });
-    K.appear(pClose, { from: "pop", at: V.word(5, 7, "closing a network") });
-    K.appear(r1, { from: "fade", at: V.at(5, 8) });
-    K.appear(r2, { from: "fade", at: "<0.2" });
-    K.pulse([G.head, Dst.head, Rv.head], { tone: "ink", at: V.word(5, 9, "the kind") });
+    K.pulse([G.head, Dst.head, Rv.head], { tone: "ink", at: V.word(5, 7, "the kind") });
   },
 });

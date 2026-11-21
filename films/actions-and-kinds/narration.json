@@ -25,14 +25,14 @@
       "Whatever no rule allows, and you have not said yes to, is denied."
     ],
     [
-      "A hold makes only one thing wait: the thing it is about.",
+      "A hold makes only one thing wait: the request it is about.",
       "The computer keeps running.",
       "What you see is an ask.",
       "Your yes is a grant.",
       "The ask says exactly what it lets pass.",
       "And a hold always ends.",
       "If you do not answer, Silo ends it at its own limit.",
-      "The thing is denied, with an error the agent program can read.",
+      "The request is denied, with an error the agent program can read.",
       "If the agent program gives up first and closes its connection, Silo sees that too."
     ],
     [
@@ -40,9 +40,7 @@
       "If one rule allows and another denies, deny wins.",
       "Hold beats allow.",
       "With no rule at all, it is denied.",
-      "So the order in which you wrote them never changes the result.",
-      "An alert is one more action, never a decision.",
-      "A rule that only alerts leaves the thing to the other rules."
+      "So the order in which you wrote them never changes the result."
     ],
     [
       "A deny forbids one thing, and the computer keeps running.",
@@ -57,10 +55,8 @@
       "Destructive: it ends or erases something, and that cannot be undone.",
       "Stop, restore and drop are here because each ends the programs that were running.",
       "The disk is not lost.",
-      "Reversible: it grants nothing and destroys nothing.",
+      "Protective: it grants nothing and destroys nothing.",
       "A wrong one costs only time.",
-      "Two of these are still for you to agree: taking back a secret, and closing a network.",
-      "If they are reversible, a precaution can do them.",
       "Anything added to Silo says the kind of each of its actions first."
     ]
   ]
