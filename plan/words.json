@@ -133,5 +133,9 @@
   {
     "word": "wakes on",
     "means": "Said of an extension: what makes its computer run something. \"Triggered\" is kept for a rule or a precaution."
+  },
+  {
+    "word": "request",
+    "means": "One thing that asks to cross the boundary. It may wait there for an answer."
   }
 ]
