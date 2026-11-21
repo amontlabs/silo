@@ -1,0 +1,9 @@
+{
+  "name": "Gaps in the record",
+  "what": "When a source lost facts or reports, the record says so with a gap, and what Silo shows of a run says how complete it is.",
+  "needs": [
+    "record-of-a-computer",
+    "losses-show",
+    "enforcing-and-recording"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "Reports matched to facts",
+  "what": "A report that the facts agree with is marked \"matched\", and one they disagree with \"mismatch\".",
+  "needs": [
+    "file-changes-in-the-record",
+    "processes-in-the-record",
+    "report-matched",
+    "as-sure-as-least-sure",
+    "matching-reports-to-facts"
+  ]
+}

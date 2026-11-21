@@ -1,0 +1,9 @@
+{
+  "name": "File changes in the record",
+  "what": "Every file a computer created, changed, deleted or renamed is in the record as a fact, seen from outside the computer.",
+  "needs": [
+    "record-of-a-computer",
+    "file-reads",
+    "file-changes-from-outside"
+  ]
+}

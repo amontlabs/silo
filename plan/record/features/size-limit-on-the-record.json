@@ -1,0 +1,12 @@
+{
+  "name": "A size limit on the record",
+  "what": "You set how much disk the record may take. When the limit is reached, recordings go first, then the text of messages. No fact or report is removed, and a fact says what went.",
+  "needs": [
+    "record-of-a-computer",
+    "record-size-limit",
+    "bulky-content-once",
+    "record-disk-use-shown",
+    "record-full-after-bulk",
+    "record-disk-size"
+  ]
+}

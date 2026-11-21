@@ -488,7 +488,15 @@
         "reason-in-a-refusal",
         "agent-asks-about-its-request",
         "denied-tool-call-mechanism",
-        "terms-on-changing-a-reply"
+        "terms-on-changing-a-reply",
+        "record-of-a-computer",
+        "file-changes-in-the-record",
+        "processes-in-the-record",
+        "what-each-run-wrote",
+        "gaps-in-the-record",
+        "reports-matched-to-facts",
+        "size-limit-on-the-record",
+        "flood-keeps-the-past"
       ]
     },
     {

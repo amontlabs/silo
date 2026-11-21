@@ -1,0 +1,8 @@
+{
+  "name": "The record under a flood",
+  "what": "When a computer floods the record, new lines are merged before they are written, and marked as merged. Older lines are never removed.",
+  "needs": [
+    "record-of-a-computer",
+    "record-under-a-flood"
+  ]
+}

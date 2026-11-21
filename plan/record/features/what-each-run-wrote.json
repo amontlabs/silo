@@ -1,0 +1,15 @@
+{
+  "name": "What each run wrote",
+  "what": "A computer's file changes are shared out among its runs. What no run is shown to have written is listed as unattributed.",
+  "needs": [
+    "file-changes-in-the-record",
+    "processes-in-the-record",
+    "the-chain",
+    "what-runs-wrote",
+    "matching-reports-to-facts",
+    "wrong-run-leaves-a-fact"
+  ],
+  "keeps": [
+    "books-balance"
+  ]
+}

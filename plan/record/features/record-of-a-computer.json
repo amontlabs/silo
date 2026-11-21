@@ -1,0 +1,22 @@
+{
+  "name": "The record of a computer",
+  "what": "Silo writes down what happens to a computer, outside it. What Silo saw is a fact, and what a program inside told it is a report. Each line is written once and says its time, its computer and its source.",
+  "needs": [
+    "how-silo-knows",
+    "what-the-record-holds",
+    "what-a-fact-carries",
+    "what-a-report-carries",
+    "line-never-mixes",
+    "changes-to-the-record",
+    "kinds-of-lines",
+    "who-made-each-change",
+    "sources-number-their-lines",
+    "sources",
+    "record-file-format",
+    "git-history-inside",
+    "record-path-and-core",
+    "events-until-the-recorder",
+    "observing-and-waiting",
+    "record-overhead-limit"
+  ]
+}
