@@ -6,7 +6,7 @@ The answer is worded from the last column of this table. The four ways are not t
 |---|---|---|---|
 | Assertion | "The engine checked this while running, and would have stopped." | Low | Everywhere in the core |
 | Simulation | "This held in every one of the random histories we ran, crashes included." | The simulator, built once | The real Zig core against fake drivers |
-| Every history up to a size | "This holds in every history of the real core, up to a size." | A test of about 200 lines, and the size stays small | Access: who can get what |
+| Bounded exhaustive test | "This holds after every possible sequence of calls, up to a length." | A test of about 200 lines, and the length stays small | Where a property depends on the order of calls. First for access: who can get what |
 | Proof | "This holds for this code, for every input." | Very high: the proof is many times larger than the code, and every change to the code breaks it | At most one small function, later |
 
 The core is a pure function over small tables. That is the shape these tools need, which is why
@@ -25,5 +25,14 @@ So for access, trying the real core this way is enough, and the first engine cod
 part of the core. The owner agreed on 21 November 2026: "Yes we go full zig." The table's third
 row and the answer were reworded on that day. The owner has not taken the entry yet.
 
-Still to do: the plan's lists name this way of checking `model`, in the `check` of five
-properties. The word needs replacing there and in the plan tool.
+Then the owner asked why not use the simulator alone. The simulator draws its sequences of calls
+at random, so nothing guarantees that it draws the one order a fault needs. The test of every
+sequence is certain, and can only afford short ones. In the trial both found both faults at
+once. The owner, 21 November 2026: "we always use simulator and when we have a reason to believe
+certain order we do that in addition". The answer and the
+table were reworded to say so: the simulator always, and this test where a property depends on
+the order of calls.
+
+The plan's lists named this way of checking `model`. Its name is now `bounded exhaustive test`,
+the standard term: it tries every case, and only up to a bound. "Exhaustive test" alone would
+read as a test of everything.

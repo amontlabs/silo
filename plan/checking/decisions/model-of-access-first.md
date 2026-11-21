@@ -26,7 +26,12 @@ are in the notes of `model-tool`.
 The owner, 21 November 2026, asked whether to drop the separate checking language: "Yes we go full
 zig." And on why: "it's our language, it's great that we can test with it, and we'll really use
 the language to prove, conceptualize, visualize". The answer was reworded on that day to say so.
-The owner has not taken the entry yet.
+
+The owner then asked why not use the simulator alone. The reasons are in the notes of
+`four-ways-to-check`. The owner, 21 November 2026: "we always use simulator and when we have a reason to believe
+certain order we do that in addition". The properties of access depend on the order
+of calls, as `rule-order-never-matters` says outright, so both are used here. The owner has not
+taken the entry yet.
 
 ## What the plan does not settle for access
 
