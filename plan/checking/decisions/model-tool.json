@@ -1,5 +1,6 @@
 {
   "asks": "Which tool checks the model of access?",
+  "answer": "None. Access is checked on the real core, by tests written in Zig, so there is no separate model and no tool for one.",
   "needs": [
     "model-of-access-first"
   ]

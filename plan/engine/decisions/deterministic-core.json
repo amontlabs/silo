@@ -13,6 +13,15 @@
       "check": [
         "test"
       ]
+    },
+    {
+      "in": "engine/properties",
+      "id": "core-keeps-nothing-between-calls",
+      "says": "The core keeps nothing between two calls outside its state.",
+      "kind": "safety",
+      "check": [
+        "test"
+      ]
     }
   ]
 }

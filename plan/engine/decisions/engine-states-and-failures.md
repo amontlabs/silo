@@ -37,4 +37,11 @@ The trial proposes to say so in the answer. In the core:
 A test that reads the core's source would refuse each of them. That test was not built. A test of
 the same kind was built for `deterministic-core`, with the parser that comes with Zig.
 
-Not put to the owner yet.
+The owner said yes to the three rules on 21 November 2026: "That's pretty important to have clear
+guidelines for these yes so we make as high quality as possible tests". The answer was reworded
+on that day, and the entry proposes the property `core-forgets-no-case` so that the test gets
+built with the core.
+
+Not put to the owner yet: a fourth rule, against a `catch` that turns every failure into one
+value, such as `catch null` or `catch {}`. The trial let it through, and none of the three rules
+covers it.

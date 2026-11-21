@@ -1,8 +1,9 @@
 # Is a model of access written before the first engine code
 
-- The one property of the model is, in force, `grant-needs-a-fact-or-you`, in the part `rules`.
-- Which tool checks the model is `model-tool`.
-- "The starter" is the first engine code.
+Until 21 November 2026 the answer proposed a small model in a language of its own, checked by a
+model checker before the first engine code, with the simulator then comparing the Zig core with
+it. Which tool would check it was `model-tool`. The first property to check is, in force,
+`grant-needs-a-fact-or-you`, in the part `rules`.
 
 ## A model in another language drifts
 
@@ -12,10 +13,33 @@ and says nothing about the code. Two texts make the case: Joseph Hellerstein, "N
 13 October 2026, and Andrew Helwer, "The changing role of finite-state model checking", 24 August
 2026. Both were read in full.
 
-The answer above already holds the remedy: the simulator compares the Zig core with the model. So
-the tool must be able to exchange histories with the simulator, and that became a criterion of
+The answer of that day held a remedy: the simulator compares the Zig core with the model. So the
+tool had to be able to exchange histories with the simulator, and that became a criterion of
 `model-tool`. The owner agreed on 21 November 2026.
 
-Still open: once the core exists, the real core can be run over every sequence of calls up to a
-size, because it is a pure function over small tables. The model is then needed only before the
-code exists. The trial of `model-tool` has this as one of its candidates.
+## No model in another language
+
+The trial of `model-tool` then ran a small real core in Zig over every sequence of calls at the
+model's bounds. It took 44 s, and no model in another language was quicker to check. Its numbers
+are in the notes of `model-tool`.
+
+The owner, 21 November 2026, asked whether to drop the separate checking language: "Yes we go full
+zig." And on why: "it's our language, it's great that we can test with it, and we'll really use
+the language to prove, conceptualize, visualize". The answer was reworded on that day to say so.
+The owner has not taken the entry yet.
+
+## What the plan does not settle for access
+
+The trial had to assume these to write the model. Each is a question for its own entry.
+
+- `actions-a-rule-offers` leaves open which actions a rule offers. Assumed: any.
+- `how-a-hold-ends` is open. Assumed: nothing ends a hold.
+- What a rule matches is not settled (`rules-are-data`, `allow-hold-or-deny`). Assumed: one
+  computer and one host, exactly.
+- Taking a rule away is not designed. Once it exists, three of the four properties fail as the
+  trial worded them, because the rules a request saw are read against the rules of now. The
+  owner, 21 November 2026: a rule can of course be removed, and this is written when that part is
+  planned.
+- What a drop does to the computer's secrets is not settled. Assumed: nothing.
+- `importing-changes-nothing`, in the part `extensions`, is also checked this way. The trial left
+  it out.

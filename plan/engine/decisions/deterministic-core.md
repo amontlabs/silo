@@ -46,5 +46,6 @@ inputs stop giving the same outputs. Only the test that reads the source caught 
 check left to the trial. The owner said to write it into the entry. Its check is a test, made of
 the last two rows of the table.
 
-Not put to the owner yet: a second property saying that the core keeps nothing between two calls
-outside its state. The ninth way above is the case for it.
+A second property, `core-keeps-nothing-between-calls`, says that the core keeps nothing between
+two calls outside its state. The ninth way above is the case for it. The owner said yes on
+21 November 2026 to writing it into the entry.

@@ -60,4 +60,8 @@ rule away, properties 1 to 3 fail as the statement words them, because the list 
 saw is read against the rules of now. The statement assumed that no rule is ever taken away. The
 properties of the part `rules` will meet this case when taking a rule away is designed.
 
-Not done: a person reading the five models, which is the first of the two things that decide.
+## No tool
+
+The owner, 21 November 2026, asked whether to drop the separate checking language: "Yes we go full
+zig." So no person had to read the five models, and the answer was written on that day. The
+reasons are in the notes of `model-of-access-first`. The owner has not taken the entry yet.

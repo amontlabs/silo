@@ -40,6 +40,10 @@ trial's code is.
   the host at once.
 - MicroSandbox has no setting that makes the served folder faster, and no hook to see each
   operation in its own file server. Both were read in its code, not measured.
+- On the Mac, a program built in the served folder could not be run: "Permission denied". This is
+  MicroSandbox's issue 2121, a regression of 0.7.16, open on 21 November 2026 with a fix proposed
+  in its pull request 2125. The issue was reported on a Linux host. Nobody has reported it for
+  macOS.
 
 ### The engine reads the disk at each checkpoint and compares
 

@@ -1,6 +1,6 @@
 {
-  "name": "A checked model of access",
-  "what": "Before the first engine code, a small model is written of who holds what and of the calls that touch it. A model checker tries every sequence of these calls, up to a size, among a few computers, secrets and hosts, and checks that nothing is granted except by you or by a rule you set.",
+  "name": "Access checked on every short history",
+  "what": "The part of the core that decides access is written first, in Zig: who holds what, and the calls that touch it. A test tries every sequence of these calls, up to a size, among a few computers, secrets and hosts, and checks that nothing is granted except by you or by a rule you set.",
   "needs": [
     "model-of-access-first",
     "model-tool",
