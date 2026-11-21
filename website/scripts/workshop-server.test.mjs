@@ -87,7 +87,7 @@ test('GitHub failing answers 502 when nothing is cached, and an unconfigured ser
 });
 
 test('a hung or failing token refresh answers 502 and keeps the session; only an invalid refresh token signs out', async () => {
-  const t = await setup({ limit: { path: '/login/oauth/access_token', ms: 150 } });
+  const t = await setup({ limit: { ms: 150, match: (path, body) => path === '/login/oauth/access_token' && body.includes('refresh_token') } });
   try {
     const c = t.client();
     await c.signIn('visitor-fake');
