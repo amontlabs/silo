@@ -816,14 +816,27 @@ describe('the films', () => {
     expect(printedChanges(entry({}), null)).toEqual(['its file was deleted']);
   });
 
-  it('are told behind by the films\' command exactly as by the Workshop, on the real repository', () => {
-    const out = (() => {
-      try {
-        return execFileSync('node', [join(REPOSITORY, 'films/tools/behind.mjs')], { encoding: 'utf8' });
-      } catch (error) {
-        return (error as { stdout: string }).stdout;
-      }
-    })();
+  it('are told behind by the films\' command exactly as the Workshop\'s build gives them to the page, on the real repository', () => {
+    // The build first: it fetches the whole history of a shallow clone when it can.
+    const page = readBuildData(REPOSITORY).films;
+    const shallow = execFileSync('git', ['-C', REPOSITORY, 'rev-parse', '--is-shallow-repository'], { encoding: 'utf8' }).trim() === 'true';
+    let status = 0;
+    let out = '';
+    let err = '';
+    try {
+      out = execFileSync('node', [join(REPOSITORY, 'films/tools/behind.mjs')], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (error) {
+      ({ status, stdout: out, stderr: err } = error as { status: number; stdout: string; stderr: string });
+    }
+    if (shallow) {
+      // A shallow clone: the command refuses by design, and the build marks no film behind.
+      expect(status).toBe(1);
+      expect(err).toContain('This clone is shallow');
+      expect(page.every((film) => film.behind.length === 0)).toBe(true);
+      return;
+    }
+    expect(out).not.toContain('cannot tell');
+    expect(out).not.toContain('cannot be read');
     const told = new Map<string, string[]>();
     let film = '';
     for (const line of out.split('\n')) {
@@ -831,7 +844,9 @@ describe('the films', () => {
       if (head) told.set((film = head[1]), []);
       else if (/^  [a-z0-9-]+$/.test(line)) told.get(film)!.push(line.trim());
     }
-    expect(Object.fromEntries(told)).toEqual(Object.fromEntries(readFilms(REPOSITORY, false).map((info) => [info.id, info.behind])));
+    const given = page.map((info) => [info.id, info.behind]);
+    expect([...told]).toEqual(given);
+    expect(status).toBe(given.some(([, behind]) => behind.length) ? 1 : 0);
   });
 
   it('take a check that a film still holds into its checked.md, only while it is behind and only with a reason, and are up to date once it is committed', () => {
