@@ -269,6 +269,27 @@ describe('an address from the history', () => {
 });
 
 describe('an open entry', () => {
+  it('stays drawn, its feature unfolded and past the first six, through a change of filter, and is named until the list no longer holds it', async () => {
+    const decisions = Array.from({ length: 8 }, (_, i) => ({ id: `q${i}`, stage: 'first', part: 'part-a', asks: `Question ${i}?` }));
+    const data = { ...buildData({ features: [...FEATURES, { id: 'asks-much', stage: 'second', part: 'part-a', name: 'Asks much', what: 'x', needs: decisions.map((d) => d.id) }], decisions: [...DECISIONS, ...decisions] }), films: [] };
+    mockApi();
+    history.replaceState(null, '', '/workshop?view=all#part-a/q7');
+    await renderApp(data);
+    await waitFor(() => expect(rowButton('Question 7\\?')).toHaveAttribute('aria-expanded', 'true'));
+    await userEvent.click(screen.getByRole('button', { name: 'Filter' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Part' }));
+    await userEvent.click(within(screen.getByRole('menu', { name: 'Part' })).getByRole('menuitemcheckbox', { name: /^Part A/ }));
+    expect(location.search).toBe('?view=all&part=part-a');
+    expect(rowButton('Question 7\\?')).toHaveAttribute('aria-expanded', 'true');
+    expect(rowButton('Question 7\\?').closest('.wa-item')).toHaveAttribute('id', 'entry-q7@entry-asks-much');
+    expect(location.hash).toBe('#part-a/q7');
+    // A filter that leaves it out: the address stops naming it.
+    await userEvent.click(within(screen.getByRole('menu', { name: 'Part' })).getByRole('menuitemcheckbox', { name: /^Part A/ }));
+    await userEvent.click(within(screen.getByRole('menu', { name: 'Part' })).getByRole('menuitemcheckbox', { name: /^Part B/ }));
+    expect(screen.queryByRole('button', { name: /^Question 7/ })).toBeNull();
+    expect(location.hash).toBe('');
+  });
+
   it('stays open when a search shows it on a line of its own, and the address stops naming it when a filter removes it', async () => {
     mockApi();
     history.replaceState(null, '', '/workshop?view=all#part-d/one-way');

@@ -695,8 +695,10 @@ What a person sees:
   traverse, every `popstate` counts as the history's.
 - Being open belongs to the entry, not to one drawing of it: a decision opened
   under its feature is open wherever the list draws it, a search showing it on a
-  line of its own included. When a search or a filter takes an open entry out of
-  the list, the address stops naming it.
+  line of its own included. An open entry is always drawn while the list holds
+  it: through any change of filter, search or order its feature stays unfolded,
+  and it stays shown past the first six. When a search or a filter takes an open
+  entry out of the list, the address stops naming it.
 - The films: one control per film on the line between the title row and the map
   or the tiles, in the order of `films/README.md`, at every width (it scrolls
   sideways under 760 px). Pointing at a film, or focusing it, marks its parts on

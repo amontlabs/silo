@@ -615,9 +615,20 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     setQueryState(next);
     if (next.order !== query.order) rememberHabit({ view: 'all', order: next.order });
     const filtersChanged = next.states.join() !== query.states.join() || next.parts.join() !== query.parts.join() || next.films.join() !== query.films.join() || next.q !== query.q || next.order !== query.order;
+    const nextSections = allSections(plan, graph, data.stages, next);
     if (filtersChanged) {
-      setFolds(new Map());
-      setMore(new Set());
+      // The folds made by hand start over, but an open entry is always drawn while the list holds it: its feature stays
+      // unfolded, and its "more" pressed when it lies past the first six.
+      const folds = new Map<string, boolean>();
+      const shownMore = new Set<string>();
+      for (const key of openKeys) {
+        const found = locate(nextSections, key, new Set());
+        if (!found?.holder) continue;
+        folds.set(found.holder, true);
+        if (found.more) shownMore.add(found.holder);
+      }
+      setFolds(folds);
+      setMore(shownMore);
     }
     if (!isAll) {
       // A search typed elsewhere shows All with its matches.
@@ -629,7 +640,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     }
     // The entry open last stays named only while the list still draws it; open, it is drawn open wherever it now stands.
     const open = openKeyRef.current;
-    const found = open ? locate(allSections(plan, graph, data.stages, next), open, new Set()) : null;
+    const found = open ? locate(nextSections, open, new Set()) : null;
     if (open && !found) {
       setOpenKey(null);
       setOpenAt(null);
