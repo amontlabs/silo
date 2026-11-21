@@ -137,5 +137,13 @@
   {
     "word": "request",
     "means": "One thing that asks to cross the boundary. It may wait there for an answer."
+  },
+  {
+    "word": "recipe",
+    "means": "A text that says how to make a computer."
+  },
+  {
+    "word": "task",
+    "means": "A command run in a fork or in a fresh computer, with an end."
   }
 ]
