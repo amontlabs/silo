@@ -1,11 +1,11 @@
 {
   "asks": "What does \"unverified\" mean?",
-  "answer": "Said of a report Silo could not check.",
+  "answer": "Told to Silo, not seen by it. Said of every report, and of a result computed from reports.",
   "sets": [
     {
       "in": "words",
       "word": "unverified",
-      "means": "Said of a report Silo could not check."
+      "means": "Told to Silo, not seen by it. Said of every report, and of a result computed from reports."
     }
   ]
 }
