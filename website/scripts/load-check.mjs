@@ -325,9 +325,9 @@ export function placesOf({ parts, entries }) {
   };
 }
 
-/** What the page offers: the places `placesOf` chooses from the page's data, and whether the page draws a map. */
+/** What the page offers: the places `placesOf` chooses from the page's data, and whether its map shows at 1440 x 900, where the checks that use it run. */
 async function pageOf(browser, url) {
-  const context = await browser.newContext();
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
   await page.goto(url);
   await page.waitForFunction(() => window.__workshopData, null, { timeout: 15000 });
@@ -337,7 +337,8 @@ async function pageOf(browser, url) {
   });
   await page.waitForSelector('#workshop-root:not([data-prerendered]) .ws', { timeout: 15000 });
   await page.waitForLoadState('networkidle');
-  const mapped = (await page.locator('.ws-stage').count()) > 0;
+  // Whether the map shows at this url, not whether it is in the document: in Order, CSS hides it.
+  const mapped = await page.locator('.ws-stage').first().isVisible();
   await context.close();
   return { mapped, ...placesOf(data) };
 }
@@ -536,9 +537,15 @@ async function main() {
     console.log(`the page: ${page$.mapped ? 'a map' : page$.tile ? 'tiles, no map' : 'no part'}`);
     if (page$.tile) passed = (await sideways(browser, options.url, page$.tile, page$.mapped)) && passed;
     passed = (await visits(browser, options, page$.rows, page$)) && passed;
-    passed = (await drawnPlain(browser, options, page$.mapped, Boolean(page$.tile))) && passed;
-    if (page$.rows) passed = (await drawnPart(browser, options, page$.rows)) && passed;
-    passed = (await drawnSecondVisit(browser, options)) && passed;
+    // The build draws the plain address: what it drew is checked there, whatever view the url names. At any other
+    // address the page holds what is under the title row until the script draws it.
+    const plain = new URL(options.url);
+    plain.search = '';
+    const atPlain = { ...options, url: plain.href };
+    const plain$ = plain.href === options.url ? page$ : await pageOf(browser, plain.href);
+    passed = (await drawnPlain(browser, atPlain, plain$.mapped, Boolean(plain$.tile))) && passed;
+    if (plain$.rows) passed = (await drawnPart(browser, atPlain, plain$.rows)) && passed;
+    passed = (await drawnSecondVisit(browser, atPlain)) && passed;
   } finally {
     await browser.close();
   }

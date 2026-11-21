@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-// Prints the advance widths of a WOFF2 font file, per character, in thousandths of an em:
-//   node scripts/font-widths.mjs public/fonts/ibm-plex-serif-400-normal.woff2
+// Prints the advance widths of a WOFF2 font file, per character, in thousandths of an em: printable ASCII, a few
+// typographic marks, and the characters given after the file:
+//   node scripts/font-widths.mjs public/fonts/ibm-plex-serif-400-normal.woff2 'é'
+// A character the font has no glyph for is named on stderr, and the exit code is 1.
 // The map's title widths (src/workshop/map-fit.ts) are made with it. It reads the font's cmap and hmtx tables, from
 // the file's single Brotli stream; it ignores kerning, which in these titles only narrows a line.
 import { readFileSync } from 'node:fs';
@@ -120,7 +122,13 @@ export function advanceWidths(file) {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const widths = advanceWidths(readFileSync(process.argv[2]));
-  // Printable ASCII and the typographic marks a title may use; any other character stops the build by name.
-  const printable = Object.entries(widths).filter(([char]) => (char >= ' ' && char <= '~') || '‘’“”–—…'.includes(char));
+  const asked = [...new Set([...(process.argv.slice(3).join(''))])];
+  // Printable ASCII and the typographic marks a title may use, then the characters asked for.
+  const printable = Object.entries(widths).filter(([char]) => (char >= ' ' && char <= '~') || '‘’“”–—…'.includes(char) || asked.includes(char));
   console.log(JSON.stringify(Object.fromEntries(printable)));
+  const missing = asked.filter((char) => !Object.hasOwn(widths, char));
+  if (missing.length) {
+    console.error(`${process.argv[2]} has no glyph for ${missing.map((char) => `"${char}"`).join(', ')}: the page would draw it in another face.`);
+    process.exitCode = 1;
+  }
 }

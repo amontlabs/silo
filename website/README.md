@@ -127,7 +127,9 @@ the first place with rows the plain view must never be painted and the place
 must be in the first frame after the takeover; and on a
 second visit, the state remembered, nothing under the title row may move by
 half a pixel or more when the script takes over, at 1440 × 900 and 390 × 844.
-A plan with no part is checked at the places it has, and passes.
+A plan with no part builds only from a folder named in `WORKSHOP_PLAN`, which
+draws no map, since Silo's map stops the build when `plan/` lacks a part it
+places. Built that way, it is checked at the places it has, and passes.
 `npm test` does not run it.
 
 To see the page's moves frame by frame, with the same server running,

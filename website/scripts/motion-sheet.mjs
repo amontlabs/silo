@@ -14,6 +14,7 @@
 // - a comment's height or the comment box's top changes when the comment is confirmed.
 // On a page with a map, the moves on the tiles run in Order, where the tiles are; the flows named map-* run on the map, at
 // 1440 x 900: the map to a part and back, a scrolled map to a part and back from a scrolled part, Map to Order and back.
+// Each flow sets the view it needs, whatever view the url names.
 // It drives Playwright's own browser: `npx playwright-core install chromium-headless-shell` once.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -193,16 +194,19 @@ const tileOf = (part) => `.ws-tile[data-part="${part}"] .ws-tile-hit`;
 
 /** What the moves need from the page's data: its parts in order, those with rows, an entry with notes. */
 async function siteOf(browser, url) {
-  const context = await browser.newContext();
+  const context = await browser.newContext({ viewport: { width: DESK[0], height: DESK[1] } });
   const page = await context.newPage();
-  await page.goto(url);
+  // Whatever view the url names: a page has a map when the map shows in its own default view, on a desk.
+  const plain = new URL(url);
+  plain.searchParams.delete('view');
+  await page.goto(plain.href);
   await page.waitForFunction(() => window.__workshopData, null, { timeout: 15000 });
   const data = await page.evaluate(() => {
     const { parts, entries } = window.__workshopData;
     return { parts: parts.map((part) => part.id), entries: entries.map((entry) => ({ id: entry.id, part: entry.part, notes: entry.notes })) };
   });
   await page.waitForSelector('#workshop-root:not([data-prerendered]) .ws', { timeout: 15000 });
-  const mapped = (await page.locator('.ws-stage').count()) > 0;
+  const mapped = await page.locator('.ws-stage').first().isVisible();
   await context.close();
   const withRows = data.parts.filter((part) => data.entries.some((entry) => entry.part === part));
   const noted = data.entries.find((entry) => entry.notes && entry.part);
@@ -334,13 +338,15 @@ async function main() {
     const site = await siteOf(browser, options.url);
     if (!site.parts.length) throw new Error('the page has no part');
     const contexts = [];
-    // A page at an address with its state loaded; in Order on a page with a map, unless the flow is on the map.
+    // A page at an address with its state loaded, in the view the flow needs whatever the url names: on the map for the
+    // map's flows, in Order for the others on a page with a map.
     const open = async ({ size = DESK, hash = '', signIn = false, map = false }) => {
       const context = await browser.newContext({ viewport: { width: size[0], height: size[1] }, deviceScaleFactor: 1 });
       contexts.push(context);
       const page = await context.newPage();
       const url = new URL(options.url);
       if (site.mapped && !map) url.searchParams.set('view', 'order');
+      else url.searchParams.delete('view');
       if (signIn) {
         await page.goto(url.href, { waitUntil: 'networkidle' });
         await page.locator('#workshop-account a.button').click();
@@ -352,6 +358,7 @@ async function main() {
       url.hash = hash;
       await page.goto(url.href, { waitUntil: 'networkidle' });
       await page.waitForSelector('#workshop-root:not([data-prerendered]) .ws[data-live="answered"]', { timeout: 15000 });
+      if (map && !(await page.locator('.ws-stage').first().isVisible())) throw new Error('the map does not show');
       await wait(400);
       return page;
     };

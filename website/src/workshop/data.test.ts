@@ -11,7 +11,7 @@ import { buildData, CORE_NOTES, DECISIONS, emptyPlanFiles, FEATURES, PARTS, plan
 import { checkLayout, LayoutError, MAP_HEIGHT, NO_MAP, SILO_MAP, withoutRests } from './map';
 import type { Box, MapLayout } from './map';
 import { EXAMPLE_MAP } from './map-example';
-import { MAP_PIXELS, MONO_ADVANCE, SERIF_WIDTHS, stateNeeds, unknownCharacters } from './map-fit';
+import { MAP_PIXELS, MONO_ADVANCE, SERIF_WIDTHS, shownTitle, stateNeeds, TITLE_FACE, TITLE_STYLE, titleEms, unknownCharacters } from './map-fit';
 import { stateWords } from './plan';
 import type { Counts, PartState } from './plan';
 
@@ -428,8 +428,45 @@ describe('the map layout', () => {
       expect(message).toBe('website/src/workshop/map.ts: the title of the part "part-d", "Part D, a bit longer", needs a box 122 map units wide on the folded map, and its box there is 120. Fix: widen its box in map.ts, or shorten the title in plan/parts.json.');
     });
 
-    it('stops on a character the width table lacks, naming it', () => {
-      expect(() => buildDataFrom(planFiles(titled('Café')), { map: EXAMPLE_MAP })).toThrow('The title of the part "part-c", "Café", has "é", which the width table of website/src/workshop/map-fit.ts lacks, so the build cannot tell whether it fits its box. Fix: add the character with website/scripts/font-widths.mjs, or use another one in plan/parts.json.');
+    it('stops on a character the width table lacks, naming it and the command that prints its width', () => {
+      expect(() => buildDataFrom(planFiles(titled('Café')), { map: EXAMPLE_MAP })).toThrow('The title of the part "part-c", "Café", has "é", which the width table of website/src/workshop/map-fit.ts lacks, so the build cannot tell whether it fits its box. Fix: run `node website/scripts/font-widths.mjs website/public/fonts/ibm-plex-serif-400-normal.woff2 \'é\'` and add the width it prints for each to SERIF_WIDTHS, or use another character in plan/parts.json.');
+      // The command, as the message gives it, prints that width; a character the font has no glyph for is named, and fails.
+      const printed = JSON.parse(execFileSync('node', ['website/scripts/font-widths.mjs', TITLE_FACE.file, 'é'], { cwd: REPOSITORY, encoding: 'utf8' }));
+      expect(printed['é']).toBe(536);
+      expect(() => execFileSync('node', ['website/scripts/font-widths.mjs', TITLE_FACE.file, '漢'], { cwd: REPOSITORY, stdio: 'pipe' })).toThrow('has no glyph for "漢"');
+    });
+
+    it('stops on a part named like a property every object has, with no place, as on any part with no place', () => {
+      const files = planFiles({ parts: [...PARTS, { id: 'constructor', title: 'Constructor', line: 'A part named like a property of every object.' }] });
+      expect(() => buildDataFrom(files, { map: EXAMPLE_MAP })).toThrow('The map has no place for the part "constructor" of plan/parts.json. Add it to website/src/workshop/map.ts.');
+      for (const id of ['toString', '__proto__', 'hasOwnProperty']) {
+        expect(() => checkLayout({ ...plan(), parts: [...plan().parts, { id, title: id }] }, EXAMPLE_MAP)).toThrow(`The map has no place for the part "${id}" of plan/parts.json.`);
+      }
+    });
+
+    it('measures a title as the page shows it: a run of white space as one space, none at the ends', () => {
+      const spaced = `The${' '.repeat(25)}engine`;
+      expect(shownTitle(`  ${spaced}\t\n`)).toBe('The engine');
+      expect(titleEms(spaced)).toBe(titleEms('The engine'));
+      // Part D's fold is 120 units wide: 25 spaces more, measured, would need about 72 more.
+      expect(() => buildDataFrom(planFiles(titled(spaced, 'part-d')), { map: EXAMPLE_MAP })).not.toThrow();
+      // A no-break space is not white space the page collapses.
+      expect(shownTitle('The\u00a0\u00a0engine')).toBe('The\u00a0\u00a0engine');
+    });
+
+    it('stops on a title that fits its box but runs under the part drawn inside it, on the fold', () => {
+      const real = layoutPlanFrom(loadDir(join(REPOSITORY, 'plan')));
+      expect(() => checkLayout(real, SILO_MAP)).not.toThrow();
+      const renamed = { ...real, parts: real.parts.map((part) => (part.id === 'computers' ? { ...part, title: 'Virtual computers' } : part)) };
+      let message = '';
+      try {
+        checkLayout(renamed, SILO_MAP);
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      // Computers is 216 units wide on the fold, and Agent programs begins 84 units in, across the title's line.
+      expect(message).toMatch(/^website\/src\/workshop\/map\.ts: the title of the part "computers", "Virtual computers", runs under the part "agent-programs", drawn inside its box on the folded map: the title needs (\d+) map units from the box's left edge, and "agent-programs" begins 84 units in\. Fix: move "agent-programs" right or off the title's line in map\.ts, or shorten the title in plan\/parts\.json\.$/);
+      expect(Number(/needs (\d+)/.exec(message)?.[1])).toBeGreaterThan(84);
     });
 
     it('has every character of the real plan\'s titles in its width table, and the table is the font file\'s', async () => {
@@ -495,6 +532,44 @@ describe('the map layout', () => {
       }
     });
   }
+
+  describe('what the stylesheet holds that the map\'s checks rely on', () => {
+    const here = dirname(new URL(import.meta.url).pathname);
+    const workshop = readFileSync(join(here, 'workshop.css'), 'utf8');
+    // The declarations of the last one-line rule for `selector`, by property.
+    const rule = (selector: string): Record<string, string> => {
+      const line = workshop.split('\n').filter((text) => text.startsWith(`${selector} {`)).at(-1) ?? '';
+      const body = line.slice(line.indexOf('{') + 1, line.lastIndexOf('}'));
+      return Object.fromEntries(body.split(';').map((declaration) => declaration.trim()).filter(Boolean).map((declaration) => [declaration.slice(0, declaration.indexOf(':')).trim(), declaration.slice(declaration.indexOf(':') + 1).trim()]));
+    };
+    const size = (value: number) => `max(${TITLE_STYLE.floorPx}px, calc(${value} * var(--u)))`;
+
+    it('sets the titles in the face the width table was made from', () => {
+      const site = readFileSync(join(here, '../site.css'), 'utf8');
+      expect(/--serif:\s*"([^"]+)"/.exec(site)?.[1]).toBe(TITLE_FACE.family);
+      const fonts = readFileSync(join(REPOSITORY, 'website/public/fonts/fonts.css'), 'utf8');
+      const faces = fonts.split('@font-face').filter((face) => face.includes(`'${TITLE_FACE.family}'`) && /font-style:\s*normal/.test(face) && /font-weight:\s*400/.test(face));
+      expect(faces.map((face) => /url\(\.\/([^)]+)\)/.exec(face)?.[1])).toEqual([TITLE_FACE.file.split('/').at(-1)]);
+      // The title's rule sets weight and style back to normal, and no letter spacing.
+      expect(rule('.ws-p-ttl').font).toBe(`${size(TITLE_STYLE.full.size)}/${TITLE_STYLE.lineHeight} var(--serif)`);
+      expect(Object.keys(rule('.ws-p-ttl'))).not.toContain('letter-spacing');
+    });
+
+    it('gives the titles the offsets, sizes and tops the width check uses, full and folded', () => {
+      expect(rule('.ws-p-ttl')).toMatchObject({ left: `calc(${TITLE_STYLE.full.left} * var(--u))`, top: `calc(var(--ty, ${TITLE_STYLE.top}) * var(--u))` });
+      expect(rule('.ws-part.inner .ws-p-ttl')).toEqual({ left: `calc(${TITLE_STYLE.inner.left} * var(--u))`, 'font-size': size(TITLE_STYLE.inner.size) });
+      expect(rule('.ws-stage.fold .ws-p-ttl')).toMatchObject({ left: `calc(${TITLE_STYLE.fold.left} * var(--u))`, top: `calc((var(--ch) * var(--u) - 2px - ${TITLE_STYLE.lineHeight}em) / 2)`, 'font-size': size(TITLE_STYLE.fold.size) });
+      expect(rule('.ws-stage.fold .ws-part.inner .ws-p-ttl')).toEqual({ left: `calc(${TITLE_STYLE.foldInner.left} * var(--u))`, 'font-size': size(TITLE_STYLE.foldInner.size) });
+      expect(rule('.ws-stage.fold .ws-part.tall .ws-p-ttl')).toMatchObject({ top: `calc(${TITLE_STYLE.foldTallTop} * var(--u))` });
+    });
+
+    it('keeps a part drawn inside another above it, the other focused or not, and its own focus ring above its neighbours', () => {
+      const z = (selector: string) => Number(rule(selector)['z-index']);
+      expect(z('.ws .ws-part')).toBeLessThan(z('.ws .ws-part:focus-visible'));
+      expect(z('.ws .ws-part.inner')).toBeGreaterThan(z('.ws .ws-part:focus-visible'));
+      expect(z('.ws .ws-part.inner:focus-visible')).toBeGreaterThan(z('.ws .ws-part.inner'));
+    });
+  });
 
   it('gives the stage in the stylesheet the height of the full map, which clips what goes past it', () => {
     const css = readFileSync(join(dirname(new URL(import.meta.url).pathname), 'workshop.css'), 'utf8');

@@ -248,7 +248,8 @@ export function checkLayout(plan: LayoutPlan, layout: MapLayout = SILO_MAP): voi
   // An empty layout is no map at all: the page shows the tiles alone, and any plan passes.
   if (!hasMap(layout) && !layout.zones.length && !layout.notes.length && !layout.ghosts.length && !layout.wires.full.length && !layout.wires.fold.length) return;
   for (const id of partIds) {
-    if (!layout.places[id]) throw new LayoutError(`The map has no place for the part "${id}" of plan/parts.json. Add it to ${WHERE}.`);
+    // Own keys only: a part named like a property every object has (`constructor`) has no place unless the layout gives it one.
+    if (!Object.hasOwn(layout.places, id)) throw new LayoutError(`The map has no place for the part "${id}" of plan/parts.json. Add it to ${WHERE}.`);
   }
   for (const id of Object.keys(layout.places)) {
     if (!known.has(id)) throw new LayoutError(`${WHERE} places the part "${id}", which plan/parts.json does not have.`);
