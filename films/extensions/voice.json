@@ -1,0 +1,273 @@
+{
+ "engine": "kokoro",
+ "speed": 1.0,
+ "before": 0.4,
+ "between": 0.35,
+ "after": 0.6,
+ "voices": [
+  {
+   "id": "af_heart",
+   "label": "Heart",
+   "scenes": [
+    {
+     "sentences": [
+      {
+       "text": "An extension is something you add to Silo.",
+       "file": "voice/f7fbd6e41f148763.mp3",
+       "start": 0.4,
+       "length": 2.28
+      },
+      {
+       "text": "It adds rules, a computer, or both.",
+       "file": "voice/defb2a13a954138d.mp3",
+       "start": 3.03,
+       "length": 2.141
+      },
+      {
+       "text": "Its manifest lists them: the rules, the recipe of the computer, what wakes that computer, and the tools it may use.",
+       "file": "voice/797245c5182fb877.mp3",
+       "start": 5.521,
+       "length": 6.754
+      },
+      {
+       "text": "What ships with Silo uses the same manifest as what people add.",
+       "file": "voice/324a614fa4c5801f.mp3",
+       "start": 12.625,
+       "length": 3.825
+      }
+     ],
+     "total": 17.05
+    },
+    {
+     "sentences": [
+      {
+       "text": "First example: registry rules.",
+       "file": "voice/085a7815d850c203.mp3",
+       "start": 0.4,
+       "length": 2.003
+      },
+      {
+       "text": "It adds one rule: allow crates.io on main.",
+       "file": "voice/f0c82740cdb8f9ad.mp3",
+       "start": 2.753,
+       "length": 2.818
+      },
+      {
+       "text": "Nothing in it is executed, so it has no computer.",
+       "file": "voice/f6e02969e9cb72ae.mp3",
+       "start": 5.921,
+       "length": 2.876
+      },
+      {
+       "text": "Importing it changes nothing.",
+       "file": "voice/2c9e0943d16882ea.mp3",
+       "start": 9.147,
+       "length": 1.429
+      },
+      {
+       "text": "It shows the rule it adds.",
+       "file": "voice/2e7b6d74ca0a64a9.mp3",
+       "start": 10.926,
+       "length": 1.394
+      },
+      {
+       "text": "Installing it switches the rule on.",
+       "file": "voice/ba1a66c6c48ddbea.mp3",
+       "start": 12.67,
+       "length": 1.686
+      }
+     ],
+     "total": 14.956
+    },
+    {
+     "sentences": [
+      {
+       "text": "Second example: disk watch.",
+       "file": "voice/1f14ad1598bd8358.mp3",
+       "start": 0.4,
+       "length": 1.77
+      },
+      {
+       "text": "Every minute it measures a folder of main.",
+       "file": "voice/88e60b8e69aa2609.mp3",
+       "start": 2.52,
+       "length": 2.249
+      },
+      {
+       "text": "That is something executed.",
+       "file": "voice/4ca12ccedccfb8d8.mp3",
+       "start": 5.119,
+       "length": 1.441
+      },
+      {
+       "text": "So the extension ships a computer.",
+       "file": "voice/199a4311dfd52b8a.mp3",
+       "start": 6.91,
+       "length": 1.818
+      },
+      {
+       "text": "Its manifest names the recipe, and installing the extension makes that computer.",
+       "file": "voice/bc1f1ca2695e8876.mp3",
+       "start": 9.078,
+       "length": 4.716
+      },
+      {
+       "text": "Nothing of an extension is executed inside Silo.",
+       "file": "voice/f22e2e7f02ba902f.mp3",
+       "start": 14.144,
+       "length": 3.088
+      },
+      {
+       "text": "You can always see that computer.",
+       "file": "voice/ba8ebbdfa9472d59.mp3",
+       "start": 17.582,
+       "length": 1.567
+      }
+     ],
+     "total": 19.749
+    },
+    {
+     "sentences": [
+      {
+       "text": "That computer asks Silo for what it needs, through tools.",
+       "file": "voice/a8e3de1a5445f407.mp3",
+       "start": 0.4,
+       "length": 2.913
+      },
+      {
+       "text": "It can use only the tools its manifest names, and installing the extension grants them.",
+       "file": "voice/cb3b5850351df285.mp3",
+       "start": 3.663,
+       "length": 4.972
+      },
+      {
+       "text": "A tool reads, shows or protects.",
+       "file": "voice/736fa4dd573374a5.mp3",
+       "start": 8.985,
+       "length": 2.028
+      },
+      {
+       "text": "Disk watch reads the folder /work on main.",
+       "file": "voice/958d4e74fa2942d7.mp3",
+       "start": 11.363,
+       "length": 2.217
+      },
+      {
+       "text": "It shows a panel and an alert in the app.",
+       "file": "voice/0fd342276a9dea85.mp3",
+       "start": 13.93,
+       "length": 2.112
+      },
+      {
+       "text": "Where a tool applies to computers, you choose which ones when you install.",
+       "file": "voice/53c47cf5ce3e973e.mp3",
+       "start": 16.392,
+       "length": 3.691
+      }
+     ],
+     "total": 20.683
+    },
+    {
+     "sentences": [
+      {
+       "text": "Something wakes an extension.",
+       "file": "voice/c90a505c1e8372b4.mp3",
+       "start": 0.4,
+       "length": 1.4
+      },
+      {
+       "text": "Disk watch wakes on a time, and nothing waits for it.",
+       "file": "voice/47775a764bc92d38.mp3",
+       "start": 2.15,
+       "length": 2.694
+      },
+      {
+       "text": "Third example: request check.",
+       "file": "voice/d43b7f440dc54f6d.mp3",
+       "start": 5.194,
+       "length": 1.728
+      },
+      {
+       "text": "It wakes when a network request of main waits at the boundary, and Silo asks it.",
+       "file": "voice/22103f856800e7fc.mp3",
+       "start": 7.272,
+       "length": 4.268
+      },
+      {
+       "text": "It answers one of three things: let it go on, deny it, or hold it.",
+       "file": "voice/65e24715cccbbcc8.mp3",
+       "start": 11.89,
+       "length": 3.613
+      },
+      {
+       "text": "Let it go on is not allow: the rules still decide.",
+       "file": "voice/c1356efb2dc667bc.mp3",
+       "start": 15.853,
+       "length": 2.695
+      },
+      {
+       "text": "If it does not answer in time, the wait ends as its manifest says.",
+       "file": "voice/6272f57fcbbe7fa3.mp3",
+       "start": 18.898,
+       "length": 3.788
+      },
+      {
+       "text": "You can always see what wakes an extension.",
+       "file": "voice/e69223e5b26e2776.mp3",
+       "start": 23.036,
+       "length": 1.941
+      }
+     ],
+     "total": 25.577
+    },
+    {
+     "sentences": [
+      {
+       "text": "Request check denies and holds by itself, because its manifest names that tool and you installed it.",
+       "file": "voice/795a3485cdb756a1.mp3",
+       "start": 0.4,
+       "length": 5.852
+      },
+      {
+       "text": "A tool that protects names the computer it applies to.",
+       "file": "voice/991ad58d30fa14c5.mp3",
+       "start": 6.602,
+       "length": 2.789
+      },
+      {
+       "text": "Granting it sets a precaution on that computer, which rests on the extension.",
+       "file": "voice/e25edfffc575ad8a.mp3",
+       "start": 9.741,
+       "length": 4.169
+      }
+     ],
+     "total": 14.51
+    },
+    {
+     "sentences": [
+      {
+       "text": "No tool an extension can use grants or destroys.",
+       "file": "voice/24fab40672e3ec2b.mp3",
+       "start": 0.4,
+       "length": 3.061
+      },
+      {
+       "text": "There is no tool to allow a request, to open a network, or to drop a computer.",
+       "file": "voice/0a902048bf332f93.mp3",
+       "start": 3.811,
+       "length": 4.419
+      },
+      {
+       "text": "Only the rules it adds can allow something, and importing shows them.",
+       "file": "voice/693b966e697e40de.mp3",
+       "start": 8.58,
+       "length": 3.609
+      }
+     ],
+     "total": 12.789
+    }
+   ],
+   "total": 125.314
+  }
+ ]
+}

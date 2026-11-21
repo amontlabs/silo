@@ -1,0 +1,62 @@
+{
+  "speed": 1.0,
+  "voices": [
+    {
+      "id": "af_heart",
+      "label": "Heart"
+    }
+  ],
+  "scenes": [
+    [
+      "An extension is something you add to Silo.",
+      "It adds rules, a computer, or both.",
+      "Its manifest lists them: the rules, the recipe of the computer, what wakes that computer, and the tools it may use.",
+      "What ships with Silo uses the same manifest as what people add."
+    ],
+    [
+      "First example: registry rules.",
+      "It adds one rule: allow crates.io on main.",
+      "Nothing in it is executed, so it has no computer.",
+      "Importing it changes nothing.",
+      "It shows the rule it adds.",
+      "Installing it switches the rule on."
+    ],
+    [
+      "Second example: disk watch.",
+      "Every minute it measures a folder of main.",
+      "That is something executed.",
+      "So the extension ships a computer.",
+      "Its manifest names the recipe, and installing the extension makes that computer.",
+      "Nothing of an extension is executed inside Silo.",
+      "You can always see that computer."
+    ],
+    [
+      "That computer asks Silo for what it needs, through tools.",
+      "It can use only the tools its manifest names, and installing the extension grants them.",
+      "A tool reads, shows or protects.",
+      "Disk watch reads the folder /work on main.",
+      "It shows a panel and an alert in the app.",
+      "Where a tool applies to computers, you choose which ones when you install."
+    ],
+    [
+      "Something wakes an extension.",
+      "Disk watch wakes on a time, and nothing waits for it.",
+      "Third example: request check.",
+      "It wakes when a network request of main waits at the boundary, and Silo asks it.",
+      "It answers one of three things: let it go on, deny it, or hold it.",
+      "Let it go on is not allow: the rules still decide.",
+      "If it does not answer in time, the wait ends as its manifest says.",
+      "You can always see what wakes an extension."
+    ],
+    [
+      "Request check denies and holds by itself, because its manifest names that tool and you installed it.",
+      "A tool that protects names the computer it applies to.",
+      "Granting it sets a precaution on that computer, which rests on the extension."
+    ],
+    [
+      "No tool an extension can use grants or destroys.",
+      "There is no tool to allow a request, to open a network, or to drop a computer.",
+      "Only the rules it adds can allow something, and importing shows them."
+    ]
+  ]
+}

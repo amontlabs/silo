@@ -1,7 +1,0 @@
-{
-  "asks": "How is Silo extended?",
-  "answer": "Silo is extended by a client of the engine's calls or by a program inside a computer, and nothing loads into the engine or the app at run time.",
-  "needs": [
-    "added-classifier"
-  ]
-}

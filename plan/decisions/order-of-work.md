@@ -12,7 +12,7 @@ design record's marks:
   computer can only be made from a recipe.
 - Giving memory back when idle, and forks that share their parent's disk, move early. (Agreed)
 - The hot-file map comes once the record exists, since it costs little then. (Agreed)
-- Added classifiers and plugins follow the record. The first piece is a program that forwards
+- Extensions follow the record. The first piece is a program that forwards
   alerts and asks.
 - Recording the screen when an agent drives it is useful and not first. (Owner)
 - The phone app is later. (Owner)

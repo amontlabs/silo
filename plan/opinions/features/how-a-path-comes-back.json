@@ -9,8 +9,5 @@
     "what-would-bring-it-back",
     "file-changes-in-the-record",
     "git-history-inside"
-  ],
-  "keeps": [
-    "classifier-never-acts"
   ]
 }

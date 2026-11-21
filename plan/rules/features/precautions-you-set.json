@@ -4,7 +4,7 @@
   "needs": [
     "allow-hold-or-deny",
     "law-of-triggers",
-    "how-an-opinion-acts",
+    "opinion-acts-through-a-precaution",
     "what-a-precaution-may-do",
     "what-a-precaution-says",
     "where-precautions-live",

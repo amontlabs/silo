@@ -1,0 +1,15 @@
+{
+  "asks": "What does an extension receive when it reads the record of a computer?",
+  "answer": "The facts and reports of the computers the user chose, as a stream and by query, the opinions about them, and whether each computer is running, paused or stopped.",
+  "needs": [
+    "extension-tools"
+  ],
+  "replaces": [
+    "what-a-classifier-receives"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It is the taken answer of what-a-classifier-receives with its subject corrected."
+  },
+  "verdict": "take"
+}

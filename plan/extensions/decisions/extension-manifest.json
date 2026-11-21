@@ -1,0 +1,14 @@
+{
+  "asks": "What is an extension?",
+  "answer": "An extension adds rules, a computer, or both. Its manifest lists the rules, the recipe of the computer, what wakes that computer and the tools it may use.",
+  "replaces": [
+    "added-classifier",
+    "what-defines-a-classifier"
+  ],
+  "adds": [
+    "extension",
+    "manifest",
+    "panel"
+  ],
+  "verdict": "take"
+}

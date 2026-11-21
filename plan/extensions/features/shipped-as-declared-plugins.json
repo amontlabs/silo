@@ -1,0 +1,23 @@
+{
+  "name": "Silo's own classifiers, declared",
+  "what": "The classifiers that ship with Silo come installed as plugins, each with a declaration: what it wakes on, what it is given, where it runs, which of Silo's calls it uses and what it gives back. Their files can be read by anyone, and Silo holds each of them to its declaration.",
+  "needs": [
+    "what-ships-with-silo",
+    "shipped-extensions-use-the-manifest",
+    "shipped-as-readable-files",
+    "extension-manifest",
+    "manifest-is-enforced",
+    "what-wakes-an-extension",
+    "extension-tools",
+    "extension-registration",
+    "extension-says-done",
+    "extension-ships-a-computer",
+    "how-each-run-is-going",
+    "which-run-did-it",
+    "how-a-path-comes-back",
+    "kind-of-each-call"
+  ],
+  "keeps": [
+    "extension-computer-is-shown"
+  ]
+}

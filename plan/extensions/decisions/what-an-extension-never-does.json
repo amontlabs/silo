@@ -1,0 +1,18 @@
+{
+  "asks": "What can an extension never do?",
+  "answer": "No tool an extension can use grants or destroys.",
+  "needs": [
+    "extension-manifest"
+  ],
+  "replaces": [
+    "what-a-classifier-can-never-do"
+  ],
+  "adds": [
+    "no-tool-grants-or-destroys"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The owner called this sentence basically perfect on 21 November 2026."
+  },
+  "verdict": "take"
+}

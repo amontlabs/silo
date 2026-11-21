@@ -12,7 +12,7 @@ agreed that start, and open a port or any other channel, are granting, and that
 taking back a secret and closing a network or any other channel are protective.
 
 "Let a classifier read a record" is granting because what a classifier may read is a grant
-(`reading-is-a-grant`, in `plugins`).
+(`reading-is-a-grant`, in `extensions`).
 
 The kinds of the other actions the design names are not decided: `kinds-of-other-actions`. How
 a fork becomes main, and the kind of that action, are open in `going-back`: `fork-becomes-main`.

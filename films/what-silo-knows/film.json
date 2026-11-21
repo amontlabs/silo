@@ -11,11 +11,10 @@
     "opinion-stored-apart",
     "opinions-computed-again",
     "what-a-classifier-is",
-    "classifier-never-acts",
     "as-sure-as-least-sure",
+    "word-unverified",
     "report-never-stored-as-fact",
-    "books-balance",
-    "losses-show",
+    "holes",
     "own-account-as-a-check",
     "own-account-check-optional",
     "your-opinion-stays-an-opinion"
@@ -27,7 +26,7 @@
     },
     {
       "word": "report",
-      "means": "one thing a program inside the computer told Silo. Written once, as told."
+      "means": "one thing a program inside the computer told Silo. Written once, unverified."
     },
     {
       "word": "process",
@@ -55,20 +54,12 @@
     },
     {
       "word": "classifier",
-      "means": "whatever gives an opinion. It never acts."
-    },
-    {
-      "word": "unattributed",
-      "means": "said of a change Silo saw and that no report accounts for."
-    },
-    {
-      "word": "gap",
-      "means": "a moment when Silo lost sight of something. A gap is itself written in the record."
+      "means": "whatever gives an opinion."
     }
   ],
   "clear": true,
   "test": {
     "question": "An agent with full access stops the probe inside the computer for one minute, deletes a folder, and starts the probe again. What does the record hold about it?",
-    "answer": "The deletion is there, as a fact: Silo sees the disk from outside, and the agent cannot reach that part. How finely in time Silo sees the disk is still to find out. What is missing is which process did it, because the reports stopped for a minute. That hole is itself in the record, as a gap. So the record shows a change that no report accounts for, and says that it lost sight of the inside. It does not fill the hole with an opinion."
+    "answer": "The deletion is there, as a fact: Silo sees the disk from outside, and the agent cannot reach that part. How finely in time Silo sees the disk is still to find out. What is missing is which process did it, because the reports stopped for a minute. That is a hole. Silo does not fill it with an opinion."
   }
 }

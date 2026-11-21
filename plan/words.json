@@ -117,5 +117,45 @@
   {
     "word": "engine",
     "means": "The core piece of Silo. The app, the command line and every tool only talk to it."
+  },
+  {
+    "word": "extension",
+    "means": "Rules, a computer, or both, added to Silo through a manifest."
+  },
+  {
+    "word": "manifest",
+    "means": "What an extension says of itself: the rules it adds, the recipe of its computer, what wakes that computer and the tools it may use."
+  },
+  {
+    "word": "panel",
+    "means": "A view in the app that an extension creates through a tool, and that the app draws."
+  },
+  {
+    "word": "wakes on",
+    "means": "Said of an extension: what makes its computer run something. \"Triggered\" is kept for a rule or a precaution."
+  },
+  {
+    "word": "request",
+    "means": "One thing that asks to cross the boundary. It may wait there for an answer."
+  },
+  {
+    "word": "recipe",
+    "means": "A text that says how to make a computer."
+  },
+  {
+    "word": "task",
+    "means": "A command run in a fork or in a fresh computer, with an end."
+  },
+  {
+    "word": "unverified",
+    "means": "Told to Silo, not seen by it. Said of every report, and of a result computed from reports."
+  },
+  {
+    "word": "matched",
+    "means": "An opinion about a report: the facts agree with it. The report stays unverified."
+  },
+  {
+    "word": "mismatch",
+    "means": "An opinion about a report: the facts disagree with it."
   }
 ]

@@ -1,5 +1,0 @@
-{
-  "asks": "What does one define for a classifier?",
-  "answer": "A classifier that judges tool calls is one example, not the whole feature. For any classifier one defines when it runs, its input, its program (simple or complex, with tools or without) and the shape of its output. It should be very customisable. It can be as small as: the user's request and the tool call in, an opinion out.",
-  "verdict": "take"
-}

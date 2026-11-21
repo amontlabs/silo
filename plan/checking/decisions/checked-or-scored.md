@@ -12,4 +12,4 @@ is in the part `rules`.
 | What a precaution may do | Yes: only protective actions | A precaution's type has no other action in it; the simulator |
 
 The rows on a classifier's mechanics and a classifier's opinion are in the part `opinions`, the row
-on an added classifier in the part `plugins`.
+on an added classifier in the part `extensions`.

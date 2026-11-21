@@ -5,7 +5,7 @@
     "record-of-a-computer",
     "what-an-opinion-is",
     "what-a-classifier-is",
-    "classifier-is-a-role",
+    "what-makes-a-classifier",
     "opinion-is-a-value",
     "who-fixes-the-values",
     "how-an-opinion-is-shown",
@@ -15,7 +15,6 @@
   ],
   "keeps": [
     "opinion-stored-apart",
-    "classifier-never-acts",
     "report-never-stored-as-fact",
     "never-shown-as-a-fact"
   ]

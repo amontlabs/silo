@@ -1,0 +1,12 @@
+{
+  "asks": "Does what ships with Silo use the same manifest?",
+  "answer": "What ships with Silo uses the same manifest as what people add.",
+  "needs": [
+    "extension-manifest"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The owner said yes, definitely, on 21 November 2026. Silo's own extensions then get the same limits."
+  },
+  "verdict": "take"
+}

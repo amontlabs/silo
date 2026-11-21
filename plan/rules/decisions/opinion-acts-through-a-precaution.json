@@ -1,0 +1,15 @@
+{
+  "asks": "How can an opinion lead to an action?",
+  "answer": "An opinion leads to an action only through a precaution. Granting an extension a protective tool sets one, which rests on that extension.",
+  "needs": [
+    "extension-may-protect"
+  ],
+  "replaces": [
+    "how-an-opinion-acts"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "how-an-opinion-acts still says a classifier never acts, which extension-may-protect, taken on 21 November 2026, no longer holds."
+  },
+  "verdict": "take"
+}

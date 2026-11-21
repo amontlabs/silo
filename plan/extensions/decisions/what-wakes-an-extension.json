@@ -1,0 +1,12 @@
+{
+  "asks": "What wakes an extension?",
+  "answer": "Either something happened and nothing waits: a time, a new line in the record, the user's click in one of its panels. Or a request waits at the boundary and Silo asks the extension, which answers one of three things: let it go on, deny it, hold it. \"Let it go on\" is not \"allow\": the rules still decide. If it does not answer in time, the wait ends as its manifest says. The user can always see what wakes it.",
+  "needs": [
+    "extension-manifest"
+  ],
+  "adds": [
+    "wakes-on",
+    "what-wakes-an-extension-is-shown"
+  ],
+  "verdict": "take"
+}

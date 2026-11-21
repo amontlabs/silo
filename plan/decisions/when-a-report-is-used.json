@@ -1,0 +1,8 @@
+{
+  "asks": "When does Silo rest on a report and not on a fact?",
+  "answer": "Only for what cannot be seen from outside the computer.",
+  "adds": [
+    "facts-before-reports"
+  ],
+  "verdict": "take"
+}

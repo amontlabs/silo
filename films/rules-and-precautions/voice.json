@@ -65,37 +65,37 @@
        "length": 4.333
       },
       {
-       "text": "Because its trigger can be wrong, a precaution takes only reversible actions, such as alert, checkpoint, pause, deny and hold.",
-       "file": "voice/327edb2063486109.mp3",
+       "text": "Because its trigger can be wrong, a precaution takes only protective actions, such as alert, checkpoint, pause, deny and hold.",
+       "file": "voice/aee9025619f39b24.mp3",
        "start": 13.626,
-       "length": 7.624
+       "length": 7.549
       },
       {
        "text": "It never allows, never resumes and never stops a computer.",
        "file": "voice/b7bfb18befbb64c5.mp3",
-       "start": 21.6,
+       "start": 21.525,
        "length": 3.425
       },
       {
        "text": "Silo is built so that such a precaution cannot even be written.",
        "file": "voice/bd13110e78de2053.mp3",
-       "start": 25.375,
+       "start": 25.3,
        "length": 3.544
       },
       {
        "text": "Like a rule, a precaution is kept outside the computer, and nothing inside can change it.",
        "file": "voice/f822a526ba95b8f3.mp3",
-       "start": 29.269,
+       "start": 29.194,
        "length": 4.889
       },
       {
-       "text": "What an agent may see of it is still open.",
-       "file": "voice/aa5600f25df787d5.mp3",
-       "start": 34.508,
-       "length": 1.989
+       "text": "By default a computer sees nothing of the opinions and precautions about it.",
+       "file": "voice/f3fc4ab5a33eafa3.mp3",
+       "start": 34.433,
+       "length": 4.317
       }
      ],
-     "total": 37.097
+     "total": 39.35
     },
     {
      "sentences": [
@@ -118,67 +118,67 @@
        "length": 2.304
       },
       {
-       "text": "A report or an opinion, through a precaution, does only what can be undone.",
-       "file": "voice/6df5db6433559832.mp3",
+       "text": "A report or an opinion, through a precaution, takes only protective actions.",
+       "file": "voice/b3bd95c29aea1553.mp3",
        "start": 7.434,
-       "length": 4.224
+       "length": 4.477
       },
       {
        "text": "A budget shows the difference.",
        "file": "voice/004cb874cc6adc8b.mp3",
-       "start": 12.008,
+       "start": 12.261,
        "length": 1.406
       },
       {
        "text": "On a computer it is a rule: the boundary counts every call.",
        "file": "voice/96454369d9b67b43.mp3",
-       "start": 13.764,
+       "start": 14.017,
        "length": 3.274
       },
       {
        "text": "On a run it is a precaution: which run made a call is an opinion.",
        "file": "voice/6e0dc73449df409b.mp3",
-       "start": 17.388,
+       "start": 17.641,
        "length": 3.832
       },
       {
        "text": "A wrong grant lets something out that cannot be taken back.",
        "file": "voice/73fc06459b1a8790.mp3",
-       "start": 21.57,
+       "start": 21.823,
        "length": 2.949
       },
       {
        "text": "A wrong pause costs time.",
        "file": "voice/e50a53df7a7ae99e.mp3",
-       "start": 24.869,
+       "start": 25.122,
        "length": 1.459
       },
       {
-       "text": "A classifier itself never acts.",
-       "file": "voice/32ad0d0aa3a770e9.mp3",
-       "start": 26.678,
-       "length": 1.876
+       "text": "An opinion leads to an action only through a precaution.",
+       "file": "voice/6c58fb8f03d1415a.mp3",
+       "start": 26.931,
+       "length": 2.994
       },
       {
        "text": "And there is no detour.",
        "file": "voice/f2c33c76f91f27f6.mp3",
-       "start": 28.904,
+       "start": 30.275,
        "length": 1.177
       },
       {
        "text": "That a classifier gave an opinion, or that a precaution acted, is itself a fact.",
        "file": "voice/a924e421d2567f2a.mp3",
-       "start": 30.431,
+       "start": 31.802,
        "length": 4.798
       },
       {
        "text": "No rule may be triggered by it.",
        "file": "voice/bec4212bd519ab31.mp3",
-       "start": 35.579,
+       "start": 36.95,
        "length": 1.587
       }
      ],
-     "total": 37.766
+     "total": 39.137
     },
     {
      "sentences": [
@@ -189,37 +189,37 @@
        "length": 3.36
       },
       {
-       "text": "Synchronous: the thing waits at the boundary for the answer, so it can still be denied or held.",
-       "file": "voice/fef2e09828c82ff3.mp3",
+       "text": "Synchronous: the request waits at the boundary for the answer, so it can still be denied or held.",
+       "file": "voice/124f052b05e93e8c.mp3",
        "start": 4.11,
-       "length": 5.203
+       "length": 5.453
       },
       {
        "text": "A rule answers on the spot, because a fact is known on the spot.",
        "file": "voice/e602c443f2629949.mp3",
-       "start": 9.663,
+       "start": 9.913,
        "length": 3.546
       },
       {
        "text": "Here the budget of main is reached, and in this example the next model call is denied.",
        "file": "voice/678d1c844693a223.mp3",
-       "start": 13.559,
+       "start": 13.809,
        "length": 4.65
       },
       {
-       "text": "A precaution makes the thing wait for a classifier's opinion.",
-       "file": "voice/d2a31c2173fd8ce5.mp3",
-       "start": 18.559,
-       "length": 3.009
+       "text": "A precaution makes the request wait for a classifier.",
+       "file": "voice/359deb464ac59c10.mp3",
+       "start": 18.809,
+       "length": 2.748
       },
       {
-       "text": "Here the opinion is not safe, and the precaution denies it.",
-       "file": "voice/6e01d0453b6692a3.mp3",
-       "start": 21.918,
-       "length": 3.306
+       "text": "Here the classifier says deny, and the precaution denies it.",
+       "file": "voice/581c9555ab02782b.mp3",
+       "start": 21.907,
+       "length": 3.365
       }
      ],
-     "total": 25.824
+     "total": 25.872
     },
     {
      "sentences": [
@@ -242,19 +242,19 @@
        "length": 4.365
       },
       {
-       "text": "A precaution: a classifier's opinion comes after the thing has passed, and the precaution pauses main.",
-       "file": "voice/f73f4bc42fc01a9b.mp3",
+       "text": "A precaution: a classifier's opinion comes after the request has passed, and the precaution pauses main.",
+       "file": "voice/0d1bf68c17937488.mp3",
        "start": 12.259,
-       "length": 6.152
+       "length": 6.327
       },
       {
-       "text": "The timing does not change the kinds: a rule may trigger any kind, and a precaution only reversible ones.",
-       "file": "voice/d781f2f7c2e33b5c.mp3",
-       "start": 18.761,
-       "length": 6.482
+       "text": "The timing does not change the kinds: a rule may trigger any kind, and a precaution only protective ones.",
+       "file": "voice/74f0a203fbe4ba71.mp3",
+       "start": 18.936,
+       "length": 6.389
       }
      ],
-     "total": 25.843
+     "total": 25.925
     },
     {
      "sentences": [
@@ -277,60 +277,60 @@
        "length": 2.926
       },
       {
-       "text": "If the opinion is safe, the precaution does nothing, and the call passes as the rules allow.",
-       "file": "voice/e340651f319a73b7.mp3",
+       "text": "The classifier says one of three things.",
+       "file": "voice/38d814fcecb3736c.mp3",
        "start": 10.011,
-       "length": 5.205
+       "length": 1.967
       },
       {
-       "text": "If it is unsure, in this example the precaution holds it for you.",
-       "file": "voice/37f349df73481b38.mp3",
-       "start": 15.566,
-       "length": 3.65
+       "text": "Let it go on: the precaution does nothing, and the call passes as the rules allow.",
+       "file": "voice/0336c9d752321388.mp3",
+       "start": 12.328,
+       "length": 4.439
+      },
+      {
+       "text": "Hold: the call is held for you.",
+       "file": "voice/c4fa256249654b6f.mp3",
+       "start": 17.117,
+       "length": 1.628
       }
      ],
-     "total": 19.816
+     "total": 19.345
     },
     {
      "sentences": [
       {
-       "text": "Here it says: not safe.",
-       "file": "voice/a79202c70ae10b1b.mp3",
+       "text": "Here it says: deny.",
+       "file": "voice/8e6235e614dda58f.mp3",
        "start": 0.4,
-       "length": 1.407
+       "length": 1.267
       },
       {
-       "text": "The precaution denies the call, and Silo changes the reply: the tool call is replaced by a refusal.",
-       "file": "voice/a9bfaa5dd7014997.mp3",
-       "start": 2.157,
-       "length": 6.118
+       "text": "The precaution denies the call.",
+       "file": "voice/11725a347ddf1e02.mp3",
+       "start": 2.017,
+       "length": 1.55
       },
       {
-       "text": "The agent program sends the refusal back with its next request, and the model reads it.",
-       "file": "voice/386b9bde174e217b.mp3",
-       "start": 8.625,
-       "length": 4.727
-      },
-      {
-       "text": "The original and the replacement are both kept as facts.",
-       "file": "voice/61615fb9e9979c95.mp3",
-       "start": 13.702,
-       "length": 3.055
+       "text": "The model sees its own call, unchanged, with an error that says it was denied.",
+       "file": "voice/9651574a798cb81b.mp3",
+       "start": 3.917,
+       "length": 4.55
       },
       {
        "text": "This works where Silo can read the model's traffic.",
        "file": "voice/eecd83dc503935dd.mp3",
-       "start": 17.107,
+       "start": 8.817,
        "length": 2.682
       },
       {
-       "text": "How each agent program takes a changed reply is still to be tested.",
-       "file": "voice/5bd8ceec96657667.mp3",
-       "start": 20.139,
-       "length": 4.065
+       "text": "How Silo makes that error reach the model is still to be found out.",
+       "file": "voice/c97474a99c7d499a.mp3",
+       "start": 11.849,
+       "length": 3.659
       }
      ],
-     "total": 24.804
+     "total": 16.108
     },
     {
      "sentences": [
@@ -356,7 +356,7 @@
      "total": 15.792
     }
    ],
-   "total": 202.613
+   "total": 197.2
   }
  ]
 }

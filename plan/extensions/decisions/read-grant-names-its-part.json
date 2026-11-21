@@ -1,0 +1,11 @@
+{
+  "asks": "Does a tool that reads cover everything?",
+  "answer": "A tool that reads names what it reads: a path on a computer, or a part of the record of a computer.",
+  "needs": [
+    "extension-manifest"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It says for reading what extension-tools says of every tool, and the owner asked for examples as exact as a path."
+  }
+}

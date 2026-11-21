@@ -1,0 +1,22 @@
+{
+  "asks": "When does a request wait for an extension's answer?",
+  "answer": "A request waits for an extension's answer only if a precaution the user accepted says so. Granting an extension a tool that protects the requests of a computer sets that precaution. Installing an extension with no such tool never makes a request wait.",
+  "needs": [
+    "what-wakes-an-extension"
+  ],
+  "sets": [
+    {
+      "in": "extensions/properties",
+      "id": "no-wait-without-a-precaution",
+      "says": "A request waits for an extension's answer only if a precaution the user accepted says so.",
+      "kind": "safety",
+      "check": [
+        "simulator"
+      ]
+    }
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The current state of the design recommends it and gives no further reason."
+  }
+}

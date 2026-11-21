@@ -1,0 +1,11 @@
+{
+  "asks": "What do importing and installing an extension do?",
+  "answer": "Importing an extension changes nothing: it shows the rules it adds, the computer it would make, what wakes that computer and the tools it may use. Installing it switches them on.",
+  "needs": [
+    "extension-manifest"
+  ],
+  "adds": [
+    "importing-changes-nothing"
+  ],
+  "verdict": "take"
+}

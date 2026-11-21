@@ -21,10 +21,10 @@ Each film ends as one HTML file: the film with its voice and subtitles, the entr
 | `what-silo-knows` | decides | 7 |
 | `actions-and-kinds` | decides | 6 |
 | `rules-and-precautions` | decides | 8 |
-| `added-classifiers` | decides | 6 |
+| `extensions` | decides | 7 |
 
 What the owner settled and a film does not carry yet is in that film's `pending.md`; the file goes
-once the film carries it. The fifth film needs a new script.
+once the film carries it.
 
 ## What is here
 

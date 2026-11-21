@@ -1,0 +1,15 @@
+{
+  "asks": "Who chooses what an extension spends?",
+  "answer": "What an extension's computer spends is the user's choice, and it is metered like any computer.",
+  "needs": [
+    "extension-manifest"
+  ],
+  "replaces": [
+    "classifier-spend"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It is the taken answer of classifier-spend with its subject corrected."
+  },
+  "verdict": "take"
+}

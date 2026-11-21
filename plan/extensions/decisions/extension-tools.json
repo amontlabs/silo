@@ -1,0 +1,18 @@
+{
+  "asks": "Which tools may an extension use?",
+  "answer": "An extension can use only the tools its manifest names, and installing it grants them. A tool reads, shows or protects: it reads a path or the record of a computer, shows an alert, a question or a panel in the app, or protects by denying, holding or pausing. Where a tool applies to computers, the user chooses which ones when installing: all of them, or specific ones. Which tools Silo offers is settled when they are built.",
+  "needs": [
+    "extension-manifest"
+  ],
+  "replaces": [
+    "reading-is-a-grant"
+  ],
+  "adds": [
+    "extension-uses-only-named-tools"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The owner agreed to the first sentence on 21 November 2026, when it said \"declares\"."
+  },
+  "verdict": "take"
+}

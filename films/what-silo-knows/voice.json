@@ -200,19 +200,13 @@
        "length": 1.654
       },
       {
-       "text": "It never acts.",
-       "file": "voice/2f8b7321272783d2.mp3",
-       "start": 8.592,
-       "length": 0.962
-      },
-      {
        "text": "What an opinion can lead to comes in the film on rules and precautions.",
        "file": "voice/25ddc055527cb75c.mp3",
-       "start": 9.904,
+       "start": 8.592,
        "length": 3.674
       }
      ],
-     "total": 14.178
+     "total": 12.866
     },
     {
      "sentences": [
@@ -229,69 +223,39 @@
        "length": 1.919
       },
       {
-       "text": "Mix in a report, and the result is as told: no surer than the report.",
-       "file": "voice/ede98562a06b7cef.mp3",
+       "text": "Mix in a report, and the result is unverified: no surer than the report.",
+       "file": "voice/1df86b6620f0bbed.mp3",
        "start": 6.244,
-       "length": 4.357
+       "length": 4.533
       },
       {
        "text": "Add a judgement, and it is an opinion.",
        "file": "voice/8c8cd4e920a8d07d.mp3",
-       "start": 10.951,
+       "start": 11.127,
        "length": 2.01
       },
       {
        "text": "And a report or an opinion is never stored as a fact.",
        "file": "voice/b9ba08f3f74a7820.mp3",
-       "start": 13.311,
+       "start": 13.487,
        "length": 3.114
       }
      ],
-     "total": 17.025
+     "total": 17.201
     },
     {
      "sentences": [
       {
-       "text": "All the reports together account for 48 megabytes, written by the build.",
-       "file": "voice/0ef522359cb5ce39.mp3",
+       "text": "Silo never fills a hole.",
+       "file": "voice/d19c0a3aa6ecff52.mp3",
        "start": 0.4,
-       "length": 4.13
-      },
-      {
-       "text": "From outside, Silo saw 61 megabytes change.",
-       "file": "voice/d6265e3fc0d6ce8a.mp3",
-       "start": 4.88,
-       "length": 3.101
-      },
-      {
-       "text": "Silo corrects neither.",
-       "file": "voice/f403567a4c9b7d52.mp3",
-       "start": 8.331,
-       "length": 1.232
-      },
-      {
-       "text": "The 13 megabytes left over are shown as unattributed, and are never spread over the rest.",
-       "file": "voice/ef3acfcf6a21b227.mp3",
-       "start": 9.913,
-       "length": 5.416
-      },
-      {
-       "text": "And where Silo lost sight for a moment, it records a gap.",
-       "file": "voice/bd744073e1b5d5ec.mp3",
-       "start": 15.679,
-       "length": 2.96
-      },
-      {
-       "text": "The record says what it does not know.",
-       "file": "voice/1449b6b20556ab5c.mp3",
-       "start": 18.989,
-       "length": 1.726
+       "length": 1.375
       }
      ],
-     "total": 21.315
+     "total": 2.375
     }
    ],
-   "total": 136.381
+   "total": 116.305
   }
  ]
 }

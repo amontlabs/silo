@@ -1,0 +1,8 @@
+{
+  "asks": "Is an extension's use of a tool recorded?",
+  "answer": "Each use of a tool by an extension is a fact in the record.",
+  "needs": [
+    "extension-tools"
+  ],
+  "verdict": "take"
+}

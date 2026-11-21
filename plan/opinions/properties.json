@@ -14,15 +14,5 @@
     "check": [
       "test"
     ]
-  },
-  {
-    "id": "classifier-never-acts",
-    "says": "A classifier never acts.",
-    "kind": "safety",
-    "from": "less-sure-less-power",
-    "check": [
-      "model",
-      "simulator"
-    ]
   }
 ]

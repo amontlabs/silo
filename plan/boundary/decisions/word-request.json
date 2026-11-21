@@ -1,11 +1,8 @@
 {
   "asks": "What does \"request\" mean?",
-  "answer": "What waits at the boundary.",
-  "sets": [
-    {
-      "in": "words",
-      "word": "request",
-      "means": "What waits at the boundary."
-    }
-  ]
+  "answer": "One thing that asks to cross the boundary. It may wait there for an answer.",
+  "adds": [
+    "request"
+  ],
+  "verdict": "take"
 }

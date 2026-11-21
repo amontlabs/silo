@@ -1,5 +1,0 @@
-{
-  "asks": "What is an added classifier?",
-  "answer": "A program that reads the record and gives opinions: a script, a small model, your own agent.",
-  "verdict": "take"
-}

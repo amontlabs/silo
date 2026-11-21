@@ -5,17 +5,17 @@ explainer({
     { caption: "A rule: triggered by a fact.",
       source: "A rule is triggered by a fact and reads only facts. It is exact, and it may do anything you wrote in it." },
     { caption: "A precaution: triggered by a report or an opinion.",
-      source: "A precaution is triggered by a report or an opinion. It can be wrong, so it takes only reversible actions: it never allows, never resumes and never stops a computer. (You first agreed \"pause or stop\". Stop is destructive, so a precaution no longer stops a computer.)" },
+      source: "A precaution is triggered by a report or an opinion. It can be wrong, so it takes only protective actions: it never allows, never resumes and never stops a computer." },
     { caption: "The less sure the trigger, the less it may do.",
-      source: "Who or what triggers something decides what it may do: the less sure the trigger, the less it may do. You can do anything, at any time. A classifier never acts: its opinion leads to an action only through a precaution you set." },
-    { caption: "Synchronous: the thing waits for the answer.",
-      source: "A rule or a precaution is synchronous or asynchronous. Synchronous: the thing waits at the boundary for the answer. Asynchronous: nothing waits, and only the computer is left to act on." },
+      source: "Who or what triggers something decides what it may do: the less sure the trigger, the less it may do. You can do anything, at any time. An opinion leads to an action only through a precaution." },
+    { caption: "Synchronous: the request waits for the answer.",
+      source: "A rule or a precaution is synchronous or asynchronous. Synchronous: the request waits at the boundary for the answer. Asynchronous: nothing waits, and only the computer is left to act on." },
     { caption: "Asynchronous: nothing waits.",
-      source: "A rule or a precaution is synchronous or asynchronous. Synchronous: the thing waits at the boundary for the answer. Asynchronous: nothing waits, and only the computer is left to act on." },
+      source: "A rule or a precaution is synchronous or asynchronous. Synchronous: the request waits at the boundary for the answer. Asynchronous: nothing waits, and only the computer is left to act on." },
     { caption: "A classifier on each tool call.",
       source: "Through a precaution, a classifier can be asked synchronously on each tool call a model asks for." },
-    { caption: "A denied tool call: the reply is changed.",
-      source: "A denied tool call changes the model's reply at the boundary, and Silo records the original and the replacement." },
+    { caption: "A denied tool call comes back as an error.",
+      source: "The model sees its own call, unchanged, with an error that says it was denied." },
     { caption: "Rules are the promise. A precaution is extra caution.",
       source: "A classifier can be fooled, and a rule at the boundary cannot be got around. Rules are the promise, and a precaution is extra caution on top." },
   ],
@@ -95,11 +95,6 @@ explainer({
       if (lk.head) K.gsap.set(lk.head, { opacity: 0 });
       tl.set(lk, { opacity: 1 }, T(s, t));
       tl.fromTo(lk.path, { drawSVG: "0% 0%" }, { drawSVG: `0% ${f * 100}%`, duration: dur, ease: "power2.inOut", immediateRender: false }, T(s, t));
-    };
-    // The rest of that link, once the thing is let through.
-    const onward = (lk, s, t, dur = 0.6) => {
-      tl.to(lk.path, { drawSVG: "0% 100%", duration: dur, ease: "power2.inOut" }, T(s, t));
-      if (lk.head) tl.to(lk.head, { opacity: 1, duration: 0.2 }, T(s, t + dur - 0.15));
     };
     // Where a chip riding a link stops: just before the fraction f, with 12 px to spare. The chip is put there.
     const parkBefore = (chip, lk, f = 0.5) => {
@@ -214,6 +209,10 @@ explainer({
     const misTo2 = K.link({ x: xB + 22 + neq2.w + 8, y: (yA + yB) / 2 }, prec2b, { tone: "muted", to: "left" });   // from the end of "3 ≠ 4"
     const unwritten2 = K.text(475, no2[0]._y + 34, "cannot be written", { size: 14, color: "muted" });
     const outside2 = K.text(prec2._x - prec2.w / 2 - 16, 525, "kept outside the computer", { size: 14, color: "muted", anchor: "end" });
+    // Inside main, under its programs: by default it sees none of what stands outside about it.
+    const unseen2 = [K.icon(1100, 420, "hidden", { size: 22, tone: "muted" }),
+                     K.text(1100, 448, "by default, sees no opinion", { size: 14, color: "muted" }),
+                     K.text(1100, 467, "and no precaution about it", { size: 14, color: "muted" })];
     const pause2 = K.link(prec2, main2, { tone: "ink", from: "right", to: "left" });
     const alert2 = K.link(prec2, you2, { tone: "ink", from: "right", to: "left" });
     const alertChip2 = K.chip(0, 0, "alert", { tone: "warn", icon: "bell", size: 15 });
@@ -221,7 +220,7 @@ explainer({
     // 2. A classifier reads the record and gives an opinion, outside the record; the opinion's link reaches the
     //    precaution card. A report set against a fact goes to a second, smaller one. Only then does the action leave the
     //    precaution card: an alert to you, and main paused, still and pale. Hero: the paused computer, and the three
-    //    struck-through chips on the card.
+    //    struck-through chips on the card. Last, inside main: by default it sees no opinion and no precaution about it.
     scene(1);
     K.hide([main1, disk1, canary, host1, rule1, same1, you1, record1, row1, out1, seen1, alert1, alertChip1, toRec1, recChip1], { at: 0 });
     K.appear(rec2, { at: 0.2 });
@@ -253,6 +252,7 @@ explainer({
     K.appear(no2[2], { from: "pop", at: V.word(1, 4, "never stops") });
     K.appear(unwritten2, { from: "fade", at: V.word(1, 5, "cannot even be written") });
     K.appear(outside2, { from: "fade", at: V.word(1, 6, "kept outside the computer") });
+    K.appear(unseen2, { from: "fade", stagger: 0.12, at: V.word(1, 7, "sees nothing") - 0.2 });
     run(progs2, 1, 0.5, tPause2 + 0.8);
 
     // ---------- 3. Who triggers decides what it may do. Three rows, right-aligned; the three kinds at the right. ----------
@@ -266,8 +266,8 @@ explainer({
     const ar = "  →  ";
     const r1 = rowOf(150, ["you", ar, "anything"], ["you", "muted"]);
     const r2 = rowOf(320, ["a fact", ar, "a rule", ar, "anything the rule says"], ["ink", "muted", "ink", "muted"]);
-    const r3 = rowOf(530, ["a report or an opinion", ar, "a precaution", ar, "reversible only"], ["ink", "muted", "ink", "muted"]);
-    const kinds = [["granting", 150], ["destructive", 320], ["reversible", 530]].map(([n, y]) => K.card(1110, y, n, { w: 200 }));
+    const r3 = rowOf(530, ["a report or an opinion", ar, "a precaution", ar, "protective only"], ["ink", "muted", "ink", "muted"]);
+    const kinds = [["granting", 150], ["destructive", 320], ["protective", 530]].map(([n, y]) => K.card(1110, y, n, { w: 200 }));
     const [kGrant, kDest, kRev] = kinds;
     const reach = (y, kind, off, tn) => K.link({ x: RX + 14, y }, { x: kind.at("left").x - 4, y: kind._y + off }, { tone: tn });
     const l1 = [reach(150, kGrant, -10, "you"), reach(150, kDest, -10, "you"), reach(150, kRev, -18, "you")];
@@ -277,7 +277,7 @@ explainer({
     // The budget, an example under the left end of the second and of the third row.
     const budgetC = K.text(r2[0]._x + r2[0].w / 2, 356, "a budget on a computer", { size: 14, color: "muted" });
     const budgetR = K.text(r3[0]._x + r3[0].w / 2, 564, "a budget on a run", { size: 14, color: "muted" });
-    const cls3 = shrink(K.card(0, 0, "small model", { sub: "gives opinions, never acts", icon: "model" }), 0.94);
+    const cls3 = shrink(K.card(0, 0, "small model", { sub: "gives opinions", icon: "model" }), 0.94);
     place(cls3, r3[0]._x + cls3.w / 2, 628);
     // The detour: a small record row at the end of the third row, "precaution acted" with its mark, and a dashed grey
     // line with no arrowhead from it toward "a rule". A grey ✕ crosses it: no rule may be triggered by it.
@@ -291,10 +291,11 @@ explainer({
     const detourSays = K.text(dm.x - 24, dm.y + 4, "no detour", { size: 16, color: "muted", anchor: "end" });
 
     // 3. The three kinds stand at the right, in one colour. The rows come one by one as the voice says them, each linked
-    //    to the kinds it reaches. Hero: the third row reaching only "reversible". Then the classifier, which never acts,
-    //    and the detour: the precaution acted is a fact, and the line from it to a rule is crossed out.
+    //    to the kinds it reaches. Hero: the third row reaching only "protective". Then the classifier, whose opinion
+    //    leads to an action only through the precaution of that row, and the detour: the precaution acted is a fact,
+    //    and the line from it to a rule is crossed out.
     scene(2);
-    K.hide([rec2, rRep, rFact, neq2, cls2, op2, op2Who, prec2, ...no2, unwritten2, outside2, prec2b, main2, agent2, ...progs2, you2, read2, opTo2, misTo2, pause2, alert2, alertChip2], { at: 0 });
+    K.hide([rec2, rRep, rFact, neq2, cls2, op2, op2Who, prec2, ...no2, unwritten2, outside2, ...unseen2, prec2b, main2, agent2, ...progs2, you2, read2, opTo2, misTo2, pause2, alert2, alertChip2], { at: 0 });
     K.appear(kinds, { from: "right", stagger: 0.15, at: V.at(2, 0) + 0.3 });
     K.appear(r1, { from: "fade", stagger: 0.12, at: V.at(2, 1) });
     K.draw(l1, { at: V.word(2, 1, "anything") });
@@ -302,7 +303,7 @@ explainer({
     K.draw(l2, { at: V.word(2, 2, "does what the rule says") });
     K.appear(choice3, { from: "fade", at: ">" });
     K.appear(r3, { from: "fade", stagger: 0.18, at: V.at(2, 3) });
-    K.draw(l3, { at: V.word(2, 3, "only what can be undone") });
+    K.draw(l3, { at: V.word(2, 3, "only protective actions") });
     K.spotlight([...r3, l3, kRev], { at: "<" });
     K.glow(kRev, { tone: "ink", at: "<0.2" });
     K.spotlight(null, { at: V.at(2, 4) });
@@ -310,7 +311,8 @@ explainer({
     K.appear(budgetR, { from: "fade", at: V.word(2, 6, "On a run") });
     K.pulse(kGrant, { tone: "ink", at: V.word(2, 7, "A wrong grant") });
     K.pulse(kRev, { tone: "ink", at: V.word(2, 8, "A wrong pause") });
-    K.appear(cls3, { from: "below", at: V.word(2, 9, "A classifier") });
+    K.appear(cls3, { from: "below", at: V.word(2, 9, "An opinion") });
+    K.pulse(r3[2], { tone: "ink", at: V.word(2, 9, "only through a precaution") });
     K.appear([acted, actedMark], { from: "fade", at: V.word(2, 11, "is itself a fact") });
     K.draw(detour, { at: ">", dur: 0.7 });
     K.appear(cross3, { from: "pop", at: V.word(2, 12, "No rule") });
@@ -358,14 +360,14 @@ explainer({
     const actA4 = K.link(rule4, { x: A4.c._x + 32, y: A4.c._y + A4.c.h / 2 + 9 }, { tone: "ink", from: "left", to: "bottom" });
     // Right, a precaution: the connection waits for the classifier's opinion, and only that opinion's precaution denies it.
     const clsP4 = K.card(xcB, 180, "small model", { sub: "a classifier", icon: "model", w: 200 });
-    const [opP4, opP4Who] = opinion(xcB, 268, "not safe", "small model");
-    const precP4 = fitCol(precaution(0, 0, "on not safe: deny"));
+    const [opP4, opP4Who] = opinion(xcB, 268, "deny", "small model");
+    const precP4 = shrink(precaution(0, 0, "wait for the classifier:", { sub: "deny or hold" }), 0.94);
     place(precP4, xcB, 415);
     const readP4 = K.link(P4.c, clsP4, { tone: "muted", dashed: true, from: "right", to: "left" });
     const opToP4 = K.link(opP4Who, precP4, { tone: "accent" });
     const denyP4 = K.chip(0, 0, "deny", { tone: "ink", size: 14 });
     const actP4 = K.link(precP4, { x: P4.c._x + 32, y: P4.c._y + P4.c.h / 2 + 9 }, { tone: "ink", from: "left", to: "bottom" });   // the chip's right end is the read link's
-    const kinds4 = K.text(640, 640, "rule: any kind · precaution: reversible only", { size: 17, color: "muted" });
+    const kinds4 = K.text(640, 640, "rule: any kind · precaution: protective only", { size: 17, color: "muted" });
 
     // 4. Both things wait at the boundary. Left: the budget is counted there, the rule lights and the model call is cut at
     //    once; no classifier, no ask. Right: the connection waits while the classifier looks at it; its opinion's link
@@ -397,10 +399,10 @@ explainer({
     const t0P = V.at(3, 4);
     drawTo(P4.lk, 3, t0P);
     ride(P4.c, P4.lk, 3, t0P + 0.2, 1.2);
-    const tRead = Math.max(V.word(3, 4, "a classifier's opinion") - 0.3, t0P + 1.4);
+    const tRead = Math.max(V.word(3, 4, "wait for a classifier") - 0.3, t0P + 1.4);
     K.draw(readP4, { at: tRead, dur: 0.5 });
     K.pulse(clsP4, { tone: "accent", at: tRead + 0.45 });
-    const tOpP = Math.max(V.word(3, 5, "not safe") - 0.3, tRead + 0.7);
+    const tOpP = Math.max(V.word(3, 5, "deny") - 0.3, tRead + 0.7);
     K.appear([opP4, opP4Who], { from: "right", at: tOpP, dur: 0.5 });
     K.draw(opToP4, { at: tOpP + 0.35, dur: 0.5 });
     K.pulse(precP4, { tone: "accent", at: tOpP + 0.8 });                // the opinion's link has reached the card
@@ -433,7 +435,7 @@ explainer({
     const pauseChipA5 = K.chip(0, 0, "pause", { tone: "ink", size: 14 });
     const alertA5 = K.link(rule5, you5, { tone: "ink", from: "bottom", to: "top" });
     const alertChip5 = K.chip(0, 0, "alert", { tone: "warn", icon: "bell", size: 15 });
-    // Right, a precaution on an opinion that comes after the thing has passed.
+    // Right, a precaution on an opinion that comes after the request has passed.
     const recP5 = K.window(xcB, 180, "The record", { w: COL, icon: "list" });
     const rowP5 = fact(recP5, "connection");
     const clsP5 = K.card(xcB, 320, "small model", { sub: "a classifier", icon: "model", w: 200 });
@@ -446,7 +448,7 @@ explainer({
     const pauseChipP5 = K.chip(0, 0, "pause", { tone: "ink", size: 14 });
     const actP5 = K.link(precP5, P5.r, { tone: "ink", from: "left", to: "right" });
     const nothing5 = K.text(640, 625, "nothing waits, so nothing is allowed, held or denied", { size: 17, color: "muted" });
-    const kinds5 = K.text(640, 652, "rule: any kind · precaution: reversible only", { size: 17, color: "muted" });
+    const kinds5 = K.text(640, 652, "rule: any kind · precaution: protective only", { size: 17, color: "muted" });
 
     // 5. Nothing stands at a boundary. Left: the meter fills to "low", a fact; its link reaches the rule card, the card
     //    lights, main is paused and the alert travels to you. Right: the connection passes and lands in the record;
@@ -502,23 +504,26 @@ explainer({
     run(P5.p, 4, 0.4, tPP + 0.9);
 
     // ---------- 6 and 7. A classifier on each tool call. The model outside; main below, its top edge the boundary. ----------
-    const B5 = 310;
-    const model5 = K.card(355, 92, "model", { icon: "model", w: 200 });
-    const main5 = computer(355, 480, 570, 340);              // x 70..640, y 310..650
-    const prog5 = K.card(355, 585, "agent program", { icon: "agent", w: 240 });
-    const reply5 = K.doc(355, 238, "reply", { w: 360, h: 125 });
+    const B5 = 335, X5 = 355, XR = 1040;
+    const model5 = K.card(X5, 92, "model", { icon: "model", w: 200 });
+    const main5 = computer(X5, B5 + 157.5, 500, 315);        // x 105..605, y 335..650
+    const prog5 = K.card(X5, 585, "agent program", { icon: "agent", w: 240 });
+    const reply5 = K.doc(X5, 251, "reply", { w: 340 });
     const call5 = reply5.line("rm -rf ~/work");
-    const call5b = reply5.line("A classifier thinks it is not safe.");
-    const cls5 = K.card(1030, 100, "small model", { sub: "a classifier", icon: "model", w: 200 });
-    const [op5, op5Who] = opinion(1030, 190, "not safe", "small model");
-    const prec5 = K.window(1000, 372, "precaution", { w: 300, icon: "shield" });
+    // The red ground the call's line takes when it is denied. It is laid now and fades in then: the line has no
+    // colour of its own to change from.
+    const [[band5, { fill: wash5 }]] = call5.paint("bad");
+    band5.setAttribute("fill", wash5);
+    K.gsap.set(band5, { opacity: 0 });
+    const cls5 = K.card(XR, 160, "small model", { sub: "a classifier", icon: "model", w: 200 });
+    const [op5, op5Who] = opinion(XR, 246, "deny", "small model");
+    const prec5 = K.window(XR, 429, "precaution", { w: 300, icon: "shield" });
     prec5.box.setAttribute("stroke", K.tone("faint"));
     prec5.box.setAttribute("stroke-dasharray", "5 5");
     prec5.box.setAttribute("stroke-width", 1.25);
-    const pr = ["safe: does nothing", "unsure: hold for you", "not safe: deny"].map(s => prec5.row(s));
-    const record5 = K.window(950, 582, "The record", { w: 540, icon: "list" });
-    const ro1 = fact(record5, "tool call  rm -rf ~/work  (original)");
-    const ro2 = fact(record5, "tool call  refusal  (sent instead)");
+    const pr = ["go on: does nothing", "hold: held for you", "deny: denied"].map(s => prec5.row(s));
+    const record5 = K.window(XR - 100, 602, "The record", { w: 500, icon: "list" });
+    const ro5 = fact(record5, "tool call  rm -rf ~/work  denied");
     const down5 = K.link(model5, prog5, { tone: "ink", from: "bottom", to: "top" });
     const d0 = down5.path.getPointAtLength(0).y, d1 = down5.path.getPointAtLength(down5.len).y, f5 = (B5 - d0) / (d1 - d0);
     const read5 = K.link(reply5, cls5, { tone: "muted", dashed: true, from: "right", to: "left" });
@@ -526,13 +531,17 @@ explainer({
     const timer5 = K.icon(rm5.x, rm5.y, "timer", { size: 24, tone: "ink" });
     const limit5 = K.text(rm5.x + 24, rm5.y + 26, "Silo's limit", { size: 15, color: "muted", anchor: "start" });
     const opTo5 = K.link(op5Who, prec5, { tone: "accent" });
-    const deny5 = K.link(pr[2], reply5, { tone: "ink" });
-    const back5 = K.link(prog5, model5, { tone: "ink", from: "right", to: "right", bend: 0.7 });
-    const refusal5 = K.chip(0, 0, "refusal", { tone: "ink", icon: "message", size: 15 });
-    const changed6 = K.text(372, 290, "changed here", { size: 16, color: "accent", anchor: "start" });
-    const reads6 = K.text(372, 200, "Silo reads this traffic", { size: 16, color: "accent", anchor: "start" });
-    // The part of the model's link above the boundary, lit: the traffic Silo reads.
+    const deny5 = K.link(pr[2], call5, { tone: "ink" });
+    // What the model sees, beside it: its own call as the reply holds it, and the error under it. No link leads to
+    // it: how the error reaches the model is not known.
+    const seen5 = K.doc(X5 + 255, 106, "the model sees", { w: 230, icon: "eye" });
+    const seenCall = seen5.line("rm -rf ~/work");
+    const seenErr = seen5.line("error: denied", { tone: "bad" });
+    const how5 = K.text(seen5._x, 106 + seen5.h / 2 + 20, "how: to find out", { size: 14, color: "muted" });
+    const reads6 = K.text(X5 - 17, 162, "Silo reads this traffic", { size: 16, color: "accent", anchor: "end" });
+    // The part of the model's link above the boundary, lit: the traffic Silo reads. It stops short of the red cross.
     const lit6 = svg("path", { d: down5._d, fill: "none", stroke: K.tone("accent"), "stroke-width": 3, "stroke-linecap": "round", opacity: 0 }, down5);
+    const fLit = f5 - 17 / down5.len;
     // A line of the precaution card lights for a moment as the voice names it.
     const flash = (row, s, t, hold) => {
       const o = svg("rect", { x: -row.w / 2, y: -row.h / 2, width: row.w, height: row.h, rx: 9, fill: "none", stroke: K.tone("accent"), "stroke-width": 1.5, opacity: 0 }, row);
@@ -541,8 +550,8 @@ explainer({
     };
 
     // 6. A reply comes from the model and stops at the boundary, a tool call inside it. The classifier looks at it; the
-    //    wait has Silo's limit. The precaution's first two lines light as the voice names them. Nothing is decided yet.
-    //    Hero: the reply waiting at the boundary, with the three lines of the precaution.
+    //    wait has Silo's limit. The precaution's three lines come as the voice counts them, and the first two light as
+    //    it names them. Nothing is decided yet. Hero: the reply waiting at the boundary, with the three lines.
     scene(5);
     K.hide([A5.r, A5.a, ...A5.p, P5.r, P5.a, ...P5.p, P5.h, P5.lk, P5.c, head5, titleA5, titleP5, sep5, gauge5, gMark5, rule5, you5, meter5, pauseA5,
             pauseChipA5, alertA5, alertChip5, recP5, rowP5, clsP5, opP5, opP5Who, precP5, toRecP5, readP5, opToP5, pauseChipP5, actP5, nothing5, kinds5], { at: 0 });
@@ -560,47 +569,46 @@ explainer({
     K.appear(limit5, { from: "fade", at: "<0.1" });
     K.pulse(timer5, { tone: "ink", at: V.word(5, 2, "ends it itself") });
     K.appear(prec5, { at: V.at(5, 3) - 0.3 });
-    K.appear(pr, { from: "fade", stagger: 0.1, at: "<0.3" });
-    flash(pr[0], 5, V.word(5, 3, "is safe"), 1.6);
-    flash(pr[1], 5, V.word(5, 4, "is unsure"), 2.0);
+    K.appear(pr, { from: "fade", stagger: 0.22, at: V.word(5, 3, "one of three things") - 0.2 });
+    flash(pr[0], 5, V.at(5, 4), V.end(5, 4) - V.at(5, 4) - 0.1);
+    const tHold = V.at(5, 5) - 0.15;
+    flash(pr[1], 5, tHold, V.total(5) - 1.85 - tHold);                 // unlit again before the scene's last beat
 
-    // 7. The same picture. "not safe" reaches the precaution card and its third line stays lit; only then does the deny
-    //    leave the card. The tool call in the reply is replaced, "changed here" stays at the boundary, and the reply goes
-    //    on to the agent program, which sends the refusal back; it parks before the model. Two rows land. Last, the
-    //    model's link above the boundary lights: Silo reads it there. Hero: the reply changing at the boundary.
+    // 7. The same picture. "deny" reaches the precaution card and its third line stays lit; only then does the deny
+    //    leave the card. The tool call in the reply turns red and the model's link is cut at the boundary: nothing goes
+    //    on to the agent program. Beside the model its own call stands again, with the error under it. One row lands in
+    //    the record. Last, the model's link above the boundary lights: Silo reads it there. Hero: the call, unchanged,
+    //    with its error, beside the model.
     scene(6);
-    const tOp5 = V.word(6, 0, "not safe") - 0.3;
+    const tOp5 = V.word(6, 0, "deny") - 0.3;
     K.pulse(cls5, { tone: "accent", at: tOp5 - 0.2 });
     K.appear([op5, op5Who], { from: "below", at: tOp5, dur: 0.5 });
     K.draw(opTo5, { at: tOp5 + 0.35, dur: 0.5 });
     K.glow(pr[2], { tone: "accent", at: tOp5 + 0.8 });                 // the opinion's link has reached the card
-    K.dim([timer5, limit5], { to: 0.4, at: tOp5 + 0.8 });
     const tDeny5 = Math.max(V.word(6, 1, "denies the call") - 0.2, tOp5 + 1.1);
     K.draw(deny5, { at: tDeny5, dur: 0.6 });                            // only now does the deny leave it
-    K.pulse(reply5, { tone: "ink", at: tDeny5 + 0.55 });
-    const tSwap = Math.max(V.word(6, 1, "replaced by a refusal") - 0.4, tDeny5 + 1);
-    K.relabel(call5, "Silo denied this tool call.", { at: tSwap });
-    K.appear(call5b, { from: "fade", at: tSwap + 0.2 });
-    const tGo = Math.max(V.end(6, 1) - 0.2, tSwap + 0.8);
-    K.hide([deny5, read5, timer5, limit5], { at: tGo });                // the wait is over
-    onward(down5, 6, tGo + 0.1);
-    K.moveTo(reply5, 355, 430, { dur: 1, at: tGo + 0.2 });
-    K.appear(changed6, { from: "fade", at: tGo + 0.6 });
-    K.draw(back5, { at: Math.max(V.word(6, 2, "sends the refusal back") - 0.4, tGo + 1.3) });
-    K.travel(refusal5, back5, { land: "dock", dur: 1.4, at: ">-0.1" });
-    K.pulse(model5, { tone: "ink", at: Math.max(V.word(6, 2, "the model reads it"), tGo + 2.9) });
-    const tRec5 = V.at(6, 3) - 0.2;
+    const tCut5 = tDeny5 + 0.6;
+    tl.to(band5, { opacity: 1, duration: 0.45, ease: "power1.inOut" }, T(6, tCut5));
+    tl.to(call5.label, { fill: K.tone("bad"), duration: 0.45, ease: "power1.inOut" }, T(6, tCut5));
+    cutAt(down5, 6, tCut5 + 0.1, f5);
+    K.hide([read5, timer5, limit5], { at: tCut5 });                     // the wait is over
+    const tView = Math.max(V.word(6, 2, "its own call") - 0.5, tCut5 + 0.8);
+    K.pulse(model5, { tone: "ink", at: tView - 0.1 });
+    K.appear(seen5, { from: "left", at: tView });
+    K.appear(seenCall, { from: "fade", at: tView + 0.3 });
+    K.pulse([call5, seenCall], { tone: "ink", at: Math.max(V.word(6, 2, "unchanged"), tView + 0.9) });
+    const tErr = Math.max(V.word(6, 2, "with an error"), tView + 1.4);
+    K.appear(seenErr, { from: "fade", at: tErr });
+    const tRec5 = Math.max(V.word(6, 2, "it was denied") - 0.3, tErr + 0.6);
     K.appear(record5, { at: tRec5 });
-    const tRo1 = Math.max(V.word(6, 3, "The original"), tRec5 + 0.4), tRo2 = Math.max(V.word(6, 3, "the replacement"), tRo1 + 0.5);
-    K.appear(ro1, { from: "fade", at: tRo1 });
-    K.appear(ro2, { from: "fade", at: tRo2 });
-    markPulse(ro1, T(6, Math.max(V.word(6, 3, "kept as facts"), tRo2 + 0.6)));
-    markPulse(ro2, T(6, Math.max(V.word(6, 3, "kept as facts"), tRo2 + 0.6) + 0.15));
-    const tLit = V.word(6, 4, "the model's traffic") - 0.2;
+    K.appear(ro5, { from: "fade", at: tRec5 + 0.5 });
+    markPulse(ro5, T(6, tRec5 + 1.1));
+    const tLit = Math.max(V.word(6, 3, "the model's traffic") - 0.2, tRec5 + 1.2);
     tl.set(lit6, { opacity: 1 }, T(6, tLit));
-    tl.fromTo(lit6, { drawSVG: "0% 0%" }, { drawSVG: `0% ${f5 * 100}%`, duration: 0.6, ease: "power2.inOut", immediateRender: false }, T(6, tLit));
+    tl.fromTo(lit6, { drawSVG: "0% 0%" }, { drawSVG: `0% ${fLit * 100}%`, duration: 0.6, ease: "power2.inOut", immediateRender: false }, T(6, tLit));
     K.appear(reads6, { from: "fade", at: tLit + 0.3 });
-    K.pulse(prog5, { tone: "ink", at: V.word(6, 5, "each agent program") });
+    K.pulse(seenErr, { tone: "bad", at: V.word(6, 4, "that error") });
+    K.appear(how5, { from: "fade", at: V.word(6, 4, "still to be found out") - 0.4 });
 
     // ---------- 8. Three innocent steps pass the classifier; the rule at the boundary cuts the last. ----------
     const E7 = 840;
@@ -609,7 +617,7 @@ explainer({
       .map(s => K.chip(0, 0, s, { tone: "ink", icon: "command", mono: true, size: 14 }));
     calls7.forEach(c => place(c, 70 + c.w / 2, 170));
     const cls7 = K.card(230, 290, "small model", { sub: "a classifier", icon: "model", w: 200 });
-    const [op7, op7Who] = opinion(230, 375, "safe", "small model");
+    const [op7, op7Who] = opinion(230, 375, "go on", "small model");
     const prec7 = precaution(230, 495, "precaution");
     const nothing7 = K.text(230, 548, "does nothing", { size: 15, color: "muted" });
     const opTo7 = K.link(op7Who, prec7, { tone: "accent" });
@@ -623,12 +631,12 @@ explainer({
     const wPromise = K.text(allow7._x, 530, "promise", { size: 32, weight: 700, color: "accent" });
     const wExtra = K.text(230, 610, "extra caution", { size: 32, weight: 700, color: "muted" });
 
-    // 8. Each step waits at the edge, the classifier reads it and says "safe", the opinion reaches the precaution, which
+    // 8. Each step waits at the edge, the classifier reads it and says "go on", the opinion reaches the precaution, which
     //    does nothing, and the step goes in. The last one reaches the boundary as a connection toward paste.rs, and the
     //    rule cuts it there. Then the two words. Hero: the cut at the boundary, after the precaution denied none.
     scene(7);
-    K.hide([model5, main5, prog5, reply5, call5, call5b, cls5, op5, op5Who, prec5, ...pr, record5, ro1, ro2, down5, read5, timer5, limit5,
-            opTo5, deny5, back5, refusal5, changed6, reads6], { at: 0 });
+    K.hide([model5, main5, prog5, reply5, call5, cls5, op5, op5Who, prec5, ...pr, record5, ro5, down5, read5, opTo5, deny5,
+            seen5, seenCall, seenErr, how5, reads6], { at: 0 });
     K.appear(main7, { from: "fade", at: 0.1 });
     K.appear([cls7, prec7], { at: "<0.2", stagger: 0.1 });
     K.appear([allow7, paste7], { at: "<0.2", stagger: 0.1 });

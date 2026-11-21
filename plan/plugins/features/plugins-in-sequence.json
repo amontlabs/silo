@@ -1,4 +1,0 @@
-{
-  "name": "Plugins in sequence",
-  "what": "Plugins woken in sequence, cheap first: one plugin woken by another's opinion."
-}

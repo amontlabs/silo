@@ -1,8 +1,0 @@
-{
-  "asks": "Where does a classifier run?",
-  "answer": "A classifier that is only data needs no computer. Code or tools means a computer.",
-  "adds": [
-    "where-a-classifier-runs-is-shown"
-  ],
-  "verdict": "take"
-}

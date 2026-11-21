@@ -100,61 +100,61 @@
     {
      "sentences": [
       {
-       "text": "A hold makes only one thing wait: the thing it is about.",
-       "file": "voice/05d1feca54f16514.mp3",
+       "text": "A hold makes only one thing wait: the request it is about.",
+       "file": "voice/858cf4b0505f4ee7.mp3",
        "start": 0.4,
-       "length": 3.084
+       "length": 3.401
       },
       {
        "text": "The computer keeps running.",
        "file": "voice/6dd606a119e4ef40.mp3",
-       "start": 3.834,
+       "start": 4.151,
        "length": 1.393
       },
       {
        "text": "What you see is an ask.",
        "file": "voice/b502957f6733c13e.mp3",
-       "start": 5.577,
+       "start": 5.894,
        "length": 1.201
       },
       {
        "text": "Your yes is a grant.",
        "file": "voice/d9070720028f8821.mp3",
-       "start": 7.128,
+       "start": 7.445,
        "length": 1.187
       },
       {
        "text": "The ask says exactly what it lets pass.",
        "file": "voice/9aca86123ee168cb.mp3",
-       "start": 8.665,
+       "start": 8.982,
        "length": 2.12
       },
       {
        "text": "And a hold always ends.",
        "file": "voice/92d29e40077c3162.mp3",
-       "start": 11.135,
+       "start": 11.452,
        "length": 1.45
       },
       {
        "text": "If you do not answer, Silo ends it at its own limit.",
        "file": "voice/9f3a4147b87376a5.mp3",
-       "start": 12.935,
+       "start": 13.252,
        "length": 2.888
       },
       {
-       "text": "The thing is denied, with an error the agent program can read.",
-       "file": "voice/2aba2a744655d17e.mp3",
-       "start": 16.173,
-       "length": 3.451
+       "text": "The request is denied, with an error the agent program can read.",
+       "file": "voice/ccbcbafe72f0833d.mp3",
+       "start": 16.49,
+       "length": 3.611
       },
       {
        "text": "If the agent program gives up first and closes its connection, Silo sees that too.",
        "file": "voice/047658fe9f894943.mp3",
-       "start": 19.974,
+       "start": 20.451,
        "length": 4.62
       }
      ],
-     "total": 25.194
+     "total": 25.671
     },
     {
      "sentences": [
@@ -187,21 +187,9 @@
        "file": "voice/feeda33e306cfa1f.mp3",
        "start": 8.77,
        "length": 3.417
-      },
-      {
-       "text": "An alert is one more action, never a decision.",
-       "file": "voice/73a27644de376006.mp3",
-       "start": 12.537,
-       "length": 2.689
-      },
-      {
-       "text": "A rule that only alerts leaves the thing to the other rules.",
-       "file": "voice/fff5d99d37948072.mp3",
-       "start": 15.576,
-       "length": 3.254
       }
      ],
-     "total": 19.43
+     "total": 12.787
     },
     {
      "sentences": [
@@ -271,40 +259,28 @@
        "length": 1.319
       },
       {
-       "text": "Reversible: it grants nothing and destroys nothing.",
-       "file": "voice/552c4b4324672dca.mp3",
+       "text": "Protective: it grants nothing and destroys nothing.",
+       "file": "voice/833e8f7980b93d91.mp3",
        "start": 17.363,
-       "length": 2.911
+       "length": 2.921
       },
       {
        "text": "A wrong one costs only time.",
        "file": "voice/4aa1f956f22b54d0.mp3",
-       "start": 20.624,
+       "start": 20.634,
        "length": 1.528
-      },
-      {
-       "text": "Two of these are still for you to agree: taking back a secret, and closing a network.",
-       "file": "voice/313f0173020d71f5.mp3",
-       "start": 22.502,
-       "length": 4.735
-      },
-      {
-       "text": "If they are reversible, a precaution can do them.",
-       "file": "voice/9780366a2da43052.mp3",
-       "start": 27.587,
-       "length": 2.655
       },
       {
        "text": "Anything added to Silo says the kind of each of its actions first.",
        "file": "voice/722b60e58d09dcb2.mp3",
-       "start": 30.592,
+       "start": 22.512,
        "length": 3.709
       }
      ],
-     "total": 34.901
+     "total": 26.821
     }
    ],
-   "total": 136.424
+   "total": 122.178
   }
  ]
 }

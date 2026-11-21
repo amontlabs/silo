@@ -41,23 +41,17 @@
     [
       "What gives an opinion is called a classifier: a pattern, a function, a small model, or an agent.",
       "A classifier gives opinions.",
-      "It never acts.",
       "What an opinion can lead to comes in the film on rules and precautions."
     ],
     [
       "Something computed is as sure as its least sure ingredient.",
       "A count of facts is as good as a fact.",
-      "Mix in a report, and the result is as told: no surer than the report.",
+      "Mix in a report, and the result is unverified: no surer than the report.",
       "Add a judgement, and it is an opinion.",
       "And a report or an opinion is never stored as a fact."
     ],
     [
-      "All the reports together account for 48 megabytes, written by the build.",
-      "From outside, Silo saw 61 megabytes change.",
-      "Silo corrects neither.",
-      "The 13 megabytes left over are shown as unattributed, and are never spread over the rest.",
-      "And where Silo lost sight for a moment, it records a gap.",
-      "The record says what it does not know."
+      "Silo never fills a hole."
     ]
   ]
 }

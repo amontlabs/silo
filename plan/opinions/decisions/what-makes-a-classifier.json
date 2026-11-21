@@ -1,0 +1,18 @@
+{
+  "asks": "What makes an extension a classifier?",
+  "answer": "A classifier is an extension that gives a value from a fixed list. It is one case of an extension, not the name for all of them.",
+  "needs": [
+    "extension-manifest",
+    "shipped-extensions-use-the-manifest"
+  ],
+  "sets": [
+    {
+      "in": "words",
+      "word": "classifier",
+      "means": "An extension that gives a value from a fixed list.",
+      "not": [
+        "judge"
+      ]
+    }
+  ]
+}

@@ -3,20 +3,13 @@
   "needs": [
     "words-for-recipes"
   ],
-  "sets": [
-    {
-      "in": "words",
-      "word": "recipe",
-      "means": "A text that says how to make a computer."
-    },
-    {
-      "in": "words",
-      "word": "task",
-      "means": "A command run in a fork or in a fresh computer, with an end."
-    }
+  "adds": [
+    "recipe",
+    "task"
   ],
   "suggest": {
     "verdict": "take",
     "why": "The word is agreed; this meaning is the record's own word list, which carries no mark."
-  }
+  },
+  "verdict": "take"
 }

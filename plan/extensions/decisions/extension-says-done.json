@@ -1,0 +1,6 @@
+{
+  "asks": "Does an extension say it is done when it has nothing to say?",
+  "needs": [
+    "extension-manifest"
+  ]
+}

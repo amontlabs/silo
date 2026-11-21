@@ -1,0 +1,9 @@
+{
+  "asks": "May an extension deny, hold or pause by itself?",
+  "answer": "Yes, when its manifest names that tool and the user installed it. A protective tool names the computer it applies to. Granting it sets a precaution on that computer, which rests on the extension.",
+  "needs": [
+    "extension-tools",
+    "what-an-extension-never-does"
+  ],
+  "verdict": "take"
+}

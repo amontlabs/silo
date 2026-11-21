@@ -13,7 +13,6 @@
     "model-calls-in-the-record"
   ],
   "keeps": [
-    "classifier-never-acts",
     "books-balance"
   ]
 }
