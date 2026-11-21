@@ -107,6 +107,8 @@ export function AllView(props: AllViewProps) {
   const kept = useMemo(() => stripKept(sections, query), [sections, query]);
   const chips = SUBS.flatMap(([sub]) => listOf(query, sub).map((value) => values.find((one) => one.sub === sub && one.value === value)).filter((one): one is Value => one !== undefined));
 
+  // A move inside the Filter menu (typing, another submenu) keeps what opened it, until it closes.
+  const within = (patch: { sub: Sub | null; text: string }) => setMenu((now) => ({ kind: 'filter', ...(now?.kind === 'filter' && now.from ? { from: now.from } : {}), ...patch }));
   const chipButton = (key: string) => bar.current?.querySelector<HTMLElement>(`.wa-chip[data-chip="${CSS.escape(key)}"] > button:first-child`);
   const close = (focus: 'filter' | 'display' | null = null) => {
     const from = menu?.kind === 'filter' ? menu.from : undefined;
@@ -161,15 +163,15 @@ export function AllView(props: AllViewProps) {
     filterMenu = (
       <>
         <div className="wa-menu wa-menu-filter" role="menu" aria-label="Filter" onKeyDown={(event) => menuKeys(event, undefined, (button) => button.click())}>
-          <input type="text" placeholder="Filter" aria-label="Filter" value={menu.text} onChange={(event) => setMenu({ kind: 'filter', sub: null, text: event.target.value })} />
+          <input type="text" placeholder="Filter" aria-label="Filter" value={menu.text} onChange={(event) => within({ sub: null, text: event.target.value })} />
           {text ? matches.map((value) => <Check key={`${value.sub}-${value.value}`} value={value} query={query} onQuery={onQuery} />) : SUBS.map(([sub, label]) => (
             <button
               type="button" role="menuitem" key={sub} aria-haspopup="menu" aria-expanded={menu.sub === sub}
               onClick={() => {
-                setMenu({ kind: 'filter', sub, text: '' });
+                within({ sub, text: '' });
                 requestAnimationFrame(() => bar.current?.querySelector<HTMLElement>('.wa-menu-sub > button')?.focus());
               }}
-              onPointerEnter={() => setMenu({ kind: 'filter', sub, text: '' })}
+              onPointerEnter={() => within({ sub, text: '' })}
             >
               <span>{label}</span><Icon name="chev" />
             </button>
@@ -179,7 +181,7 @@ export function AllView(props: AllViewProps) {
           <div
             className="wa-menu wa-menu-sub" role="menu" aria-label={SUBS[subIndex][1]} style={{ top: `${36 + 33 + subIndex * 28}px` }}
             onKeyDown={(event) => menuKeys(event, () => {
-              setMenu({ kind: 'filter', sub: null, text: '' });
+              within({ sub: null, text: '' });
               requestAnimationFrame(() => bar.current?.querySelectorAll<HTMLElement>('.wa-menu-filter > button')[subIndex]?.focus());
             })}
           >

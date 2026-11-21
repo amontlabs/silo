@@ -537,6 +537,23 @@ describe('the keyboard\'s focus', () => {
   });
 });
 
+describe('a chip\'s menu', () => {
+  it('remembers the chip that opened it through typing and another submenu, and gives it the focus back', async () => {
+    mockApi();
+    history.replaceState(null, '', '/workshop?view=all&state=undecided&part=part-a');
+    await renderApp(withNeeds());
+    const value = (text: string) => [...document.querySelectorAll<HTMLElement>('.wa-chip > button:first-child')].find((button) => button.textContent === text) as HTMLElement;
+    await userEvent.click(value('Part A'));
+    await userEvent.type(screen.getByRole('textbox', { name: 'Filter' }), 'part');
+    await userEvent.clear(screen.getByRole('textbox', { name: 'Filter' }));
+    fireEvent.pointerEnter(screen.getByRole('menuitem', { name: 'Film' }));
+    fireEvent.pointerEnter(screen.getByRole('menuitem', { name: 'State' }));
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(value('Part A'));
+  });
+});
+
 describe('search', () => {
   it('opens from the map with its key, and typing shows All with the matches', async () => {
     mockApi();
