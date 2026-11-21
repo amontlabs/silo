@@ -259,27 +259,33 @@ pip. It has no entry for a part not decided: the map's key says what a dashed
 line means, and a screen reader still hears "not decided" for such a part. With no entry
 it draws nothing and is no list, but its empty box keeps the title row's height.
 
-What a part needs: a part needs another part when one of its entries (a decision
-or a feature) names an entry of that part in `needs`. A need inside a part, and
-a need of a decision of Product, say nothing. The build computes it
-(`partNeeds` in `data.ts`) and gives each part `needs` and `neededBy`, as part
-ids in the order of the map (`places` of the layout), then the parts the map does
-not place. On the full map, while the pointer is on a part or the keyboard's
-focus is, the parts it needs are marked with a second, inner
-outline in the ink (`needed`), and the parts that neither it needs nor need it
-fade to 40 % (`faint`). A part stays marked while the pointer is on it or the
-keyboard's focus is; when they are on different parts, the pointer's part wins,
-and the marks go when neither is on a part. The colours of the states and the ring
-of the open part stay as they are, and the wires and their words do not change. The
-fade covers the whole part, the accent of one that is next or being built included,
-since it lasts only while the pointer or the focus is on another part. The tip of a part gains a line
-"Needs" and a line "Needed by", each followed by the titles of those parts; a line
-with no part is left out. What a screen reader hears for a part on the map gains the
-same two sentences ("Needs The engine, Computers." "Needed by Rules and precautions."); the tiles' say
-nothing of it. In the folded strip the tip of a name has the same two lines, and
-nothing is marked or faded. The tip never covers its part while it fits below it,
-or else above it: it goes below when it fits there, above otherwise, and is
-pulled 8 px inside the window only when it fits in neither.
+What a part depends on: part X depends on part Y when an entry of X (a decision
+or a feature) names an entry of Y in `needs`, and Y starts before X in the plan's
+order. A part starts at its first feature in the order of `order.json`, or at its
+first entry when it has no feature. So no two parts depend on each other: when The
+engine and The record name each other, only the one that starts later depends on
+the other. A need inside a part, and a need of a decision of Product, say nothing.
+The build computes it (`partDepends` in `data.ts`) and gives each part `dependsOn`,
+as part ids in the order of the map (`places` of the layout), then the parts the
+map does not place.
+
+On the full map, while the pointer is on a part or the keyboard's focus is, the
+parts it depends on are marked with a second, inner outline in the ink (`marked`),
+a difference in shape and weight that needs no colour, and every other part fades
+to 40 % (`faint`). Nothing is shown for the parts that depend on it. A part stays
+marked while the pointer is on it or the keyboard's focus is; when they are on
+different parts, the pointer's part wins, and the marks go when neither is on a
+part. The colours of the states and the ring of the open part stay as they are,
+and the wires and their words do not change. The fade covers the whole part, the
+accent of one that is next or being built included, since it lasts only while the
+pointer or the focus is on another part. The map's key gains a line, a sample of
+the ring and "it depends on", only while some part is marked. What a screen reader
+hears for a part on the map gains "Depends on A, B." in the order of the map, since
+it cannot see the marks; a part that depends on none gets no sentence. In the folded
+strip nothing is marked or faded. The tip of a part, on the map and in the strip, is
+the part's line (with its title in the strip) and lists no part. It never covers its
+part while it fits below it, or else above it: it goes below when it fits there,
+above otherwise, and is pulled 8 px inside the window only when it fits in neither.
 
 A layout as written (`MapLayout`: `SILO_MAP`, the example, `NO_MAP`) has `rests`
 and no mark of not decided. The page gets the layout from `pageLayout`

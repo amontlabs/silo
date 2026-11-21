@@ -122,10 +122,8 @@ export interface Part {
   id: string;
   title: string;
   line: string;
-  /** The parts it needs: one of its entries names an entry of each in `needs`. In the order of the map. */
-  needs: string[];
-  /** The parts that need it, in the order of the map. */
-  neededBy: string[];
+  /** The parts it depends on, in the order of the map: one of its entries names an entry of each in `needs`, and that part starts before this one in the plan's order. */
+  dependsOn: string[];
 }
 
 export interface BuildData {
