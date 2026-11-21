@@ -28,7 +28,7 @@ and that every action has one of three kinds.
 - boundary: the edge of a computer. Everything that enters or leaves it passes through parts of Silo that run outside it.
 - channel: one way through the boundary. None exists by default.
 - rule: data you set. At the boundary it allows, holds or denies. The next film says what triggers it.
-- request: what waits at the boundary.
+- request: one thing that asks to cross the boundary. It may wait there for an answer.
 - allow, hold, deny: what happens to one request waiting at the boundary: it passes, it waits for your answer, or it is refused.
 - ask: what a hold shows you: a request that waits for your answer.
 - grant: to give a computer the ability to do something. Its opposite is to revoke. The words come from access control.
