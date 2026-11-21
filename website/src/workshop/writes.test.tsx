@@ -2,7 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { apiConfig } from './api';
-import { detail, itemOf, mockApi, ok, owner, part, posts, refused, renderApp, rowButton, visitor } from './test-support';
+import { detail, itemOf, mockApi, ok, owner, part, posts, refused, renderApp, rowButton, visitor, withheldTimers } from './test-support';
 import type { Route } from './test-support';
 
 // Signing in and writes.
@@ -355,35 +355,32 @@ describe('a refused write', () => {
         routes: { [write.route]: () => new Promise<Reply>((resolve) => { gate.release = resolve; }) },
       });
       history.replaceState(null, '', `/workshop${write.at}`);
-      const timeout = apiConfig.writeTimeoutMs;
-      if (!reply) apiConfig.writeTimeoutMs = 30;
-      try {
-        await renderApp();
-        await write.make();
-        await waitFor(() => expect(posts(calls, write.route.replace('POST ', ''))).toHaveLength(1));
-        write.during();
-        if (reply) await act(async () => gate.release(reply));
+      // With no answer, the write's own time limit is what ends it: held back until the test fires it.
+      const limit = withheldTimers(apiConfig.writeTimeoutMs);
+      await renderApp();
+      await write.make();
+      await waitFor(() => expect(posts(calls, write.route.replace('POST ', ''))).toHaveLength(1));
+      write.during();
+      if (reply) await act(async () => gate.release(reply));
+      else await limit.fire();
 
-        const alert = await screen.findByRole('alert');
-        if (out) {
-          // The person is shown signed out: no login, the way back in, and the alert says to sign in.
-          expect(alert).toHaveTextContent(/sign in/i);
-          expect(screen.queryByText(write.as.login, { selector: '.ws-login' })).not.toBeInTheDocument();
-          expect(screen.getByRole('link', { name: 'Sign in with GitHub' })).toBeInTheDocument();
-        } else {
-          // It names what failed and why; where the server gave a reason, that is the reason shown.
-          expect(alert).toHaveTextContent(write.alert);
-          expect(alert).toHaveTextContent(/not saved\.\s*\S/i);
-          if (why) expect(alert).toHaveTextContent(why);
-          write.typed?.();
-        }
-        write.undone();
-        expect(screen.queryByText('Sending…')).not.toBeInTheDocument();
-        expect(screen.queryByText('Saving…')).not.toBeInTheDocument();
-        expect(localStorage.getItem(STORE)).toBeNull();
-      } finally {
-        apiConfig.writeTimeoutMs = timeout;
+      const alert = await screen.findByRole('alert');
+      if (out) {
+        // The person is shown signed out: no login, the way back in, and the alert says to sign in.
+        expect(alert).toHaveTextContent(/sign in/i);
+        expect(screen.queryByText(write.as.login, { selector: '.ws-login' })).not.toBeInTheDocument();
+        expect(screen.getByRole('link', { name: 'Sign in with GitHub' })).toBeInTheDocument();
+      } else {
+        // It names what failed and why; where the server gave a reason, that is the reason shown.
+        expect(alert).toHaveTextContent(write.alert);
+        expect(alert).toHaveTextContent(/not saved\.\s*\S/i);
+        if (why) expect(alert).toHaveTextContent(why);
+        write.typed?.();
       }
+      write.undone();
+      expect(screen.queryByText('Sending…')).not.toBeInTheDocument();
+      expect(screen.queryByText('Saving…')).not.toBeInTheDocument();
+      expect(localStorage.getItem(STORE)).toBeNull();
     });
   });
 });
