@@ -7,23 +7,12 @@
   "replaces": [
     "what-a-classifier-can-never-do"
   ],
-  "sets": [
-    {
-      "in": "extensions/properties",
-      "id": "no-tool-grants-or-destroys",
-      "says": "No tool an extension can use grants or destroys.",
-      "kind": "safety",
-      "from": "less-sure-less-power",
-      "check": [
-        "types"
-      ]
-    }
-  ],
-  "removes": [
-    "added-classifier-cannot-act"
+  "adds": [
+    "no-tool-grants-or-destroys"
   ],
   "suggest": {
     "verdict": "take",
     "why": "The owner called this sentence basically perfect on 21 November 2026."
-  }
+  },
+  "verdict": "take"
 }

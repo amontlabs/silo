@@ -1,14 +1,5 @@
 [
   {
-    "id": "added-classifier-cannot-act",
-    "says": "An added classifier can never act on a computer, answer an ask, set or change a rule or a precaution, give a secret, or write into another computer.",
-    "kind": "safety",
-    "from": "less-sure-less-power",
-    "check": [
-      "model"
-    ]
-  },
-  {
     "id": "extension-code-in-its-own-computer",
     "says": "Whatever an extension executes runs in a computer made from its own recipe.",
     "kind": "safety",
@@ -22,6 +13,15 @@
     "kind": "safety",
     "check": [
       "test"
+    ]
+  },
+  {
+    "id": "no-tool-grants-or-destroys",
+    "says": "No tool an extension can use grants or destroys.",
+    "kind": "safety",
+    "from": "less-sure-less-power",
+    "check": [
+      "types"
     ]
   }
 ]
