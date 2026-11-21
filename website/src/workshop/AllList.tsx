@@ -85,9 +85,12 @@ export function AllList(props: ListProps) {
       const current = item && node.contains(item) ? item.querySelector<HTMLElement>(':scope > .wa-row') : null;
       if (!current || !active) return;
       const { needs, waits } = relationsOf(graph, rowKeyOf(active));
-      const rowOf = (key: string) => node.querySelector<HTMLElement>(`.wa-row[data-row="${CSS.escape(key)}"]`);
-      const up = needs.map(rowOf).filter((one): one is HTMLElement => one !== null);
-      const down = waits.map(rowOf).filter((one): one is HTMLElement => one !== null);
+      // Every drawing of a related entry is lit: a decision several unfolded features share shows under each.
+      const rowsOf = (key: string) => [...node.querySelectorAll<HTMLElement>(`.wa-row[data-row="${CSS.escape(key)}"]`)];
+      const up = needs.flatMap(rowsOf);
+      const down = waits.flatMap(rowsOf);
+      const upShown = needs.filter((key) => rowsOf(key).length).length;
+      const downShown = waits.filter((key) => rowsOf(key).length).length;
       if (!up.length && !down.length && !needs.length && !waits.length) return;
       for (const one of [...up, ...down]) one.classList.add('lit');
       lit = [...up, ...down];
@@ -109,8 +112,8 @@ export function AllList(props: ListProps) {
       };
       add('path', { d: `M${X} ${top}V${bottom}` });
       // More out of sight (folded, filtered, or not in this list): the line goes on, dotted, to the list's edge.
-      if (needs.length > up.length) add('path', { class: 'far', d: `M${X} ${top}V0` });
-      if (waits.length > down.length) add('path', { class: 'far', d: `M${X} ${bottom}V${Math.round(box.height)}` });
+      if (needs.length > upShown) add('path', { class: 'far', d: `M${X} ${top}V0` });
+      if (waits.length > downShown) add('path', { class: 'far', d: `M${X} ${bottom}V${Math.round(box.height)}` });
       for (const one of up) {
         const y = mid(one);
         add('path', { d: `M${X} ${y}H22` });
@@ -337,10 +340,18 @@ function Kids({ holder, part, kids, passing, props }: { holder: string; part: st
   const all = props.more.has(holder);
   const visible = all ? shown : shown.slice(0, KIDS_SHOWN);
   const rest = shown.length - visible.length;
+  // "N more" pressed: the focus goes to the first decision it revealed.
+  const revealed = useRef(false);
+  useEffect(() => {
+    if (!all || !revealed.current) return;
+    revealed.current = false;
+    const first = shown[KIDS_SHOWN];
+    if (first) document.getElementById(underKey(first.key, holder))?.querySelector<HTMLElement>(':scope > .wa-row > .wa-hit')?.focus();
+  }, [all, shown, holder]);
   return (
     <div className="wa-kids">
       {visible.map((kid) => <DecisionView key={kid.key} row={kid} instance={underKey(kid.key, holder)} props={props} holderPart={part} />)}
-      {rest > 0 ? <button type="button" className="wa-row more" onClick={() => props.onMore(holder)}><span>{rest} more</span></button> : null}
+      {rest > 0 ? <button type="button" className="wa-row more" onClick={() => { revealed.current = true; props.onMore(holder); }}><span>{rest} more</span></button> : null}
     </div>
   );
 }

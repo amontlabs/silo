@@ -25,10 +25,13 @@ export interface AllViewProps {
   more: ReadonlySet<string>;
   onMore: (key: string) => void;
   waiting: boolean;
+  /** Opens an entry where it stands, or in its own place when the list does not hold it. */
+  onOpen: (key: string) => void;
 }
 
 type Sub = 'state' | 'part' | 'film';
-type MenuState = { kind: 'filter'; sub: Sub | null; text: string } | { kind: 'display' } | null;
+/** `from`: the chip that opened the menu, by its key, which takes the focus back when the menu closes. */
+type MenuState = { kind: 'filter'; sub: Sub | null; text: string; from?: string } | { kind: 'display' } | null;
 
 const SUBS: [Sub, string][] = [['state', 'State'], ['part', 'Part'], ['film', 'Film']];
 const SHOW_WORDS: Record<Show, string> = { feature: 'Features', decision: 'Decisions', film: 'Films' };
@@ -104,11 +107,23 @@ export function AllView(props: AllViewProps) {
   const kept = useMemo(() => stripKept(sections, query), [sections, query]);
   const chips = SUBS.flatMap(([sub]) => listOf(query, sub).map((value) => values.find((one) => one.sub === sub && one.value === value)).filter((one): one is Value => one !== undefined));
 
+  const chipButton = (key: string) => bar.current?.querySelector<HTMLElement>(`.wa-chip[data-chip="${CSS.escape(key)}"] > button:first-child`);
   const close = (focus: 'filter' | 'display' | null = null) => {
+    const from = menu?.kind === 'filter' ? menu.from : undefined;
     setMenu(null);
-    if (focus === 'filter') filterButton.current?.focus();
+    if (focus === 'filter') (from && chipButton(from) || filterButton.current)?.focus();
     if (focus === 'display') displayButton.current?.focus();
   };
+  // Where the focus goes once the chips are drawn again: the chip now at that place, else Filter.
+  const chipFocus = useRef<number | null>(null);
+  const chipKeys = chips.map((chip) => `${chip.sub}-${chip.value}`).join('|');
+  useEffect(() => {
+    const at = chipFocus.current;
+    if (at === null) return;
+    chipFocus.current = null;
+    const buttons = bar.current?.querySelectorAll<HTMLElement>('.wa-chip > button:first-child');
+    (buttons?.[Math.min(at, buttons.length - 1)] ?? filterButton.current)?.focus();
+  }, [chipKeys]);
   // A menu closes on a press outside it, and on Escape; F opens Filter.
   useEffect(() => {
     const onDown = (event: PointerEvent) => {
@@ -192,15 +207,15 @@ export function AllView(props: AllViewProps) {
         </button>
         {chips.length ? (
           <div className="wa-chips">
-            {chips.map((chip) => (
-              <span className="wa-chip" key={`${chip.sub}-${chip.value}`}>
-                <button type="button" onClick={() => setMenu({ kind: 'filter', sub: chip.sub, text: '' })}>{chip.mark}<span>{chip.label}</span></button>
-                <button type="button" className="wa-x" aria-label={`Remove ${chip.label}`} onClick={() => onQuery(withValue(query, chip.sub, chip.value, false))}><Icon name="x" /></button>
+            {chips.map((chip, index) => (
+              <span className="wa-chip" key={`${chip.sub}-${chip.value}`} data-chip={`${chip.sub}-${chip.value}`}>
+                <button type="button" onClick={() => setMenu({ kind: 'filter', sub: chip.sub, text: '', from: `${chip.sub}-${chip.value}` })}>{chip.mark}<span>{chip.label}</span></button>
+                <button type="button" className="wa-x" aria-label={`Remove ${chip.label}`} onClick={() => { chipFocus.current = index; onQuery(withValue(query, chip.sub, chip.value, false)); }}><Icon name="x" /></button>
               </span>
             ))}
           </div>
         ) : null}
-        {chips.length > 1 ? <button type="button" className="wa-clear" onClick={() => onQuery({ ...query, states: [], parts: [], films: [] })}>Clear</button> : null}
+        {chips.length > 1 ? <button type="button" className="wa-clear" onClick={() => { onQuery({ ...query, states: [], parts: [], films: [] }); filterButton.current?.focus(); }}>Clear</button> : null}
         <span className="wa-gap" />
         {narrowed(query) ? <span className="wa-count">{count.shown} of {count.total}</span> : null}
         <button
@@ -223,7 +238,7 @@ export function AllView(props: AllViewProps) {
           </div>
         ) : null}
       </div>
-      <Strip graph={graph} kept={kept} store={store} />
+      <Strip graph={graph} kept={kept} store={store} onOpen={props.onOpen} />
       <AllList
         sections={sections} graph={graph} plan={plan} ctx={props.ctx} store={store} latest={query.order === 'latest'} flat={Boolean(query.q.trim())}
         folds={props.folds} onFold={props.onFold} more={props.more} onMore={props.onMore} waiting={props.waiting}
@@ -239,7 +254,7 @@ export function AllView(props: AllViewProps) {
  * move along it. While a row is pointed at, focused or open, its pip is ringed, the pips it needs and those that wait
  * for it keep their ink, and a comb under them joins the three.
  */
-function Strip({ graph, kept, store }: { graph: Graph; kept: ReadonlySet<string> | null; store: RelationStore }) {
+function Strip({ graph, kept, store, onOpen }: { graph: Graph; kept: ReadonlySet<string> | null; store: RelationStore; onOpen: (key: string) => void }) {
   const [stop, setStop] = useState(0);
   const strip = useRef<HTMLElement>(null);
   const comb = useRef<SVGSVGElement>(null);
@@ -250,7 +265,10 @@ function Strip({ graph, kept, store }: { graph: Graph; kept: ReadonlySet<string>
     if (!node || !svg || !ol) return;
     let marked: Element[] = [];
     const draw = () => {
-      for (const one of marked) one.classList.remove('rel', 'cur');
+      for (const one of marked) {
+        one.classList.remove('rel', 'cur');
+        if (one instanceof HTMLElement && one.dataset.label) one.setAttribute('aria-label', one.dataset.label);
+      }
       marked = [];
       node.classList.remove('relating');
       svg.replaceChildren();
@@ -266,6 +284,9 @@ function Strip({ graph, kept, store }: { graph: Graph; kept: ReadonlySet<string>
       node.classList.add('relating');
       if (me) me.classList.add('cur');
       for (const one of [...needed, ...waiting]) one.classList.add('rel');
+      // What a screen reader hears of a dot that is part of the relation drawn: one word for its side of it.
+      for (const one of needed) one.setAttribute('aria-label', `${one.dataset.label}, needed`);
+      for (const one of waiting) one.setAttribute('aria-label', `${one.dataset.label}, waiting`);
       marked = [...(me ? [me] : []), ...needed, ...waiting];
       const box = ol.getBoundingClientRect();
       const x = (one: Element) => {
@@ -297,9 +318,13 @@ function Strip({ graph, kept, store }: { graph: Graph; kept: ReadonlySet<string>
     return store.subscribe(draw);
   });
 
+  // A dot whose feature the list does not hold opens it where it lives, as a link to it does.
   const go = (key: string) => {
     const item = document.getElementById(key);
-    if (!item) return;
+    if (!item) {
+      onOpen(key);
+      return;
+    }
     item.scrollIntoView?.({ block: 'center' });
     item.querySelector<HTMLElement>(':scope > .wa-row > .wa-hit')?.focus({ preventScroll: true });
   };
@@ -320,7 +345,7 @@ function Strip({ graph, kept, store }: { graph: Graph; kept: ReadonlySet<string>
             <li key={row.key}>
               <button
                 type="button" className={`wa-sp ${row.status}${out ? ' out' : ''}`} data-row={row.key} tabIndex={index === stop ? 0 : -1}
-                aria-label={`${step} ${row.name}, ${PIP_WORDS[row.status]}`} data-tip={`${step}  ${row.name}`}
+                aria-label={`${step} ${row.name}, ${PIP_WORDS[row.status]}`} data-label={`${step} ${row.name}, ${PIP_WORDS[row.status]}`} data-tip={`${step}  ${row.name}`}
                 onFocus={() => { setStop(index); store.focus(row.key); }} onBlur={() => store.focus(null)}
                 onPointerEnter={() => store.point(row.key)} onPointerLeave={() => store.point(null)}
                 onClick={() => go(row.key)}

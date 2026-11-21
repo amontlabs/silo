@@ -432,13 +432,19 @@ What a person sees:
   of History; a search lists its matches on lines of their own. With nothing to
   show, "Nothing matches." and "Clear". Keys: `/` search, `F` filter, up and
   down move between rows, right unfolds, left folds, Enter opens, Escape closes
-  a menu. The address holds the view, the order, the filters, what is
+  a menu. A press on a row's name gives that row the focus, with no ring: the ring
+  shows for the keyboard only. The focus lands on the nearest thing that makes sense:
+  Escape in the search gives it to the search button, a menu opened from a chip
+  gives it back to that chip, removing a chip gives it to the next chip or to Filter,
+  Clear to Filter, and "N more" to the first decision it revealed. The address holds the view, the order, the filters, what is
   displayed and the search (`view`, `order`, `state`, `part`, `film`, `show`,
   `q`), a default left out.
 - The strip: one pip per feature in build order, always all of them; a filter
   leaves the pips in place and those it removes go faint. Each pip is a target
   24 px high, its tooltip the step and the name; a press brings that step's row
-  into view and gives it the focus. The strip is one stop for the keyboard, the
+  into view and gives it the focus, or, when the list does not hold that feature,
+  opens it in its part's place. While a relation is drawn, a dot that is part of it
+  is named with one more word: "needed" or "waiting". The strip is one stop for the keyboard, the
   arrows moving along it. Under 760 px each feature is a bar 4 px high, and the
   strip does not stay under the header.
 - Relations are drawn, never written. Pointing at a row for 120 ms, focusing it
@@ -447,7 +453,8 @@ What a person sees:
   the strip (a dot under a need, an arrowhead under what waits). In the list's
   left margin a rail joins the row to each row it needs (a dot) and each that
   waits for it (an arrowhead), and those rows take the ground of a row under
-  the pointer; the rail goes on dotted to the list's edge when some are out of
+  the pointer, every drawing of each (a decision shown under two features is lit
+  under both); the rail goes on dotted to the list's edge when some are out of
   sight. For a decision, what waits is the features that need it. The pointer's
   row wins over the focused one, and that one over the row opened last. An
   opened row holds no list of what it needs. All of it is drawn by hand on the

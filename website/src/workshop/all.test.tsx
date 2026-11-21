@@ -138,7 +138,7 @@ describe('the address', () => {
     expect([...feature.querySelectorAll('.wa-kids .wa-name > span:first-child')].map((name) => name.textContent)).toEqual(['Which way do changes go?', 'Can a log be changed after the fact?']);
   });
 
-  it('unfolds by the caret and the arrows, shows six then "N more", and opening a row moves none above it', async () => {
+  it('unfolds by the caret and the arrows, shows six then "N more", which gives the focus to the first it reveals, and keeps the order of the rows when one opens', async () => {
     const many = withNeeds();
     const decisions = Array.from({ length: 8 }, (_, i) => ({ id: `q${i}`, stage: 'first', part: 'part-a', asks: `Question ${i}?` }));
     const data = { ...buildData({ features: [...FEATURES, { id: 'asks-much', stage: 'second', part: 'part-a', name: 'Asks much', what: 'x', needs: decisions.map((d) => d.id) }], decisions: [...DECISIONS, ...decisions] }), films: many.films };
@@ -154,6 +154,7 @@ describe('the address', () => {
     expect(feature.querySelectorAll('.wa-kids > .wa-item')).toHaveLength(6);
     await userEvent.click(within(feature).getByRole('button', { name: '2 more' }));
     expect(feature.querySelectorAll('.wa-kids > .wa-item')).toHaveLength(8);
+    expect(document.activeElement).toBe(feature.querySelectorAll('.wa-kids > .wa-item')[6].querySelector('.wa-hit'));
     const ids = () => [...document.querySelectorAll('.wa-list .wa-item')].map((item) => item.id);
     const before = ids();
     await userEvent.click(rowButton('Question 3\\?'));
@@ -290,6 +291,39 @@ describe('relations', () => {
     expect(document.activeElement).toBe(rowButton('Save a checkpoint'));
   });
 
+  it('open the feature of a dot the list does not hold in its part\'s place', async () => {
+    mockApi();
+    history.replaceState(null, '', '/workshop?view=all&part=part-a');
+    await renderApp(withNeeds());
+    const dot = document.querySelector<HTMLButtonElement>('.wa-sp[data-row="entry-fork"]') as HTMLButtonElement;
+    expect(dot).toHaveClass('out');
+    await userEvent.click(dot);
+    expect(screen.getByRole('heading', { level: 2, name: 'Part D' })).toBeInTheDocument();
+    await waitFor(() => expect(rowButton('Fork a computer')).toHaveAttribute('aria-expanded', 'true'));
+    expect(location.hash).toBe('#part-d/fork');
+  });
+
+  it('name each dot of the relation drawn by its side of it, and light every drawing of a related decision', async () => {
+    const shared = buildData({
+      features: [...FEATURES, { id: 'fork-keeps', stage: 'fourth', part: 'part-d', name: 'Keep a fork apart', what: 'x', needs: ['one-way', 'fork'] }, { id: 'fork-later', stage: 'fifth', part: 'part-d', name: 'Fork later', what: 'y', needs: ['one-way', 'fork-keeps'] }],
+    });
+    mockApi();
+    history.replaceState(null, '', '/workshop?view=all&state=undecided');
+    await renderApp({ ...shared, films: [] });
+    vi.useFakeTimers();
+    // Both features show "Which way do changes go?" unfolded; the decision's relations reach both.
+    const keeps = rowButton('Keep a fork apart').closest('.wa-row') as HTMLElement;
+    fireEvent.pointerOver(keeps);
+    await act(async () => { await vi.advanceTimersByTimeAsync(POINT_MS + 10); });
+    expect(document.querySelector('.wa-sp[data-row="entry-fork"]')).toHaveAccessibleName(/, needed$/);
+    expect(document.querySelector('.wa-sp[data-row="entry-fork-later"]')).toHaveAccessibleName(/, waiting$/);
+    expect(document.querySelector('.wa-sp[data-row="entry-core"]')).toHaveAccessibleName(/not decided$|decided$/);
+    expect([...document.querySelectorAll('.wa-row.lit[data-row="entry-one-way"]')]).toHaveLength(2);
+    fireEvent.pointerLeave(keeps.closest('.wa-list') as HTMLElement);
+    expect(document.querySelector('.wa-sp[data-row="entry-fork"]')).not.toHaveAccessibleName(/needed/);
+    vi.useRealTimers();
+  });
+
   it('give each pip of the strip a target and one stop for the keyboard, the arrows moving along it, a press bringing its row', async () => {
     mockApi();
     history.replaceState(null, '', '/workshop?view=all');
@@ -402,12 +436,48 @@ describe('the films', () => {
     expect(listNames()).toEqual(['The engine runs on its own', 'Create and delete a computer', 'Keep a fork apart', 'Which way do changes go?']);
   });
 
+  it('take their frame away once the row is closed', async () => {
+    mockApi();
+    history.replaceState(null, '', '/workshop#part-a/core');
+    await renderApp(withNeeds(FILMS));
+    await waitFor(() => expect(itemOf('The engine runs on its own').querySelector('.wa-filmbox iframe')).not.toBeNull());
+    await userEvent.click(rowButton('The engine runs on its own'));
+    expect(rowButton('The engine runs on its own')).toHaveAttribute('aria-expanded', 'false');
+    expect(document.querySelector('iframe')).toBeNull();
+  });
+
   it('show a film the site cannot play as its title and line, with no frame', async () => {
     mockApi();
     history.replaceState(null, '', '/workshop#films/across');
     await renderApp(withNeeds(FILMS.map((film) => ({ ...film, playable: false }))));
     expect(screen.getByRole('heading', { level: 2, name: 'Across the parts' })).toBeInTheDocument();
     expect(document.querySelector('iframe, .wa-player')).toBeNull();
+  });
+});
+
+describe('the keyboard\'s focus', () => {
+  it('goes back to the search button on Escape, to a chip from its menu, to the next chip or Filter when one goes, and to Filter after Clear', async () => {
+    mockApi();
+    history.replaceState(null, '', '/workshop?view=all&state=undecided,decided&part=part-a');
+    await renderApp(withNeeds());
+    await userEvent.click(screen.getByRole('button', { name: 'Search' }));
+    await userEvent.keyboard('{Escape}');
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Search' }));
+    const value = (text: string) => [...document.querySelectorAll<HTMLElement>('.wa-chip > button:first-child')].find((button) => button.textContent === text) as HTMLElement;
+    await userEvent.click(value('decided'));
+    expect(screen.getByRole('menu', { name: 'State' })).toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
+    expect(document.activeElement).toBe(value('decided'));
+    await userEvent.click(screen.getByRole('button', { name: 'Remove decided' }));
+    expect(document.activeElement).toBe(value('Part A'));
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Part A' }));
+    expect(document.activeElement).toBe(value('not decided'));
+    await userEvent.click(screen.getByRole('button', { name: 'Remove not decided' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Filter' }));
+    history.replaceState(null, '', '/workshop?view=all&state=undecided&part=part-a');
+    act(() => { dispatchEvent(new PopStateEvent('popstate')); });
+    await userEvent.click(document.querySelector('.wa-clear') as HTMLElement);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Filter' }));
   });
 });
 

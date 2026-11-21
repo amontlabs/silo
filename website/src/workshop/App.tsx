@@ -182,11 +182,20 @@ const address = (search: string, hash = '') => `${location.pathname}${search}${h
 /** The search of the title row: an icon until pressed, then a field. Typing shows All with the matches. */
 function Search({ value, open, onOpen, onChange, onClose }: { value: string; open: boolean; onOpen: () => void; onChange: (text: string) => void; onClose: () => void }) {
   const field = useRef<HTMLInputElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  // Escape in the field gives the focus back to the search button once it is drawn again.
+  const back = useRef(false);
   useEffect(() => {
     if (open) field.current?.focus();
   }, [open]);
-  if (!open && !value) {
-    return <button type="button" className="wa-ctl icon wa-searchctl" aria-label="Search" data-tip="Search" data-kbd="/" onClick={onOpen}><Icon name="search" /></button>;
+  const closed = !open && !value;
+  useEffect(() => {
+    if (!closed || !back.current) return;
+    back.current = false;
+    button.current?.focus();
+  }, [closed]);
+  if (closed) {
+    return <button type="button" ref={button} className="wa-ctl icon wa-searchctl" aria-label="Search" data-tip="Search" data-kbd="/" onClick={onOpen}><Icon name="search" /></button>;
   }
   return (
     <label className="wa-search">
@@ -198,6 +207,7 @@ function Search({ value, open, onOpen, onChange, onClose }: { value: string; ope
         onKeyDown={(event) => {
           if (event.key !== 'Escape') return;
           event.stopPropagation();
+          back.current = true;
           onChange('');
           onClose();
         }}
@@ -900,6 +910,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
           <AllView
             plan={plan} graph={graph} sections={sections} query={query} onQuery={setQuery} ctx={ctx} store={store}
             folds={folds} onFold={list.onFold} more={more} onMore={list.onMore} waiting={w.waiting}
+            onOpen={(key) => openRow(key, { focus: true })}
           />
         ) : (
           <>
