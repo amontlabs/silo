@@ -1,3 +1,4 @@
 {
-  "asks": "How does an opinion that an extension gives reach the opinions kept beside the record?"
+  "asks": "How does an opinion that an extension gives reach the opinions kept beside the record?",
+  "answer": "By answering a question, through a tool. Silo defines each such tool: what it asks about, and the list of answers. An extension granted the tool answers about lines of the record it read. That it answered, and what, is a fact in the record, like every use of a tool. What the answer says is an opinion: Silo keeps the latest one beside the record, with the extension, its version and those lines, and the app shows it on those lines as that extension's opinion. An answer does nothing by itself."
 }
