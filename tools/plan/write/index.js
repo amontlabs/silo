@@ -189,7 +189,9 @@ export function take(files, id, options = {}) {
 }
 
 /**
- * The owner's no: `"verdict": "drop"`, with `sets`, `removes` and `replaces` kept. Refused on a
+ * The owner's no: `"verdict": "drop"`, with `sets`, `removes` and `replaces` kept. Only a taken
+ * feature holds `started`, so a feature being built loses it in the same write, and the message
+ * says so. Refused on a
  * replaced decision, on a taken entry that has `adds` (its statements are in force), and on a taken
  * decision that has `replaces` (the decisions it replaced would be in force again).
  * @param {Map<string, string>} files @param {string} id @param {Options} [options] @returns {Outcome}
@@ -214,5 +216,7 @@ export function drop(files, id, options = {}) {
   }
   const data = structuredClone(json.get(file));
   data.verdict = 'drop';
-  return finish(files, new Map([[file, entryText(entry.kind, data)]]), options, `dropped ${id}`);
+  const building = data.started !== undefined;
+  delete data.started;
+  return finish(files, new Map([[file, entryText(entry.kind, data)]]), options, building ? `dropped ${id}, which was being built: its started date is removed` : `dropped ${id}`);
 }

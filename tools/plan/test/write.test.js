@@ -368,6 +368,26 @@ test('drop writes the verdict and keeps sets; it refuses a taken entry that brou
   assert.equal(taken.changed.size, 0);
 });
 
+test('drop on a feature being built removes started with the verdict, says so, and the plan passes the check', () => {
+  const base = basePlan();
+  base['engine/decisions/linux-vm-engine.json'] = { ...base['engine/decisions/linux-vm-engine.json'], verdict: 'take' };
+  base['engine/features/start-computer.json'] = { ...base['engine/features/start-computer.json'], verdict: 'take', started: '2026-11-18' };
+  const files = filesOf(base);
+  assert.deepEqual(checkFiles(files).errors, []);
+  assert.equal(entryStatus(parsePlan(files).plan.entries['start-computer'], parsePlan(files).plan.entries), 'building');
+  const outcome = drop(files, 'start-computer');
+  assert.equal(outcome.status, 'done', outcome.message);
+  assert.equal(outcome.message, 'dropped start-computer, which was being built: its started date is removed');
+  const after = apply(files, outcome);
+  const entry = parse(after, 'engine/features/start-computer.json');
+  assert.equal(entry.verdict, 'drop');
+  assert.equal('started' in entry, false);
+  assert.deepEqual(checkFiles(after).errors, []);
+  // A feature that was not being built keeps the plain message.
+  const waiting = drop(sample(), 'start-computer');
+  assert.equal(waiting.message, 'dropped start-computer');
+});
+
 /** A small seeded generator, so a failing sequence can be replayed. @param {number} seed */
 function random(seed) {
   let state = seed >>> 0;

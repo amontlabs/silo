@@ -158,7 +158,8 @@ and a feature when it is built. A replaced decision still counts as done.
   taken, everything it needs is done, and each property it added has an `at` that names an
   existing file. `built` does not need `started`.
 - Whoever starts the build of a feature writes `started` by hand, and whoever finishes it writes
-  `built` by hand. No command writes them.
+  `built` by hand. No command writes them. Only a taken feature holds `started`, so `plan drop` on
+  a feature being built removes `started` in the same write as the verdict, and says so.
 
 ## The order
 

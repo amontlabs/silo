@@ -14,7 +14,7 @@ Node 26, no dependency, no network call. `npm test` runs the tests, which use th
 | `plan` | Shows the first entry in the order with no verdict (its kind, its question or its name, and `suggest`; for a decision its `answer`, or when it has none the statements it sets, and each decision it names in `replaces` with its `answer`, or the ids it adds when it has none), the features being built, the features ready to build, and the features that wait and for what. |
 | `plan show <id>` | For an entry: first its state, then the entry whole (its keys, its `sets` in full, its stage and position, each need with its status, what needs it, its notes), then what binds it, compact: every principle and the properties of the root, of its part and in `keeps` (id and `says`); the taken decisions in force of its part and in `needs` (id and `answer`, or the ids it adds when it has none); the other taken decisions in force of the root as ids only, which `--all` prints in full. A decision in force is taken and not replaced. A replaced decision, one that has `replaced_by`, prints `Replaced by: <id>` first. A need that is replaced prints `replaced by <id>`. Each decision named in `replaces` prints with its `answer`, or the ids it adds. For a part: its title and line (and the word of the same id with its meaning, when there is one), its taken entries in force (and its replaced and dropped ones) as a count and their ids, then each entry with no verdict in the order of `order.json` (id, kind, status, and its `asks` or `name`), the first marked `next`, then its properties (id and `says`). For a statement: the statement, the entry whose `adds` brought it, the features that keep it, and the entries that would replace or remove it. `--json` gives everything, whatever `--all`. |
 | `plan take <id>` | The owner's yes. It writes what is listed under the table, in one commit named `Owner: take <id>`. |
-| `plan drop <id>` | The owner's no. Writes `"verdict": "drop"`, keeps `sets`, `removes` and `replaces`, and commits `Owner: drop <id>`. |
+| `plan drop <id>` | The owner's no. Writes `"verdict": "drop"`, keeps `sets`, `removes` and `replaces`, and commits `Owner: drop <id>`. On a feature being built it removes `started` in the same write, since only a taken feature holds `started`, and its message says so. |
 | `plan check` | Checks the plan. The merge gate and the site's build run it. |
 
 What `plan take <id>` writes:
@@ -43,7 +43,7 @@ replaced decision it also names the decision that replaced it, from its `replace
 replaced decision, a taken entry that has `adds`, and a taken decision that has `replaces`. It
 refuses a taken decision that a decision with no verdict names in `replaces`, and names that
 decision. It also refuses a plan that fails the check or has uncommitted changes. Any other taken
-decision may be dropped. Both check the plan they would write and write
+decision may be dropped. A feature being built may be dropped too: `plan drop` removes its `started` with the verdict. Both check the plan they would write and write
 nothing when it fails.
 
 Uncommitted changes are asked of git with every untracked and ignored file listed, whatever the
