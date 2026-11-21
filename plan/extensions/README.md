@@ -9,15 +9,15 @@ to open or delete something.
 
 ## Why it is so
 
-- **An extension that executes anything ships a computer** (`extension-ships-a-computer`). Its
-  manifest names the recipe. What Silo only reads, such as rules, is not executed.
-- **Its computer reaches Silo only through the tools the manifest names**, and installing the
-  extension grants them (`extension-tools`, `import-then-install`).
-- **No tool grants or destroys** (`what-an-extension-never-does`). A tool reads or takes a
-  protective action, and a protective one sets a precaution (`extension-may-protect`).
+- **An extension that executes anything ships a computer** (`extension-code-in-its-own-computer`,
+  `extension-computer-is-shown`). Its manifest names the recipe. What Silo only reads, such as
+  rules, is not executed.
+- **No tool it can use grants or destroys** (`no-tool-grants-or-destroys`).
+- **Importing it changes nothing** (`importing-changes-nothing`). Installing it switches on what
+  it showed.
 
-These are put forward and not in force yet. In force today: `added-classifier-cannot-act`,
-`where-a-classifier-runs-is-shown`.
+Put forward and not in force yet: which tools it may use (`extension-tools`), that it may protect
+by itself (`extension-may-protect`), and what wakes it (`what-wakes-an-extension`).
 
 ## Three examples
 

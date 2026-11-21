@@ -30,3 +30,10 @@ An agent's note. The only output an extension has is its answer about one waitin
 three words that Silo fixes (`what-wakes-an-extension`). Everything else goes through tools.
 Nothing in the part `extensions` needs the word "classifier", so this decision can wait, and the
 fifth film can show the case without the word.
+
+## The owner's answer (21 November 2026, later)
+
+The owner now understands it this way: an answer belongs to a tool. An extension that has the tool
+"deny or hold the network requests of main" must give that answer, and other tools may bring other
+answers. It can be called a classifier if it really needs a name. The owner agrees to leave this
+decision undecided and to keep the word out of the fifth film.

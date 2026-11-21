@@ -1,4 +1,4 @@
 {
   "asks": "Does a recipe say what its computer needs from outside?",
-  "answer": "A recipe names the secrets its computer needs and the hosts it reaches. Naming them grants nothing: the user gives each secret and accepts each host."
+  "answer": "A recipe may name the rules its computer comes with, such as the hosts it may reach, and the secrets it needs. Importing a recipe changes nothing: it shows those rules and the secrets to give. Making the computer switches the rules on."
 }

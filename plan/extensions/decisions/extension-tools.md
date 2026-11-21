@@ -51,3 +51,10 @@ safe. The owner was not convinced: a call that only reads can still leak.
 
 Forwarding alerts and asks to a phone: `forwarding-tool`. Whether an extension with nothing to
 say still says it is done: `extension-says-done`.
+
+## The word "shows"
+
+The owner asked twice whether a better word exists. Compared on 21 November 2026: notifies (fits
+an alert only), informs (a question asks), displays (the same, less plain), interacts and
+communicates (true of all three, but they do not say what happens). None is better. The owner has
+not ruled on it.
