@@ -213,15 +213,20 @@ those are the page's own addresses, and the message names the part and the fix.
 `plan/parts.json` on the full map and on the folded one, inside two zones: your
 Mac, and the virtual machines in it. Text that is not a part stands for what is
 not Silo: outside the Mac, the internet, the model providers, and a server or a
-cloud where computers also run, and under it, beside the app, your phone; inside
-it, your own terminal and editor; under the boundary, its channels. Wires join
-them, most with one word, such as "facts" from the boundary to the record or
-"requests" from the boundary to the internet. The wire from "What you see" to
-your phone has no word, since the phone's text says what travels; it runs down
-between the Mac's edge and the parts on the left, and "How it is checked" starts
-after the phone. A wire that the folded map draws again carries that drawing as
-its `fold`, so it looks the same there; a wire or a text with no folded place
-fades out as the map folds.
+cloud where computers also run; inside it, your own terminal and editor; under
+the boundary, its channels. Your phone is a third zone, a box like the Mac's
+with its corner marks, on the right outside the Mac with the other things
+outside it. It holds one text, "What you see" with the line "alerts and asks":
+the same name as the app's part, since what you see is shown in both. No wire
+joins the two. Wires join the rest, most with one word, such as "facts" from the
+boundary to the record or "requests" from the boundary to the internet. "How it
+is checked" is as wide as the Mac, under it, its edges the Mac's. A wire that the folded map draws
+again carries that drawing as its `fold`, so it looks the same there; a wire with
+none fades out as the map folds. A zone or a text with none (the phone and its
+text, the server's text) is gone as the fold starts, with a fade of 60 ms at most,
+and comes back only once the map has unfolded: "How it is checked" travels to its
+folded place across them, and must cross none that is still showing. The folded
+map is the same with or without them.
 
 Each wire and each zone says in `rests` what in the plan it draws. An entry of
 `rests` is the id of a decision or a feature, `word:<id>` for a word of

@@ -125,8 +125,8 @@
    not for words. */
 .ws-node.undecided b { color: var(--muted); }
 /* A text with no folded place fades out as the map folds, and back in once it has unfolded. */
-.ws-stage.fold .ws-node.off-fold { opacity: 0; transition: opacity .1s; }
-.ws-stage:not(.fold) .ws-node.off-fold { transition: opacity .22s .2s; }
+.ws-stage.fold :is(.ws-node, .ws-zone).off-fold { opacity: 0; transition: opacity .06s; }
+.ws-stage:not(.fold) :is(.ws-node, .ws-zone).off-fold { transition: opacity .06s .44s; }
 /* What a solid and a dashed line mean, on the full map only. */
 .ws-mapkey { position: absolute; left: calc(var(--lx) * var(--u)); top: calc(var(--ly) * var(--u)); display: grid; gap: calc(6 * var(--u)); font: max(12px, calc(10 * var(--u)))/1.2 var(--mono); color: var(--muted); white-space: nowrap; pointer-events: none; transition: opacity .22s .2s; }
 .ws-mapkey span { display: flex; align-items: center; gap: calc(7 * var(--u)); }
