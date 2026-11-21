@@ -36,6 +36,10 @@ Vite. It has two pages:
   `api/`). While the plan holds no part, it is the same page with no tile; the
   title row keeps its links and "Suggest a feature".
 
+- **Films** (`/films/<id>/`, made by `scripts/films.mjs`): each film of
+  `films/` played by itself, with its voice and its subtitles, so that the
+  Workshop can offer "Watch". See [Films](#films).
+
 Shared files: `src/site.css` (tokens, the gutter, the frame and its diamonds,
 the header, buttons, the theme switch and the drawn arrow and check icons),
 `public/theme.js` (first-paint light, dark or System theme,
@@ -1142,6 +1146,9 @@ snapshots catch up when the hour resets.
 | `website/server/node.mjs` | Adapter for Node's `req`/`res`, used by Vercel and the local server. |
 | `website/api/workshop.cjs` | Vercel's entry point. |
 | `website/scripts/prepare-vercel.mjs` | Writes the Build Output (static site, function, routes). |
+| `website/scripts/films.mjs` | Makes each film's page and the player they share, into `dist/films/` (see [Films](#films)). |
+| `website/scripts/films.test.mjs` | The films' pages on a small made-up film: what is written, the films, folders and links refused, the hook `vite.config.ts` registers, and the shared files equal to what a real page asks for. |
+| `website/scripts/films-test-support.mjs` | The made-up `films/` folder of those tests and of `src/workshop/data.test.ts`. |
 | `website/scripts/plan-entries.mjs` | Makes the list of the plan's entries from `plan/`, for `prepare-vercel.mjs` and the local server. |
 | `website/scripts/workshop-dev.mjs` | Local server for the site and the API. |
 | `website/scripts/fake-github.mjs` | Fake GitHub used by the tests and by `--fake`. |
@@ -1158,6 +1165,83 @@ All of them run with the website's `npm test`.
 The server uses Node's standard library (`crypto`, `fetch`, `http`) and no
 package. `prepare-vercel.mjs` refuses a file the function would load from
 `website/node_modules/`, and the whole function is 15 files, about 170 KB, of which 70 KB are `plan-entries.json`.
+
+## Films
+
+A film of `films/` is code and sound, not a video: its `explainer.js`, drawn by
+the player of `films/player/` and the kit of `films/kit/`, and its clips in
+`voice/` as `voice.json` names them. The `films` plugin of `vite.config.ts`
+calls `scripts/films.mjs` after `vite build` has written the site, and writes
+into `dist/films/`:
+
+- `<id>/index.html`: the page of `films/player/page.html` with nothing of the
+  films' review page: no title or line above the film, no entries, no
+  questions, no copy button, and no `page.js`. The tab bears the film's title.
+  `voice.json` is inlined, each clip's source pointing at `/films/<id>/voice/`.
+  It opens paused on its Play control: no sound starts without a press. It
+  takes the site's theme from `/theme.js` (light, dark or the system's, as the
+  home page and the Workshop keep it), as every page of the site does, and
+  follows a change made in another tab; `?theme=` is not promised there. The
+  player's other query parameters work as in `films/README.md`.
+- `<id>/explainer.js` and the clips `voice.json` names (a clip it no longer
+  names is left out).
+- `player/`: what the pages share, loaded as files: `voice.js` and `kit.js` of
+  `films/player/`, `page.css`, the kit's `player.css`, its vendor scripts and
+  fonts, and `licences/geist.txt` and `licences/lucide.txt`, the texts the
+  icons' and the fonts' licences ask to go with every copy
+  (`films/kit/NOTICE.md`). Each page names the two licence files in a comment
+  at its end. These shared files are a fixed list written in `films.mjs`:
+  nothing is found by listing a folder, and a file of the list that is missing
+  stops the build.
+
+The pages name every file by its absolute path under `/films/`, so a film's
+address works with or without its closing slash. A folder directly under
+`films/` that holds a `film.json`, an `explainer.js` or a `voice.json` (as a
+file or as a link) is a film; any other folder is left out. A film must be
+complete, so none can vanish from the site without an error: one whose files
+are not complete stops the build with the film, the file and the fix, the way
+the plan's errors read. That is a missing `film.json`, `explainer.js` or
+`voice.json`, a `film.json` whose `id` is not the folder's or with no title, a
+voice without a scene or without a field the player reads
+(`films/player/voice.js`: the voice's `id` and `label`, each scene's `total`
+and `sentences`, each sentence's `text`, `start`, `length` and `file`), or a
+clip that is missing or is not named `voice/<name>.mp3`. A link in place of a
+film's folder or of any of its files stops the build too. So does `films/`
+itself as a link, and any link directly under `films/`, whatever it leads to
+and whether it leads anywhere; only a name that starts with a dot, which tools
+leave there, is passed over.
+
+The build follows no link. For each file it reads or copies (a shared file,
+the page template `films/player/page.html`, a film's file or clip), every
+folder on its path under `films/` is a plain folder, the file is a plain file,
+and its real path is inside the real path of `films/`; otherwise the build
+stops and names the file and the link. So no file outside `films/` is
+published, nor its text put into a page. The step uses Node only, and nothing
+it makes is committed. It does not check that a file is tracked by git: the
+deployed site is always built from a fresh clone, where every file is tracked.
+
+The Workshop's build data says which films the site plays: `films`, one
+`{ id, playable }` per film, `playable` true for a film whose page the build
+writes (`readBuildData` in `src/workshop/data.ts`).
+
+A film's page may be framed by a page of the site, and by nothing else:
+`/films/` answers `frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN`,
+where every other path refuses any frame (see [Build and deploy](#build-and-deploy)).
+The local server (`workshop-dev.mjs`) serves the films from `dist/` and gives
+the looser headers only to a file it really serves from `dist/films/`: it
+chooses them from the file's path once the address is decoded and normalised,
+not from the address as typed. So `/films/..%2findex.html` (the home page),
+`/FILMS/<id>/`, a 404 and an error keep the strict headers, and so does every
+file when `dist/films` is a link. Vercel gives the film's rule to every path
+under `/films/`, one that leads to no file included; that 404 can then be
+framed only by the site itself, so nothing is exposed. The dev server
+serves the same files at the same addresses, read from `films/` on each
+request, and answers 400 to a malformed `%` escape under `/films/`; like
+`vite preview`, it sets no frame header on any page.
+
+After a film changes in `films/`, run `npm --prefix website run build` (or
+`build:vercel`) again: the site has no copy of a film of its own. Five films
+weigh about 4.2 MB in `dist/films/`, about 0.7 MB of it the shared player.
 
 ## Build and deploy
 
@@ -1191,9 +1275,15 @@ following Vercel's
   allows. An unknown endpoint is Vercel's 404.
 - `config.json`: `version: 3` and its routes. The first adds
   `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY`
-  to every path and continues. The second,
+  to every path but the films' and continues. The second adds
+  `frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN` under `/films/`,
+  so the Workshop can show a film in a frame, and continues. Both, and the
+  route of a film's page, are `caseSensitive`: Vercel matches a route's `src`
+  without regard to case by default, and `/FILMS/` would get the looser rule.
+  Vercel documents `src` as PCRE-compatible, the negative lookahead included. The third,
   `{ "src": "^/workshop/?$", "dest": "/workshop/index.html" }`, serves the
-  Workshop page at both `/workshop` and `/workshop/`. `{ "handle": "filesystem" }`
+  Workshop page at both `/workshop` and `/workshop/`. The fourth serves a
+  film's page at `/films/<id>` and `/films/<id>/`. `{ "handle": "filesystem" }`
   hands every other path to the filesystem. After `{ "handle": "hit" }`, so only
   for a file that exists, the last route adds
   `Cache-Control: public, max-age=31536000, immutable` to Vite's hashed files

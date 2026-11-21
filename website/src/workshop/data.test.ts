@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { canonicalText } from '../../../tools/plan/model/index.js';
@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { loadDir } from '../../../tools/plan/read/index.js';
 import { buildDataFrom, factsFrom, historiesFrom, historyFromGit, layoutPlanFrom, notesFrom, planDir, readBuildData, readHistories, readHistory, unshallow } from './data';
 import type { Git } from './data';
+import { made } from '../../scripts/films-test-support.mjs';
 import { buildData, CORE_NOTES, DECISIONS, emptyPlanFiles, FEATURES, PARTS, planFiles, withLists, ZIG_NOTES } from './fixtures';
 import { checkLayout, LayoutError, MAP_HEIGHT, MAP_WIDTH, NO_MAP, SILO_MAP, pageLayout } from './map';
 import type { Box, MapLayout, PageLayout, Wire } from './map';
@@ -149,7 +150,13 @@ describe('reading plan/ from a repository folder', () => {
       const data = readBuildData(root, EXAMPLE_MAP);
       expect(data.entries).toHaveLength(FEATURES.length + DECISIONS.length);
       expect(data.parts).toHaveLength(PARTS.length);
+      expect(data.films).toEqual([]);
       expect(() => readBuildData(join(root, 'missing'))).toThrow('cannot be read');
+      // Made-up films: tiny, and another one beside it.
+      const { put } = made(root, join(REPOSITORY, 'films', 'player', 'page.html'));
+      cpSync(join(root, 'films', 'tiny'), join(root, 'films', 'another'), { recursive: true });
+      put('another/film.json', JSON.stringify({ id: 'another', title: 'Another' }));
+      expect(readBuildData(root, EXAMPLE_MAP).films).toEqual([{ id: 'another', playable: true }, { id: 'tiny', playable: true }]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

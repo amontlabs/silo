@@ -135,6 +135,8 @@ export interface BuildData {
   map: PageLayout;
   /** Set when the build could not read the whole history of the repository: every History ends with a line that says so. */
   shallow: boolean;
+  /** The films of films/, by id: `playable` when the build wrote the film's page, at /films/<id>/. */
+  films: { id: string; playable: boolean }[];
 }
 
 export interface LiveIssue {

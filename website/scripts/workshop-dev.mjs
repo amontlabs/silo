@@ -4,12 +4,13 @@
 //   node scripts/workshop-dev.mjs [--port 4174]          against GitHub, from WORKSHOP_* variables
 // Run `npm run build` first. The site's origin is http://127.0.0.1:<port>.
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { lstat, realpath, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readConfig } from '../server/config.mjs';
 import { createNodeHandler, FRAME_HEADERS } from '../server/node.mjs';
+import { FILM_FRAME_HEADERS } from './prepare-vercel.mjs';
 import { createWorkshop } from '../server/workshop.mjs';
 import { readPlan } from '../../tools/plan/read/index.js';
 import { createFakeGitHub, seedDemo } from './fake-github.mjs';
@@ -23,6 +24,7 @@ const TYPES = {
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.woff2': 'font/woff2', '.woff': 'font/woff',
   '.mp4': 'video/mp4', '.webm': 'video/webm', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8',
+  '.mp3': 'audio/mpeg', '.otf': 'font/otf', '.ttf': 'font/ttf',
 };
 
 async function file(path) {
@@ -41,6 +43,21 @@ export async function staticFile(distDir, pathname) {
   const target = normalize(join(distDir, decoded));
   if (target !== distDir && !target.startsWith(distDir.endsWith(sep) ? distDir : distDir + sep)) return null;
   return (await file(target)) || file(join(target, 'index.html'));
+}
+
+// Whether `path`, a file staticFile gives, is really served from distDir/films/: distDir/films is a plain
+// folder (a link there gives no file the looser rule), the file's normalised path is under it letter for
+// letter, and so is its real path. Only such a file may be framed (FILM_FRAME_HEADERS).
+export async function servedFromFilms(distDir, path) {
+  const films = join(distDir, 'films');
+  if (!normalize(path).startsWith(films + sep)) return false;
+  try {
+    if (!(await lstat(films)).isDirectory()) return false;
+    const [real, realFilms] = await Promise.all([realpath(path), realpath(films)]);
+    return real.startsWith(realFilms + sep);
+  } catch {
+    return false;
+  }
 }
 
 // plan/, or the plan WORKSHOP_PLAN names, as the build reads it.
@@ -87,16 +104,21 @@ export async function startDev({ fake = false, planDir = PLAN, port = 4174, host
       pathname = null;
     }
     if (pathname?.startsWith('/api/workshop/')) return api(req, res);
-    for (const [name, value] of Object.entries(FRAME_HEADERS)) res.setHeader(name, value);
+    const readable = pathname !== null && (req.method === 'GET' || req.method === 'HEAD');
+    const path = readable ? await staticFile(distDir, pathname) : null;
+    // As deployed: only a file really served from dist/films/ may be framed, by a page of the site. The
+    // choice follows the file served, after the address is decoded and normalised, never the address as
+    // typed; an error keeps the strict headers.
+    const frame = path && (await servedFromFilms(distDir, path)) ? FILM_FRAME_HEADERS : FRAME_HEADERS;
+    for (const [name, value] of Object.entries(frame)) res.setHeader(name, value);
     if (pathname === null) {
       res.writeHead(400);
       return res.end();
     }
-    if (req.method !== 'GET' && req.method !== 'HEAD') {
+    if (!readable) {
       res.writeHead(405);
       return res.end();
     }
-    const path = await staticFile(distDir, pathname);
     if (!path) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
       return res.end('Not found');
