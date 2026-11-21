@@ -1,4 +1,5 @@
 {
   "asks": "Is a small formal model of access written and checked before the first engine code?",
-  "answer": "No second description of the rules is written in another language. The first engine code is the part that decides who can get what, in Zig. Before the rest of the engine is built on it, the simulator runs it. Its properties depend on the order of calls, so a test also runs it on every possible sequence of a few calls. That code stays a few hundred lines, so a person can read all of it."
+  "answer": "No second description of the rules is written in another language. The first engine code is the part that decides who can get what, in Zig. Before the rest of the engine is built on it, the simulator runs it. Its properties depend on the order of calls, so a test also runs it on every possible sequence of a few calls. That code stays a few hundred lines, so a person can read all of it.",
+  "verdict": "take"
 }
