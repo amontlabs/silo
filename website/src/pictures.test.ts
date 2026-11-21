@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { END, STEPS, STILL_STEP } from './flow';
+import { END, STEPS, STILL_STEP, endOf, film } from './flow';
 import { mountPictures } from './pictures';
 
 // The page as it is served, with what a browser gives and jsdom lacks: nothing is in view until a test says so.
@@ -92,19 +92,62 @@ afterEach(() => {
 });
 
 describe('the two pictures', () => {
-  it('show once their script has drawn them: the flow at its start, every card at its end', () => {
+  it('show once their script has drawn them: the flow at its still, every card at its end', () => {
     mountPictures();
     expect(document.documentElement.classList.contains('pictures-pending')).toBe(false);
     expect(flow().classList.contains('live')).toBe(true);
     expect($('#cards').classList.contains('live')).toBe(true);
-    expect(step()).toBe(0);
-    expect(drawn('.scene', 'o')).toBe(0);
-    expect(drawn('.a1', 'o')).toBe(0);
+    expect(step()).toBe(STILL_STEP);
+    expect(drawn('.scene', 'o')).toBe(1);
+    expect(drawn('.cross', 'o')).toBe(1);
     // The first card's last moment: the three commands are typed and checked.
     expect(card('full').querySelectorAll('.ty.on')).toHaveLength(3);
     expect(card('full').querySelectorAll('.ok.on')).toHaveLength(3);
     // No pointer is part of a still.
     expect(document.querySelectorAll('.mv.on')).toHaveLength(0);
+  });
+
+  it('show the still until the flow first moves, then play it from its start', () => {
+    // The still as the page shows it without script: a stage of the served markup, held where flow.css puts it.
+    const copy = document.createElement('div');
+    copy.innerHTML = stage().outerHTML;
+    film(copy.firstElementChild as HTMLElement).hold(endOf(STILL_STEP));
+    mountPictures();
+    // Out of view, the flow is held: the stage is the still.
+    expect(stage().innerHTML).toBe(copy.firstElementChild!.innerHTML);
+    vi.advanceTimersByTime(5000);
+    expect(stage().innerHTML).toBe(copy.firstElementChild!.innerHTML);
+    // In view, it plays from moment 0.
+    see(stage(), 1);
+    expect(flowIs()).toBe('moving');
+    expect(step()).toBe(0);
+    expect(drawn('.scene', 'o')).toBe(0);
+    expect(drawn('.a1', 'o')).toBe(0);
+    vi.advanceTimersByTime(2000);
+    expect(step()).toBe(0);
+    expect(drawn('.a1', 'o')).toBe(1);
+  });
+
+  it('name in the step row the step the stage shows, even when a frame comes after the step has started', () => {
+    mountPictures();
+    see(stage(), 1);
+    // Frames come every 16 ms. Go back starts at 22600, between the frames at 22592 and 22608.
+    expect(STEPS[6] % 16).not.toBe(0);
+    vi.advanceTimersByTime(STEPS[6]);
+    // The last frame drawn is still in Cost: the row names Cost.
+    expect(step()).toBe(5);
+    expect(drawn('.cp-name', 'o')).toBe(0);
+    vi.advanceTimersByTime(8);
+    // The frame at 22608 is in Go back: the row names it, and its bar starts 8 ms in.
+    const late = Math.ceil(STEPS[6] / 16) * 16 - STEPS[6];
+    expect(step()).toBe(6);
+    expect(document.querySelectorAll('.steps button')[6].getAttribute('aria-current')).toBe('step');
+    expect(document.querySelectorAll('.steps button')[5].hasAttribute('aria-current')).toBe(false);
+    expect(document.querySelectorAll<HTMLElement>('.steps li')[6].style.getPropertyValue('--skip')).toBe(`${-late}ms`);
+    // Pause pressed now shows the end of the step the stage shows.
+    $('.ctl').click();
+    expect(step()).toBe(6);
+    expect(drawn('.cp-name', 'o')).toBe(1);
   });
 
   it('move one at a time: the flow while 30% of it is in view, the cards only while the flow is not playing', () => {
@@ -161,11 +204,26 @@ describe('the two pictures', () => {
     see(stage(), 1);
     vi.advanceTimersByTime(END - 1);
     expect(step()).toBe(STEPS.length - 1);
-    vi.advanceTimersByTime(1);
+    // The first frame at or after the end starts the film again.
+    vi.advanceTimersByTime(16);
     expect(step()).toBe(0);
     expect(flowIs()).toBe('moving');
     vi.advanceTimersByTime(2000);
     expect(drawn('.a1', 'o')).toBe(1);
+  });
+
+  it('play the card the visitor points at, and carry on from it once it ends', () => {
+    mountPictures();
+    see(card('full'), 1);
+    see(card('screen'), 1);
+    pointer(card('edge'), 'pointerenter', 'mouse');
+    expect(playing()).toEqual(['edge']);
+    // The card ends, the pointer stays: no other card starts.
+    vi.advanceTimersByTime(10000);
+    expect(playing()).toEqual([]);
+    pointer(card('edge'), 'pointerleave', 'mouse');
+    vi.advanceTimersByTime(900);
+    expect(turnsOver(10000)).toEqual(['full', 'screen', 'full']);
   });
 
   it('play the card the visitor points at and hold the flow until they leave it', () => {
@@ -356,9 +414,11 @@ describe('the two pictures', () => {
     vi.advanceTimersByTime(10000);
     expect(playing()).toEqual([]);
 
+    // Play starts the flow from its start.
     $('.ctl').click();
     expect(flowIs()).toBe('moving');
-    expect(step()).toBe(STILL_STEP + 1);
+    expect(step()).toBe(0);
+    expect(drawn('.scene', 'o')).toBe(0);
     see(stage(), 0);
     vi.advanceTimersByTime(60000);
     expect(playing()).toEqual([]);

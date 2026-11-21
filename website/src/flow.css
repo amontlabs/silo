@@ -24,8 +24,7 @@
 
 .flow { width: calc(100% + 28px); max-width: 1040px; margin: 0 -14px; }
 .flow figure { margin: 0; }
-.flow .stage { --mode: wide; position: relative; aspect-ratio: 1000 / 380; container-type: inline-size; overflow: hidden; transition: opacity 0.4s; }
-.flow .stage.fade { opacity: 0; }
+.flow .stage { --mode: wide; position: relative; aspect-ratio: 1000 / 380; container-type: inline-size; overflow: hidden; }
 .flow .scene {
   --px: calc(100cqw / 1000);
   --fs-name: 17;

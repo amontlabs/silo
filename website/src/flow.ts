@@ -10,8 +10,12 @@ import type { Scene } from './scene';
 /** When each step starts, and when the whole film ends, in milliseconds. */
 export const STEPS = [0, 3200, 7200, 11200, 15600, 19600, 22600, 26600];
 export const END = 31000;
-/** The last moment of a step. */
-export const endOf = (step: number) => (step < STEPS.length - 1 ? STEPS[step + 1] : END) - 1;
+/** How long the film takes to fade out before it starts again. */
+const FADE = 450;
+/** When a step is over: the next one starts, or the film fades out. */
+const overAt = (step: number) => (step < STEPS.length - 1 ? STEPS[step + 1] : END);
+/** The last moment of a step. The last step's is before the fade, so that it shows when the film is paused there. */
+export const endOf = (step: number) => (step < STEPS.length - 1 ? STEPS[step + 1] : END - FADE) - 1;
 /** The step shown when nothing may move on its own: Boundary, a request passed and one denied at the edge of main. */
 export const STILL_STEP = 3;
 const stepAt = (t: number) => STEPS.findLastIndex((start) => start <= t);
@@ -191,10 +195,10 @@ type Part = HTMLElement | SVGElement;
 
 /**
  * The film in `stage`, as a scene: held at a moment, or played on from one. While it is held nothing runs; while it
- * plays one frame loop draws it. Which composition it uses, across or in one column, CSS says (`--mode`), and it is
- * read again each time the film is held or played.
+ * plays one frame loop draws it, and tells `onFrame` the moment it drew, after its last frame too. Which composition
+ * it uses, across or in one column, CSS says (`--mode`), and it is read again each time the film is held or played.
  */
-export function film(stage: HTMLElement): Scene {
+export function film(stage: HTMLElement, onFrame?: (t: number) => void): Scene {
   const q = (selector: string) => stage.querySelector<Part>(selector)!;
   const qa = (selector: string) => [...stage.querySelectorAll<Part>(selector)];
   const written = new Map<Part, Map<string, string>>();
@@ -301,7 +305,8 @@ export function film(stage: HTMLElement): Scene {
   /** Draws every part as it is at `t`. */
   function draw(t: number) {
     const s = stepAt(t);
-    put(P.scene, { o: ramp(t, 0, 350) });
+    // The film fades in at its start and out over its last moments, before it starts again.
+    put(P.scene, { o: ramp(t, 0, 350) * (1 - lin(t, END - FADE, END - FADE + 400)) });
 
     // your Mac
     const mac = sample(R.mac, t);
@@ -500,9 +505,11 @@ export function film(stage: HTMLElement): Scene {
     loop = 0;
   };
   const frame = () => {
-    const t = performance.now() - startedAt;
-    draw(Math.min(t, END - 1));
+    const t = Math.min(performance.now() - startedAt, END - 1);
+    draw(t);
     loop = t < END - 1 ? requestAnimationFrame(frame) : 0;
+    // Last, so that what `onFrame` does (hold, play again) is not undone here.
+    onFrame?.(t);
   };
   return {
     end: END,
@@ -538,10 +545,13 @@ export function mountFlow(root: HTMLElement, options: { still: boolean; onChange
   const stage = root.querySelector<HTMLElement>('.stage')!;
   const steps = [...root.querySelectorAll<HTMLElement>('.steps li')];
   const ctl = root.querySelector<HTMLButtonElement>('.ctl')!;
-  const picture = film(stage);
-  let timers: number[] = [];
   /** The visitor wants the flow to move: true until they press Pause. */
   let wanted = !options.still;
+  /**
+   * True until the flow has moved or the visitor has picked a step. Until then a held stage shows the still, as the
+   * page does without script, and the flow starts from moment 0 the first time it may move.
+   */
+  let fresh = true;
   /** The page says the flow may move. */
   let allowed = false;
   let running = false;
@@ -549,7 +559,12 @@ export function mountFlow(root: HTMLElement, options: { still: boolean; onChange
   /** The moment shown while the flow is held, and what `performance.now()` was at moment 0 while it moves. */
   let at = 0;
   let startedAt = 0;
-  const later = (run: () => void, ms: number) => timers.push(window.setTimeout(run, ms));
+  // One clock: while the flow moves, the frame that draws it also moves the step row along and starts it again at
+  // its end, so the row always names the step the stage shows.
+  const picture = film(stage, (t) => {
+    if (t >= END - 1) show(0);
+    else if (stepAt(t) !== step) setStep(stepAt(t), t);
+  });
   const now = () => (running ? Math.min(performance.now() - startedAt, END - 1) : at);
 
   function setStep(i: number, t: number) {
@@ -561,7 +576,7 @@ export function mountFlow(root: HTMLElement, options: { still: boolean; onChange
     });
     // The bar of a step is a CSS animation: laying the page out here starts it again from `t`.
     void root.offsetWidth;
-    steps[i].style.setProperty('--dur', `${endOf(i) + 1 - STEPS[i]}ms`);
+    steps[i].style.setProperty('--dur', `${overAt(i) - STEPS[i]}ms`);
     steps[i].style.setProperty('--skip', `${STEPS[i] - t}ms`);
     steps[i].classList.add('on');
     steps[i].querySelector('button')?.setAttribute('aria-current', 'step');
@@ -569,36 +584,34 @@ export function mountFlow(root: HTMLElement, options: { still: boolean; onChange
 
   /** Shows the flow as it is at `t`. It plays on from there if the visitor wants it to and the page allows it. */
   function show(t: number) {
-    timers.forEach(clearTimeout);
-    timers = [];
     const was = running;
     running = wanted && allowed;
+    if (running) fresh = false;
     at = t;
     startedAt = performance.now() - t;
+    const shown = fresh ? endOf(STILL_STEP) : t;
     if (running) picture.play(t);
-    else picture.hold(t);
-    stage.classList.remove('fade');
-    setStep(stepAt(t), t);
+    else picture.hold(shown);
+    setStep(stepAt(shown), shown);
     // Paused by the visitor, the step's bar is full. Held by the page, it stops where it is.
     root.classList.toggle('paused', !wanted);
     root.classList.toggle('held', wanted && !allowed);
     ctl.textContent = wanted ? 'Pause' : 'Play';
-    if (running) {
-      STEPS.forEach((start, i) => {
-        if (start > t) later(() => setStep(i, start), start - t);
-      });
-      later(() => stage.classList.add('fade'), END - 450 - t);
-      later(() => show(0), END - t);
-    }
     if (was !== running) options.onChange?.();
   }
 
-  // Pause shows the end of the step that was playing. Play goes on with the next step.
+  // Pause shows the end of the step that was playing. Play goes on with the next step, or starts the flow from
+  // moment 0 if it has not moved yet.
   ctl.addEventListener('click', () => {
     wanted = !wanted;
-    show(wanted ? (step < STEPS.length - 1 ? STEPS[step + 1] : 0) : endOf(step));
+    show(wanted ? (fresh || step === STEPS.length - 1 ? 0 : STEPS[step + 1]) : endOf(step));
   });
-  steps.forEach((li, i) => li.querySelector('button')?.addEventListener('click', () => show(wanted ? STEPS[i] : endOf(i))));
+  steps.forEach((li, i) =>
+    li.querySelector('button')?.addEventListener('click', () => {
+      fresh = false;
+      show(wanted ? STEPS[i] : endOf(i));
+    }),
+  );
 
   // A change of size can change the composition (across, or in one column), so the flow is drawn again at the same
   // moment. The stage keeps one size through every step, so playing never causes this.
@@ -611,7 +624,7 @@ export function mountFlow(root: HTMLElement, options: { still: boolean; onChange
   }).observe(stage);
 
   root.classList.add('live');
-  show(options.still ? endOf(STILL_STEP) : 0);
+  show(0);
 
   return {
     get running() {

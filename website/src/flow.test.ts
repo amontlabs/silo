@@ -70,22 +70,23 @@ describe('the film', () => {
   }
 
   for (const mode of ['wide', 'tall'] as const) {
-    it(`shows the same stage when held at a moment as when played up to it, in every step (${mode})`, () => {
+    it(`shows the same stage when held at a moment as when played up to it, in every step and in the fade (${mode})`, () => {
       const played = stage(mode);
       const held = stage(mode);
       const playing = film(played);
       const holding = film(held);
       playing.play(0);
+      // A frame comes every 16 ms: these moments are frames, the middle of each step and its last frame, then a
+      // moment of the fade before the film starts again.
+      const moments = STEPS.flatMap((start, i) => [start + (endOf(i) - start) / 2, endOf(i)]).concat(END - 200);
       let passed = 0;
-      for (let i = 0; i < STEPS.length; i++) {
-        // A frame comes every 16 ms: these moments are frames, the middle of a step and its last frame.
-        for (const at of [STEPS[i] + (endOf(i) - STEPS[i]) / 2, endOf(i)].map((t) => Math.floor(t / 16) * 16)) {
-          vi.advanceTimersByTime(at - passed);
-          passed = at;
-          holding.hold(at);
-          expect(played.innerHTML, `${mode} at ${at}`).toBe(held.innerHTML);
-        }
+      for (const at of moments.map((t) => Math.floor(t / 16) * 16)) {
+        vi.advanceTimersByTime(at - passed);
+        passed = at;
+        holding.hold(at);
+        expect(played.outerHTML, `${mode} at ${at}`).toBe(held.outerHTML);
       }
+      expect(Number(held.querySelector<HTMLElement>('.scene')!.style.getPropertyValue('--o'))).toBeLessThan(1);
       // At its end the film stops drawing until it is played again.
       vi.advanceTimersByTime(END);
       expect(vi.getTimerCount()).toBe(0);
