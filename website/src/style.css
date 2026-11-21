@@ -1,4 +1,8 @@
-/* The home page. Type sizes: 14 (interface), 17 (reading), 40 (headline), plus the wordmark. */
+/* The home page. Type sizes: 12 (mono labels), 14 (interface), 17 (reading), 20 (a card), 22 (section titles), 40 (headline), plus the wordmark. */
+.title {
+  font: italic 22px/1.3 var(--serif);
+  letter-spacing: -0.4px;
+}
 
 /* On a window taller than the page, the hero takes what main has left over (site.css). */
 .hero {
@@ -63,6 +67,16 @@
 }
 .pitch span {
   display: block;
+}
+/* While a picture is put at a moment in one go, nothing in it animates. */
+.jump,
+.jump * {
+  transition: none !important;
+  animation: none !important;
+}
+/* Until their script has drawn them, the pictures stay hidden, with their room kept. */
+.pictures-pending .mini {
+  visibility: hidden;
 }
 /* The notice: where Silo stands, under the same three columns as the points */
 .notice {
