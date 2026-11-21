@@ -10,5 +10,6 @@
   "suggest": {
     "verdict": "take",
     "why": "It is the taken answer of classifier-spend with its subject corrected."
-  }
+  },
+  "verdict": "take"
 }
