@@ -4,7 +4,7 @@
 //   node scripts/workshop-dev.mjs [--port 4174]          against GitHub, from WORKSHOP_* variables
 // Run `npm run build` first. The site's origin is http://127.0.0.1:<port>.
 import { createReadStream } from 'node:fs';
-import { realpath, stat } from 'node:fs/promises';
+import { lstat, realpath, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -45,12 +45,14 @@ export async function staticFile(distDir, pathname) {
   return (await file(target)) || file(join(target, 'index.html'));
 }
 
-// Whether `path`, a file staticFile gives, is really served from distDir/films/: its normalised path is under
-// it, letter for letter, and so is its real path. Only such a file may be framed (FILM_FRAME_HEADERS).
+// Whether `path`, a file staticFile gives, is really served from distDir/films/: distDir/films is a plain
+// folder (a link there gives no file the looser rule), the file's normalised path is under it letter for
+// letter, and so is its real path. Only such a file may be framed (FILM_FRAME_HEADERS).
 export async function servedFromFilms(distDir, path) {
   const films = join(distDir, 'films');
   if (!normalize(path).startsWith(films + sep)) return false;
   try {
+    if (!(await lstat(films)).isDirectory()) return false;
     const [real, realFilms] = await Promise.all([realpath(path), realpath(films)]);
     return real.startsWith(realFilms + sep);
   } catch {

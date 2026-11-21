@@ -100,8 +100,9 @@ function holdsFilm(path) {
 
 /**
  * The films of `filmsDir`, by name: each folder directly under it that holds a film.json, an explainer.js or a
- * voice.json. A link in place of such a folder stops the build, so a film cannot drop out of the site unseen.
- * No folder, no film.
+ * voice.json. films/ must be a plain folder, and any link directly under it stops the build, whatever it leads
+ * to, so a film cannot drop out of the site unseen; a name that starts with a dot, which tools leave there, is
+ * passed over. No folder, no film.
  */
 export function filmIds(filmsDir = defaultFilmsDir()) {
   let stat;
@@ -110,12 +111,13 @@ export function filmIds(filmsDir = defaultFilmsDir()) {
   } catch {
     return [];
   }
-  if (!stat.isDirectory()) return [];
+  if (stat.isSymbolicLink()) throw problem('films', '(folder)', 'is a link', 'make films/ a plain folder: the site publishes nothing a link leads to');
+  if (!stat.isDirectory()) throw problem('films', '(folder)', 'is not a folder', 'make films/ a plain folder');
   const ids = [];
   for (const entry of readdirSync(filmsDir, { withFileTypes: true })) {
-    if (!(entry.isDirectory() || entry.isSymbolicLink()) || !holdsFilm(join(filmsDir, entry.name))) continue;
-    if (entry.isSymbolicLink()) throw problem(`films/${entry.name}`, '(folder)', 'is a link to a film', 'make the film a plain folder directly under films/: the site publishes nothing a link leads to');
-    ids.push(entry.name);
+    if (entry.name.startsWith('.')) continue;
+    if (entry.isSymbolicLink()) throw problem(`films/${entry.name}`, '(folder)', 'is a link', `make films/${entry.name} a plain folder or file, or remove it: the site publishes nothing a link leads to`);
+    if (entry.isDirectory() && holdsFilm(join(filmsDir, entry.name))) ids.push(entry.name);
   }
   return ids.sort();
 }
@@ -144,7 +146,7 @@ export function readFilm(filmsDir, id) {
   } catch {
     throw problem(shown, '(folder)', 'does not exist', `make the film's folder directly under films/, or leave ${id} out`);
   }
-  if (stat.isSymbolicLink()) throw problem(shown, '(folder)', 'is a link to a film', 'make the film a plain folder directly under films/: the site publishes nothing a link leads to');
+  if (stat.isSymbolicLink()) throw problem(shown, '(folder)', 'is a link', `make films/${id} a plain folder or file, or remove it: the site publishes nothing a link leads to`);
   if (!stat.isDirectory()) throw problem(shown, '(folder)', 'is not a folder', 'keep each film as a plain folder directly under films/');
   if (!ID.test(id) || id === PLAYER) throw problem(shown, '(folder)', `"${id}" cannot be a film's address`, `name the folder with lowercase letters, digits and dashes, and not "${PLAYER}"`);
   const film = readJson(filmsDir, `${id}/film.json`);

@@ -1205,7 +1205,10 @@ voice without a scene or without a field the player reads
 (`films/player/voice.js`: the voice's `id` and `label`, each scene's `total`
 and `sentences`, each sentence's `text`, `start`, `length` and `file`), or a
 clip that is missing or is not named `voice/<name>.mp3`. A link in place of a
-film's folder or of any of its files stops the build too.
+film's folder or of any of its files stops the build too. So does `films/`
+itself as a link, and any link directly under `films/`, whatever it leads to
+and whether it leads anywhere; only a name that starts with a dot, which tools
+leave there, is passed over.
 
 The build follows no link. For each file it reads or copies (a shared file,
 the page template `films/player/page.html`, a film's file or clip), every
@@ -1227,7 +1230,10 @@ The local server (`workshop-dev.mjs`) serves the films from `dist/` and gives
 the looser headers only to a file it really serves from `dist/films/`: it
 chooses them from the file's path once the address is decoded and normalised,
 not from the address as typed. So `/films/..%2findex.html` (the home page),
-`/FILMS/<id>/`, a 404 and an error keep the strict headers. The dev server
+`/FILMS/<id>/`, a 404 and an error keep the strict headers, and so does every
+file when `dist/films` is a link. Vercel gives the film's rule to every path
+under `/films/`, one that leads to no file included; that 404 can then be
+framed only by the site itself, so nothing is exposed. The dev server
 serves the same files at the same addresses, read from `films/` on each
 request, and answers 400 to a malformed `%` escape under `/films/`; like
 `vite preview`, it sets no frame header on any page.

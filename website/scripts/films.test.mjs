@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defaultFilmsDir, FilmError, filmFileFor, filmFiles, filmIds, readFilm, writeFilms } from './films.mjs';
@@ -97,7 +97,11 @@ test('a link on the way to any file the build reads is refused, naming the file 
       const out = join(root, 'dist');
       await assert.rejects(writeFilms(out, films), (error) => {
         assert.ok(error instanceof FilmError, linked);
-        assert.equal(error.message, `${file}: (file): is reached through a link, films/${linked}. Fix: make films/${linked} a plain ${kind}: the site publishes nothing a link leads to`);
+        // A link directly under films/ is refused before any file is read through it.
+        const expected = linked.includes('/')
+          ? `${file}: (file): is reached through a link, films/${linked}. Fix: make films/${linked} a plain ${kind}: the site publishes nothing a link leads to`
+          : `films/${linked}: (folder): is a link. Fix: make films/${linked} a plain folder or file, or remove it: the site publishes nothing a link leads to`;
+        assert.equal(error.message, expected);
         return true;
       });
       assert.ok(!existsSync(out), linked);
@@ -117,24 +121,42 @@ test('a shared file missing from the fixed list stops the build: a licence text 
   }
 });
 
-test('a folder that holds none of a film\'s files is not a film; a link to a film stops the build', () => {
+test('a folder that holds none of a film\'s files is not a film; any link directly under films/ stops the build', () => {
   const { root, films, put } = made();
   try {
     assert.deepEqual(filmIds(films), ['tiny']);
     assert.throws(() => readFilm(films, 'tools'), (error) => error instanceof FilmError && error.message === 'films/tools/film.json: (file): is missing. Fix: write film.json as films/README.md says, or move the folder out of films/');
     assert.throws(() => readFilm(films, 'nowhere'), /^Error: films\/nowhere: \(folder\): does not exist/);
-    // A link in place of a film's folder: the film would vanish from the site, so the build stops.
-    symlinkSync(join(films, 'tiny'), join(films, 'linked'));
-    const linked = 'films/linked: (folder): is a link to a film. Fix: make the film a plain folder directly under films/: the site publishes nothing a link leads to';
-    assert.throws(() => filmIds(films), (error) => error instanceof FilmError && error.message === linked);
-    assert.throws(() => readFilm(films, 'linked'), (error) => error instanceof FilmError && error.message === linked);
-    unlinkSync(join(films, 'linked'));
-    // A link to a folder that holds no film's file is not a film.
-    symlinkSync(join(films, 'tools'), join(films, 'other'));
+    // Any link directly under films/ stops the build, whatever it leads to: a film, an empty folder, nothing.
+    mkdirSync(join(root, 'empty'));
+    for (const [name, target] of [['linked', join(films, 'tiny')], ['to-empty', join(root, 'empty')], ['dangling', join(root, 'nowhere')]]) {
+      symlinkSync(target, join(films, name));
+      const message = `films/${name}: (folder): is a link. Fix: make films/${name} a plain folder or file, or remove it: the site publishes nothing a link leads to`;
+      assert.throws(() => filmIds(films), (error) => error instanceof FilmError && error.message === message, name);
+      assert.throws(() => readFilm(films, name), (error) => error instanceof FilmError && error.message === message, name);
+      unlinkSync(join(films, name));
+    }
+    // A name that starts with a dot is passed over, link or not.
+    symlinkSync(join(root, 'nowhere'), join(films, '.cache'));
     assert.deepEqual(filmIds(films), ['tiny']);
     // The shared player's folder cannot be a film's address.
     put('player/film.json', JSON.stringify({ id: 'player', title: 'Player' }));
     assert.throws(() => filmFiles(films), /films\/player: \(folder\): "player" cannot be a film's address/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('films/ itself as a link stops the build, naming it', async () => {
+  const { root, films } = made();
+  try {
+    const real = join(root, 'real-films');
+    renameSync(films, real);
+    symlinkSync(real, films);
+    const message = 'films: (folder): is a link. Fix: make films/ a plain folder: the site publishes nothing a link leads to';
+    assert.throws(() => filmIds(films), (error) => error instanceof FilmError && error.message === message);
+    await assert.rejects(writeFilms(join(root, 'dist'), films), (error) => error instanceof FilmError && error.message === message);
+    assert.ok(!existsSync(join(root, 'dist')));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

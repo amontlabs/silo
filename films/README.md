@@ -290,7 +290,8 @@ clips it names, each `voice/<name>.mp3`. These are loaded as files, not inlined.
 a film whose files are not complete, with the film, the file and the fix: a clip missing from
 `voice/` is fixed by `tools/voice.py <id>`. A folder that holds a `film.json`, an `explainer.js` or a
 `voice.json` is a film to the site, and must hold all three. It follows no link: a folder or a file of `films/` that
-is a link, on the way to a file it reads, stops it too.
+is a link, on the way to a file it reads, stops it too, and so does `films/` as a link or any link
+directly under it (a name that starts with a dot excepted).
 
 So after a film changes, nothing in `films/` is to be built for the site: commit the film's files
 (the clips of `voice/` included), and the next build of the site plays it. To see it locally, run

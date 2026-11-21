@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createPublicKey, createPrivateKey, generateKeyPairSync, randomBytes, verify } from 'node:crypto';
-import { cp, lstat, mkdir, mkdtemp, readFile, readlink, readdir, rm, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, mkdtemp, readFile, readlink, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { connect as netConnect, createServer } from 'node:net';
 import { createRequire } from 'node:module';
 import { get as httpGet } from 'node:http';
@@ -1288,6 +1288,26 @@ test('the local server lets only a file it really serves from dist/films/ be fra
     const post = await fetch(`${dev.origin}/films/tiny/`, { method: 'POST' });
     assert.equal(post.status, 405);
     assert.equal(post.headers.get('x-frame-options'), 'DENY');
+  } finally {
+    await dev.close();
+    await rm(site, { recursive: true, force: true });
+  }
+});
+
+test('the local server gives no file the looser headers when dist/films is a link', async () => {
+  const site = await fixtureSite(undefined, { plan: true });
+  // dist/films leads to a folder outside dist/ that holds a film's page.
+  await mkdir(join(site, 'elsewhere', 'tiny'), { recursive: true });
+  await writeFile(join(site, 'elsewhere', 'tiny', 'index.html'), '<!doctype html><title>Tiny</title>');
+  await symlink(join(site, 'elsewhere'), join(site, 'dist', 'films'));
+  const dev = await startDev({ fake: true, port: await freePort(), distDir: join(site, 'dist'), planDir: join(site, 'plan'), log: () => {} });
+  try {
+    for (const path of ['/films/tiny/', '/films/tiny/index.html']) {
+      const response = await fetch(dev.origin + path);
+      assert.equal(response.status, 200, path);
+      assert.equal(response.headers.get('content-security-policy'), "frame-ancestors 'none'", path);
+      assert.equal(response.headers.get('x-frame-options'), 'DENY', path);
+    }
   } finally {
     await dev.close();
     await rm(site, { recursive: true, force: true });
