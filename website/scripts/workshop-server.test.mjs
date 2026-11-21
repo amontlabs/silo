@@ -105,7 +105,9 @@ test('a hung or failing token refresh answers 502 and keeps the session; only an
     };
     let settled = false;
     const pending = c.call('GET', 'vote?n=1').then((response) => { settled = true; return response; });
-    await arrived;
+    // Whichever comes first: the refresh reaching GitHub, or the vote ending without one, which is a failure.
+    const first = await Promise.race([arrived.then(() => 'refresh'), pending.then((response) => `the vote settled with ${response.status}`)]);
+    assert.equal(first, 'refresh', `the refresh did not reach GitHub: ${first}`);
     const other = await t.client().call('GET', 'state');
     assert.equal(other.status, 200);
     assert.equal(settled, false, 'other requests are not held by the refresh');

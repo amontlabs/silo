@@ -29,9 +29,9 @@ export const PLAN_ENTRIES = [
   { id: 'share-link', kind: 'feature', title: 'Share a computer with a link', part: 'computers', suggestedIn: 6 },
 ];
 
-// `cuttable(path, body)` picks the calls the test can cut with `cut()`: each fails, while it is in flight, as a call
-// that timed out does. No clock decides it, so a busy machine cannot cut a call early or late; every other call
-// keeps the workshop's own limit.
+// `cuttable(path, body)` picks the calls the test holds: each is cut by `cut()` alone, failing as a call that timed
+// out does. No limit of the workshop's runs on such a call, and no clock of any kind, so a busy machine can neither
+// cut it early nor leave it uncut; every other call keeps the workshop's own limit.
 export async function setup({ configured = true, seed = true, cuttable, entries = PLAN_ENTRIES } = {}) {
   const clock = { t: START };
   const now = () => clock.t;
@@ -49,7 +49,7 @@ export async function setup({ configured = true, seed = true, cuttable, entries 
         const abort = new AbortController();
         cutting.add(abort);
         try {
-          return await fetch(url, { ...init, signal: AbortSignal.any([init.signal, abort.signal]) });
+          return await fetch(url, { ...init, signal: abort.signal });
         } finally {
           cutting.delete(abort);
         }
