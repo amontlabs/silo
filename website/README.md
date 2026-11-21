@@ -710,12 +710,15 @@ What a person sees:
   that part's place too. An entry a film shows has the film's mark after its
   name ("Has a film"), and an opened row shows the film first, with its title,
   its line and its number of entries, which lists them in All. A film is behind
-  when a commit that is not a merge and comes after the last one that touched the
-  film's folder (in the order of the commits, not their times) changed what the
-  Workshop prints of an entry it shows: its question or name, its answer or what,
-  the ids or the texts of the statements it sets or added, what it removes, what it
-  keeps, its surfaces; or dropped, replaced or deleted it (`readFilms` and
-  `printedChanged` in `data.ts`). A take alone changes none of these. A
+  when what the Workshop prints of an entry it shows is different now from what
+  it was at the film's last commit that is not a merge: its question or name, its
+  answer or what, the ids of the statements it sets or added and the texts of
+  those it sets, what it removes, what it keeps, its surfaces; or it was dropped,
+  replaced or deleted (`readFilms` and `printedChanged` in `data.ts`). The two
+  ends are compared, not the commits between them, so a change undone since does
+  not count; an entry is found by its id wherever its file is, and one that did not
+  exist at the film's commit makes the film behind. A take alone changes none of
+  these. A
   film behind has its frame dashed, on its control and on that entry's mark
   ("Film is behind the plan").
 - A film plays in a frame of its own page, `/films/<id>/?in=workshop`, loaded

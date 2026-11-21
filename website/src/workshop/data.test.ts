@@ -800,36 +800,47 @@ describe('the films', () => {
     // A take writes the ids of `sets` as `adds` and deletes `sets` and `removes`: the same statements stand.
     expect(printedChanged(entry({ sets: [set], removes: ['scrap'] }), entry({ adds: ['twin'], verdict: 'take' }))).toBe(false);
     expect(printedChanged(entry({ sets: [set] }), entry({ adds: ['twin', 'more'], verdict: 'take' }))).toBe(true);
+    // A word of `sets` has no id: it is named by its word, as the lists name it.
+    expect(printedChanged(entry({ sets: [{ in: 'words', word: 'Pause point', means: 'A stop.' }] }), entry({ adds: ['pause-point'], verdict: 'take' }))).toBe(false);
   });
 
-  it('count the commits after the film\'s last one in their order, two in the same second told apart, and none from a history cut short', () => {
+  it('compare what an entry says now with what it said at the film\'s last commit: a change undone does not count, a moved file is the same entry, a new one counts', () => {
     const root = mkdtempSync(join(tmpdir(), 'workshop-films-'));
-    const git = (args: string[]) => execFileSync('git', ['-C', root, ...args], { env: { ...process.env, GIT_AUTHOR_DATE: '2026-11-20T12:00:00Z', GIT_COMMITTER_DATE: '2026-11-20T12:00:00Z', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }, stdio: 'ignore' });
+    const git = (args: string[]) => execFileSync('git', ['-C', root, ...args], { env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }, stdio: 'ignore' });
     const write = (path: string, text: string) => {
       mkdirSync(dirname(join(root, path)), { recursive: true });
       writeFileSync(join(root, path), text);
     };
     try {
       git(['init', '-q', '-b', 'main']);
-      write('plan/p/features/early.json', entry({ name: 'Early' }));
-      write('plan/p/features/late.json', entry({ name: 'Late' }));
-      write('plan/p/features/taken.json', entry({ name: 'Taken' }));
+      for (const id of ['undone', 'changed', 'moved', 'taken']) write(`plan/p/features/${id}.json`, entry({ name: id }));
+      // A film shows statements too: `least-power` is a principle, an entry at neither end.
+      write('films/one/film.json', JSON.stringify({ id: 'one', title: 'One', line: 'L.', shows: ['undone', 'changed', 'moved', 'taken', 'new', 'least-power'] }));
       git(['add', '.']);
-      git(['commit', '-q', '-m', 'plan']);
-      write('plan/p/features/early.json', entry({ name: 'Early, changed before the film' }));
-      git(['commit', '-q', '-am', 'before']);
-      write('films/one/film.json', JSON.stringify({ id: 'one', title: 'One', line: 'L.', shows: ['early', 'late', 'taken'] }));
+      git(['commit', '-q', '-m', 'the film']);
+      // On a side branch, a change made and undone; merged.
+      git(['checkout', '-q', '-b', 'side']);
+      write('plan/p/features/undone.json', entry({ name: 'undone, for a while' }));
+      git(['commit', '-q', '-am', 'change']);
+      write('plan/p/features/undone.json', entry({ name: 'undone' }));
+      git(['commit', '-q', '-am', 'undo']);
+      git(['checkout', '-q', 'main']);
+      git(['merge', '-q', '--no-ff', '-m', 'merge', 'side']);
+      write('plan/p/features/changed.json', entry({ name: 'changed since' }));
+      mkdirSync(join(root, 'plan/q/features'), { recursive: true });
+      git(['mv', 'plan/p/features/moved.json', 'plan/q/features/moved.json']);
+      write('plan/p/features/taken.json', entry({ name: 'taken', verdict: 'take' }));
+      write('plan/p/features/new.json', entry({ name: 'new' }));
       git(['add', '.']);
-      git(['commit', '-q', '-m', 'film']);
-      // The same second as the film's commit: told apart by their order.
-      write('plan/p/features/late.json', entry({ name: 'Late, changed after the film' }));
-      write('plan/p/features/taken.json', entry({ name: 'Taken', verdict: 'take' }));
       git(['commit', '-q', '-am', 'after']);
-      expect(readFilms(root, false)).toEqual([{ id: 'one', title: 'One', line: 'L.', shows: ['early', 'late', 'taken'], behind: ['late'] }]);
+      expect(readFilms(root, false)).toEqual([{ id: 'one', title: 'One', line: 'L.', shows: ['undone', 'changed', 'moved', 'taken', 'new', 'least-power'], behind: ['changed', 'new'] }]);
       expect(readFilms(root, true)[0].behind).toEqual([]);
+      // A commit git cannot read says nothing.
+      expect(readFilms(root, false, () => 'f'.repeat(40))[0].behind).toEqual([]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
 
 });

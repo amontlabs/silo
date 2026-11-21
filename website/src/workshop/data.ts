@@ -373,17 +373,21 @@ function setOrAdded(entry: EntryFile): Map<string, string | null> {
   const statements = new Map<string, string | null>();
   for (const id of list(entry.adds)) statements.set(id, null);
   if (Array.isArray(entry.sets)) {
-    for (const item of entry.sets as Record<string, unknown>[]) if (typeof item?.id === 'string') statements.set(item.id, JSON.stringify(item));
+    // A word is named by its word, as the lists name it (`wordId`); a principle or a property by its id.
+    for (const item of entry.sets as Record<string, unknown>[]) {
+      const id = typeof item?.id === 'string' ? item.id : typeof item?.word === 'string' ? wordId(item.word) : null;
+      if (id) statements.set(id, JSON.stringify(item));
+    }
   }
   return statements;
 }
 
 /**
- * Whether an entry file, before and after a commit, changed in what the Workshop prints of it: its question or name,
+ * Whether an entry file, at two moments, differs in what the Workshop prints of it: its question or name,
  * its answer or what, the ids or the texts of the statements it sets or added, what it removes, what it keeps, its
  * surfaces; or it was dropped, replaced or deleted. A take alone changes none of these: it writes the ids of `sets` as
  * `adds` and deletes `sets` and `removes`, so the same statements stand, by id, and the texts are compared where both
- * sides hold them. A file that did not exist before is new, not changed.
+ * sides hold them. A file that did not exist before is new, not changed; one that no longer exists has changed.
  */
 export function printedChanged(before: string | null, after: string | null): boolean {
   if (before === null) return false;
@@ -410,52 +414,55 @@ export function printedChanged(before: string | null, after: string | null): boo
   return [...a].some(([id, text]) => text !== null && b.get(id) !== null && b.get(id) !== text);
 }
 
-/** One change of an entry's file in a commit that is not a merge: its text before and after (null where the file did not exist). */
-export interface FileChange {
-  id: string;
-  before: string | null;
-  after: string | null;
+/** The id of the entry a file of plan/ holds, from its path (`<part>/decisions/<id>.json`, `decisions/<id>.json`, …). */
+const entryIdOf = (path: string): string | null => /(?:^|\/)(?:decisions|features)\/([^/]+)\.json$/.exec(path)?.[1] ?? null;
+
+/** The files of the entries `ids` as they were at `commit`, by id, found by their id wherever they were; null when git cannot say. */
+export function entriesAt(repository: string, commit: string, ids: ReadonlySet<string>): Map<string, string> | null {
+  const git = (args: string[], input?: string) => execFileSync('git', ['-C', repository, ...args], { input, maxBuffer: 512 * 1024 * 1024, timeout: 120_000, stdio: ['pipe', 'pipe', 'ignore'] });
+  const found = new Map<string, string>();
+  try {
+    const oids = new Map<string, string>();
+    for (const line of git(['ls-tree', '-r', '-z', commit, '--', PLAN_DIR]).toString('utf8').split('\0')) {
+      const [meta, path] = line.split('\t');
+      const id = path ? entryIdOf(path) : null;
+      if (id && ids.has(id)) oids.set(meta.split(' ')[2], id);
+    }
+    if (!oids.size) return found;
+    const out = git(['cat-file', '--batch'], [...oids.keys()].map((oid) => `${oid}\n`).join(''));
+    let at = 0;
+    for (const [oid, id] of oids) {
+      const end = out.indexOf(10, at);
+      if (end === -1) break;
+      const [, type, size] = out.subarray(at, end).toString().split(' ');
+      if (type === 'missing') {
+        at = end + 1;
+        continue;
+      }
+      found.set(id, out.subarray(end + 1, end + 1 + Number(size)).toString('utf8'));
+      at = end + 1 + Number(size) + 1;
+    }
+  } catch {
+    return null;
+  }
+  return found;
 }
 
-/** The changes to the files of `ids` under plan/ in the commits that are not merges and come after `commit` (`commit..HEAD`), oldest last. */
-export function entryFileChanges(repository: string, commit: string, ids: ReadonlySet<string>): FileChange[] {
-  const git = (args: string[], input?: string) => execFileSync('git', ['-C', repository, ...args], { input, maxBuffer: 512 * 1024 * 1024, timeout: 120_000, stdio: ['pipe', 'pipe', 'ignore'] });
-  try {
-    const log = git(['log', '--no-merges', '--raw', '-z', '--no-abbrev', '--no-renames', '--format=%x01%H', `${commit}..HEAD`, '--', PLAN_DIR]).toString('utf8');
-    const found: { id: string; old: string; now: string }[] = [];
-    const tokens = log.split('\0');
-    for (let i = 0; i < tokens.length; i += 1) {
-      let token = tokens[i].replace(/^\n/, '');
-      const head = token.indexOf('\x01');
-      if (head !== -1) token = token.slice(head + 1).replace(/^[0-9a-f]+\s*/, '');
-      if (!token.startsWith(':')) continue;
-      const [, , old, now] = token.slice(1).split(' ');
-      const path = tokens[(i += 1)] ?? '';
-      const id = /(?:^|\/)(?:decisions|features)\/([^/]+)\.json$/.exec(path)?.[1];
-      if (id && ids.has(id)) found.push({ id, old, now });
-    }
-    const none = (oid: string) => /^0+$/.test(oid);
-    const blobs = new Map<string, string>();
-    const oids = [...new Set(found.flatMap(({ old, now }) => [old, now]).filter((oid) => !none(oid)))];
-    if (oids.length) {
-      const out = git(['cat-file', '--batch'], oids.map((oid) => `${oid}\n`).join(''));
-      let at = 0;
-      for (const oid of oids) {
-        const end = out.indexOf(10, at);
-        if (end === -1) break;
-        const [, type, size] = out.subarray(at, end).toString().split(' ');
-        if (type === 'missing') {
-          at = end + 1;
-          continue;
-        }
-        blobs.set(oid, out.subarray(end + 1, end + 1 + Number(size)).toString('utf8'));
-        at = end + 1 + Number(size) + 1;
+/** The files of the entries `ids` as plan/ holds them now, by id, wherever they are. */
+export function entriesNow(dir: string, ids: ReadonlySet<string>): Map<string, string> {
+  const found = new Map<string, string>();
+  const walk = (folder: string) => {
+    for (const entry of readdirSync(folder, { withFileTypes: true })) {
+      const path = join(folder, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else {
+        const id = entryIdOf(path);
+        if (id && ids.has(id)) found.set(id, readFileSync(path, 'utf8'));
       }
     }
-    return found.map(({ id, old, now }) => ({ id, before: none(old) ? null : blobs.get(old) ?? null, after: none(now) ? null : blobs.get(now) ?? null }));
-  } catch {
-    return [];
-  }
+  };
+  if (existsSync(dir)) walk(dir);
+  return found;
 }
 
 /** The last commit that is not a merge and touched a folder of the repository; null when git cannot say. */
@@ -469,15 +476,19 @@ function folderCommit(repository: string, folder: string): string | null {
 
 /**
  * The films of `repository`: each real folder directly under films/ that holds a film.json, in the order films/README.md
- * gives (one it does not name comes after, by id). A film is behind on an entry it shows when a commit that is not a
- * merge and comes after the film's last one (in the order of the commits, not their times) changed what the Workshop
- * prints of that entry (`printedChanged`). A shallow history says nothing is behind.
+ * gives (one it does not name comes after, by id). A film is behind on an entry it shows when what the Workshop prints of
+ * that entry (`printedChanged`) is different now from what it was at the film's last commit that is not a merge: the two
+ * ends are compared, so a change undone since does not count, and an entry is found by its id wherever its file is. An
+ * entry that did not exist at the film's commit makes the film behind; an id that is an entry at neither end (a film also
+ * shows statements of the lists) is not looked at. A shallow history, a film git knows no commit
+ * of, or a commit git cannot read, says nothing is behind.
  */
 export function readFilms(
   repository: string,
   shallow: boolean,
   lastCommit: (folder: string) => string | null = (folder) => folderCommit(repository, folder),
-  changesAfter: (commit: string, ids: ReadonlySet<string>) => FileChange[] = (commit, ids) => entryFileChanges(repository, commit, ids),
+  atCommit: (commit: string, ids: ReadonlySet<string>) => Map<string, string> | null = (commit, ids) => entriesAt(repository, commit, ids),
+  now: (ids: ReadonlySet<string>) => Map<string, string> = (ids) => entriesNow(join(repository, PLAN_DIR), ids),
 ): FilmInfo[] {
   const dir = join(repository, 'films');
   if (!existsSync(dir)) return [];
@@ -488,8 +499,14 @@ export function readFilms(
     const raw = JSON.parse(readFileSync(file, 'utf8')) as { title?: unknown; line?: unknown; shows?: unknown };
     const shows = list(raw.shows);
     const commit = shallow ? null : lastCommit(`films/${name}`);
-    const changes = commit ? changesAfter(commit, new Set(shows)) : [];
-    const behind = shows.filter((id) => changes.some((change) => change.id === id && printedChanged(change.before, change.after)));
+    let behind: string[] = [];
+    if (commit) {
+      const ids = new Set(shows);
+      const then = atCommit(commit, ids);
+      const current = now(ids);
+      // A film shows statements too (a principle, a property, a word): an id that is an entry at neither end is none.
+      if (then) behind = shows.filter((id) => (then.has(id) || current.has(id)) && (!then.has(id) || printedChanged(then.get(id)!, current.get(id) ?? null)));
+    }
     films.push({ id: name, title: typeof raw.title === 'string' ? raw.title : name, line: typeof raw.line === 'string' ? raw.line : '', shows, behind });
   }
   const readme = join(dir, 'README.md');
