@@ -179,6 +179,10 @@ the whole product.
 A part may have the same id as the word it is about (`record`, `boundary`, `engine`). `plan show`
 on that id prints the part, with the word's meaning.
 
+When a part's `line` changes, look at its place on the Workshop's map in
+`website/src/workshop/map.ts`; the site's build stops on what it can check there, such as a title
+wider than its box or a wire that rests on a decision no longer in force.
+
 ## Working on the plan
 
 - Before you add an entry, search `plan/` for one that asks the same thing. When an entry with no

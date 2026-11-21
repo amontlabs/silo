@@ -22,10 +22,11 @@ export const SERIF_WIDTHS: Record<string, number> = {
 export const MONO_ADVANCE = 600;
 
 /**
- * The map's width in pixels at the two ends of the windows where it shows. It shows from a 1200 px window up; the page
- * frame is at most 1136 px wide with a 1 px line on each side, and below a 1220 px window it keeps 40 px on each side.
+ * The map's width in pixels at the two ends of the windows where it shows. It shows from a 1200 px window up, less a
+ * scroll bar where the system draws one (up to 17 px); the page frame is at most 1136 px wide with a 1 px line on each
+ * side, and below a 1220 px window it keeps 40 px on each side.
  */
-export const MAP_PIXELS = { narrowest: 1200 - 2 * 40 - 2, widest: 1136 - 2 } as const;
+export const MAP_PIXELS = { narrowest: 1200 - 17 - 2 * 40 - 2, widest: 1136 - 2 } as const;
 
 /** The paper a line keeps between its end and the box's right border, in map units: under 3 the end touches the border. */
 export const RIGHT_ROOM = 3;

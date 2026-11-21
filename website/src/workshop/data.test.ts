@@ -462,6 +462,23 @@ describe('the map layout', () => {
       }
     });
 
+    it(`moves no part of ${name} across another, or across the text that is not a part, while it folds`, () => {
+      // Every box moves from its full place to its folded one in the same time with the same easing: at each step t
+      // of the move it sits at full + t * (fold - full). A part inside another overlaps that one by design.
+      const at = (from: Box, to: Box, t: number) => from.map((value, index) => value + t * (to[index] - value)) as Box;
+      const hit = (a: Box, b: Box) => a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3];
+      const boxes = [
+        ...Object.entries(layout.places).filter(([, place]) => !place.inner).map(([id, place]) => [id, place.full, place.fold] as const),
+        ...layout.notes.map((note) => [`the text ${note.title}`, note.full, note.fold] as const),
+      ];
+      const crossings = new Set<string>();
+      for (let step = 0; step <= 100; step += 1) {
+        const t = step / 100;
+        boxes.forEach(([a, af, ac], index) => boxes.slice(index + 1).forEach(([b, bf, bc]) => { if (hit(at(af, ac, t), at(bf, bc, t))) crossings.add(`${a} and ${b}`); }));
+      }
+      expect([...crossings]).toEqual([]);
+    });
+
     it(`keeps the parts of ${name} clear of each other, of the text that is not a part and of the zones' labels, full and folded`, () => {
       const hit = (a: Box, b: Box) => a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3];
       // A zone's label sits on its top edge, 14 units in, about 120 wide and 16 high.

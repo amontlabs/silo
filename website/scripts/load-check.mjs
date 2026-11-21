@@ -363,7 +363,9 @@ async function sideways(browser, url, part, mapped) {
   });
   const left = () => page.evaluate(() => Math.round(document.querySelector('.page-shell').getBoundingClientRect().left));
   const plain = await left();
-  await page.locator(mapped ? `.ws-part[data-part="${part}"]` : `.ws-tile[data-part="${part}"] .ws-tile-hit`).click();
+  // A map's part is pressed on its title, near its top left corner: a part drawn inside another covers the middle of that one.
+  if (mapped) await page.locator(`.ws-part[data-part="${part}"]`).click({ position: { x: 12, y: 12 } });
+  else await page.locator(`.ws-tile[data-part="${part}"] .ws-tile-hit`).click();
   await wait(1500);
   const opened = await left();
   await page.locator('.ws-back').click();

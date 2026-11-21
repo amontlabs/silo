@@ -108,14 +108,15 @@ export const SILO_MAP: MapLayout = {
     opinions: { full: [232, 418, 204, 64], fold: [180, 136, 172, 26], ty: 13, sy: 36 },
     recipes: { full: [456, 34, 168, 48], fold: [420, 14, 132, 26], ty: 6, sy: 27 },
     computers: { full: [372, 130, 180, 128], fold: [300, 58, 216, 34] },
-    'agent-programs': { full: [388, 186, 136, 52], fold: [384, 63, 104, 24], inner: true, ty: 7, sy: 29 },
+    'agent-programs': { full: [388, 186, 136, 52], fold: [384, 63, 108, 24], inner: true, ty: 7, sy: 29 },
     'going-back': { full: [372, 298, 152, 56], fold: [300, 98, 104, 26], ty: 9, sy: 31 },
     record: { full: [480, 418, 160, 64], fold: [456, 136, 100, 26], ty: 13, sy: 36 },
     boundary: { full: [592, 162, 124, 64], fold: [532, 62, 100, 28], ty: 13, sy: 36, rests: ['word:boundary'] },
     rules: { full: [688, 418, 184, 64], fold: [580, 136, 160, 26], ty: 13, sy: 36, rests: ['where-precautions-live'] },
     traffic: { full: [744, 162, 196, 64], fold: [656, 62, 164, 28], ty: 13, sy: 36 },
-    // A low bar under the whole drawing: what holds in every part.
-    checking: { full: [24, 566, 1088, 48], fold: [872, 124, 168, 30], ty: 6, sy: 27, rests: ['properties-are-checked'] },
+    // A low bar under the whole drawing: what holds in every part. Folded, it ends where it ends on the full map, low
+    // enough that it passes under Rules and precautions on its way there.
+    checking: { full: [24, 566, 1088, 48], fold: [944, 142, 168, 26], ty: 6, sy: 27, rests: ['properties-are-checked'] },
   },
   zones: [
     { label: 'YOUR MAC', full: [24, 18, 936, 536], fold: [16, 8, 828, 164], corners: true, rests: ['who-it-is-for', 'where-it-runs'] },
