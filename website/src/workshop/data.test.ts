@@ -804,6 +804,38 @@ describe('the films', () => {
     expect(printedChanged(entry({ sets: [{ in: 'words', word: 'Pause point', means: 'A stop.' }] }), entry({ adds: ['pause-point'], verdict: 'take' }))).toBe(false);
   });
 
+  it('compare the texts of an entry\'s statements wherever they live at each end: in its sets before a take, in the lists after', () => {
+    const root = mkdtempSync(join(tmpdir(), 'workshop-films-'));
+    const git = (args: string[]) => execFileSync('git', ['-C', root, ...args], { env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }, stdio: 'ignore' });
+    const write = (path: string, text: string) => {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), text);
+    };
+    const word = (name: string, means: string) => ({ word: name, means });
+    try {
+      git(['init', '-q', '-b', 'main']);
+      write('plan/words.json', JSON.stringify([word('main', 'One computer.'), word('old', 'Taken before the film.')]));
+      write('plan/principles.json', JSON.stringify([{ id: 'least-power', says: 'Less sure, less power.', asks: 'What triggers it?' }]));
+      // Proposed at the film's commit, each with the statement it would set.
+      write('plan/p/decisions/same-text.json', entry({ asks: 'Same?', sets: [{ in: 'words', ...word('twin', 'A copy.') }] }));
+      write('plan/p/decisions/new-text.json', entry({ asks: 'New?', sets: [{ in: 'principles', id: 'first-ask', says: 'Ask first.', asks: 'Who asks?' }] }));
+      // Taken before the film: its statement lives in the lists.
+      write('plan/p/decisions/taken-before.json', entry({ asks: 'Old?', adds: ['old'], verdict: 'take' }));
+      write('films/one/film.json', JSON.stringify({ id: 'one', title: 'One', line: 'L.', shows: ['same-text', 'new-text', 'taken-before'] }));
+      git(['add', '.']);
+      git(['commit', '-q', '-m', 'the film']);
+      // Taken since: one with the text it proposed, one with a new text; and the text of the old one changed in its list.
+      write('plan/p/decisions/same-text.json', entry({ asks: 'Same?', adds: ['twin'], verdict: 'take' }));
+      write('plan/p/decisions/new-text.json', entry({ asks: 'New?', adds: ['first-ask'], verdict: 'take' }));
+      write('plan/words.json', JSON.stringify([word('main', 'One computer.'), word('old', 'Taken before the film, said again.'), word('twin', 'A copy.')]));
+      write('plan/principles.json', JSON.stringify([{ id: 'least-power', says: 'Less sure, less power.', asks: 'What triggers it?' }, { id: 'first-ask', says: 'Ask first, always.', asks: 'Who asks?' }]));
+      git(['commit', '-q', '-am', 'taken']);
+      expect(readFilms(root, false)[0].behind).toEqual(['new-text', 'taken-before']);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('find each entry at the film\'s commit by its id, two files with the same bytes included, wherever they moved since', () => {
     const root = mkdtempSync(join(tmpdir(), 'workshop-films-'));
     const git = (args: string[]) => execFileSync('git', ['-C', root, ...args], { env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }, stdio: 'ignore' });

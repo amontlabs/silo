@@ -712,13 +712,15 @@ What a person sees:
   its line and its number of entries, which lists them in All. A film is behind
   when what the Workshop prints of an entry it shows is different now from what
   it was at the film's last commit that is not a merge: its question or name, its
-  answer or what, the ids of the statements it sets or added and the texts of
-  those it sets, what it removes, what it keeps, its surfaces; or it was dropped,
+  answer or what, the ids of the statements it sets or added and their texts
+  (wherever they live at each end: in its `sets` before a take, in the plan's lists
+  after it), what it removes, what it keeps, its surfaces; or it was dropped,
   replaced or deleted (`readFilms` and `printedChanged` in `data.ts`). The two
   ends are compared, not the commits between them, so a change undone since does
-  not count; an entry is found by its id wherever its file is, and one that did not
-  exist at the film's commit makes the film behind. A take alone changes none of
-  these. A
+  not count; an entry is found by its id, its file's name, wherever its file is, and
+  one that did not exist at the film's commit makes the film behind. A take that
+  changes no text does not count; an id a film shows that is an entry at neither
+  end (a statement of the lists) is not looked at. A
   film behind has its frame dashed, on its control and on that entry's mark
   ("Film is behind the plan").
 - A film plays in a frame of its own page, `/films/<id>/?in=workshop`, loaded
