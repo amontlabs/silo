@@ -105,23 +105,38 @@
 .ws-wires.w-fold { opacity: 0; transition: opacity .1s; }
 .ws-stage.fold .ws-wires.w-full { opacity: 0; transition: opacity .1s; }
 .ws-stage.fold .ws-wires.w-fold { opacity: 1; transition: opacity .22s .24s; }
-.ws-wire path { fill: none; stroke: var(--faint); stroke-width: 1; stroke-dasharray: 2 3; transition: stroke .3s; }
+/* A wire is solid when what it draws is decided and dashed when it is not; its colour is its part's state. */
+.ws-wire path { fill: none; stroke: var(--faint); stroke-width: 1; transition: stroke .3s; }
+.ws-wire.undecided path { stroke-dasharray: 4 3; }
 .ws-wire .ah { fill: var(--faint); stroke: none; stroke-dasharray: none; transition: fill .3s; }
-/* Wire labels are text over the drawing, so they keep a readable size when the map is small. */
-.ws-wl { position: absolute; left: calc(var(--lx) * var(--u)); top: calc(var(--ly) * var(--u)); transform: translateY(-80%); font: max(12px, calc(10 * var(--u)))/1 var(--mono); color: var(--faint); white-space: nowrap; pointer-events: none; transition: opacity .1s, color .3s; }
+/* Wire labels are text over the drawing, so they keep a readable size when the map is small, and an ink that reaches 4.5:1
+   whatever the part's state and whether the wire is decided: the line says that, not the word. */
+.ws-wl { position: absolute; left: calc(var(--lx) * var(--u)); top: calc(var(--ly) * var(--u)); transform: translateY(-80%); font: max(12px, calc(10 * var(--u)))/1 var(--mono); color: var(--muted); white-space: nowrap; pointer-events: none; transition: opacity .1s, color .3s; }
 .ws-wl.mid { transform: translate(-50%, -80%); }
-.ws-wl.s-done, .ws-wl.s-next, .ws-wl.s-planned { color: var(--muted); }
 .ws-stage.fold .ws-wl { opacity: 0; }
 .ws-stage:not(.fold) .ws-wl { transition: opacity .22s .2s, color .3s; }
-.ws-wire.s-done path { stroke: var(--ink); stroke-dasharray: none; } .ws-wire.s-done .ah { fill: var(--ink); }
-.ws-wire.s-next path, .ws-wire.s-planned path { stroke: var(--muted); stroke-dasharray: none; }
+.ws-wire.s-done path { stroke: var(--ink); } .ws-wire.s-done .ah { fill: var(--ink); }
+.ws-wire.s-next path, .ws-wire.s-planned path { stroke: var(--muted); }
 .ws-wire.s-next .ah, .ws-wire.s-planned .ah { fill: var(--muted); }
 .ws-node { font-size: max(12px, calc(13 * var(--u))); line-height: 1.3; color: var(--muted); white-space: nowrap; pointer-events: none; }
 .ws-node b { display: block; font-weight: 400; color: var(--ink); }
-.ws-node span { display: block; transition: opacity .2s; }
+.ws-node span { display: block; white-space: normal; text-wrap: balance; transition: opacity .2s; }
 .ws-stage.fold .ws-node span { opacity: 0; }
+/* Not decided: the title takes the second ink, as the line under it does. The faint ink, 2.53:1 on the light ground, is
+   not for words. */
+.ws-node.undecided b { color: var(--muted); }
+/* A text with no folded place fades out as the map folds, and back in once it has unfolded. */
+.ws-stage.fold .ws-node.off-fold { opacity: 0; transition: opacity .1s; }
+.ws-stage:not(.fold) .ws-node.off-fold { transition: opacity .22s .2s; }
+/* What a solid and a dashed line mean, on the full map only. */
+.ws-mapkey { position: absolute; left: calc(var(--lx) * var(--u)); top: calc(var(--ly) * var(--u)); display: grid; gap: calc(6 * var(--u)); font: max(12px, calc(10 * var(--u)))/1.2 var(--mono); color: var(--muted); white-space: nowrap; pointer-events: none; transition: opacity .22s .2s; }
+.ws-mapkey span { display: flex; align-items: center; gap: calc(7 * var(--u)); }
+.ws-mapkey svg { flex: none; width: calc(24 * var(--u)); height: calc(2 * var(--u)); overflow: visible; }
+.ws-mapkey path { stroke: var(--muted); }
+.ws-stage.fold .ws-mapkey { opacity: 0; transition: opacity .1s; }
 .ws-ghost { border: 1px dashed var(--faint); border-radius: 3px; background: var(--paper); opacity: .6; pointer-events: none; }
 .ws-ghost.s-done, .ws-ghost.s-next, .ws-ghost.s-planned { border-style: solid; border-color: var(--muted); }
+.ws-zone.undecided { border-style: dashed; }
 .ws-stage.fold .ws-ghost { opacity: 0; }
 
 .ws .ws-part { --g: var(--faint); border: 1px dashed var(--faint); border-radius: 3px; background: var(--paper); color: var(--muted); z-index: 1; cursor: pointer; }

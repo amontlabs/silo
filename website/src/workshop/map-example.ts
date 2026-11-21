@@ -1,11 +1,13 @@
 // An example of a map layout, not Silo's plan. Its five parts and their names are made up; they show how the parts
 // of plan/parts.json become places and wires on the map, and every kind of thing a layout can hold: a tall part with
-// a glyph, a part inside another, copies stacked behind a part, a wide bar, zones, text that is not a part, and
-// wires with arrows, labels and a cross. The tests draw the fixture plan (fixtures.ts) with it; the page never shows
-// it. The real parts go in SILO_MAP in map.ts.
+// a glyph, a part inside another, copies stacked behind a part, a wide bar, zones, text that is not a part, wires
+// with arrows, labels and a cross, a wire and a text that leave the folded map, a wire with a word that is not
+// decided, and the key. The tests draw the fixture plan (fixtures.ts) with it; the page never shows it. The real parts go in SILO_MAP
+// in map.ts.
 // What each thing rests on is one of the fixture's parts, never one of its decisions: tests change those decisions for
-// their own reasons (taken, replaced, dropped), and the map's stops must not fire there. The tests of the stops give
-// the example's wires the rests each case needs.
+// their own reasons (taken, replaced, dropped), and the map's stops must not fire there. The one exception is the last
+// wire, which also rests on the feature `export`, which has no verdict, so the map draws it as not decided; no other
+// test gives `export` a verdict. The tests of the stops give the example's wires the rests each case needs.
 import type { MapLayout } from './map';
 
 export const EXAMPLE_MAP: MapLayout = {
@@ -29,22 +31,21 @@ export const EXAMPLE_MAP: MapLayout = {
     { label: 'ZONE ONE', full: [24, 18, 840, 536], fold: [16, 10, 856, 160], corners: true, rests: ['part:part-a'] },
     { label: 'ZONE TWO', full: [440, 90, 360, 416], fold: [400, 22, 412, 138], rounded: true, rests: ['part:part-b'] },
   ],
-  notes: [{ title: 'Outside', line: 'not a part', full: [946, 160, 150, 40], fold: [952, 44, 150, 36], rests: ['part:part-b'] }],
+  notes: [
+    { title: 'Outside', line: 'not a part', full: [946, 160, 150, 40], fold: [952, 44, 150, 36], rests: ['part:part-b'] },
+    // Its line wraps within its width, and it leaves the folded map.
+    { title: 'A longer text', line: 'whose line wraps within the width of its box', full: [946, 260, 150, 60] },
+  ],
   ghosts: [
     { of: 'part-d', full: [484, 334, 152, 64], fold: [412, 84, 120, 30], rests: ['part:part-d'] },
     { of: 'part-d', full: [478, 328, 152, 64], fold: [412, 84, 120, 30] },
   ],
-  wires: {
-    full: [
-      { of: 'part-b', d: 'M240 178H465', arrows: [[472, 178, 'r']], label: [356, 170, 'uses', 'middle'], rests: ['part:part-b'] },
-      { of: 'part-d', d: 'M548 242V315', arrows: [[548, 322, 'd']], label: [557, 287, 'leads to'], rests: ['part:part-d'] },
-      { of: 'part-d', d: 'M636 360H700', cross: [708, 360], label: [720, 364, 'stops'], rests: ['part:part-d'] },
-      { of: 'part-b', d: 'M784 178H932', arrows: [[939, 178, 'r']], rests: ['part:part-b'] },
-    ],
-    fold: [
-      { of: 'part-b', d: 'M216 53H405', arrows: [[412, 53, 'r']] },
-      { of: 'part-d', d: 'M472 72V77', arrows: [[472, 84, 'd']] },
-      { of: 'part-b', d: 'M800 53H945', arrows: [[952, 53, 'r']] },
-    ],
-  },
+  wires: [
+    { of: 'part-b', d: 'M240 178H465', arrows: [[472, 178, 'r']], label: [356, 170, 'uses', 'middle'], rests: ['part:part-b'], fold: { d: 'M216 53H405', arrows: [[412, 53, 'r']] } },
+    { of: 'part-d', d: 'M548 242V315', arrows: [[548, 322, 'd']], label: [557, 287, 'leads to'], rests: ['part:part-d'], fold: { d: 'M472 72V77', arrows: [[472, 84, 'd']] } },
+    // It stops at the cross, and it leaves the folded map.
+    { of: 'part-d', d: 'M636 360H700', cross: [708, 360], label: [720, 364, 'stops'], rests: ['part:part-d'] },
+    { of: 'part-b', d: 'M784 178H932', arrows: [[939, 178, 'r']], label: [858, 170, 'exports', 'middle'], rests: ['part:part-b', 'export'], fold: { d: 'M800 53H945', arrows: [[952, 53, 'r']] } },
+  ],
+  key: [946, 500],
 };

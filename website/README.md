@@ -211,26 +211,56 @@ A part whose id is `product`, `left`, `suggested` or `latest` stops the build:
 those are the page's own addresses, and the message names the part and the fix.
 `map.ts` holds the drawing, `SILO_MAP`. It places every part of
 `plan/parts.json` on the full map and on the folded one, inside two zones: your
-Mac, and the virtual machines in it. The model providers are text outside the
-Mac, not a part. Nine wires join the parts, each with one word, such as "facts"
-from the boundary to the record.
+Mac, and the virtual machines in it. Text that is not a part stands for what
+is not Silo: outside the Mac, the internet, the model providers, and a server
+or a cloud where computers also run later; inside it, your own terminal and
+editor; under the boundary, its channels. Wires join them, most with one word,
+such as "facts" from the boundary to the record or "requests" from the
+boundary to the internet. A wire that the folded map draws again carries that
+drawing as its `fold`, so it looks the same there; a wire or a text with no
+folded place fades out as the map folds.
 
-Each wire of the full map and each zone says in `rests` what in the plan it
-draws. An entry of `rests` is the id of a decision, `word:<id>` for a word of
+Each wire and each zone says in `rests` what in the plan it draws. An entry of
+`rests` is the id of a decision or a feature, `word:<id>` for a word of
 `plan/words.json`, or `part:<id>` for what only a part's line says. The wire
-"facts" rests on `how-silo-knows`. A place, a text or a copy behind a part may
-have `rests` too. The wires of the folded map have none, since they draw the
-same relations again. The page's data leaves `rests` out.
+"facts" rests on `how-silo-knows`. A text may have `rests` too; one with none is
+drawn as decided. A place and a copy behind a part may have them too, and the
+build checks them as it checks the others, but they change nothing drawn.
+
+The map shows the plan as it proposes it, and says which of it is decided. A
+dashed outline or line has one source for each kind of thing:
+
+- A wire, a zone and a text rest on the plan: they are not decided when at
+  least one id in their `rests` is proposed. A decision with an answer or `sets`
+  and no verdict, and a feature with no verdict, are proposed; a taken
+  decision, a taken or built feature, a word and a part are in force. A wire
+  not decided is a dashed line; a zone is a dashed outline; a text has its
+  title in the second ink. A wire's line keeps the colour its part's state gives
+  it. The day the owner takes the entry, the same thing is
+  drawn decided, with no change to the layout.
+- A part's box and a copy behind a part are drawn by the part's state alone,
+  as the map has always drawn them: dashed while the part is "not decided yet",
+  solid once it is planned, next or done. What a place or a copy rests on
+  changes nothing there, and the page gets no mark for either.
+
+A key on the full map (class `ws-mapkey`, not the header's `ws-key`) says what a
+solid and a dashed line mean ("decided", "not decided"). The page's data gets
+`undecided: true` on a wire, a zone or a text that is not decided and nothing
+else of `rests`, and never the layout's `file`. A wire's word is in the second
+ink, never the faint one (2.53:1 on the light ground), whatever its part's state
+and whether the wire is decided: the line says that, not the word. The same
+holds for the title of a text that is not decided.
 
 The build checks the drawing against the plan. It stops, with the problem and
 the fix, when:
 
 - a part of `plan/parts.json` has no place, or the drawing names a part the
   plan does not have;
-- a wire of the full map or a zone has no `rests`;
-- an id in `rests` names no decision, or a decision that is open, answered and
-  not taken, dropped or replaced (the message names the one that replaced it),
-  or a word or a part that does not exist;
+- a wire or a zone has no `rests`;
+- an id in `rests` names nothing in the plan, an open decision (no answer says
+  what to draw), a dropped decision, a replaced one (the message names the one
+  that replaced it), a dropped feature, or a word or a part that does not
+  exist;
 - a part's title is wider than its box, on the full map or on the folded one,
   at a 1200 px window or at the widest the map gets.
 
@@ -245,7 +275,7 @@ A layout with no place in it (`NO_MAP`) draws no map: any plan passes, and the
 page shows the parts as tiles only, without the Map and Order control. A plan
 read from another folder (`WORKSHOP_PLAN`) is built with it. `map-example.ts`
 is a made-up layout of five parts that shows every kind of thing a layout can
-hold; the tests draw their fixture plan (`fixtures.ts`) with it, and the page
+hold, a wire that is not decided among them; the tests draw their fixture plan (`fixtures.ts`) with it, and the page
 never shows it.
 
 The page has no way to take or drop an entry and the server has no verdict route:

@@ -177,7 +177,7 @@ export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null }: B
     parts: plan.parts.map((part) => ({ id: part.id, title: part.title, line: part.line })),
     stages: plan.stages.map((stage) => ({ id: stage.id, title: stage.title, line: stage.line })),
     entries,
-    map: pageLayout(map),
+    map: pageLayout(map, layoutPlanOf(plan)),
     shallow: history?.shallow === true,
   };
 }
@@ -204,15 +204,17 @@ export function factsFrom(files: Map<string, string>): Facts {
   return toFacts(checkedPlan(files));
 }
 
-/** What the map's check reads of a plan: its parts, the status of each decision, and its words. */
+/** What the map reads of a plan: its parts, the status of each decision and feature, and its words. */
 function layoutPlanOf(plan: RawPlan): LayoutPlan {
   // The plan tool's model reads the entries as the files give them, which the check has already passed.
   const entries = plan.entries as unknown as Record<string, Parameters<typeof entryStatus>[0]>;
   const decisions: LayoutPlan['decisions'] = {};
+  const features: LayoutPlan['features'] = {};
   for (const [id, entry] of Object.entries(entries)) {
     if (entry.kind === 'decision') decisions[id] = { status: entryStatus(entry, entries) as LayoutPlan['decisions'][string]['status'], replacedBy: replacedBy(entry) };
+    else features[id] = { status: entryStatus(entry, entries) as LayoutPlan['features'][string]['status'] };
   }
-  return { parts: plan.parts, decisions, words: plan.words.flatMap((word) => (word.id ? [word.id] : [])) };
+  return { parts: plan.parts, decisions, features, words: plan.words.flatMap((word) => (word.id ? [word.id] : [])) };
 }
 
 /** Checks the files of a plan and gives what the map's check reads of it, or throws with every problem. */
