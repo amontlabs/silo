@@ -8,4 +8,4 @@ itself, and granting it that tool is what sets the precaution (`extension-may-pr
 `extensions`).
 
 Put forward by an agent on 21 November 2026, so that no taken decision contradicts another. The
-owner has not seen this wording.
+owner read this wording and agreed to it the same day.
