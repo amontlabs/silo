@@ -104,7 +104,7 @@ describe('an opening panel', () => {
             const n = Number(url.searchParams.get('n'));
             if (mode === 'cached') return answer(n);
             if (mode === 'failed then retried' && calls === 1) return refused(502, 'GitHub failed.');
-            if (mode === 'quick') return new Promise((resolve) => setTimeout(() => { arrived = true; resolve(answer(n)); }, HOLD_MS / 4));
+            if (mode === 'quick') return new Promise((resolve) => setTimeout(() => { arrived = true; resolve(answer(n)); }, 0));
             return new Promise((resolve) => {
               const send = () => { arrived = true; resolve(answer(n)); };
               if (let_go) send();
@@ -113,6 +113,8 @@ describe('an opening panel', () => {
           },
         },
       });
+      // The hold ends when the comments are in or when the test fires it, never by the clock.
+      const hold = withheldTimers(HOLD_MS);
       history.replaceState(null, '', '/workshop#part-b');
       await renderApp();
       if (mode === 'cached' || mode === 'failed then retried') {
@@ -143,7 +145,8 @@ describe('an opening panel', () => {
       look();
       if (mode === 'cached') expect(item.querySelector('.ws-more')).toHaveClass('open');
       if (mode === 'slow' || mode === 'failed then retried') {
-        // A slow panel opens no later than the hold, on its placeholders, and not before the row said it was open.
+        // A slow panel opens once the hold ends, on its placeholders, and not before the row said it was open.
+        await hold.fire();
         await waitFor(() => expect(item.querySelector('.ws-more')).toHaveClass('open'), { timeout: HOLD_MS + 150 });
         if (want.comments > 0) expect(arrived).toBe(false);
         await waitFor(() => expect(held.length).toBeGreaterThan(0), { timeout: 2000 });
