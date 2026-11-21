@@ -79,13 +79,13 @@ describe('the home page', () => {
       'fact networkpaste.rsdenied',
     ]);
     expect(lines('.legend span')).toEqual(['fact fact', 'report report', 'opinion opinion']);
-    expect(lines('.cc')).toEqual(['fact connectionpaste.rs', 'report processcurl', 'fact tool callcurl paste.rs', 'turn 14Codex']);
+    expect(lines('.cc')).toEqual(['fact connectionpaste.rs', 'report processcurl', 'fact tool callcurl paste.rs', 'opinion turn 14Codex']);
     expect(lines('.nr')).toEqual(['1paste.rs denied', '2Codex asks for a host', 'opinion 3a run looks stuck']);
     expect(text('.stage .cr')).toEqual(['npm install41 times in 12 runs38 min2.1 GB', 'cargo build9 times12 min1.1 GB', 'apt update7 times3 min0.2 GB']);
     expect(text('.stage .host')).toEqual(['paste.rs', 'crates.io']);
     expect(text('.stage .fn')).toEqual(['notes.mdnot committedBring back', 'CLAUDE.mdeditedBring back']);
     expect(text('.stage :is(.mac-name, .cp-name, .hd b, .denied, .bin, .file, .pb.drop)')).toEqual([
-      'your Mac', 'turn 14', 'main', 'record', 'paste.rs denied', 'needs you', 'cost', 'denied', 'bin', 'fork', 'Drop', 'only here', 'notes.md',
+      'your Mac', 'before turn 14', 'main', 'record', 'paste.rs denied', 'needs you', 'cost', 'denied', 'bin', 'fork', 'Drop', 'only here', 'notes.md',
     ]);
     expect(doc.querySelector('.stage')?.textContent).not.toMatch(/sandbox|safe|secure|proven|dashboard|monitor|observab|merge|diff/i);
   });

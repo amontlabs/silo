@@ -105,8 +105,12 @@
 .flow .k2 { top: calc(102 * var(--px)); }
 .flow .k3 { top: calc(154 * var(--px)); }
 .flow .k4 { top: calc(206 * var(--px)); }
-/* The line that joins what led to an alert, drawn from the top. */
-.flow .chain-line { position: absolute; left: calc(18 * var(--px)); top: calc(72 * var(--px)); width: 1.5px; height: calc(156 * var(--px)); margin-left: -0.75px; background: var(--wire); transform: scaleY(var(--a)); transform-origin: 0 0; opacity: var(--o); }
+/* The line that joins what led to an alert, drawn from the top. Its last third leads to the turn, an opinion: dashed. */
+.flow .chain-line {
+  position: absolute; left: calc(18 * var(--px)); top: calc(72 * var(--px)); width: 1.5px; height: calc(156 * var(--px)); margin-left: -0.75px;
+  background: linear-gradient(var(--wire), var(--wire)) top / 100% calc(200% / 3) no-repeat, repeating-linear-gradient(var(--wire) 0 2px, transparent 2px 4px) bottom / 100% calc(100% / 3) no-repeat;
+  clip-path: inset(0 0 calc((1 - var(--a)) * 100%) 0); opacity: var(--o);
+}
 
 /* a short list: what needs you, then what costs the most */
 .flow .list .hd b + b { position: absolute; left: calc(12 * var(--px)); }
@@ -187,10 +191,9 @@
 /* In one column: the scene's box is 340 by 620, and the step names take two rows, with Pause under them. */
 @media (max-width: 700px) {
   .flow .stage { --mode: tall; aspect-ratio: 340 / 620; }
-  .flow .scene { --px: calc(100cqw / 340); --fs-name: 15; --fs-mono: 12.5; --fs-small: 12; --fs-big: 17; --rr-k: 68; }
+  .flow .scene { --px: calc(100cqw / 340); --fs-name: 15; --fs-mono: 12.5; --fs-small: 12; --fs-big: 17; --rr-k: 66; }
   .flow .hd b { font-size: calc(15 * var(--px)); }
   .flow :is(.rr, .cc) { gap: calc(8 * var(--px)); padding: 0 calc(2 * var(--px)); }
-  .flow .rr .k { width: calc(68 * var(--px)); }
   .flow .cc { height: calc(38 * var(--px)); }
   .flow .cc .k { width: calc(78 * var(--px)); }
   .flow .k1 { top: calc(46 * var(--px)); }
@@ -208,7 +211,10 @@
   .flow .cr .nm { font-size: calc(16 * var(--px)); }
   .flow .fig { left: calc(12 * var(--px)); top: calc(40 * var(--px)); gap: calc(6 * var(--px)) calc(14 * var(--px)); font-size: calc(13 * var(--px)); }
   .flow .fig span:nth-child(n) { width: auto; }
-  .flow .host { gap: calc(5 * var(--px)); padding: 0 calc(5 * var(--px)); font-size: calc(11.5 * var(--px)); }
+  .flow .host { gap: calc(5 * var(--px)); padding: 0 calc(6 * var(--px)); font-size: calc(11 * var(--px)); }
+  /* The record is set a little smaller so that, in Boundary, main and the record leave room for the hosts. */
+  .flow .rec { --fs-mono: 12; }
+  .flow .rr { gap: calc(5 * var(--px)); }
   .flow-foot { flex-wrap: wrap; gap: 6px; }
   .flow .steps { flex: 1 0 100%; grid-template-columns: repeat(4, 1fr); gap: 0 12px; }
   .flow .ctl { margin-left: auto; }
@@ -273,37 +279,37 @@
 .scene .pk.p1 { --x: 665; --y: 160; }
 .scene .pk.p2 { --x: 772; --y: 212; }
 .scene .cross { --x: 672; --y: 160; --o: 1; }
-.scene .bin { --x: 536; --y: 26; --w: 440; --h: 244; }
+.scene .bin { --x: 726; --y: 210; --w: 250; --h: 80; }
 .scene .back-wire { --x: 201.82; --y: 340; }
 .scene .box.fork { --x: 266; --y: 200; --w: 620; --h: 116; --s: 0.94; }
 .scene .box.fork .hd .run { --o: 1; }
-.scene .only { --x: 24; --y: 142; --w: 440; --h: 128; }
+.scene .only { --x: 24; --y: 210; --w: 420; --h: 128; }
 .scene .only .fn.f1 { --dy: 6; }
 .scene .only .fn.f1 .pb.bb { --o: 1; }
 .scene .only .fn.f2 { --dy: 6; }
 .scene .only .fn.f2 .pb.bb { --o: 1; }
-.scene .file { --x: 36; --y: 192; }
+.scene .file { --x: 36; --y: 260; }
 .scene .ptr { --x: 410; --y: 202; }
 
 /* The still, in one column. */
 @media (max-width: 700px) {
   .scene { --o: 1; }
-  .scene .mac { --x: 1; --y: 12; --w: 246; --h: 606; --o: 1; }
+  .scene .mac { --x: 1; --y: 12; --w: 236; --h: 606; --o: 1; }
   .scene .mac-name { --x: 17; --y: 3; --o: 1; }
   .scene .tl { --o: 1; }
-  .scene .tl .tl-line { --x: 10; --y: 580; --w: 226; }
-  .scene .tl .cp.c1 { --x: 30.55; --y: 580; --size: 8; --o: 1; }
-  .scene .tl .cp.c2 { --x: 51.09; --y: 580; --size: 8; --o: 1; }
-  .scene .tl .cp.c3 { --x: 71.64; --y: 580; --size: 8; --o: 1; }
-  .scene .tl .cp.c4 { --x: 92.18; --y: 580; --size: 8; --o: 1; }
-  .scene .tl .cp.c5 { --x: 112.73; --y: 580; --size: 4; }
-  .scene .tl .cp.c6 { --x: 133.27; --y: 580; --size: 4; }
-  .scene .tl .cp.c7 { --x: 153.82; --y: 580; --size: 4; }
-  .scene .tl .cp.c8 { --x: 174.36; --y: 580; --size: 4; }
-  .scene .tl .cp.c9 { --x: 194.91; --y: 580; --size: 4; }
-  .scene .tl .cp.c10 { --x: 215.45; --y: 580; --size: 4; }
-  .scene .tl .cp-name { --x: 85.64; --y: 556; }
-  .scene .box.main { --x: 6; --y: 296; --w: 236; --h: 214; --o: 1; }
+  .scene .tl .tl-line { --x: 10; --y: 580; --w: 216; }
+  .scene .tl .cp.c1 { --x: 29.64; --y: 580; --size: 8; --o: 1; }
+  .scene .tl .cp.c2 { --x: 49.27; --y: 580; --size: 8; --o: 1; }
+  .scene .tl .cp.c3 { --x: 68.91; --y: 580; --size: 8; --o: 1; }
+  .scene .tl .cp.c4 { --x: 88.55; --y: 580; --size: 8; --o: 1; }
+  .scene .tl .cp.c5 { --x: 108.18; --y: 580; --size: 4; }
+  .scene .tl .cp.c6 { --x: 127.82; --y: 580; --size: 4; }
+  .scene .tl .cp.c7 { --x: 147.45; --y: 580; --size: 4; }
+  .scene .tl .cp.c8 { --x: 167.09; --y: 580; --size: 4; }
+  .scene .tl .cp.c9 { --x: 186.73; --y: 580; --size: 4; }
+  .scene .tl .cp.c10 { --x: 206.36; --y: 580; --size: 4; }
+  .scene .tl .cp-name { --x: 82.91; --y: 556; }
+  .scene .box.main { --x: 6; --y: 296; --w: 226; --h: 214; --o: 1; }
   .scene .box.main .ag.a1 { --y: 48; --h: 52; --o: 1; }
   .scene .box.main .ag.a1 .who { --y: 16; }
   .scene .box.main .ag.a1 .cmd { --x: 28; --y: 27; --n: 30; }
@@ -317,7 +323,7 @@
   .scene .box.main .ag.a3 .who { --y: 16; }
   .scene .box.main .ag.a3 .cmd { --x: 28; --y: 27; --n: 11; }
   .scene .box.main .ag.a3 .ok { --y: 17; --d: 1; }
-  .scene .rec { --x: 6; --y: 24; --w: 236; --h: 253; --o: 1; }
+  .scene .rec { --x: 6; --y: 24; --w: 226; --h: 253; --o: 1; }
   .scene .rec .hd b:nth-child(1) { --o: 1; }
   .scene .rec .rr.r1 { --a: 1; --o: 1; }
   .scene .rec .rr.r2 { --a: 1; --o: 1; }
@@ -334,26 +340,26 @@
   .scene .list .cr.o1 { --dy: 8; }
   .scene .list .cr.o2 { --dy: 8; }
   .scene .list .cr.o3 { --dy: 8; }
-  .scene .edge.e1 { --x: 242; --y: 296; --h: 178; --o: 1; }
-  .scene .edge.e2 { --x: 242; --y: 474; --h: 36; --o: 1; }
-  .scene .req.q1 { --x: 182; --y: 422; --w: 53; --o: 1; }
-  .scene .req.q2 { --x: 182; --y: 474; --w: 64; --o: 1; }
-  .scene .host.h1 { --x: 252; --y: 407; --w: 86; --h: 30; --o: 1; }
-  .scene .host.h2 { --x: 252; --y: 459; --w: 86; --h: 30; --o: 1; }
+  .scene .edge.e1 { --x: 232; --y: 296; --h: 178; --o: 1; }
+  .scene .edge.e2 { --x: 232; --y: 474; --h: 36; --o: 1; }
+  .scene .req.q1 { --x: 172; --y: 422; --w: 53; --o: 1; }
+  .scene .req.q2 { --x: 172; --y: 474; --w: 68; --o: 1; }
+  .scene .host.h1 { --x: 246; --y: 407; --w: 86; --h: 30; --o: 1; }
+  .scene .host.h2 { --x: 246; --y: 459; --w: 86; --h: 30; --o: 1; }
   .scene .host.h2 .hdot { --got: 1; }
-  .scene .denied { --x: 338; --y: 448; --o: 1; }
-  .scene .pk.p1 { --x: 235; --y: 422; }
-  .scene .pk.p2 { --x: 246; --y: 474; }
-  .scene .cross { --x: 242; --y: 422; --o: 1; }
-  .scene .bin { --x: 10; --y: 20; --w: 320; --h: 96; }
-  .scene .back-wire { --x: 71.64; --y: 572; }
+  .scene .denied { --x: 332; --y: 397; --o: 1; }
+  .scene .pk.p1 { --x: 225; --y: 422; }
+  .scene .pk.p2 { --x: 240; --y: 474; }
+  .scene .cross { --x: 232; --y: 422; --o: 1; }
+  .scene .bin { --x: 10; --y: 530; --w: 320; --h: 80; }
+  .scene .back-wire { --x: 68.91; --y: 572; }
   .scene .box.fork { --x: 10; --y: 318; --w: 320; --h: 112; --s: 0.94; }
   .scene .box.fork .hd .run { --o: 1; }
-  .scene .only { --x: 10; --y: 248; --w: 320; --h: 128; }
+  .scene .only { --x: 10; --y: 270; --w: 320; --h: 128; }
   .scene .only .fn.f1 { --dy: 6; }
   .scene .only .fn.f1 .pb.bb { --o: 1; }
   .scene .only .fn.f2 { --dy: 6; }
   .scene .only .fn.f2 .pb.bb { --o: 1; }
-  .scene .file { --x: 22; --y: 298; }
+  .scene .file { --x: 22; --y: 320; }
   .scene .ptr { --x: 310; --y: 184; }
 }

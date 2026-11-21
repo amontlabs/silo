@@ -98,6 +98,8 @@ interface Geo {
   onlyRow: number;
   /** Where a file brought back lands in main, from main's corner. */
   got: { x: number; y: number };
+  /** How tall main grows in Drop to hold the file brought back. */
+  holds: number;
   /** The widest bar of the list ranked by cost. */
   bar: number;
 }
@@ -119,21 +121,22 @@ function wide(): Geo {
   return {
     tall: false,
     mac: [all, all, all, S(1, 14, 700, 365), all, all, all, all],
-    main: [S(200, 64, 600, 238), S(90, 84, 820, 214), S(598, 34, 372, 250), S(366, 34, 306, 250), chip(24, 328), chip(24, 328), chip(24, 88), S(24, 288, 160, 80)],
+    main: [S(200, 64, 600, 238), S(90, 84, 820, 214), S(598, 34, 372, 250), S(366, 34, 306, 250), chip(24, 328), chip(24, 328), chip(24, 88), chip(24, 88)],
     rows: [0, 1, 2].map((i) => agentRows(i, false)),
     rec: [null, null, S(24, 34, 544, 254), S(24, 34, 318, 254), S(520, 36, 440, 256), S(520, 36, 440, 256, 0), null, null],
     list: [null, null, null, null, S(40, 36, 440, 256), S(60, 26, 880, 286), null, null],
-    tl: [null, null, line(24, 976, 348, 9), line(24, 676, 348, 9), line(196, 976, 348, 9), line(196, 976, 348, 9), line(196, 976, 108, 13), line(206, 976, 308, 9)],
+    tl: [null, null, line(24, 976, 348, 9), line(24, 676, 348, 9), line(196, 976, 348, 9), line(196, 976, 348, 9), line(196, 976, 108, 13), line(196, 976, 108, 13)],
     h1: [null, null, null, S(778, 142, 196, 36), null, null, null, null],
     h2: [null, null, null, S(778, 194, 196, 36), null, null, null, null],
-    fork: [null, null, null, null, null, null, S(266, 200, 620, 116), S(24, 26, 440, 104)],
-    only: [null, null, null, null, null, null, null, S(24, 142, 440, 128)],
-    bin: [null, null, null, null, null, null, null, S(536, 26, 440, 244)],
-    binned: S(681, 128, 150, 40),
+    fork: [null, null, null, null, null, null, S(266, 200, 620, 116), S(460, 210, 250, 104)],
+    only: [null, null, null, null, null, null, null, S(24, 210, 420, 128)],
+    bin: [null, null, null, null, null, null, null, S(726, 210, 250, 80)],
+    binned: S(738, 238, 226, 40),
     reqFrom: 90,
     needRow: { y: 44, h: 64, x: 300 },
     onlyRow: 44,
     got: { x: 12, y: 44 },
+    holds: 80,
     bar: 836,
   };
 }
@@ -143,22 +146,23 @@ function tall(): Geo {
   const chip = (x: number, y: number) => S(x, y, 140, 40);
   return {
     tall: true,
-    mac: [all, all, all, S(1, 12, 246, 606), all, all, all, all],
-    main: [S(10, 200, 320, 226), S(10, 180, 320, 256), S(10, 296, 320, 214), S(6, 296, 236, 214), chip(10, 532), chip(10, 532), chip(10, 150), S(10, 492, 150, 80)],
+    mac: [all, all, all, S(1, 12, 236, 606), all, all, all, all],
+    main: [S(10, 200, 320, 226), S(10, 180, 320, 256), S(10, 296, 320, 214), S(6, 296, 226, 214), chip(10, 532), chip(10, 532), chip(10, 150), chip(10, 150)],
     rows: [0, 1, 2].map((i) => agentRows(i, true)),
-    rec: [null, null, S(10, 24, 320, 253), S(6, 24, 236, 253), S(10, 262, 320, 252), S(10, 262, 320, 252, 0), null, null],
+    rec: [null, null, S(10, 24, 320, 253), S(6, 24, 226, 253), S(10, 262, 320, 252), S(10, 262, 320, 252, 0), null, null],
     list: [null, null, null, null, S(10, 24, 320, 226), S(10, 24, 320, 334), null, null],
-    tl: [null, null, line(10, 330, 580, 8), line(10, 236, 580, 8), line(10, 330, 594, 8), line(10, 330, 594, 8), line(20, 320, 238, 13), line(10, 330, 594, 8)],
-    h1: [null, null, null, S(252, 407, 86, 30), null, null, null, null],
-    h2: [null, null, null, S(252, 459, 86, 30), null, null, null, null],
-    fork: [null, null, null, null, null, null, S(10, 318, 320, 112), S(10, 130, 320, 104)],
-    only: [null, null, null, null, null, null, null, S(10, 248, 320, 128)],
-    bin: [null, null, null, null, null, null, null, S(10, 20, 320, 96)],
-    binned: S(100, 48, 140, 40),
+    tl: [null, null, line(10, 330, 580, 8), line(10, 226, 580, 8), line(10, 330, 594, 8), line(10, 330, 594, 8), line(20, 320, 238, 13), line(20, 320, 238, 13)],
+    h1: [null, null, null, S(246, 407, 86, 30), null, null, null, null],
+    h2: [null, null, null, S(246, 459, 86, 30), null, null, null, null],
+    fork: [null, null, null, null, null, null, S(10, 318, 320, 112), S(10, 412, 320, 104)],
+    only: [null, null, null, null, null, null, null, S(10, 270, 320, 128)],
+    bin: [null, null, null, null, null, null, null, S(10, 530, 320, 80)],
+    binned: S(22, 558, 296, 40),
     reqFrom: 60,
     needRow: { y: 44, h: 52, x: 230 },
     onlyRow: 44,
-    got: { x: 12, y: 44 },
+    got: { x: 12, y: 40 },
+    holds: 72,
     bar: 282,
   };
 }
@@ -305,10 +309,12 @@ export function film(stage: HTMLElement): Scene {
     put(P.macName, { x: mac.x + 16, y: mac.y - 9, o: 1 });
 
     // main, and its three agents
-    const m = sample(R.main, t);
+    // In Drop, main grows downwards to take the file brought back; its corner and its line of time stay.
+    const m = { ...sample(R.main, t) };
+    if (s === 7) m.h = lerp(m.h, G.holds, ramp(t, T(7, 2300), T(7, 2600)));
     const intro = s === 0 ? ramp(t, 100, 520) : 1;
     box(P.main, { ...m, o: m.o * intro }, { s: lerp(0.95, 1, intro), glow: s === 7 ? bump(t, T(7, 3000), 500) : 0 });
-    toggle(P.main, 'chip', m.w < 225);
+    toggle(P.main, 'chip', m.w < 200);
     P.rows.forEach((r, i) => {
       const at = sample(rows[i], t);
       const a = ramp(t, T(0, 900 + i * 600), T(0, 1250 + i * 600));
@@ -395,8 +401,8 @@ export function film(stage: HTMLElement): Scene {
     box(P.h1, h1);
     box(P.h2, h2);
     put(P.reached, { got: ramp(t, T(3, 1500), T(3, 1800)) });
-    // Denied: by paste.rs, inside its box across, under it in one column.
-    const by = G.tall ? { x: h1.x + h1.w, y: h1.y + h1.h + 11 } : { x: h1.x + h1.w - 10, y: h1.y + h1.h / 2 };
+    // Denied: by paste.rs, inside its box across, over it in one column, on the side away from crates.io.
+    const by = G.tall ? { x: h1.x + h1.w, y: h1.y - 10 } : { x: h1.x + h1.w - 10, y: h1.y + h1.h / 2 };
     put(P.denied, { ...by, o: h1.o * ramp(t, T(3, 3600), T(3, 3900)) });
 
     // The edge of main is lit through Boundary. A request leaves the row of the agent that sent it: the one for
