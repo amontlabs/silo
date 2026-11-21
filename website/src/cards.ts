@@ -49,10 +49,10 @@ const MINIS: Record<string, [end: number, cues: Cue[]]> = {
     [
       [300, fly('.p1', [[114, 70.5], [172, 70.5], [172, 40.5], [191, 40.5]], 900)],
       [1200, add('.m1', 'got')],
-      [2000, fly('.p2', [[114, 70.5], [172, 70.5], [172, 78]], 650)],
-      [2650, add('.gate', 'lit')],
-      [2650, add('.xm')],
-      [2800, add('.dn')],
+      [2000, fly('.p2', [[114, 70.5], [140, 70.5]], 450)],
+      [2450, add('.gate', 'lit')],
+      [2550, add('.xm')],
+      [2700, add('.dn')],
     ],
   ],
   // Five lines are written one after the other, then the legend says what the two marks mean.
@@ -80,7 +80,7 @@ const MINIS: Record<string, [end: number, cues: Cue[]]> = {
       [1700, add('.ws')],
       [1900, add('.w1')],
       [2000, add('.c1')],
-      [2400, add('.w2')],
+      [2400, add('.wd')],
       [2500, add('.c2')],
     ],
   ],

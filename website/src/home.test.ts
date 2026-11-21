@@ -76,10 +76,14 @@ describe('the home page', () => {
     expect(picture('record')).toEqual([
       'tool call', 'cargo build', 'process', 'cargo build', 'files', '214 changed', 'network', 'crates.io', 'model', '18 calls · $0.42', 'fact', 'report',
     ]);
-    const kinds = (name: string) => [...doc.querySelectorAll(`.card[data-mini="${name}"] svg .dm`)].map((mark) => (mark.classList.contains('fact') ? 'fact' : 'report'));
+    const kinds = (name: string) =>
+      [...doc.querySelectorAll(`.card[data-mini="${name}"] svg .dm`)].map((mark) => (mark.classList.contains('fact') ? 'fact' : mark.classList.contains('op') ? 'opinion' : 'report'));
     expect(kinds('record')).toEqual(['fact', 'report', 'fact', 'fact', 'fact', 'fact', 'report']);
     expect(picture('needs')).toEqual(['1', 'paste.rs denied', '2', 'Codex asks for a host', '3', 'a run looks stuck', 'connection', 'paste.rs', 'turn 14', 'Codex']);
-    expect(kinds('needs')).toEqual(['fact']);
+    expect(kinds('needs')).toEqual(['opinion', 'fact', 'opinion']);
+    // The row of turn 14 and the line `a run looks stuck` carry the opinion mark, and the line leading to the row is dashed.
+    expect(doc.querySelectorAll('.card[data-mini="needs"] svg .c2 .op, .card[data-mini="needs"] svg .g3 .op')).toHaveLength(2);
+    expect(doc.querySelectorAll('.card[data-mini="needs"] svg .wd')).toHaveLength(1);
     expect(picture('back')).toEqual(['main', 'fork']);
     expect(doc.querySelectorAll('.card[data-mini="back"] svg .dm')).toHaveLength(5);
   });
@@ -94,6 +98,7 @@ describe('the home page', () => {
 
   it('draws arrows and checks as icons, not as characters the bundled fonts lack', () => {
     expect(html).not.toMatch(/[↗↑→✓]/);
+    expect(html).not.toMatch(/download|releases|demo\.html|silo-tour|How to use|\/media\//i);
   });
 
   it('says nothing the plan contradicts: no root, no row counts', () => {

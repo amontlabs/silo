@@ -47,6 +47,10 @@
 .mini .dm { fill: var(--paper); stroke: var(--wire); stroke-width: 1; transition: fill 0.2s, stroke 0.2s; }
 .mini .dm.hot { fill: var(--accent); stroke: var(--accent); }
 .mini .dm.fact { fill: var(--ink); stroke: var(--ink); }
+/* An opinion is a hollow diamond with its left half filled. */
+.mini .hf { fill: var(--ink); stroke: none; }
+/* The part of a joining line that leads to an opinion is dashed. */
+.mini .wd { fill: none; stroke: var(--wire); stroke-width: 1; stroke-dasharray: 2 2; }
 .mini .ok { fill: none; stroke: var(--accent-ink); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .mini .xx { fill: none; stroke: var(--accent-ink); stroke-width: 1.3; stroke-linecap: round; }
 /* A pointer glides to its place. Yours takes the text colour, an agent's the accent. Its outline is the page's colour. */
