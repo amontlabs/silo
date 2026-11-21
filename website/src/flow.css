@@ -1,0 +1,364 @@
+/* The flow: the film under the pitch. Its scene is drawn in a box of 1000 by 380 (across) or 340 by 620 (in one
+   column), and every size in it is a number of that box's pixels, `--px`, so the scene scales with the stage without
+   script. flow.ts writes on each part the numbers of the moment (where it is, how big, how visible) as custom
+   properties. Without them, the rules at the end of this file show the last moment of Boundary: the still. */
+
+/* The numbers flow.ts writes. They are not inherited: each part has its own. */
+@property --x { syntax: "<number>"; inherits: false; initial-value: 0; }
+@property --y { syntax: "<number>"; inherits: false; initial-value: 0; }
+@property --w { syntax: "<number>"; inherits: false; initial-value: 0; }
+@property --h { syntax: "<number>"; inherits: false; initial-value: 0; }
+@property --o { syntax: "<number>"; inherits: false; initial-value: 0; }
+@property --s { syntax: "<number>"; inherits: false; initial-value: 1; }
+@property --dx { syntax: "<number>"; inherits: false; initial-value: 0; }
+@property --dy { syntax: "<number>"; inherits: false; initial-value: 0; }
+@property --a { syntax: "<number>"; inherits: false; initial-value: 0; }
+@property --d { syntax: "<number>"; inherits: false; initial-value: 0; }
+@property --n { syntax: "<number>"; inherits: false; initial-value: 0; }
+@property --caret { syntax: "<number>"; inherits: false; initial-value: 0; }
+@property --size { syntax: "<number>"; inherits: false; initial-value: 0; }
+@property --hot { syntax: "<number>"; inherits: false; initial-value: 0; }
+@property --got { syntax: "<number>"; inherits: false; initial-value: 0; }
+@property --wash { syntax: "<number>"; inherits: false; initial-value: 0; }
+@property --glow { syntax: "<number>"; inherits: false; initial-value: 0; }
+
+.flow { width: calc(100% + 28px); max-width: 1040px; margin: 0 -14px; }
+.flow figure { margin: 0; }
+.flow .stage { --mode: wide; position: relative; aspect-ratio: 1000 / 380; container-type: inline-size; overflow: hidden; }
+.flow .scene {
+  --px: calc(100cqw / 1000);
+  --fs-name: 17;
+  --fs-mono: 15;
+  --fs-small: 12.5;
+  --fs-big: 21;
+  --rr-k: 82;
+  position: absolute;
+  inset: 0;
+  opacity: var(--o);
+  font-family: var(--sans);
+  color: var(--ink);
+}
+.flow .scene > * { position: absolute; left: 0; top: 0; transform: translate(calc(var(--x) * var(--px)), calc(var(--y) * var(--px))) scale(var(--s)); opacity: var(--o); }
+.flow :is(.mac, .box, .rec, .list, .host, .bin, .only) { box-sizing: border-box; width: calc(var(--w) * var(--px)); height: calc(var(--h) * var(--px)); }
+.flow :is(.box, .rec, .list, .only) { border: 1px solid var(--wire); background: var(--surface); overflow: hidden; }
+.flow .scene p { margin: 0; }
+
+/* your Mac */
+.flow .mac { border: 1px dashed var(--wire); }
+.flow .mac-name { padding: 0 calc(7 * var(--px)); background: var(--paper); font: calc(var(--fs-small) * var(--px)) / calc(18 * var(--px)) var(--mono); color: var(--muted); white-space: nowrap; }
+
+/* A computer: main, the fork. Its header is its name and its state. */
+.flow .box.main { transform-origin: 50% 50%; box-shadow: 0 0 0 calc(var(--glow) * 5 * var(--px)) color-mix(in srgb, var(--accent) 35%, transparent); }
+.flow .box.fork { transform-origin: 50% 0; }
+.flow .box.fork.gone { border-style: dashed; }
+.flow .hd { position: absolute; left: 0; right: 0; top: 0; height: calc(40 * var(--px)); display: flex; align-items: center; justify-content: space-between; gap: calc(8 * var(--px)); padding: 0 calc(12 * var(--px)); border-bottom: 1px solid var(--line); font: calc(var(--fs-small) * var(--px)) / 1 var(--mono); color: var(--muted); white-space: nowrap; }
+.flow .box.chip .hd { border-bottom-color: transparent; }
+.flow .hd b { font: 500 calc(16 * var(--px)) / 1 var(--mono); color: var(--ink); }
+.flow .run { display: inline-flex; align-items: center; gap: calc(6 * var(--px)); opacity: var(--o); }
+.flow .main .run { --o: 1; }
+.flow .run::before { content: ""; box-sizing: border-box; width: calc(6 * var(--px)); height: calc(6 * var(--px)); border: 1.4px solid var(--ink); border-radius: 50%; }
+.flow .fork .drop { margin-left: auto; }
+
+/* An agent in a computer: its name, its folder, and the command it types */
+.flow .ag { position: absolute; left: calc(12 * var(--px)); right: calc(12 * var(--px)); top: 0; border-top: 1px solid var(--line); }
+.flow .main .ag { height: calc(var(--h) * var(--px)); transform: translate(calc(var(--dx) * var(--px)), calc(var(--y) * var(--px))); opacity: var(--o); }
+.flow .fork .ag { top: calc(48 * var(--px)); height: calc(52 * var(--px)); opacity: var(--o); }
+.flow .who { position: absolute; left: 0; top: calc(16 * var(--px)); display: flex; align-items: baseline; gap: calc(8 * var(--px)); white-space: nowrap; }
+.flow .main .who { top: 0; transform: translateY(calc(var(--y) * var(--px))); }
+.flow .dot { width: calc(7 * var(--px)); height: calc(7 * var(--px)); border-radius: 50%; background: var(--ink); flex-shrink: 0; transform: translateY(calc(-2 * var(--px))); }
+.flow .nm { font: 500 calc(var(--fs-name) * var(--px)) / calc(20 * var(--px)) var(--sans); }
+.flow .rp { font: calc(var(--fs-small) * var(--px)) / calc(20 * var(--px)) var(--mono); color: var(--muted); }
+.flow .cmd { position: absolute; left: 0; top: 0; display: flex; align-items: center; transform: translate(calc(var(--x) * var(--px)), calc(var(--y) * var(--px))); opacity: var(--o); font: calc(var(--fs-mono) * var(--px)) / calc(20 * var(--px)) var(--mono); white-space: pre; --len: var(--n); }
+.flow .ps { color: var(--muted); }
+/* A command is typed: its text shows as many characters as `--n` says, and the caret follows. */
+.flow .cmd .tx { display: inline-block; overflow: hidden; vertical-align: top; width: calc(var(--len) * 1ch); }
+.flow .caret { display: inline-block; width: calc(7 * var(--px)); height: calc(15 * var(--px)); margin-left: 1px; background: var(--ink); opacity: var(--on); }
+.flow .cmd { --on: var(--caret); }
+/* A check, drawn along its line. */
+.flow .ok { fill: none; stroke: var(--accent-ink); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 11; stroke-dashoffset: calc((1 - var(--d)) * 11); }
+.flow .ag .ok { position: absolute; right: calc(2 * var(--px)); top: 0; width: calc(16 * var(--px)); height: calc(16 * var(--px)); transform: translateY(calc(var(--y) * var(--px))); opacity: var(--o); }
+
+/* The marks of the record: a fact is a filled diamond, a report a hollow one, an opinion a half-filled one. */
+.flow .mk { width: calc(12 * var(--px)); height: calc(12 * var(--px)); flex-shrink: 0; fill: var(--paper); stroke: var(--wire); stroke-width: 1.2; stroke-linejoin: round; }
+.flow .mk.fact { fill: var(--ink); stroke: var(--ink); }
+.flow .mk.opinion { color: var(--ink); stroke: var(--ink); }
+
+/* the record, and what led to an alert */
+.flow .rec .hd b + b { position: absolute; left: calc(12 * var(--px)); }
+.flow :is(.rec, .list) .hd b { font-size: calc(15 * var(--px)); opacity: var(--o); }
+.flow :is(.rr, .cc) { position: absolute; left: calc(8 * var(--px)); right: calc(8 * var(--px)); display: flex; align-items: center; gap: calc(10 * var(--px)); padding: 0 calc(4 * var(--px)); font: calc(var(--fs-mono) * var(--px)) / 1 var(--mono); white-space: pre; opacity: var(--o); clip-path: inset(0 calc((1 - var(--a)) * 100%) 0 0); }
+.flow .rr { height: calc(29 * var(--px)); background: color-mix(in srgb, var(--accent-wash) calc(var(--wash) * 100%), transparent); }
+.flow .rr .k { width: calc(var(--rr-k) * var(--px)); flex-shrink: 0; color: var(--muted); }
+.flow .r1 { top: calc(44 * var(--px)); }
+.flow .r2 { top: calc(73 * var(--px)); }
+.flow .r3 { top: calc(102 * var(--px)); }
+.flow .r4 { top: calc(131 * var(--px)); }
+.flow .r5 { top: calc(160 * var(--px)); }
+.flow .r6 { top: calc(189 * var(--px)); }
+.flow .r7 { top: calc(218 * var(--px)); }
+.flow .legend { position: absolute; left: calc(12 * var(--px)); bottom: calc(9 * var(--px)); display: flex; gap: calc(18 * var(--px)); font: calc(12 * var(--px)) / 1 var(--mono); color: var(--muted); white-space: nowrap; opacity: var(--o); }
+.flow .legend span { display: inline-flex; align-items: center; gap: calc(7 * var(--px)); }
+.flow .cc { height: calc(44 * var(--px)); }
+.flow .cc .k { width: calc(96 * var(--px)); flex-shrink: 0; color: var(--muted); }
+.flow .k1 { top: calc(50 * var(--px)); }
+.flow .k2 { top: calc(102 * var(--px)); }
+.flow .k3 { top: calc(154 * var(--px)); }
+.flow .k4 { top: calc(206 * var(--px)); }
+/* The line that joins what led to an alert, drawn from the top. Its last third leads to the turn, an opinion: dashed. */
+.flow .chain-line {
+  position: absolute; left: calc(18 * var(--px)); top: calc(72 * var(--px)); width: 1.5px; height: calc(156 * var(--px)); margin-left: -0.75px;
+  background: linear-gradient(var(--wire), var(--wire)) top / 100% calc(200% / 3) no-repeat, repeating-linear-gradient(var(--wire) 0 2px, transparent 2px 4px) bottom / 100% calc(100% / 3) no-repeat;
+  clip-path: inset(0 0 calc((1 - var(--a)) * 100%) 0); opacity: var(--o);
+}
+
+/* a short list: what needs you, then what costs the most */
+.flow .list .hd b + b { position: absolute; left: calc(12 * var(--px)); }
+.flow :is(.nr, .cr) { position: absolute; left: calc(8 * var(--px)); right: calc(8 * var(--px)); box-sizing: border-box; border-top: 1px solid var(--line); opacity: var(--o); }
+.flow .nr { display: flex; align-items: center; gap: calc(16 * var(--px)); height: calc(64 * var(--px)); padding: 0 calc(12 * var(--px)); font-size: calc(var(--fs-big) * var(--px)); line-height: 1.2; transform: translateY(calc(var(--dy) * var(--px))) scale(var(--s)); background: color-mix(in srgb, var(--accent-wash) calc(var(--wash) * 100%), transparent); }
+.flow .n1 { top: calc(44 * var(--px)); }
+.flow .n2 { top: calc(112 * var(--px)); }
+.flow .n3 { top: calc(180 * var(--px)); }
+.flow .nr .no { width: calc(22 * var(--px)); font: 500 calc(var(--fs-big) * var(--px)) / 1 var(--mono); color: var(--muted); }
+.flow .n1 .no { color: var(--accent-ink); }
+.flow .nr .tx { flex: 1; }
+.flow .cr { height: calc(74 * var(--px)); transform: translateY(calc(var(--dy) * var(--px))); }
+.flow .o1 { top: calc(40 * var(--px)); }
+.flow .o2 { top: calc(120 * var(--px)); }
+.flow .o3 { top: calc(200 * var(--px)); }
+.flow .cr .nm { position: absolute; left: calc(12 * var(--px)); top: calc(12 * var(--px)); font: 500 calc(19 * var(--px)) / 1.2 var(--mono); white-space: nowrap; }
+.flow .o1 .nm { color: var(--accent-ink); }
+.flow .fig { position: absolute; left: calc(330 * var(--px)); right: calc(12 * var(--px)); top: calc(16 * var(--px)); display: flex; gap: calc(8 * var(--px)) calc(22 * var(--px)); white-space: nowrap; font-size: calc(15 * var(--px)); line-height: calc(20 * var(--px)); color: var(--muted); }
+.flow .fig span:nth-child(1) { width: calc(210 * var(--px)); }
+.flow .fig span:nth-child(2) { width: calc(90 * var(--px)); }
+.flow .bar { position: absolute; left: calc(12 * var(--px)); bottom: calc(12 * var(--px)); width: calc(var(--w) * var(--px)); height: calc(6 * var(--px)); background: var(--wire); }
+.flow .o1 .bar { background: var(--accent); }
+
+/* main's line of time, and its checkpoints: the site's diamond, hollow, filled with the accent when you go back to one */
+.flow .tl-line { position: absolute; left: 0; top: 0; width: calc(var(--w) * var(--px)); height: 1.5px; margin-top: -0.75px; background: var(--wire); transform: translate(calc(var(--x) * var(--px)), calc(var(--y) * var(--px))); }
+.flow .cp { position: absolute; left: 0; top: 0; box-sizing: border-box; width: calc(var(--size) * 0.75 * var(--px)); height: calc(var(--size) * 0.75 * var(--px)); border: 1px solid color-mix(in srgb, var(--accent) calc(var(--hot) * 100%), var(--wire)); background: color-mix(in srgb, var(--accent) calc(var(--hot) * 100%), var(--paper)); transform: translate(calc(var(--x) * var(--px) - 50%), calc(var(--y) * var(--px) - 50%)) rotate(45deg); opacity: var(--o); }
+.flow .cp-name { position: absolute; left: 0; top: 0; font: calc(var(--fs-small) * var(--px)) / 1 var(--mono); color: var(--accent-ink); white-space: nowrap; transform: translate(calc(var(--x) * var(--px)), calc(var(--y) * var(--px))); opacity: var(--o); }
+
+/* The edge of main, lit while a request meets it, and the requests: a wire from the agent's row, and a dot that
+   travels along it. Outside your Mac, a host's dot is filled once a request reaches it. */
+.flow .scene > .edge { width: calc(3 * var(--px)); height: calc(var(--h) * var(--px)); margin-left: calc(-1.5 * var(--px)); background: var(--accent); transform: translate(calc(var(--x) * var(--px)), calc(var(--y) * var(--px))); }
+.flow .req { width: calc(var(--w) * var(--px)); height: 0; margin-top: -0.75px; border-top: 1.5px dashed var(--wire); }
+.flow .scene > .pk { box-sizing: border-box; width: calc(10 * var(--px)); height: calc(10 * var(--px)); border: 1.5px solid var(--paper); border-radius: 50%; background: var(--ink); transform: translate(calc(var(--x) * var(--px) - 50%), calc(var(--y) * var(--px) - 50%)); }
+.flow .scene > .cross { width: calc(14 * var(--px)); height: calc(14 * var(--px)); fill: none; stroke: var(--accent-ink); stroke-width: 2; stroke-linecap: round; transform: translate(calc(var(--x) * var(--px) - 50%), calc(var(--y) * var(--px) - 50%)); }
+.flow .host { display: flex; align-items: center; gap: calc(7 * var(--px)); padding: 0 calc(10 * var(--px)); border: 1px dashed var(--wire); background: var(--paper); font: calc(var(--fs-mono) * var(--px)) / 1 var(--mono); white-space: nowrap; }
+.flow .hdot { box-sizing: border-box; width: calc(8 * var(--px)); height: calc(8 * var(--px)); flex-shrink: 0; border-radius: 50%; border: 1.3px solid color-mix(in srgb, var(--ink) calc(var(--got) * 100%), var(--wire)); background: color-mix(in srgb, var(--ink) calc(var(--got) * 100%), transparent); }
+.flow .scene > .denied { font: calc(var(--fs-small) * var(--px)) / 1 var(--mono); color: var(--accent-ink); white-space: nowrap; transform: translate(calc(var(--x) * var(--px) - 100%), calc(var(--y) * var(--px) - 50%)); }
+
+/* going back: the wire from the checkpoint to the fork, what is only in the fork, the file brought back, the bin */
+.flow .back-wire { width: 1.6px; height: calc(var(--h) * var(--px)); margin-left: -0.8px; background: color-mix(in srgb, var(--accent) calc(var(--hot) * 100%), var(--wire)); }
+.flow .only .hd { justify-content: flex-start; }
+.flow .fn { position: absolute; left: calc(12 * var(--px)); right: calc(12 * var(--px)); height: calc(40 * var(--px)); display: flex; align-items: center; gap: calc(14 * var(--px)); border-top: 1px solid var(--line); font: calc(var(--fs-mono) * var(--px)) / 1 var(--mono); white-space: nowrap; transform: translateY(calc(var(--dy) * var(--px))); opacity: var(--o); }
+.flow .f1 { top: calc(44 * var(--px)); }
+.flow .f2 { top: calc(84 * var(--px)); }
+.flow .nt { font-size: calc(var(--fs-small) * var(--px)); color: var(--muted); }
+.flow .fn .bb { margin-left: auto; transform: scale(var(--s)); opacity: var(--o); }
+.flow .fn .ok { position: absolute; right: calc(38 * var(--px)); top: 50%; width: calc(16 * var(--px)); height: calc(16 * var(--px)); margin-top: calc(-8 * var(--px)); opacity: var(--o); }
+.flow .file { box-sizing: border-box; display: flex; align-items: center; height: calc(28 * var(--px)); padding: 0 calc(10 * var(--px)); border: 1px solid var(--accent); background: var(--accent-wash); font: calc(var(--fs-small) * var(--px)) / 1 var(--mono); white-space: nowrap; }
+.flow .bin { border: 1px dashed var(--wire); }
+.flow .bin span { position: absolute; left: calc(12 * var(--px)); top: calc(10 * var(--px)); font: calc(var(--fs-small) * var(--px)) / 1 var(--mono); color: var(--muted); }
+
+/* Buttons drawn in the picture, in the site's colours: you press them, the visitor does not. */
+.flow .pb { box-sizing: border-box; display: inline-flex; align-items: center; height: calc(28 * var(--px)); padding: 0 calc(11 * var(--px)); border: 1px solid var(--line); border-radius: 3px; background: var(--surface-hover); box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 8%, transparent); font: calc(14 * var(--px)) / 1 var(--sans); color: var(--ink); white-space: nowrap; }
+.flow .drop { transform: scale(var(--s)); opacity: var(--o); }
+
+/* your pointer: its tip is the point it is at */
+.flow .scene > .ptr { z-index: 1; width: calc(22 * var(--px)); height: calc(22 * var(--px)); color: var(--ink); transform: translate(calc((var(--x) - 3) * var(--px)), calc((var(--y) - 2) * var(--px))) scale(var(--s)); transform-origin: 14% 10%; }
+
+/* The step names under the stage, and Pause at the end of their row. A step's bar fills while it plays and stays
+   full once it is done. Paused by the visitor, the flow shows the end of a step: its bar is full. Held by the page
+   (out of view, a hidden tab, a card being played), the bar stops where it is. */
+.flow-foot { display: flex; align-items: flex-start; gap: 18px; margin-top: 6px; padding: 0 14px; }
+.flow .steps { flex: 1; min-width: 0; margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(8, 1fr); gap: 0 10px; }
+.flow .steps button { display: block; width: 100%; padding: 0 0 10px; background: none; text-align: left; font: 14px/1.2 var(--sans); color: var(--muted); white-space: nowrap; }
+.flow .steps button:hover { color: var(--ink); }
+.flow .steps i { position: relative; display: block; height: 2px; margin-bottom: 9px; overflow: hidden; background: var(--line); }
+.flow .steps b { position: absolute; inset: 0; background: var(--ink); transform: scaleX(0); transform-origin: left; }
+.flow .steps li.done b { transform: none; }
+.flow .steps li.on b { animation: flow-fill var(--dur) linear var(--skip, 0ms) forwards; }
+.flow .steps li.on button { color: var(--ink); font-weight: 500; }
+@keyframes flow-fill { to { transform: none; } }
+.flow.paused .steps li.on b { animation: none; transform: none; }
+.flow.held .steps li.on b { animation-play-state: paused; }
+.flow .ctl { flex-shrink: 0; margin-top: 3px; }
+/* Without script the flow cannot play: the still shows, and the step names and Pause keep their room. */
+.flow:not(.live) :is(.steps, .ctl) { visibility: hidden; }
+
+/* In one column: the scene's box is 340 by 620, and the step names take two rows, with Pause under them. */
+@media (max-width: 700px) {
+  .flow .stage { --mode: tall; aspect-ratio: 340 / 620; }
+  .flow .scene { --px: calc(100cqw / 340); --fs-name: 15; --fs-mono: 12.5; --fs-small: 12; --fs-big: 17; --rr-k: 66; }
+  .flow .hd b { font-size: calc(15 * var(--px)); }
+  .flow :is(.rr, .cc) { gap: calc(8 * var(--px)); padding: 0 calc(2 * var(--px)); }
+  .flow .cc { height: calc(38 * var(--px)); }
+  .flow .cc .k { width: calc(78 * var(--px)); }
+  .flow .k1 { top: calc(46 * var(--px)); }
+  .flow .k2 { top: calc(92 * var(--px)); }
+  .flow .k3 { top: calc(138 * var(--px)); }
+  .flow .k4 { top: calc(184 * var(--px)); }
+  .flow .chain-line { left: calc(16 * var(--px)); top: calc(65 * var(--px)); height: calc(138 * var(--px)); }
+  .flow .nr { height: calc(52 * var(--px)); }
+  .flow .n2 { top: calc(102 * var(--px)); }
+  .flow .n3 { top: calc(160 * var(--px)); }
+  .flow .cr { height: calc(86 * var(--px)); }
+  .flow .o1 { top: calc(44 * var(--px)); }
+  .flow .o2 { top: calc(138 * var(--px)); }
+  .flow .o3 { top: calc(232 * var(--px)); }
+  .flow .cr .nm { font-size: calc(16 * var(--px)); }
+  .flow .fig { left: calc(12 * var(--px)); top: calc(40 * var(--px)); gap: calc(6 * var(--px)) calc(14 * var(--px)); font-size: calc(13 * var(--px)); }
+  .flow .fig span:nth-child(n) { width: auto; }
+  .flow .host { gap: calc(5 * var(--px)); padding: 0 calc(6 * var(--px)); font-size: calc(11 * var(--px)); }
+  /* The record is set a little smaller so that, in Boundary, main and the record leave room for the hosts. */
+  .flow .rec { --fs-mono: 12; }
+  .flow .rr { gap: calc(5 * var(--px)); }
+  .flow-foot { flex-wrap: wrap; gap: 6px; }
+  .flow .steps { flex: 1 0 100%; grid-template-columns: repeat(4, 1fr); gap: 0 12px; }
+  .flow .ctl { margin-left: auto; }
+}
+
+/* The still: the last moment of Boundary, across. flow.test.ts checks it against what flow.ts draws there. */
+.scene { --o: 1; }
+.scene .mac { --x: 1; --y: 14; --w: 700; --h: 365; --o: 1; }
+.scene .mac-name { --x: 17; --y: 5; --o: 1; }
+.scene .tl { --o: 1; }
+.scene .tl .tl-line { --x: 24; --y: 348; --w: 652; }
+.scene .tl .cp.c1 { --x: 83.27; --y: 348; --size: 9; --o: 1; }
+.scene .tl .cp.c2 { --x: 142.55; --y: 348; --size: 9; --o: 1; }
+.scene .tl .cp.c3 { --x: 201.82; --y: 348; --size: 9; --o: 1; }
+.scene .tl .cp.c4 { --x: 261.09; --y: 348; --size: 9; --o: 1; }
+.scene .tl .cp.c5 { --x: 320.36; --y: 348; --size: 4.5; }
+.scene .tl .cp.c6 { --x: 379.64; --y: 348; --size: 4.5; }
+.scene .tl .cp.c7 { --x: 438.91; --y: 348; --size: 4.5; }
+.scene .tl .cp.c8 { --x: 498.18; --y: 348; --size: 4.5; }
+.scene .tl .cp.c9 { --x: 557.45; --y: 348; --size: 4.5; }
+.scene .tl .cp.c10 { --x: 616.73; --y: 348; --size: 4.5; }
+.scene .tl .cp-name { --x: 215.82; --y: 324; }
+.scene .box.main { --x: 366; --y: 34; --w: 306; --h: 250; --o: 1; }
+.scene .box.main .ag.a1 { --y: 48; --h: 52; --o: 1; }
+.scene .box.main .ag.a1 .who { --y: 16; }
+.scene .box.main .ag.a1 .cmd { --x: 30; --y: 27; --n: 30; }
+.scene .box.main .ag.a1 .ok { --y: 28; --d: 1; }
+.scene .box.main .ag.a2 { --y: 100; --h: 52; --o: 1; }
+.scene .box.main .ag.a2 .who { --y: 6; }
+.scene .box.main .ag.a2 .cmd:nth-child(2) { --x: 30; --y: 27; --n: 11; }
+.scene .box.main .ag.a2 .cmd.curl { --x: 30; --y: 27; --o: 1; --n: 13; }
+.scene .box.main .ag.a2 .ok { --y: 28; --d: 1; }
+.scene .box.main .ag.a3 { --y: 152; --h: 52; --o: 1; }
+.scene .box.main .ag.a3 .who { --y: 16; }
+.scene .box.main .ag.a3 .cmd { --x: 30; --y: 27; --n: 11; }
+.scene .box.main .ag.a3 .ok { --y: 28; --d: 1; }
+.scene .rec { --x: 24; --y: 34; --w: 318; --h: 254; --o: 1; }
+.scene .rec .hd b:nth-child(1) { --o: 1; }
+.scene .rec .rr.r1 { --a: 1; --o: 1; }
+.scene .rec .rr.r2 { --a: 1; --o: 1; }
+.scene .rec .rr.r3 { --a: 1; --o: 1; }
+.scene .rec .rr.r4 { --a: 1; --o: 1; }
+.scene .rec .rr.r5 { --a: 1; --o: 1; }
+.scene .rec .rr.r6 { --a: 1; --o: 1; }
+.scene .rec .rr.r7 { --a: 1; --o: 1; }
+.scene .list { --x: 40; --y: 36; --w: 440; --h: 256; }
+.scene .list .hd b:nth-child(1) { --o: 1; }
+.scene .list .nr.n1 { --dy: 8; }
+.scene .list .nr.n2 { --dy: 8; }
+.scene .list .nr.n3 { --dy: 8; }
+.scene .list .cr.o1 { --dy: 8; }
+.scene .list .cr.o2 { --dy: 8; }
+.scene .list .cr.o3 { --dy: 8; }
+.scene .edge.e1 { --x: 672; --y: 34; --h: 178; --o: 1; }
+.scene .edge.e2 { --x: 672; --y: 212; --h: 72; --o: 1; }
+.scene .req.q1 { --x: 582; --y: 160; --w: 83; --o: 1; }
+.scene .req.q2 { --x: 582; --y: 212; --w: 190; --o: 1; }
+.scene .host.h1 { --x: 778; --y: 142; --w: 196; --h: 36; --o: 1; }
+.scene .host.h2 { --x: 778; --y: 194; --w: 196; --h: 36; --o: 1; }
+.scene .host.h2 .hdot { --got: 1; }
+.scene .denied { --x: 964; --y: 160; --o: 1; }
+.scene .pk.p1 { --x: 665; --y: 160; }
+.scene .pk.p2 { --x: 772; --y: 212; }
+.scene .cross { --x: 672; --y: 160; --o: 1; }
+.scene .bin { --x: 726; --y: 210; --w: 250; --h: 80; }
+.scene .back-wire { --x: 201.82; --y: 340; }
+.scene .box.fork { --x: 266; --y: 200; --w: 620; --h: 116; --s: 0.94; }
+.scene .box.fork .hd .run { --o: 1; }
+.scene .only { --x: 24; --y: 210; --w: 420; --h: 128; }
+.scene .only .fn.f1 { --dy: 6; }
+.scene .only .fn.f1 .pb.bb { --o: 1; }
+.scene .only .fn.f2 { --dy: 6; }
+.scene .only .fn.f2 .pb.bb { --o: 1; }
+.scene .file { --x: 36; --y: 260; }
+.scene .ptr { --x: 410; --y: 202; }
+
+/* The still, in one column. */
+@media (max-width: 700px) {
+  .scene { --o: 1; }
+  .scene .mac { --x: 1; --y: 12; --w: 236; --h: 606; --o: 1; }
+  .scene .mac-name { --x: 17; --y: 3; --o: 1; }
+  .scene .tl { --o: 1; }
+  .scene .tl .tl-line { --x: 10; --y: 580; --w: 216; }
+  .scene .tl .cp.c1 { --x: 29.64; --y: 580; --size: 8; --o: 1; }
+  .scene .tl .cp.c2 { --x: 49.27; --y: 580; --size: 8; --o: 1; }
+  .scene .tl .cp.c3 { --x: 68.91; --y: 580; --size: 8; --o: 1; }
+  .scene .tl .cp.c4 { --x: 88.55; --y: 580; --size: 8; --o: 1; }
+  .scene .tl .cp.c5 { --x: 108.18; --y: 580; --size: 4; }
+  .scene .tl .cp.c6 { --x: 127.82; --y: 580; --size: 4; }
+  .scene .tl .cp.c7 { --x: 147.45; --y: 580; --size: 4; }
+  .scene .tl .cp.c8 { --x: 167.09; --y: 580; --size: 4; }
+  .scene .tl .cp.c9 { --x: 186.73; --y: 580; --size: 4; }
+  .scene .tl .cp.c10 { --x: 206.36; --y: 580; --size: 4; }
+  .scene .tl .cp-name { --x: 82.91; --y: 556; }
+  .scene .box.main { --x: 6; --y: 296; --w: 226; --h: 214; --o: 1; }
+  .scene .box.main .ag.a1 { --y: 48; --h: 52; --o: 1; }
+  .scene .box.main .ag.a1 .who { --y: 16; }
+  .scene .box.main .ag.a1 .cmd { --x: 28; --y: 27; --n: 30; }
+  .scene .box.main .ag.a1 .ok { --y: 17; --d: 1; }
+  .scene .box.main .ag.a2 { --y: 100; --h: 52; --o: 1; }
+  .scene .box.main .ag.a2 .who { --y: 6; }
+  .scene .box.main .ag.a2 .cmd:nth-child(2) { --x: 28; --y: 27; --n: 11; }
+  .scene .box.main .ag.a2 .cmd.curl { --x: 28; --y: 27; --o: 1; --n: 13; }
+  .scene .box.main .ag.a2 .ok { --y: 7; --d: 1; }
+  .scene .box.main .ag.a3 { --y: 152; --h: 52; --o: 1; }
+  .scene .box.main .ag.a3 .who { --y: 16; }
+  .scene .box.main .ag.a3 .cmd { --x: 28; --y: 27; --n: 11; }
+  .scene .box.main .ag.a3 .ok { --y: 17; --d: 1; }
+  .scene .rec { --x: 6; --y: 24; --w: 226; --h: 253; --o: 1; }
+  .scene .rec .hd b:nth-child(1) { --o: 1; }
+  .scene .rec .rr.r1 { --a: 1; --o: 1; }
+  .scene .rec .rr.r2 { --a: 1; --o: 1; }
+  .scene .rec .rr.r3 { --a: 1; --o: 1; }
+  .scene .rec .rr.r4 { --a: 1; --o: 1; }
+  .scene .rec .rr.r5 { --a: 1; --o: 1; }
+  .scene .rec .rr.r6 { --a: 1; --o: 1; }
+  .scene .rec .rr.r7 { --a: 1; --o: 1; }
+  .scene .list { --x: 10; --y: 24; --w: 320; --h: 226; }
+  .scene .list .hd b:nth-child(1) { --o: 1; }
+  .scene .list .nr.n1 { --dy: 8; }
+  .scene .list .nr.n2 { --dy: 8; }
+  .scene .list .nr.n3 { --dy: 8; }
+  .scene .list .cr.o1 { --dy: 8; }
+  .scene .list .cr.o2 { --dy: 8; }
+  .scene .list .cr.o3 { --dy: 8; }
+  .scene .edge.e1 { --x: 232; --y: 296; --h: 178; --o: 1; }
+  .scene .edge.e2 { --x: 232; --y: 474; --h: 36; --o: 1; }
+  .scene .req.q1 { --x: 172; --y: 422; --w: 53; --o: 1; }
+  .scene .req.q2 { --x: 172; --y: 474; --w: 68; --o: 1; }
+  .scene .host.h1 { --x: 246; --y: 407; --w: 86; --h: 30; --o: 1; }
+  .scene .host.h2 { --x: 246; --y: 459; --w: 86; --h: 30; --o: 1; }
+  .scene .host.h2 .hdot { --got: 1; }
+  .scene .denied { --x: 332; --y: 397; --o: 1; }
+  .scene .pk.p1 { --x: 225; --y: 422; }
+  .scene .pk.p2 { --x: 240; --y: 474; }
+  .scene .cross { --x: 232; --y: 422; --o: 1; }
+  .scene .bin { --x: 10; --y: 530; --w: 320; --h: 80; }
+  .scene .back-wire { --x: 68.91; --y: 572; }
+  .scene .box.fork { --x: 10; --y: 318; --w: 320; --h: 112; --s: 0.94; }
+  .scene .box.fork .hd .run { --o: 1; }
+  .scene .only { --x: 10; --y: 270; --w: 320; --h: 128; }
+  .scene .only .fn.f1 { --dy: 6; }
+  .scene .only .fn.f1 .pb.bb { --o: 1; }
+  .scene .only .fn.f2 { --dy: 6; }
+  .scene .only .fn.f2 .pb.bb { --o: 1; }
+  .scene .file { --x: 22; --y: 320; }
+  .scene .ptr { --x: 310; --y: 184; }
+}

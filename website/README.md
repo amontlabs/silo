@@ -3,16 +3,24 @@
 The public site at [silo.amontlabs.com](https://silo.amontlabs.com), built with
 Vite. It has two pages:
 
-- **Home** (`index.html`, `src/style.css`, `src/cards.css`): the way into the
-  Workshop with one line on where Silo stands, the headline and the pitch, six
-  cards on what Silo does, and the "in heavy development" notice. Its texts are
-  interim, until the owner settles the new design, and nothing on it is read
-  from the plan. Each card has a small picture of its feature, a label, a title
-  and a paragraph. The page has a script, `src/home.ts`, that plays the
-  pictures (`src/pictures.ts`, `src/cards.ts`, `src/scene.ts`): one card at a
-  time, the cards in view taking turns, a card you point at or press at once.
-  With reduced motion nothing moves until you press a card, and without script
-  each picture shows as a still at its end. The page shows once its fonts are
+- **Home** (`index.html`, `src/style.css`, `src/flow.css`, `src/cards.css`):
+  the way into the Workshop with one line on where Silo stands, the headline
+  and the pitch with the flow under them, six cards on what Silo does, and the
+  "in heavy development" notice. Its texts are interim, until the owner settles
+  the new design, and nothing on it is read from the plan. The flow is a film
+  of eight steps, from main and its three agents to a fork dropped after one
+  file is brought back, played in a loop, with the step names and Pause under
+  it; a hidden caption tells it in words. Each card has a small picture of its
+  feature, a label, a title and a paragraph. The page has a script,
+  `src/home.ts`, that plays the pictures (`src/pictures.ts`, `src/flow.ts`,
+  `src/cards.ts`, `src/scene.ts`), one thing at a time: the flow while at
+  least 30% of it is in view, the cards in view taking turns while it does not
+  play, a card you point at or press at once. The film is drawn from the moment
+  alone, so a step name or Pause shows exactly what playing shows; nothing runs
+  while it is held. With reduced motion nothing moves until you press Play or a
+  card. Without script the flow shows the last moment of Boundary from its
+  markup and `src/flow.css` alone, at the size it keeps through every step, and
+  each card shows as a still at its end. The page shows once its fonts are
   in (at most 1.2 s), so nothing changes width: it preloads every face it waits
   for, and the deployed site lets a browser keep the font files, so a later
   visit does not wait.

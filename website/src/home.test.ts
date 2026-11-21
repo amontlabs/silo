@@ -4,8 +4,8 @@ import { describe, expect, it } from 'vitest';
 
 const html = readFileSync(join(process.cwd(), 'index.html'), 'utf8');
 const read = (file: string) => readFileSync(join(process.cwd(), file), 'utf8');
-const css = ['src/style.css', 'src/cards.css'].map(read).join('\n');
-const scripts = ['src/home.ts', 'src/pictures.ts', 'src/cards.ts', 'src/scene.ts'].map(read).join('\n');
+const css = ['src/style.css', 'src/flow.css', 'src/cards.css'].map(read).join('\n');
+const scripts = ['src/home.ts', 'src/pictures.ts', 'src/flow.ts', 'src/cards.ts', 'src/scene.ts'].map(read).join('\n');
 const theme = readFileSync(join(process.cwd(), 'public/theme.js'), 'utf8');
 const workshop = readFileSync(join(process.cwd(), 'workshop/index.html'), 'utf8');
 const HEADLINE = 'Your agents work in a computer of their own.';
@@ -31,11 +31,63 @@ describe('the home page', () => {
 
   it('holds the way to the Workshop, then the hero, then the cards, then the notice', () => {
     expect([...doc.querySelectorAll('main > *')].map((node) => node.tagName + (node.className ? `.${node.className.split(' ')[0]}` : ''))).toEqual(['A.strip', 'SECTION.hero', 'SECTION.for', 'DIV.notice']);
-    // The hero's place for the picture under the pitch stays empty.
-    expect([...doc.querySelectorAll('.hero > *')].map((node) => node.tagName + (node.id ? `#${node.id}` : ''))).toEqual(['H1#hero-title', 'P']);
+    // The hero is the headline, the pitch and the flow, and no link of its own, so the flow starts high on the page.
+    expect([...doc.querySelectorAll('.hero > *')].map((node) => node.tagName + (node.id ? `#${node.id}` : ''))).toEqual(['H1#hero-title', 'P', 'DIV#flow']);
     expect(doc.querySelectorAll('.hero a')).toHaveLength(0);
     expect(doc.querySelector('main > a.strip')?.getAttribute('href')).toBe('/workshop');
     expect([...doc.querySelectorAll('script[type="module"]')].map((script) => script.getAttribute('src'))).toEqual(['/src/home.ts']);
+  });
+
+  it('tells the flow in words for a screen reader, and has no title of its own', () => {
+    // The headline above the flow names it.
+    expect(doc.querySelectorAll('.flow :is(h2, h3, .title)')).toHaveLength(0);
+    expect(doc.querySelector('.flow figure')?.getAttribute('aria-labelledby')).toBe('hero-title');
+    // The picture is drawn for the eye; a screen reader gets the caption instead.
+    expect(doc.querySelector('.stage')?.getAttribute('aria-hidden')).toBe('true');
+    expect(doc.querySelector('.flow figure')?.getAttribute('aria-describedby')).toBe('flow-caption');
+    expect(text('#flow-caption')).toEqual([
+      'Three agents work in main, a virtual machine on your Mac, in two repositories. Each runs its commands with sudo, and nothing asks for approval. Silo writes down what happens. What it saw itself, such as a tool call, a file change, a connection or a model call, is a fact. What a program inside told it is a report, and it is marked apart. A request to a host that a rule allows passes. A request to a host that no rule allows is denied at the edge of main, and the attempt is recorded. A short list shows what needs you, and the denied connection opens on the process, the tool call and the turn that led to it. Another list ranks repeated work by what it cost. Checkpoints are taken on their own. You go back to the one before that turn and continue from it in a fork, while main keeps running. Before you drop the fork, Silo lists what is only there. You bring one file back to main, and the fork goes to the bin.',
+    ]);
+  });
+
+  it('gives the flow controls a screen reader can name', () => {
+    expect(text('.flow .ctl')).toEqual(['Pause']);
+    const steps = [...doc.querySelectorAll('.steps li > button[type="button"]')];
+    expect(steps.map((button) => button.getAttribute('aria-label'))).toEqual(['Main', 'Full access', 'Record', 'Boundary', 'Needs you', 'Cost', 'Go back', 'Drop']);
+    expect(text('.steps .lb')).toEqual(steps.map((button) => button.getAttribute('aria-label')));
+    // What is drawn inside the picture is not a control: nothing in it takes the keyboard.
+    expect(doc.querySelectorAll('.stage :is(button, a, input, [tabindex])')).toHaveLength(0);
+  });
+
+  it('draws in the flow what the plan says, with the kind of each line of the record', () => {
+    const lines = (selector: string) =>
+      [...doc.querySelectorAll(`.stage ${selector}`)].map((line) => {
+        const mark = line.querySelector('.mk');
+        const kind = !mark?.matches('svg') ? '' : mark.classList.contains('fact') ? 'fact' : mark.classList.contains('opinion') ? 'opinion' : 'report';
+        return `${kind} ${line.textContent?.replace(/\s+/g, ' ').trim()}`.trim();
+      });
+    expect(text('.stage .main .who')).toEqual(['Claude Code~/api', 'Codex~/web', 'Claude Code~/api']);
+    expect(text('.stage .main .cmd')).toEqual(['$ sudo apt install postgresql-17', '$ npm install', '$ curl paste.rs', '$ cargo build']);
+    // Process names are reports and run names are opinions.
+    expect(lines('.rr')).toEqual([
+      'fact tool callcargo build',
+      'report processcargo build',
+      'fact files214 changed',
+      'fact model18 calls · $0.42',
+      'opinion by Claude Code, run 2',
+      'fact networkcrates.io',
+      'fact networkpaste.rsdenied',
+    ]);
+    expect(lines('.legend span')).toEqual(['fact fact', 'report report', 'opinion opinion']);
+    expect(lines('.cc')).toEqual(['fact connectionpaste.rs', 'report processcurl', 'fact tool callcurl paste.rs', 'opinion turn 14Codex']);
+    expect(lines('.nr')).toEqual(['1paste.rs denied', '2Codex asks for a host', 'opinion 3a run looks stuck']);
+    expect(text('.stage .cr')).toEqual(['npm install41 times in 12 runs38 min2.1 GB', 'cargo build9 times12 min1.1 GB', 'apt update7 times3 min0.2 GB']);
+    expect(text('.stage .host')).toEqual(['paste.rs', 'crates.io']);
+    expect(text('.stage .fn')).toEqual(['notes.mdnot committedBring back', 'CLAUDE.mdeditedBring back']);
+    expect(text('.stage :is(.mac-name, .cp-name, .hd b, .denied, .bin, .file, .pb.drop)')).toEqual([
+      'your Mac', 'before turn 14', 'main', 'record', 'paste.rs denied', 'needs you', 'cost', 'denied', 'bin', 'fork', 'Drop', 'only here', 'notes.md',
+    ]);
+    expect(doc.querySelector('.stage')?.textContent).not.toMatch(/sandbox|safe|secure|proven|dashboard|monitor|observab|merge|diff/i);
   });
 
   it('says what Silo does in six cards: a picture, a label, a title, one paragraph', () => {
@@ -109,7 +161,7 @@ describe('the home page', () => {
     const body = html.slice(html.indexOf('<main'));
     expect(body).not.toMatch(/(?:fill|stroke|style)="[^"]*#[0-9a-f]{3,8}/i);
     expect(scripts).not.toMatch(/#[0-9a-f]{3,8}\b/i);
-    expect(read('src/cards.css').replace(/\/\*[\s\S]*?\*\//g, '')).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
+    expect(['src/flow.css', 'src/cards.css'].map(read).join('\n').replace(/\/\*[\s\S]*?\*\//g, '')).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
   });
 
   it('says what the Workshop is and where Silo stands, with nothing read from the plan', () => {
@@ -171,11 +223,11 @@ describe('the home page', () => {
       ...names(read('src/style.css')),
       ...names(html.slice(html.indexOf('<style>'), html.indexOf('</style>'))),
     ]);
-    // What style.css styles on purpose: the pictures' own frame, hidden until they are drawn, and a scene being put at a moment.
-    for (const own of ['mini', 'jump']) page.delete(own);
-    const inMarkup = [...doc.querySelectorAll('.mini, .mini *')].flatMap((part) => [...part.classList]);
+    // What style.css styles on purpose: the pictures' own frames, hidden until they are drawn, and a scene being put at a moment.
+    for (const own of ['stage', 'steps', 'ctl', 'mini', 'jump']) page.delete(own);
+    const inMarkup = [...doc.querySelectorAll('.stage, .stage *, .steps, .steps *, .mini, .mini *')].flatMap((part) => [...part.classList]);
     // In the scripts: the class names in a selector, those a cue adds or removes, and those of the wires it draws.
-    const code = read('src/cards.ts') + read('src/scene.ts');
+    const code = read('src/flow.ts') + read('src/cards.ts') + read('src/scene.ts');
     const inScripts = [
       ...[...code.matchAll(/'[^'\n]*'|`[^`\n]*`/g)].flatMap(([literal]) => [...literal.matchAll(/\.([a-z][\w-]*)/g)].map((match) => match[1])),
       ...[...code.matchAll(/(?:add|rem|once|toggle|remove)\((?:'[^'\n]*', )?'([a-z][\w-]*)'/g)].map((match) => match[1]),
