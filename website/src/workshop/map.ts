@@ -162,9 +162,9 @@ export const SILO_MAP: MapLayout = {
     rules: { full: [688, 418, 184, 64], fold: [580, 136, 160, 26], ty: 13, sy: 36, rests: ['where-precautions-live'] },
     // Above the way out: it reads the calls to model providers, not everything that leaves.
     traffic: { full: [744, 82, 196, 64], fold: [656, 22, 164, 28], ty: 13, sy: 36 },
-    // A low bar under the drawing: what holds in every part. Folded, it ends where it ends on the full map, low enough
+    // A low bar under the drawing, as wide as the Mac: what holds in every part. Folded, it ends where it ends on the full map, low enough
     // that it passes under Rules and precautions on its way there.
-    checking: { full: [24, 566, 1088, 48], fold: [944, 142, 168, 26], ty: 6, sy: 27, rests: ['properties-are-checked'] },
+    checking: { full: [24, 566, 936, 48], fold: [944, 142, 168, 26], ty: 6, sy: 27, rests: ['properties-are-checked'] },
   },
   zones: [
     { label: 'YOUR MAC', full: [24, 18, 936, 536], fold: [16, 8, 828, 164], corners: true, rests: ['who-it-is-for', 'where-it-runs'] },

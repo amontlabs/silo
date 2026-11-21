@@ -572,8 +572,9 @@ describe('the map layout', () => {
       expect(map.notes.some((one) => one.title === 'Your phone')).toBe(false);
       // No wire joins What you see to the phone: the app's wires are the way to the engine and the one that shows it.
       expect(map.wires.filter((one) => one.of === 'views').map((one) => one.label?.[2])).toEqual([undefined, 'shown']);
-      // How it is checked spans the Mac, as it did before the phone.
-      expect(map.places.checking.full).toEqual([24, 566, 1088, 48]);
+      // How it is checked has the Mac's width exactly: its left and right edges are the Mac's.
+      expect(map.places.checking.full).toEqual([24, 566, 936, 48]);
+      expect([mac.full[0], mac.full[0] + mac.full[2]]).toEqual([24, 960]);
     });
   });
 

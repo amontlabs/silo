@@ -1,12 +1,14 @@
 import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { buildData, FEATURES, planFiles } from './fixtures';
-import { buildDataFrom } from './data';
+import { buildDataFrom, readBuildData } from './data';
+import { dirname, join } from 'node:path';
 import { EXAMPLE_MAP } from './map-example';
 import { MapView } from './MapView';
 import { buildPlan } from './plan';
 import type { BuildData } from './plan';
 
+const REPOSITORY = join(dirname(new URL(import.meta.url).pathname), '../../..');
 const draw = (data: BuildData, folded = false) => render(<MapView layout={data.map} groups={buildPlan(data, null).parts} folded={folded} current={null} onOpen={() => {}} />).container;
 
 describe('what the map draws as not decided', () => {
@@ -48,6 +50,19 @@ describe('what the map draws as not decided', () => {
     // Its folded place is its full one, so it stays where it is as it fades.
     expect(second.style.getPropertyValue('--cx')).toBe(second.style.getPropertyValue('--x'));
     expect(second.style.getPropertyValue('--cy')).toBe(second.style.getPropertyValue('--y'));
+  });
+
+  it('draws on Silo\'s map the phone\'s zone as not decided and with no folded place, and its text with no folded place', () => {
+    const data = readBuildData(REPOSITORY);
+    const map = draw(data);
+    const zones = [...map.querySelectorAll('.ws-zone')];
+    const [mac, phone] = ['YOUR MAC', 'YOUR PHONE'].map((label) => zones.find((zone) => zone.querySelector('.ws-zlabel')?.textContent === label)!);
+    expect(phone.classList.contains('undecided')).toBe(true);
+    expect(phone.classList.contains('off-fold')).toBe(true);
+    expect(mac.classList.contains('undecided')).toBe(false);
+    expect(mac.classList.contains('off-fold')).toBe(false);
+    const text = [...map.querySelectorAll('.ws-node')].find((node) => node.querySelector('b')?.textContent === 'What you see')!;
+    expect(text.classList.contains('off-fold')).toBe(true);
   });
 
   it('keeps the key of the header apart from the key of the map', () => {

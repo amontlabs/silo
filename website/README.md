@@ -220,10 +220,13 @@ outside it. It holds one text, "What you see" with the line "alerts and asks":
 the same name as the app's part, since what you see is shown in both. No wire
 joins the two. Wires join the rest, most with one word, such as "facts" from the
 boundary to the record or "requests" from the boundary to the internet. "How it
-is checked" spans the Mac's width under it. A wire that the folded map draws
-again carries that drawing as its `fold`, so it looks the same there; a wire, a
-zone or a text with no folded place (the phone and its text, the server's text)
-fades out as the map folds, and the folded map is the same with or without them.
+is checked" is as wide as the Mac, under it, its edges the Mac's. A wire that the folded map draws
+again carries that drawing as its `fold`, so it looks the same there; a wire with
+none fades out as the map folds. A zone or a text with none (the phone and its
+text, the server's text) is gone as the fold starts, with a fade of 60 ms at most,
+and comes back only once the map has unfolded: "How it is checked" travels to its
+folded place across them, and must cross none that is still showing. The folded
+map is the same with or without them.
 
 Each wire and each zone says in `rests` what in the plan it draws. An entry of
 `rests` is the id of a decision or a feature, `word:<id>` for a word of
