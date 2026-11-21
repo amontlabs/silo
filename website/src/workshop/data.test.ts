@@ -957,6 +957,21 @@ describe('the films', () => {
     });
   });
 
+  it('say of a film whose film.json cannot be read that it cannot be, and go on with the others', () => {
+    behindRepository((root, write, git) => {
+      write('films/bad/film.json', '{ "id": "bad", ');
+      git(['add', '.']);
+      git(['commit', '-q', '-m', 'a broken film']);
+      const log = vi.mocked(console.log);
+      expect(behindCommand([], root)).toBe(1);
+      const lines = log.mock.calls.map((call) => String(call[0]));
+      expect(lines.some((line) => line.startsWith('bad: cannot be read: films/bad/film.json: '))).toBe(true);
+      expect(lines.some((line) => line.startsWith('one: behind the plan'))).toBe(true);
+      expect(behindCommand(['bad', '--holds', 'Still.'], root)).toBe(1);
+      expect(existsSync(join(root, 'films/bad/checked.md'))).toBe(false);
+    });
+  });
+
   it('compare the texts of an entry\'s statements wherever they live at each end: in its sets before a take, in the lists after', () => {
     const root = mkdtempSync(join(tmpdir(), 'workshop-films-'));
     const git = (args: string[]) => execFileSync('git', ['-C', root, ...args], { env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }, stdio: 'ignore' });

@@ -342,11 +342,22 @@ export function readFilms(repository, shallow, lastCommit, atCommit, now) {
     const told = shallow ? null : filmBehind(repository, name, shows, { lastCommit, atCommit, now });
     return { id: name, title: typeof raw.title === 'string' ? raw.title : name, line: typeof raw.line === 'string' ? raw.line : '', shows, behind: told ? told.behind.map((item) => item.id) : [] };
   });
+  const order = filmsInOrder(dir);
+  return films.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+}
+
+/**
+ * The names of the films of films/ (`filmFolders`), in the order films/README.md gives; one it does not name comes
+ * after, by id. Reads no film.json.
+ * @param {string} dir films/
+ * @returns {string[]}
+ */
+function filmsInOrder(dir) {
   const readme = join(dir, 'README.md');
   const order = existsSync(readme) ? filmOrder(readFileSync(readme, 'utf8')) : [];
   /** @param {string} id */
   const rank = (id) => (order.includes(id) ? order.indexOf(id) : order.length);
-  return films.sort((a, b) => rank(a.id) - rank(b.id) || a.id.localeCompare(b.id));
+  return filmFolders(dir).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
 }
 
 const USAGE = 'usage: node tools/behind.mjs [<film id>…]\n       node tools/behind.mjs <film id> --holds "<why the film still holds>"\n(run from films/)';
@@ -479,10 +490,17 @@ export function main(args, repository = resolve(dirname(fileURLToPath(import.met
     console.error('This clone is shallow: a film\'s commit may be missing. Fetch the whole history (git fetch --unshallow) first.');
     return 1;
   }
-  const films = names.length ? names : readFilms(repository, true).map((film) => film.id);
+  const films = names.length ? names : filmsInOrder(dir);
   let status = 0;
   for (const name of films) {
-    const shows = list(JSON.parse(readFileSync(join(dir, name, 'film.json'), 'utf8')).shows);
+    let shows;
+    try {
+      shows = list(JSON.parse(readFileSync(join(dir, name, 'film.json'), 'utf8')).shows);
+    } catch (error) {
+      console.log(`${name}: cannot be read: films/${name}/film.json: ${error instanceof Error ? error.message : String(error)}`);
+      status = 1;
+      continue;
+    }
     const told = filmBehind(repository, name, shows);
     if (!told) {
       console.log(`${name}: cannot tell: no commit touches films/${name} yet, or git cannot read it.`);
