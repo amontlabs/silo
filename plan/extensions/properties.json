@@ -9,8 +9,16 @@
     ]
   },
   {
-    "id": "where-a-classifier-runs-is-shown",
-    "says": "The user can always see where a classifier runs.",
+    "id": "extension-code-in-its-own-computer",
+    "says": "Whatever an extension executes runs in a computer made from its own recipe.",
+    "kind": "safety",
+    "check": [
+      "hostile test"
+    ]
+  },
+  {
+    "id": "extension-computer-is-shown",
+    "says": "The user can always see the computer of an extension.",
     "kind": "safety",
     "check": [
       "test"
