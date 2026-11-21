@@ -10,5 +10,6 @@
   "suggest": {
     "verdict": "take",
     "why": "It keeps what what-a-classifier-gives-back required of an opinion. Questions to the user are now a tool."
-  }
+  },
+  "verdict": "take"
 }
