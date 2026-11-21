@@ -5,10 +5,15 @@ what a decision sets. A visitor watches one to understand a part.
 
 - A film states nothing of its own. Its `film.json` names the entries it shows, and the page under
   the film prints them from the plan.
-- A film is behind when an entry it shows has changed since it was built.
-  `python3 -I tools/behind.py <id>`, run from `films/`, says which: for each id the film shows, the file of
-  `plan/` that holds it, and the commits that changed that file later than the last commit that
-  touched the film's folder. Otherwise it says the film is up to date.
+- A film is behind when what the Workshop prints of an entry it shows is different now from what it
+  was at the film's last commit that is not a merge: its question or name, its answer or what, the
+  texts of the statements it sets or added (in its `sets` before a take, in the plan's lists after
+  it), what it removes, what it keeps, its surfaces; or it was dropped, replaced or deleted. A take
+  alone does not count, a change undone since does not count, and an entry is found by its id
+  wherever its file is. One rule says it, in `tools/behind.mjs`; the Workshop marks a film behind
+  with the same code. `node tools/behind.mjs <id>`, run from `films/`, prints for that film each
+  entry it is behind on and what changed in it, or that it is up to date; with no id, every film.
+  A film stays behind until a commit touches its folder.
 
 Each film ends as one HTML file: the film with its voice and subtitles, the entries it shows as
 `plan/` holds them, and the questions the owner answers under the film. That page is a tool of the
@@ -40,7 +45,7 @@ tools/
   entries.py         reads from plan/ the entries a film shows, and what each not decided would set (standard library only)
   place.py           the folders and files a tool may use: a film is a folder directly under films/ (standard library only)
   build.py           → out/index.html, one file with everything inlined
-  behind.py          which entries a film shows have changed since the film last changed (standard library only)
+  behind.mjs         when a film is behind the plan: the rule the Workshop uses too, and its command (Node only)
   check.sh           one film's own checks; builds first
   shot.sh            stills of the built page, taken the way check.sh takes them
   check_sources.mjs, check_player.py, check_page.py, sheet.py, listen.py   (used by check.sh)
@@ -248,7 +253,7 @@ once nothing needs it.
 
 ## Changing a film
 
-A film changes when it is behind (`tools/behind.py`), when its `pending.md` holds something, or
+A film changes when it is behind (`node tools/behind.mjs <id>`), when its `pending.md` holds something, or
 when the owner asks. Change the script first, then go through the steps above from the one each
 change touches: `narration.json` and the voice for a sentence, `explainer.js` for the picture,
 then the check and the stills.
