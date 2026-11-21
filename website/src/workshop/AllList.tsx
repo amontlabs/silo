@@ -275,16 +275,22 @@ function Line({ row, instance, props, cls, label, children, lead }: { row: Row; 
 }
 
 /**
- * A row's panel, mounted the first time the row opens and kept after, so it closes with its own animation. A list of
- * hundreds of rows mounts none until one is opened.
+ * A row's panel, mounted the first time the row opens and kept after, so a list of hundreds of rows mounts none until
+ * one opens. Mounted by an opening, it is laid out closed once and then opens, so it grows as a panel that was there
+ * closed does. Open in the first frame (an address), it is drawn open at once.
  */
 function LazyPanel({ row, open, ctx, id, lead }: { row: Row; open: boolean; ctx: EntryContext; id: string; lead?: ReactNode }) {
   const [ever, setEver] = useState(open);
-  // Open in the first frame (an address), it is drawn open at once, as any row is; opened later, it opens as one does.
-  const [first] = useState(open);
+  const [armed, setArmed] = useState(open);
   if (open && !ever) setEver(true);
+  // Drawn closed, its style is read once, so the browser has a closed panel to grow from; then it opens, before paint.
+  useLayoutEffect(() => {
+    if (!ever || armed) return;
+    document.getElementById(id)?.getBoundingClientRect();
+    setArmed(true);
+  }, [ever, armed, id]);
   if (!ever) return <div className="ws-more" id={id} aria-hidden="true" />;
-  return <Panel row={row} open={open} ctx={ctx} id={id} vote lead={lead} late={!first} />;
+  return <Panel row={row} open={open && armed} ctx={ctx} id={id} vote lead={lead} />;
 }
 
 function filmLead(row: Row, props: ListProps): ReactNode {

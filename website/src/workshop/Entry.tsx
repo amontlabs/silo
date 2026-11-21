@@ -86,19 +86,17 @@ export interface PanelProps {
   lead?: ReactNode;
   /** The vote button and the count of comments, in the panel, for a row that shows only its votes. */
   vote?: boolean;
-  /** Mounted by the press that opens it: it opens as a panel that was there closed does. */
-  late?: boolean;
 }
 
 /**
  * What a row shows once open. It opens at once and grows when its comments are in, or after HOLD_MS; its body stays
  * mounted while it closes, so the close animates too.
  */
-export function Panel({ row, open, ctx, id, lead, vote = false, late = false }: PanelProps) {
+export function Panel({ row, open, ctx, id, lead, vote = false }: PanelProps) {
   const { w } = ctx;
   // The body stays mounted while it closes, so the close animates too.
   const [closing, setClosing] = useState(false);
-  const [wasOpen, setWasOpen] = useState(late ? false : open);
+  const [wasOpen, setWasOpen] = useState(open);
   // The row shows itself open at once; its panel grows when the comments are in, or after HOLD_MS.
   const detail = row.issue === null ? undefined : w.details[row.issue];
   const ready = row.issue === null || row.issue <= 0 || !w.liveOk || typeof detail === 'object' || detail === 'error';

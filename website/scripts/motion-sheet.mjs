@@ -17,7 +17,8 @@
 // - a move between two places runs any `::view-transition-*` animation;
 // - Notes opening changes the panel's height in fewer than four steps;
 // - a comment's height or the comment box's top changes when the comment is confirmed;
-// - a row's opening or closing covers more than 16% of its way in its first frame.
+// - a row's opening or closing covers more than 16% of its way in its first frame;
+// - in All, a row that opens or closes, or a row above it, moves on the page (`still`).
 // On a page with a map, the moves on the tiles run under 1200 px, where the tiles stand in the map's place; the flows
 // named map-* run on the map, at 1440 x 900: the map to a part and back, a scrolled map to a part and back from a
 // scrolled part. Each flow runs on the map's side, whatever view the url names.
@@ -211,7 +212,7 @@ function problemsOf(kind, rows, t0, keys, meant = {}) {
 }
 
 /** Runs one action, writes its sheet and its text, and returns its problems. */
-async function capture(out, page, name, action, { selectors = ROWS, kind = null, ms = 1500 } = {}) {
+async function capture(out, page, name, action, { selectors = ROWS, kind = null, ms = 1500, still = [] } = {}) {
   const meant = MEANT[name] ?? {};
   const client = await page.context().newCDPSession(page);
   const frames = [];
@@ -233,6 +234,11 @@ async function capture(out, page, name, action, { selectors = ROWS, kind = null,
   await client.detach().catch(() => {});
 
   const problems = problemsOf(kind, data.rows, t0, Object.keys(selectors), meant);
+  // Boxes that must not move at all: their top on the page stays within half a pixel.
+  for (const key of still) {
+    const tops = data.rows.filter((row) => row[key]).map((row) => row[key][1] + row.y);
+    if (tops.length && Math.max(...tops) - Math.min(...tops) > 0.5) problems.push(`${key} moves by ${Math.round((Math.max(...tops) - Math.min(...tops)) * 10) / 10} px`);
+  }
   const skipped = Object.entries(meant).map(([check, { boxes, why }]) => `${check} not checked for ${boxes.join(', ')}: ${why}`);
   const lines = [`## ${name}  ${frames.length} frames${kind ? `  checked as: ${kind}` : ''}`, ...skipped];
   for (const key of ['y', 'sx', ...Object.keys(selectors)]) {
@@ -367,6 +373,15 @@ const FLOWS = {
     const problems = await capture(s.out, page, 'row-open', pressRow(`${ROW1} > .wa-row`), { kind: 'row', ms: 900, selectors });
     return [...problems, ...await capture(s.out, page, 'row-close', pressRow(`${ROW1} > .wa-row`), { kind: 'row', ms: 900, selectors })];
   },
+  // In All, a feature row opens and closes: it and the rows above it never move.
+  'all-rows': async (s) => {
+    const page = await s.open({ map: true, all: true });
+    const item = (n) => `.wa-list > section > .wa-item:nth-of-type(${n})`;
+    const selectors = { above1: `${item(1)} > .wa-row`, above2: `${item(2)} > .wa-row`, opened: `${item(3)} > .wa-row`, next: `${item(4)} > .wa-row`, more: `${item(3)} > .ws-more` };
+    const still = ['above1', 'above2', 'opened'];
+    const problems = await capture(s.out, page, 'all-row-open', pressRow(`${item(3)} > .wa-row`), { kind: 'row', ms: 900, selectors, still });
+    return [...problems, ...await capture(s.out, page, 'all-row-close', pressRow(`${item(3)} > .wa-row`), { kind: 'row', ms: 900, selectors, still })];
+  },
   // The Notes of an open row, their chunk loaded on the click.
   notes: async (s) => {
     if (!s.site.noted) return ['no entry has notes'];
@@ -421,13 +436,14 @@ async function main() {
     const contexts = [];
     // A page at an address with its state loaded, on the map's side whatever the url names: at 1440 px for the map's
     // flows; the others, on a page with a map, under 1200 px, where the tiles are.
-    const open = async ({ size: asked = DESK, hash = '', signIn = false, map = false }) => {
+    const open = async ({ size: asked = DESK, hash = '', signIn = false, map = false, all = false }) => {
       const size = site.mapped && !map && asked === DESK ? TILES : asked;
       const context = await browser.newContext({ viewport: { width: size[0], height: size[1] }, deviceScaleFactor: 1 });
       contexts.push(context);
       const page = await context.newPage();
       const url = new URL(options.url);
       url.searchParams.delete('view');
+      if (all) url.searchParams.set('view', 'all');
       if (signIn) {
         await page.goto(url.href, { waitUntil: 'networkidle' });
         await page.locator('#workshop-account a.button').click();
@@ -439,7 +455,7 @@ async function main() {
       url.hash = hash;
       await page.goto(url.href, { waitUntil: 'networkidle' });
       await page.waitForSelector('#workshop-root:not([data-prerendered]) .ws[data-live="answered"]', { timeout: 15000 });
-      if (map && !(await page.locator('.ws-stage').first().isVisible())) throw new Error('the map does not show');
+      if (map && !all && !(await page.locator('.ws-stage').first().isVisible())) throw new Error('the map does not show');
       await wait(400);
       return page;
     };

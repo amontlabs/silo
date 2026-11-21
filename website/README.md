@@ -154,8 +154,9 @@ To see the page's moves frame by frame, with the same server running,
 `npm --prefix website run motion-sheet` (a URL, `--out <dir>` and flow names
 after `--`). For each move, such as the plain view to a part and back on the
 tiles at 1100 × 900 and 390 × 844, or on the map at 1440 × 900 the map to a part
-and back and a scrolled map to a part and back (the flows named `map-*`), it
-writes to `website/.motion/` a contact sheet of
+and back and a scrolled map to a part and back (the flows named `map-*`), and a
+row of All opened and closed at 1440 × 900 (`all-rows`: that row and the rows
+above it must not move on the page by half a pixel), it writes to `website/.motion/` a contact sheet of
 the frames at fixed times after the action and a text file with each change
 of the scroll and of each element's box and opacity, the animations that ran
 and the layout shifts. It exits with an error when, in any move, a box it
