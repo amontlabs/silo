@@ -29,9 +29,10 @@ export const PLAN_ENTRIES = [
   { id: 'share-link', kind: 'feature', title: 'Share a computer with a link', part: 'computers', suggestedIn: 6 },
 ];
 
-// `limit: { ms, match }` cuts short only the calls `match(path, body)` accepts: the workshop keeps its own limit for
-// every other call, so a sign-in or a read on a busy machine is never cut. A call that is cut fails as a call that timed out does.
-export async function setup({ configured = true, seed = true, limit, entries = PLAN_ENTRIES } = {}) {
+// `cuttable(path, body)` picks the calls the test can cut with `cut()`: each fails, while it is in flight, as a call
+// that timed out does. No clock decides it, so a busy machine cannot cut a call early or late; every other call
+// keeps the workshop's own limit.
+export async function setup({ configured = true, seed = true, cuttable, entries = PLAN_ENTRIES } = {}) {
   const clock = { t: START };
   const now = () => clock.t;
   const fake = createFakeGitHub({ now });
@@ -41,8 +42,18 @@ export async function setup({ configured = true, seed = true, limit, entries = P
   const outputs = [];
   const env = configured ? fake.workshopEnv(ORIGIN) : { WORKSHOP_SITE_ORIGIN: ORIGIN };
   const config = readConfig(env, { apiBase: fake.url, webBase: fake.url });
-  const limited = limit
-    ? (url, init) => (limit.match(new URL(url).pathname, init.body ?? '') ? fetch(url, { ...init, signal: AbortSignal.any([init.signal, AbortSignal.timeout(limit.ms)]) }) : fetch(url, init))
+  const cutting = new Set();
+  const limited = cuttable
+    ? async (url, init) => {
+        if (!cuttable(new URL(url).pathname, init.body ?? '')) return fetch(url, init);
+        const abort = new AbortController();
+        cutting.add(abort);
+        try {
+          return await fetch(url, { ...init, signal: AbortSignal.any([init.signal, abort.signal]) });
+        } finally {
+          cutting.delete(abort);
+        }
+      }
     : fetch;
   const workshop = createWorkshop({ config, entries: readPlanEntries(entries), now, log: (entry) => logs.push(JSON.stringify(entry)), fetch: limited });
   const secrets = () => [...fake.issuedTokens, fake.clientSecret, env.WORKSHOP_SESSION_SECRET, ...[...fake.state.codes.keys()]].filter(Boolean);
@@ -85,7 +96,8 @@ export async function setup({ configured = true, seed = true, limit, entries = P
     return { call, signIn, jar };
   }
 
-  return { fake, workshop, config, clock, logs, outputs, secrets, client, close: () => fake.close() };
+  const cut = () => cutting.forEach((abort) => abort.abort(new DOMException('The operation timed out.', 'TimeoutError')));
+  return { fake, workshop, config, clock, logs, outputs, secrets, client, cut, close: () => fake.close() };
 }
 
 export const count = (fake, method, pattern, kind) => fake.state.requests.filter((r) => r.method === method && pattern.test(r.path) && (!kind || r.kind === kind)).length;

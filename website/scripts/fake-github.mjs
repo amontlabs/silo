@@ -240,6 +240,8 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     // A test's hook may delay or replace any answer.
     const hooked = state.hook?.(record);
     if (hooked?.delay) await new Promise((resolve) => setTimeout(resolve, hooked.delay));
+    // `until`: a promise the test settles; the call is held until then, however long that is.
+    if (hooked?.until) await hooked.until;
     if (hooked?.status) return json(res, hooked.status, hooked.body ?? { message: 'hooked' }, hooked.headers);
 
     // User authorization (github.com)
