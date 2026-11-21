@@ -1,0 +1,10 @@
+{
+  "name": "When a plan's limit is reached",
+  "what": "When a provider answers that the limit of your plan is reached, Silo takes a checkpoint. It alerts you again at the reset time the provider gave.",
+  "needs": [
+    "model-traffic-read",
+    "checkpoints-taken-on-their-own",
+    "alerts-on-a-change",
+    "rule-actions-on-the-computer"
+  ]
+}

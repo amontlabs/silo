@@ -1,0 +1,10 @@
+{
+  "name": "Files sent between computers",
+  "what": "An agent sends a file from its computer to another computer with a tool of Silo. The file crosses only where a rule you set allows it: from one named computer to another, one way or both ways, or between the computers of a group.",
+  "needs": [
+    "files-through-a-channel",
+    "channel-list",
+    "allow-hold-or-deny",
+    "computers-linux-beside-main"
+  ]
+}

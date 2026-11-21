@@ -1,0 +1,12 @@
+{
+  "name": "Files imported from your Mac",
+  "what": "You bring a file or a folder from your Mac into a computer when you ask for it. It is copied in once, and nothing stays shared.",
+  "needs": [
+    "files-through-a-channel",
+    "device-not-shared",
+    "computers-main-on-a-mac"
+  ],
+  "keeps": [
+    "nothing-shared-from-your-device"
+  ]
+}

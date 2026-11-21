@@ -1,0 +1,11 @@
+{
+  "name": "Two runs writing in the same checkout",
+  "what": "When two runs write in the same checkout of a repository, Silo alerts you and offers to make a fork.",
+  "needs": [
+    "which-run-did-it",
+    "patterns-of-work",
+    "forking-a-computer",
+    "alerts-on-a-change",
+    "precautions-you-set"
+  ]
+}

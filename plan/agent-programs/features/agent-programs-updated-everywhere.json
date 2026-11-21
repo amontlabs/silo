@@ -1,0 +1,9 @@
+{
+  "name": "Agent programs updated in every computer",
+  "what": "One action updates the agent programs in every computer, with each vendor's own updater. Silo takes a checkpoint of each computer first.",
+  "needs": [
+    "agent-programs-run-unmodified",
+    "checkpoints-taken-on-their-own",
+    "restore-to-a-checkpoint"
+  ]
+}

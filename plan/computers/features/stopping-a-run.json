@@ -1,0 +1,8 @@
+{
+  "name": "Stopping one run",
+  "what": "You stop one run from the app, the command line or any other client. Silo ends the agent program and every process descended from it, and the rest of the computer keeps running.",
+  "needs": [
+    "computers-stopped-and-paused",
+    "processes-in-the-record"
+  ]
+}

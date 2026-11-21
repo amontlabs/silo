@@ -1,0 +1,9 @@
+{
+  "name": "A macOS screen reached from a Linux computer",
+  "what": "You grant a Linux computer a channel to the screen of a macOS computer, or to the iOS simulator that runs in it. An agent that works in the Linux computer then drives it.",
+  "needs": [
+    "computers-macos-screen",
+    "computers-linux-beside-main",
+    "ways-out-shown"
+  ]
+}

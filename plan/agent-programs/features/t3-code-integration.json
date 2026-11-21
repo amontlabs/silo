@@ -1,0 +1,8 @@
+{
+  "name": "T3 Code as a client of Silo",
+  "what": "T3 Code is a first-class client of Silo. It talks to the engine as the app and the command line do, so you work with the agents of any computer from it.",
+  "needs": [
+    "agent-programs-reach-every-computer",
+    "engine-program-and-clients"
+  ]
+}

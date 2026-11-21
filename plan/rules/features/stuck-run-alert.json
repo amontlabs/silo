@@ -1,0 +1,9 @@
+{
+  "name": "An alert on a run stuck too long",
+  "what": "You set how long a run may stay stuck. Silo alerts you when a run passes that time.",
+  "needs": [
+    "how-each-run-is-going",
+    "precautions-you-set",
+    "alerts-on-a-change"
+  ]
+}

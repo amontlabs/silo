@@ -1,0 +1,9 @@
+{
+  "name": "A sign-in started in a computer",
+  "what": "When an agent program or an MCP server in a computer starts a sign-in, the page opens in the browser on your Mac, with your yes. The answer the provider sends to localhost reaches the program in the computer.",
+  "needs": [
+    "ports-reached-from-your-mac",
+    "agent-programs-run-unmodified",
+    "held-requests-and-asks"
+  ]
+}

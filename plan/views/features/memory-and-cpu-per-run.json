@@ -1,0 +1,9 @@
+{
+  "name": "Memory and CPU of each run",
+  "what": "Now shows the memory and the CPU each run uses. When memory runs low, the alert names the run that uses the most.",
+  "needs": [
+    "now-in-the-app",
+    "computers-low-memory-or-disk",
+    "which-run-did-it"
+  ]
+}

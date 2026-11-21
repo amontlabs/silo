@@ -1,0 +1,8 @@
+{
+  "name": "Budgets on rates and on usage outside a plan",
+  "what": "You set a budget as a rate, such as spend per hour or new conversations per minute. You also set a budget on the metered usage that is billed outside your plan.",
+  "needs": [
+    "budget-on-a-computer",
+    "budget-as-a-rate"
+  ]
+}

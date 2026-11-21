@@ -1,0 +1,8 @@
+{
+  "name": "Computers paused on a schedule",
+  "what": "You choose computers and hours. Silo pauses those computers at the start of the hours and resumes them at the end.",
+  "needs": [
+    "computers-stopped-and-paused",
+    "rule-actions-on-the-computer"
+  ]
+}

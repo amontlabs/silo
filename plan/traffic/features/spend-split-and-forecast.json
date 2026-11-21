@@ -1,0 +1,7 @@
+{
+  "name": "Spend split, and a forecast of a plan's limits",
+  "what": "Silo splits spend by effort level, by speed mode and by cache reads and writes. It also forecasts when the limits of a plan will run out.",
+  "needs": [
+    "spend-per-conversation"
+  ]
+}

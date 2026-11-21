@@ -1,0 +1,9 @@
+{
+  "name": "Merges and deploys held for your yes",
+  "what": "A set of rules you can switch on holds each merge into a default branch and each deploy until you answer the ask. You can answer from your phone.",
+  "needs": [
+    "worst-case-and-rule-sets",
+    "held-requests-and-asks",
+    "phone-app"
+  ]
+}

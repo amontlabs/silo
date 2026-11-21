@@ -41,3 +41,8 @@ question that stays open is wider than logins: how agent apps connect to compute
 - Claude Code has an official long-lived token for a machine with no window (`claude
   setup-token`). It can only make model requests. Whether a user may keep it as a Silo secret is
   a question for Anthropic.
+
+## Sign-ins that cross to the Mac (21 November 2026)
+
+The owner called the sign-in whose page opens on the Mac "super important". It is the feature
+`sign-in-from-a-computer`, which holds no login.

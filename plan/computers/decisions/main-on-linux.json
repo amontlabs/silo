@@ -1,0 +1,7 @@
+{
+  "asks": "Can main be a Linux computer?",
+  "answer": "Yes. Main is a macOS computer or a Linux computer, and the user chooses. Silo starts with a macOS main on a Mac.",
+  "needs": [
+    "main-on-macos-first"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Ports of a computer reached from your Mac",
+  "what": "You grant a port of a computer to your Mac. A program or a browser on your Mac then reaches what listens on that port in the computer, at localhost.",
+  "needs": [
+    "channel-list",
+    "open-limited-or-closed",
+    "computers-main-on-a-mac",
+    "network-stack"
+  ]
+}
