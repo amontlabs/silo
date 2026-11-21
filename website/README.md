@@ -712,6 +712,10 @@ What a person sees:
   the count shown, so a newer `state` moves the count under it. The count the server answers replaces it.
 - A refusal takes back the page's own change, one up or one down from the count shown by then, and says
   "Vote: not saved." with the server's words. A thread found closed (403 `closed`) takes it back too.
+- A comment or a suggestion whose sending fails never discards what the person typed. Its text goes back into
+  its box as it was typed, spaces included, when the box is empty. When the person typed more meanwhile, the
+  failed text goes back above it, with a blank line between. A suggestion's title goes back to its field when that
+  is empty; otherwise it goes above the text, with the failed text.
 - The title row links to the places that are not parts, before the switch:
   "Product" (`#product`: the decisions of `plan/decisions/`, with their own
   counts) and the small button "Suggest a feature" (`#suggested`), with Search

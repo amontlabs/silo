@@ -34,6 +34,16 @@ function useChunk<T extends object>(load: () => Promise<T>): [ChunkState<T>, (ag
   return [value, want];
 }
 
+/**
+ * The text of a send that failed, put back in its box without discarding anything: as it was typed when the box is
+ * empty, else above what the person typed meanwhile, with a blank line between.
+ */
+export function putBack(failed: string, now: string): string {
+  if (now === '') return failed;
+  if (failed === '') return now;
+  return `${failed}\n\n${now}`;
+}
+
 /** How the page reloads itself; tests replace it. */
 export const pageConfig = { reload: () => location.reload() };
 
@@ -362,7 +372,8 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   const sendComment = async (row: Row, event: FormEvent) => {
     event.preventDefault();
     const target = targetOf(row);
-    const text = (drafts[row.key] ?? '').trim();
+    const typed = drafts[row.key] ?? '';
+    const text = typed.trim();
     const own = ownComment(text);
     if (!target || !text || !own) return;
     const sent = sending$();
@@ -377,7 +388,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
       confirmComment(row, n, confirmed);
       remember({ n, ...opened(row, n), set: { comments: count(answered?.comments, (shownRef.current?.issues[n]?.comments ?? 0) + 1) } }, sent, confirmed);
     } catch (error) {
-      setDrafts((current) => ({ ...current, [row.key]: current[row.key] ? current[row.key] : text }));
+      setDrafts((current) => ({ ...current, [row.key]: putBack(typed, current[row.key] ?? '') }));
       if (!refusedClosed(row, error, sent)) failed('Comment', error);
     } finally {
       stopSending(row.key, own);
@@ -484,8 +495,9 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
 
   const sendSuggestion = async (event: FormEvent) => {
     event.preventDefault();
-    const title = suggestDraft.title.trim();
-    const text = suggestDraft.text.trim();
+    const typed = suggestDraft;
+    const title = typed.title.trim();
+    const text = typed.text.trim();
     if (!title || !me || !live.state) return;
     const id = Date.now() + Math.random();
     const sent = sending$();
@@ -499,7 +511,11 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
       setDetails((current) => ({ ...current, [number]: { number, title, body: text, url: '', up: 0, comments: [] } }));
       remember({ n: number, set: issue }, sent);
     } catch (error) {
-      setSuggestDraft({ title, text });
+      // The title goes back to its field when that is empty; otherwise it goes above the text, which a title field
+      // cannot hold in more than one line.
+      setSuggestDraft((current) => (current.title === ''
+        ? { title: typed.title, text: putBack(typed.text, current.text) }
+        : { title: current.title, text: putBack(putBack(typed.title, typed.text), current.text) }));
       failed('Suggestion', error);
     } finally {
       setSuggestionsSending((current) => current.filter((item) => item.id !== id));
