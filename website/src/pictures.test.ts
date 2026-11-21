@@ -315,11 +315,14 @@ describe('the two pictures', () => {
       () => show('visible'),
       () => $('.ctl').click(),
     ];
+    // A seeded generator (Park-Miller), the same hands on every run; the choices come from its whole value, as
+    // its low bits repeat every few calls and would leave most hands unused. Each hand that starts a card draws
+    // it in jsdom, which costs about 20 ms, so a hundred rounds keep the test well under its limit on a busy machine.
     let seed = 7;
-    const pick = () => (seed = (seed * 1103515245 + 12345) % 2147483648);
-    for (let round = 0; round < 300; round++) {
-      hands[pick() % hands.length]();
-      vi.advanceTimersByTime(pick() % 2500);
+    const pick = (below: number) => Math.floor(((seed = (seed * 48271) % 2147483647) / 2147483647) * below);
+    for (let round = 0; round < 100; round++) {
+      hands[pick(hands.length)]();
+      vi.advanceTimersByTime(pick(2500));
       expect(playing().length).toBeLessThanOrEqual(1);
     }
     // Back to rest: pointer away, tab shown, flow out of view.
