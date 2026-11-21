@@ -227,6 +227,9 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   // The film pointed at on the films' line: the map marks its parts.
   const [filmPoint, setFilmPoint] = useState<string | null>(null);
   const [store] = useState(relationStore);
+  const handlers = useRef<{ toggle: EntryContext['onToggle']; filmEntries: (film: string) => void }>({ toggle: () => {}, filmEntries: () => {} });
+  const stableToggle = useCallback<EntryContext['onToggle']>((row, instance) => handlers.current.toggle(row, instance), []);
+  const stableFilmEntries = useCallback((film: string) => handlers.current.filmEntries(film), []);
   const [leaving, setLeaving] = useState(false);
   // After going back from a scrolled part on the map, the map stays pinned under the header until the scroll to the top
   // has brought its own place below that line: unpinned sooner, it would jump up, then come down with the scroll.
@@ -801,14 +804,15 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   }, []);
 
   const signIn = loginUrl(typeof location === 'undefined' ? '' : location.hash);
-  const ctx: EntryContext = {
-    w, signIn, open: openKeys,
-    onToggle: (row, instance) => {
+  // The rows call these through stable functions, so a row that does not render again still calls the current ones.
+  handlers.current = {
+    toggle: (row, instance) => {
       if (openKeys.has(row.key)) closeRow(row.key);
       else openRow(row.key, instance === undefined ? {} : { instance });
     },
-    onFilmEntries: filmEntries,
+    filmEntries,
   };
+  const ctx: EntryContext = { w, signIn, open: openKeys, onToggle: stableToggle, onFilmEntries: stableFilmEntries };
   const list: PlaceList = {
     plan, graph, ctx, store, folds, more, waiting: w.waiting,
     onFold: (key, open) => setFolds((now) => new Map(now).set(key, open)),

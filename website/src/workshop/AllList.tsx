@@ -1,7 +1,7 @@
 // All's rows: one line per entry, keys first; a feature's decisions fold under it. The same rows draw All, a part's
 // place, Product and a film's place. Pointing at a row, focusing it or opening it draws its relations in the rail at
 // the list's left: a dot on each row it needs, an arrowhead on each row that waits for it, one line joining them.
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent, MouseEvent, ReactNode } from 'react';
 import { KIDS_SHOWN, partTitle, relationsOf, rowKeyOf, underKey } from './all';
 import type { FeatureItem, Graph, Item, Section } from './all';
@@ -201,7 +201,34 @@ export function AllList(props: ListProps) {
   );
 }
 
-function ItemView({ item, props }: { item: Item; props: ListProps }) {
+const keysOf = (rows: Row[] | null) => (rows ? rows.map((row) => row.key).join() : null);
+
+/**
+ * Whether an item draws the same as before: the same entry and state, closed, folded, in a list that shows the same.
+ * A row that is open or unfolded always renders again (its panel and its decisions follow the page).
+ */
+function sameItem(prev: { item: Item; props: ListProps }, next: { item: Item; props: ListProps }): boolean {
+  const a = prev.item;
+  const b = next.item;
+  const p = prev.props;
+  const n = next.props;
+  if (a.type !== b.type || a.key !== b.key || p.waiting !== n.waiting || p.inPart !== n.inPart || p.flat !== n.flat || p.latest !== n.latest || p.plan.films !== n.plan.films) return false;
+  if (a.type === 'film' && b.type === 'film') return a.film === b.film;
+  if (a.type === 'decision' && b.type === 'decision') return a.row === b.row && a.change === b.change && !p.ctx.open.has(a.row.key) && !n.ctx.open.has(b.row.key);
+  if (a.type === 'feature' && b.type === 'feature') {
+    return a.row === b.row && a.step === b.step && a.decided === b.decided && a.change === b.change && a.foldable === b.foldable
+      && keysOf(a.kids) === keysOf(b.kids) && keysOf(a.passing) === keysOf(b.passing)
+      && !p.ctx.open.has(a.row.key) && !n.ctx.open.has(b.row.key) && !isUnfolded(a, p.folds) && !isUnfolded(b, n.folds);
+  }
+  if (a.type === 'bundle' && b.type === 'bundle') {
+    return a.title === b.title && a.decided === b.decided && keysOf(a.kids) === keysOf(b.kids) && keysOf(a.passing) === keysOf(b.passing) && !isUnfolded(a, p.folds) && !isUnfolded(b, n.folds);
+  }
+  return false;
+}
+
+const ItemView = memo(ItemDrawn, sameItem);
+
+function ItemDrawn({ item, props }: { item: Item; props: ListProps }) {
   switch (item.type) {
     case 'feature': return <FeatureView item={item} props={props} />;
     case 'decision': return <DecisionView row={item.row} instance={item.key} props={props} flat change={item.change} />;

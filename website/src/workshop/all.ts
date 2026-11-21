@@ -233,7 +233,8 @@ export function allSections(plan: Plan, graph: Graph, stages: Stage[], query: Qu
   }
 
   const kept = graph.steps.map((row) => featureItem(row, graph, query, decisions)).filter((item) => passes(item.row, query) || (decisions && item.passing?.length));
-  inStages(kept.map((item) => item.row), (row) => kept.find((item) => item.row === row)!);
+  const itemOf = new Map(kept.map((item) => [item.row.key, item]));
+  inStages(kept.map((item) => item.row), (row) => itemOf.get(row.key)!);
   if (!decisions) return sections;
 
   const held = new Set(graph.steps.flatMap((row) => (graph.decisions.get(row.key) ?? []).map((kid) => kid.key)));
