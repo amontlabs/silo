@@ -4,12 +4,14 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { HOLD_MS } from './Entry';
 import { liveState } from './fixtures';
-import { clock, detail, itemOf, mockApi, ok, refused, renderApp, rowButton, wait } from './test-support';
+import { clock, detail, itemOf, mockApi, ok, refused, renderApp, rowButton, wait, withheldTimers } from './test-support';
 
 describe('comments that arrive late', () => {
   it('hold one place per expected comment while loading, with no loading line, and load on hover', async () => {
     let release: () => void = () => {};
     const calls = mockApi({ routes: { 'GET issue': (url) => new Promise((resolve) => { release = () => resolve(ok(detail(Number(url.searchParams.get('n')), { comments: [1, 2].map((id) => ({ id, author: 'mara-k', avatar: '', bot: false, createdAt: '2026-11-14T10:00:00Z', text: `Comment ${id}.` })) }))); }) } });
+    // The opening holds its panel for HOLD_MS; the test lets that hold go only by the comments arriving.
+    withheldTimers(HOLD_MS);
     history.replaceState(null, '', '/workshop#part-b');
     await renderApp();
     fireEvent.pointerEnter(rowButton('Create and delete a computer'));
@@ -102,7 +104,7 @@ describe('an opening panel', () => {
             const n = Number(url.searchParams.get('n'));
             if (mode === 'cached') return answer(n);
             if (mode === 'failed then retried' && calls === 1) return refused(502, 'GitHub failed.');
-            if (mode === 'quick') return new Promise((resolve) => setTimeout(() => { arrived = true; resolve(answer(n)); }, HOLD_MS / 4));
+            if (mode === 'quick') return new Promise((resolve) => setTimeout(() => { arrived = true; resolve(answer(n)); }, 0));
             return new Promise((resolve) => {
               const send = () => { arrived = true; resolve(answer(n)); };
               if (let_go) send();
@@ -111,6 +113,8 @@ describe('an opening panel', () => {
           },
         },
       });
+      // The hold ends when the comments are in or when the test fires it, never by the clock.
+      const hold = withheldTimers(HOLD_MS);
       history.replaceState(null, '', '/workshop#part-b');
       await renderApp();
       if (mode === 'cached' || mode === 'failed then retried') {
@@ -141,7 +145,8 @@ describe('an opening panel', () => {
       look();
       if (mode === 'cached') expect(item.querySelector('.ws-more')).toHaveClass('open');
       if (mode === 'slow' || mode === 'failed then retried') {
-        // A slow panel opens no later than the hold, on its placeholders, and not before the row said it was open.
+        // A slow panel opens once the hold ends, on its placeholders, and not before the row said it was open.
+        await hold.fire();
         await waitFor(() => expect(item.querySelector('.ws-more')).toHaveClass('open'), { timeout: HOLD_MS + 150 });
         if (want.comments > 0) expect(arrived).toBe(false);
         await waitFor(() => expect(held.length).toBeGreaterThan(0), { timeout: 2000 });

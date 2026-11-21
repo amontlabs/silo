@@ -29,7 +29,10 @@ export const PLAN_ENTRIES = [
   { id: 'share-link', kind: 'feature', title: 'Share a computer with a link', part: 'computers', suggestedIn: 6 },
 ];
 
-export async function setup({ configured = true, seed = true, timeoutMs, entries = PLAN_ENTRIES } = {}) {
+// `cuttable(path, body)` picks the calls the test holds: each is cut by `cut()` alone, failing as a call that timed
+// out does. No limit of the workshop's runs on such a call, and no clock of any kind, so a busy machine can neither
+// cut it early nor leave it uncut; every other call keeps the workshop's own limit.
+export async function setup({ configured = true, seed = true, cuttable, entries = PLAN_ENTRIES } = {}) {
   const clock = { t: START };
   const now = () => clock.t;
   const fake = createFakeGitHub({ now });
@@ -39,7 +42,20 @@ export async function setup({ configured = true, seed = true, timeoutMs, entries
   const outputs = [];
   const env = configured ? fake.workshopEnv(ORIGIN) : { WORKSHOP_SITE_ORIGIN: ORIGIN };
   const config = readConfig(env, { apiBase: fake.url, webBase: fake.url });
-  const workshop = createWorkshop({ config, entries: readPlanEntries(entries), now, log: (entry) => logs.push(JSON.stringify(entry)), ...(timeoutMs ? { timeoutMs } : {}) });
+  const cutting = new Set();
+  const limited = cuttable
+    ? async (url, init) => {
+        if (!cuttable(new URL(url).pathname, init.body ?? '')) return fetch(url, init);
+        const abort = new AbortController();
+        cutting.add(abort);
+        try {
+          return await fetch(url, { ...init, signal: abort.signal });
+        } finally {
+          cutting.delete(abort);
+        }
+      }
+    : fetch;
+  const workshop = createWorkshop({ config, entries: readPlanEntries(entries), now, log: (entry) => logs.push(JSON.stringify(entry)), fetch: limited });
   const secrets = () => [...fake.issuedTokens, fake.clientSecret, env.WORKSHOP_SESSION_SECRET, ...[...fake.state.codes.keys()]].filter(Boolean);
 
   // A client of `target`, this setup's workshop unless another instance is given.
@@ -80,7 +96,8 @@ export async function setup({ configured = true, seed = true, timeoutMs, entries
     return { call, signIn, jar };
   }
 
-  return { fake, workshop, config, clock, logs, outputs, secrets, client, close: () => fake.close() };
+  const cut = () => cutting.forEach((abort) => abort.abort(new DOMException('The operation timed out.', 'TimeoutError')));
+  return { fake, workshop, config, clock, logs, outputs, secrets, client, cut, close: () => fake.close() };
 }
 
 export const count = (fake, method, pattern, kind) => fake.state.requests.filter((r) => r.method === method && pattern.test(r.path) && (!kind || r.kind === kind)).length;

@@ -303,6 +303,35 @@ describe('the two pictures', () => {
 
   it('never leave a card playing for longer than its picture lasts', () => {
     mountPictures();
+    // How long each card plays, on the fake clock, taken at the moments it starts and stops (the page adds and removes
+    // `playing`) and never by looking now and then. `--dur` is what its picture and its linger last; a stay may not pass it.
+    let overstay = -Infinity;
+    const startedAt = new Map<string, { at: number; dur: number }>();
+    for (const name of NAMES) {
+      const list = card(name).classList;
+      const add = list.add.bind(list);
+      const remove = list.remove.bind(list);
+      const toggle = list.toggle.bind(list);
+      list.add = (...tokens: string[]) => {
+        if (tokens.includes('playing') && !list.contains('playing')) startedAt.set(name, { at: Date.now(), dur: parseFloat(card(name).style.getPropertyValue('--dur')) });
+        add(...tokens);
+      };
+      list.remove = (...tokens: string[]) => {
+        const start = startedAt.get(name);
+        if (tokens.includes('playing') && start && list.contains('playing')) {
+          overstay = Math.max(overstay, Date.now() - start.at - start.dur);
+          startedAt.delete(name);
+        }
+        remove(...tokens);
+      };
+      // The page adds and removes the class today. Should it toggle it one day, the same two paths measure it.
+      list.toggle = (token: string, force?: boolean) => {
+        const on = force ?? !list.contains(token);
+        if (token !== 'playing') return toggle(token, force);
+        if (on) list.add(token); else list.remove(token);
+        return on;
+      };
+    }
     for (const name of NAMES) see(card(name), 1);
     // A visitor's hand in every order, between turns: whatever happened, a minute later the cards still take turns.
     const hands = [
@@ -315,11 +344,14 @@ describe('the two pictures', () => {
       () => show('visible'),
       () => $('.ctl').click(),
     ];
+    // A seeded generator (Park-Miller), the same hands on every run; the choices come from its whole value, as
+    // its low bits repeat every few calls and would leave most hands unused. Each hand that starts a card draws
+    // it in jsdom, which costs about 20 ms, so a hundred rounds keep the test well under its limit on a busy machine.
     let seed = 7;
-    const pick = () => (seed = (seed * 1103515245 + 12345) % 2147483648);
-    for (let round = 0; round < 300; round++) {
-      hands[pick() % hands.length]();
-      vi.advanceTimersByTime(pick() % 2500);
+    const pick = (below: number) => Math.floor(((seed = (seed * 48271) % 2147483647) / 2147483647) * below);
+    for (let round = 0; round < 100; round++) {
+      hands[pick(hands.length)]();
+      vi.advanceTimersByTime(pick(2500));
       expect(playing().length).toBeLessThanOrEqual(1);
     }
     // Back to rest: pointer away, tab shown, flow out of view.
@@ -327,7 +359,13 @@ describe('the two pictures', () => {
     show('visible');
     see(stage(), 0);
     vi.advanceTimersByTime(10000);
+    // A minute of turns: every card takes one.
     expect(new Set(turnsOver(60000)).size).toBe(NAMES.length);
+    // No stay passed its card's time, by not even a millisecond; one still going is measured up to now.
+    for (const [, start] of startedAt) overstay = Math.max(overstay, Date.now() - start.at - start.dur);
+    expect(overstay).toBeLessThanOrEqual(0);
+    // The test saw stays end, so the check above was made on something.
+    expect(overstay).toBeGreaterThan(-Infinity);
   });
 
   it('pause at the end of the step that was playing, and go on with the next step', () => {

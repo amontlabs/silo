@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { createAppJwt } from '../server/app-auth.mjs';
 import { readConfig } from '../server/config.mjs';
-import { DEFAULT_TIMEOUT } from '../server/github.mjs';
+import { createGitHub, DEFAULT_TIMEOUT, GitHubError } from '../server/github.mjs';
 import { createNodeHandler, MAX_BODY, readRequest, waitUntil } from '../server/node.mjs';
 import { seal, unseal } from '../server/session.mjs';
 import { BUDGET, createWorkshop, LABELS } from '../server/workshop.mjs';
@@ -23,6 +23,10 @@ import { readEntryMarker, withoutMarkers } from '../../tools/workshop/model/inde
 import { planEntries } from './plan-entries.mjs';
 
 import { count, retiredNumber, entryNumber, FAILED, issueOf, ORIGIN, PLAN_ENTRIES, SESSION, setup, START, withBudget } from './workshop-test-support.mjs';
+
+// The two tests that hold a call at the fake GitHub end it themselves. This limit decides nothing while they pass:
+// it only turns a test left waiting on a call that never comes into a failure, where it would hang the whole run.
+const HELD_LIMIT_MS = 20_000;
 
 test('App JWT is RS256 with the App ID, and the installation token is cached until shortly before it expires', async () => {
   const t = await setup();
@@ -86,19 +90,32 @@ test('GitHub failing answers 502 when nothing is cached, and an unconfigured ser
   } finally { await u.close(); }
 });
 
-test('a hung or failing token refresh answers 502 and keeps the session; only an invalid refresh token signs out', async () => {
-  const t = await setup({ timeoutMs: 150 });
+test('a hung or failing token refresh answers 502 and keeps the session; only an invalid refresh token signs out', { timeout: HELD_LIMIT_MS }, async () => {
+  const t = await setup({ cuttable: (path, body) => path === '/login/oauth/access_token' && body.includes('refresh_token') });
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
   try {
     const c = t.client();
     await c.signIn('visitor-fake');
     const cookie = c.jar.get(SESSION);
     t.clock.t += 7 * 3600_000 + 56 * 60_000;
-    t.fake.state.hook = (r) => (r.path === '/login/oauth/access_token' ? { delay: 600 } : null);
+    // The refresh reaches GitHub and is held there until the test cuts it: nothing but the test ends it.
+    let reached;
+    const arrived = new Promise((resolve) => { reached = resolve; });
+    t.fake.state.hook = (r) => {
+      if (r.path !== '/login/oauth/access_token') return null;
+      reached();
+      return { until: gate };
+    };
     let settled = false;
     const pending = c.call('GET', 'vote?n=1').then((response) => { settled = true; return response; });
+    // Whichever comes first: the refresh reaching GitHub, or the vote ending without one, which is a failure.
+    const first = await Promise.race([arrived.then(() => 'refresh'), pending.then((response) => `the vote settled with ${response.status}`)]);
+    assert.equal(first, 'refresh', `the refresh did not reach GitHub: ${first}`);
     const other = await t.client().call('GET', 'state');
     assert.equal(other.status, 200);
     assert.equal(settled, false, 'other requests are not held by the refresh');
+    t.cut();
     const hung = await pending;
     assert.equal(hung.status, 502);
     assert.equal(c.jar.get(SESSION), cookie, 'the cookie is kept');
@@ -122,7 +139,41 @@ test('a hung or failing token refresh answers 502 and keeps the session; only an
     assert.equal(invalid.status, 401);
     assert.equal(c.jar.has(SESSION), false);
     assert.equal(c.jar.has('workshop-hint'), false);
-  } finally { t.fake.state.hook = null; await t.close(); }
+  } finally { t.fake.state.hook = null; release(); await t.close(); }
+});
+
+test('a call GitHub does not answer within the limit fails as a timeout', { timeout: HELD_LIMIT_MS }, async () => {
+  const t = await setup();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const realTimeout = AbortSignal.timeout;
+  try {
+    await t.client().signIn('visitor-fake');
+    const user = [...t.fake.state.tokens].find(([, entry]) => entry.kind === 'user')[0];
+    // The limit is an `AbortSignal.timeout(ms)`; here the test holds that signal and fires it itself, so no clock decides.
+    const limits = [];
+    AbortSignal.timeout = (ms) => {
+      const abort = new AbortController();
+      limits.push({ ms, abort });
+      return abort.signal;
+    };
+    let reached;
+    const arrived = new Promise((resolve) => { reached = resolve; });
+    t.fake.state.hook = (r) => {
+      if (r.path !== '/user') return null;
+      reached();
+      return { until: gate };
+    };
+    const github = createGitHub({ apiBase: t.fake.url, timeoutMs: 100 });
+    const call = github.request('GET', '/user', { token: user, as: 'user' }).then(() => 'answered', (error) => error);
+    // The limit is fired only once GitHub holds the request, or the timeout could be reported for a call never made.
+    const first = await Promise.race([arrived.then(() => 'held'), call.then((outcome) => `ended first: ${outcome instanceof Error ? outcome.message : outcome}`)]);
+    assert.equal(first, 'held');
+    assert.deepEqual(limits.map((limit) => limit.ms), [100], 'the call carries the limit it was given');
+    limits[0].abort.abort(new DOMException('The operation timed out.', 'TimeoutError'));
+    const error = await call;
+    assert.ok(error instanceof GitHubError && error.timeout === true && error.network === true, String(error));
+  } finally { AbortSignal.timeout = realTimeout; t.fake.state.hook = null; release(); await t.close(); }
 });
 
 test('a 401 on the installation token is a 502 and drops the token; a 401 on the person\'s token signs them out', async () => {
