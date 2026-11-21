@@ -10,4 +10,5 @@ something small with relevant code, structures, and some test so I can read what
 discuss it, then implement in the actual code."
 
 It bears on this question. It was said about `model-of-access-first`, and it has not been put to
-the owner as the answer of this entry.
+the owner as the answer of this entry. The owner added the same day that this has not started
+yet.

@@ -55,5 +55,5 @@ The owner, 21 November 2026, when taking the entry: "what I'm planning for I thi
 something small with relevant code, structures, and some test so I can read what the flow is,
 discuss it, then implement in the actual code."
 
-The trial of that day was such a small version for access: a core, its tables, its properties, a
-simulator and tests. It is described in the notes of `core-simulator`.
+The owner added the same day that this has not started yet. It is how the owner plans to work, and
+no part has been built this way so far.
