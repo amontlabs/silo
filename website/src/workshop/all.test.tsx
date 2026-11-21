@@ -1,16 +1,17 @@
 // All: the order and the folding of features and their decisions, each control and what it leaves in the address, the
 // old addresses, the relations on the strip and in the list, the films (their line, their marks, their place, their
 // frame), search from the map, and what the page remembers.
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { allSections, formatQuery, graphOf, kidOrder, locate, NO_QUERY, parseQuery } from './all';
 import type { Query } from './all';
-import { buildData, DECISIONS, FEATURES } from './fixtures';
+import { App } from './App';
+import { buildData, DECISIONS, FEATURES, liveState } from './fixtures';
 import { buildPlan } from './plan';
 import type { BuildData, Film } from './plan';
 import { POINT_MS } from './relation';
-import { itemOf, mockApi, part, renderApp, rowButton } from './test-support';
+import { itemOf, mockApi, ok, part, renderApp, rowButton } from './test-support';
 
 /** The fixture with a feature that needs three decisions and a feature, and two films. */
 function withNeeds(films: Partial<Film>[] = []): BuildData {
@@ -230,6 +231,40 @@ describe('the address is the truth', () => {
     await userEvent.click(screen.getByRole('button', { name: 'All' }));
     expect(screen.getByRole('button', { name: 'Latest' })).toHaveAttribute('aria-pressed', 'true');
     expect(location.search).toBe('?view=all&order=latest');
+  });
+});
+
+describe('an address from the history', () => {
+  it('is never rewritten when Back or Forward across fragments fires popstate, then hashchange', async () => {
+    mockApi();
+    await renderApp(withNeeds());
+    act(() => {
+      history.replaceState(null, '', '/workshop#left/exec');
+      dispatchEvent(new PopStateEvent('popstate'));
+      dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    await waitFor(() => expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true'));
+    expect(location.hash).toBe('#left/exec');
+    // The same old address followed by hand is written in its own form.
+    act(() => {
+      history.pushState(null, '', '/workshop#left/create');
+      dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    expect(location.hash).toBe('#part-b/create');
+  });
+
+  it('is never rewritten when what it names arrives late', async () => {
+    let release: (answer: { status: number; body: unknown }) => void = () => {};
+    mockApi({ state: () => new Promise((resolve) => { release = resolve; }) });
+    history.replaceState(null, '', '/workshop');
+    render(<App data={withNeeds()} />);
+    act(() => {
+      history.replaceState(null, '', '/workshop#issue-30');
+      dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await act(async () => release(ok(liveState())));
+    await waitFor(() => expect(rowButton('Start a task from Slack')).toHaveAttribute('aria-expanded', 'true'));
+    expect(location.hash).toBe('#issue-30');
   });
 });
 

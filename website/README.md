@@ -687,8 +687,12 @@ What a person sees:
   who arrives at the plain address, or presses All, gets them again, written into
   the address, so a person who left on Latest comes back to Latest. The order is
   remembered only from its own control. Otherwise the address is the truth: one
-  with no `order` is Build order, and an address read from the history is shown
-  as it is, never rewritten.
+  with no `order` is Build order, and an address the browser's history gave is
+  shown as it is, never rewritten, whichever event carries it (Back and Forward
+  across fragments fire `popstate`, then `hashchange`, one move) and however late
+  what it names arrives. Only an address a person followed or typed may be put in
+  its own form; where the browser has no Navigation API to tell a push from a
+  traverse, every `popstate` counts as the history's.
 - Being open belongs to the entry, not to one drawing of it: a decision opened
   under its feature is open wherever the list draws it, a search showing it on a
   line of its own included. When a search or a filter takes an open entry out of

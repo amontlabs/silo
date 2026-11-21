@@ -257,7 +257,8 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   const graph = useMemo(() => graphOf(plan), [plan]);
   const sections = useMemo(() => allSections(plan, graph, data.stages, query), [plan, graph, data.stages, query]);
   const focusNext = useRef<Focus | null>(null);
-  const wantedHash = useRef<string | null>(null);
+  /** An address naming what has not arrived yet (a suggestion comes with the live state), and whether the browser's history gave it. */
+  const wantedHash = useRef<{ hash: string; fromHistory: boolean } | null>(null);
   const foldedAt = useRef(0);
   /** The scroll driven by the fold, from a scrolled full map. */
   const lift = useRef<{ frame: number; from: number; full: number } | null>(null);
@@ -649,7 +650,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   const follow = useCallback((fromHistory: boolean) => {
     const resolved = resolveHash(location.hash, plan, rowByKey);
     if (!resolved) {
-      wantedHash.current = location.hash;
+      wantedHash.current = { hash: location.hash, fromHistory };
       return;
     }
     wantedHash.current = null;
@@ -696,30 +697,49 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   useLayoutEffect(() => {
     if (first.recalled) history.replaceState(history.state, '', address(formatQuery(location.search, 'all', first.query), location.hash));
     followRef.current(false);
+    // Back and Forward across fragments fire popstate, then hashchange for the same address: the second is the same
+    // move and is not followed again. Where the browser says how it navigates (the Navigation API), a popstate that is
+    // not a traverse (a fragment followed or typed) is a person's address; elsewhere every popstate is the history's.
+    let kind: string | null = null;
+    let popped: string | null = null;
+    const nav = (window as Window & { navigation?: EventTarget }).navigation;
+    const onNavigate = (event: Event) => { kind = (event as Event & { navigationType?: string }).navigationType ?? null; };
     const onPop = () => {
+      const fromHistory = kind === null || kind === 'traverse';
+      kind = null;
+      popped = location.href;
       moveStartsRef.current();
-      followRef.current(true);
+      followRef.current(fromHistory);
     };
     const onHash = () => {
+      if (popped === location.href) {
+        popped = null;
+        return;
+      }
+      popped = null;
       moveStartsRef.current();
       followRef.current(false);
     };
+    nav?.addEventListener('navigate', onNavigate);
     addEventListener('popstate', onPop);
     addEventListener('hashchange', onHash);
     return () => {
+      nav?.removeEventListener('navigate', onNavigate);
       removeEventListener('popstate', onPop);
       removeEventListener('hashchange', onHash);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
-    if (wantedHash.current === null) return;
-    if (resolveHash(wantedHash.current, plan, rowByKey)) follow(false);
+    const wanted = wantedHash.current;
+    if (wanted === null) return;
+    // However late it loads, an address the history gave is shown as it is.
+    if (resolveHash(wanted.hash, plan, rowByKey)) follow(wanted.fromHistory);
     else if (w.settled) {
       // A link to something that the state shown does not have falls back to the plan, once the load has ended
       // (the `fresh=1` ask included, when one was made: what was just suggested may be only in that answer).
       wantedHash.current = null;
-      history.replaceState(history.state, '', address(location.search));
+      if (!wanted.fromHistory) history.replaceState(history.state, '', address(location.search));
       settle(HOME, null);
     }
   }, [plan, rowByKey, w.settled, follow]);

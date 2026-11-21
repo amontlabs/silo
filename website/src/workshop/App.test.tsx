@@ -236,12 +236,14 @@ describe('addresses', () => {
     await renderApp();
     await waitFor(() => expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true'));
     expect(location.hash).toBe('#part-b/exec');
-    act(() => { location.hash = '#entry-reviewer'; });
+    // A link followed: the browser pushes the address and says so (hashchange; the Navigation API tells a push from a
+    // traverse, which jsdom lacks).
+    act(() => { history.pushState(null, '', '/workshop#entry-reviewer'); dispatchEvent(new HashChangeEvent('hashchange')); });
     await waitFor(() => expect(rowButton('A hosted reviewer')).toHaveAttribute('aria-expanded', 'true'));
     expect(location.hash).toBe('#part-e/reviewer');
     expect(screen.getByRole('heading', { level: 2, name: 'Part E' })).toBeInTheDocument();
     // A decision of the whole product lives in its own place.
-    act(() => { location.hash = '#entry-one-host'; });
+    act(() => { history.pushState(null, '', '/workshop#entry-one-host'); dispatchEvent(new HashChangeEvent('hashchange')); });
     await waitFor(() => expect(rowButton('Which host runs Silo first?')).toHaveAttribute('aria-expanded', 'true'));
     expect(location.hash).toBe('#product/one-host');
     expect(screen.getByRole('heading', { level: 2, name: 'Product' })).toBeInTheDocument();
