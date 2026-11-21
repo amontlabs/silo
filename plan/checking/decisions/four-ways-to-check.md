@@ -23,7 +23,7 @@ was no longer practical.
 
 So for access, trying the real core this way is enough, and the first engine code can be that
 part of the core. The owner agreed on 21 November 2026: "Yes we go full zig." The table's third
-row and the answer were reworded on that day. The owner has not taken the entry yet.
+row and the answer were reworded on that day.
 
 Then the owner asked why not use the simulator alone. The simulator draws its sequences of calls
 at random, so nothing guarantees that it draws the one order a fault needs. The test of every
@@ -36,3 +36,5 @@ the order of calls.
 The plan's lists named this way of checking `model`. Its name is now `bounded exhaustive test`,
 the standard term: it tries every case, and only up to a bound. "Exhaustive test" alone would
 read as a test of everything.
+
+The owner took the entry on 21 November 2026.

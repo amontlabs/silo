@@ -65,4 +65,4 @@ properties of the part `rules` will meet this case when taking a rule away is de
 
 The owner, 21 November 2026, asked whether to drop the separate checking language: "Yes we go full
 zig." So no person had to read the five models, and the answer was written on that day. The
-reasons are in the notes of `model-of-access-first`. The owner has not taken the entry yet.
+reasons are in the notes of `model-of-access-first`. The owner took the entry on 21 November 2026.

@@ -30,8 +30,8 @@ the language to prove, conceptualize, visualize". The answer was reworded on tha
 The owner then asked why not use the simulator alone. The reasons are in the notes of
 `four-ways-to-check`. The owner, 21 November 2026: "we always use simulator and when we have a reason to believe
 certain order we do that in addition". The properties of access depend on the order
-of calls, as `rule-order-never-matters` says outright, so both are used here. The owner has not
-taken the entry yet.
+of calls, as `rule-order-never-matters` says outright, so both are used here. The owner took the
+entry on 21 November 2026.
 
 ## What the plan does not settle for access
 
@@ -48,3 +48,12 @@ The trial had to assume these to write the model. Each is a question for its own
 - What a drop does to the computer's secrets is not settled. Assumed: nothing.
 - `importing-changes-nothing`, in the part `extensions`, is also checked this way. The trial left
   it out.
+
+## A small version first
+
+The owner, 21 November 2026, when taking the entry: "what I'm planning for I think is to always start with a poc, like
+something small with relevant code, structures, and some test so I can read what the flow is,
+discuss it, then implement in the actual code."
+
+The trial of that day was such a small version for access: a core, its tables, its properties, a
+simulator and tests. It is described in the notes of `core-simulator`.
