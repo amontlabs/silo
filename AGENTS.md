@@ -55,7 +55,7 @@ Rules for every agent. Orchestrator: also read .atelier/rules/ORCHESTRATOR.md. W
 8. These rules live in the repository; do not save them to memory.
 
 ## Silo
-- Nothing is built without a feature the owner took (`"verdict": "take"` in its file).
+- Nothing is built without a feature the owner took (`"verdict": "take"` in its file). A trial is not built: it is never merged.
 - Never write `verdict` by hand: `plan take` and `plan drop` do, on the owner's word.
 - Every word, principle and property in the plan's lists is in force, and so is every taken decision that is not replaced. Work by them. Nobody decides the same thing again or builds something else in its place, and a reviewer does not report work as wrong because it follows one.
 - Challenge any decision you think should change, in the plan, a guide or these rules. A decision should change when Silo would be better with a different one: it contradicts another decision, it gets a real case wrong or leaves it out, what it rested on has changed, or there is a better answer. Name it and give your reason on one concrete case, to the owner when you answer to the owner and in your report otherwise. Add what you would put in its place when you know. You need neither that nor to be sure before you speak. That the owner made the decision is no reason to keep quiet: the owner and the agents build Silo together, and a bad decision the owner once made must not compromise the product. Read the decision's notes first, and bring only what the owner has not already weighed there. Until the owner changes it, it stays in force, so do not work around it.
