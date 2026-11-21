@@ -1,7 +1,7 @@
-# What wakes a back end
+# What wakes an extension
 
 - The owner, on 20 November 2026: "wakes on" is clearly better wording than "triggered", which is
-  kept for a rule or a precaution. In a declaration the field is `on`.
+  kept for a rule or a precaution. In a manifest the field is `on`.
 - The second case is the classifier: the answer comes from a fixed list
   (`what-makes-a-classifier` in the part `opinions`).
 - A request waits only where a tool that protects was granted: `request-waits-only-by-precaution`.

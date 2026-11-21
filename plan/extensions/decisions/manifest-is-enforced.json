@@ -1,0 +1,18 @@
+{
+  "asks": "Does Silo enforce what a manifest says?",
+  "answer": "The manifest is what the user accepts when installing an extension and what Silo enforces afterwards.",
+  "needs": [
+    "extension-manifest"
+  ],
+  "sets": [
+    {
+      "in": "extensions/properties",
+      "id": "manifest-bounds-an-extension",
+      "says": "The manifest is what the user accepts when installing an extension and what Silo enforces afterwards.",
+      "kind": "safety",
+      "check": [
+        "hostile test"
+      ]
+    }
+  ]
+}

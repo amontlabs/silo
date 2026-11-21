@@ -1,4 +1,4 @@
 {
   "asks": "What is a panel made of?",
-  "answer": "Panels, as data that the app draws."
+  "answer": "A panel is data that the app draws. An extension creates one through a tool, as it sends an alert or puts a question."
 }

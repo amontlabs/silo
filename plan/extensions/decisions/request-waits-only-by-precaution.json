@@ -2,7 +2,7 @@
   "asks": "When does a request wait for an extension's answer?",
   "answer": "A request waits for an extension's answer only if a precaution the user accepted says so. Granting an extension a tool that protects the requests of a computer sets that precaution. Installing an extension with no such tool never makes a request wait.",
   "needs": [
-    "what-wakes-a-back-end"
+    "what-wakes-an-extension"
   ],
   "sets": [
     {

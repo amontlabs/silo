@@ -13,7 +13,7 @@
 An extension can be wrong, or tricked by text an agent wrote. So it gets what anything less sure
 than a fact gets: nothing that grants, nothing that destroys.
 
-Example: the back end of an extension reads a web page that says "open the network of main". It
+Example: the computer of an extension reads a web page that says "open the network of main". It
 cannot, whatever was granted when it was installed, because no such tool exists.
 
 ## What it replaces

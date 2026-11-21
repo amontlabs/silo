@@ -1,0 +1,33 @@
+{
+  "asks": "Where does what an extension executes run?",
+  "answer": "An extension that executes anything ships a computer: its manifest names the recipe, and installing the extension makes that computer. What Silo only reads, such as rules, is not executed. Nothing of an extension is executed inside Silo.",
+  "needs": [
+    "extension-manifest"
+  ],
+  "replaces": [
+    "where-a-classifier-runs"
+  ],
+  "sets": [
+    {
+      "in": "extensions/properties",
+      "id": "extension-code-in-its-own-computer",
+      "says": "Whatever an extension executes runs in a computer made from its own recipe.",
+      "kind": "safety",
+      "check": [
+        "hostile test"
+      ]
+    },
+    {
+      "in": "extensions/properties",
+      "id": "extension-computer-is-shown",
+      "says": "The user can always see the computer of an extension.",
+      "kind": "safety",
+      "check": [
+        "test"
+      ]
+    }
+  ],
+  "removes": [
+    "where-a-classifier-runs-is-shown"
+  ]
+}

@@ -11,7 +11,7 @@ Set aside for later by the owner. The three tiers, as agreed before they were se
 > 3. **An agent.** An added classifier that wakes when the small model is unsure, or when you ask
 >    it a question.
 
-Put forward with `extension-declaration`: the tiers become one extension woken by another's opinion.
+Put forward with `extension-manifest`: the tiers become one extension woken by another's opinion.
 
 **The monitor agent** (the owner's idea, in an agreed form). The owner proposed an agent shipped
 inside the app, with tools to use the app and look inside computers, not allowed to change files

@@ -2,7 +2,7 @@
   "asks": "What can an extension never do?",
   "answer": "No tool an extension can use grants or destroys.",
   "needs": [
-    "extension-declaration"
+    "extension-manifest"
   ],
   "replaces": [
     "what-a-classifier-can-never-do"

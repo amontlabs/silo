@@ -22,3 +22,9 @@ one costs only time. The law for an extension is `what-an-extension-never-does`.
 
 `what-a-classifier-is`, in the part `opinions`, added the property this decision removes. Its
 answer still says a classifier is whatever gives an opinion.
+
+## The owner's answer (21 November 2026, later)
+
+"If you're saying that an extension can use rules that are protective, then yes, if I understand
+correctly, but maybe I'm confusing stuff." What is meant here is tools, not rules: the extension's
+computer asks Silo to deny, hold or pause. The verdict waits for the owner's word on that reading.

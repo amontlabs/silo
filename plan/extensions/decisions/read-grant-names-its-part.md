@@ -1,3 +1,3 @@
 # A grant to read names its part
 
-In the declaration (`extension-declaration`), the lines "is given" and "may use" would carry it.
+In the manifest (`extension-manifest`), the tool that reads names its part.

@@ -1,0 +1,25 @@
+{
+  "asks": "What is an extension?",
+  "answer": "An extension adds rules, a computer, or both. Its manifest lists the rules, the recipe of the computer, what wakes that computer, the tools it may use and the secrets it needs.",
+  "replaces": [
+    "added-classifier",
+    "what-defines-a-classifier"
+  ],
+  "sets": [
+    {
+      "in": "words",
+      "word": "extension",
+      "means": "Rules, a computer, or both, added to Silo through a manifest."
+    },
+    {
+      "in": "words",
+      "word": "manifest",
+      "means": "What an extension says of itself: the rules it adds, the recipe of its computer, what wakes that computer, the tools it may use and the secrets it needs."
+    },
+    {
+      "in": "words",
+      "word": "panel",
+      "means": "A view in the app that an extension creates through a tool, and that the app draws."
+    }
+  ]
+}

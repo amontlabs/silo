@@ -14,8 +14,8 @@
   protective actions. The law needed a name for what gives the value, and the whole part was named
   after that one case.
 - Where the case shows: a request waits at the boundary, and the extension answers from a list
-  Silo fixes (`what-wakes-a-back-end` in the part `extensions`).
-- It needs `shipped-extensions-declare`: if what ships with Silo had no declaration, a built-in
+  Silo fixes (`what-wakes-an-extension` in the part `extensions`).
+- It needs `shipped-extensions-use-the-manifest`: if what ships with Silo had no manifest, a built-in
   classifier would not be an extension.
 - The word was compared with estimator, detector, monitor, evaluator, reviewer and labeler. None
   is both standard and plainer.
