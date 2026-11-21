@@ -90,6 +90,39 @@ test('plan: a feature whose needs are all done is ready', async () => {
   }, files);
 });
 
+test('plan: a feature is in one list only, and the lists come in order: being built, ready to build, waiting', async () => {
+  const files = basePlan();
+  files['engine/decisions/linux-vm-engine.json'] = { ...files['engine/decisions/linux-vm-engine.json'], verdict: 'take' };
+  // start-computer is being built, list-computers is ready (its needs are done, its build has not started),
+  // stop-computer waits for list-computers. They stand in the plan in the opposite order of the lists.
+  files['engine/features/start-computer.json'] = { ...files['engine/features/start-computer.json'], started: '2026-11-18' };
+  files['engine/features/list-computers.json'] = { name: 'List computers', what: 'Show the computers there are.', needs: ['linux-vm-engine'], verdict: 'take' };
+  files['engine/features/stop-computer.json'] = { name: 'Stop a computer', what: 'Stop a computer that runs.', needs: ['list-computers'], verdict: 'take' };
+  files['order.json'] = { ...files['order.json'], stages: files['order.json'].stages.map((stage) => (stage.id === 'app' ? { ...stage, entries: ['stop-computer', 'list-computers', 'start-computer'] } : stage)) };
+  await withRepo(async (root) => {
+    const json = JSON.parse((await run(root, ['--json'])).out);
+    assert.deepEqual(json.building, [{ id: 'start-computer', name: 'Start a computer' }]);
+    assert.deepEqual(json.ready, [{ id: 'list-computers', name: 'List computers' }]);
+    assert.deepEqual(json.waiting, [{ id: 'stop-computer', name: 'Stop a computer', for: ['list-computers'] }]);
+    const { out } = await run(root, []);
+    const at = (text) => {
+      const index = out.indexOf(text);
+      assert.notEqual(index, -1, `${text} is not listed:\n${out}`);
+      assert.equal(out.indexOf(text, index + 1), -1, `${text} is listed twice:\n${out}`);
+      return index;
+    };
+    const lists = ['Being built:', 'Ready to build:', 'Waiting:'].map(at);
+    assert.deepEqual(lists, [...lists].sort((a, b) => a - b));
+    const [building, ready, waiting] = lists;
+    const [started, list, stop] = ['start-computer  Start a computer', 'list-computers  List computers', 'stop-computer  waits for list-computers'].map(at);
+    assert.ok(building < started && started < ready, 'start-computer is under Being built');
+    assert.ok(ready < list && list < waiting, 'list-computers is under Ready to build');
+    assert.ok(waiting < stop, 'stop-computer is under Waiting');
+    assert.match((await run(root, ['show', 'start-computer'])).out, /^feature start-computer \(engine\): building, /);
+    assert.equal(JSON.parse((await run(root, ['show', 'start-computer', '--json'])).out).status, 'building');
+  }, files);
+});
+
 test('plan: the first entry with no verdict, the features ready and those that wait', async () => {
   await withRepo(async (root) => {
     const { code, out } = await run(join(root, 'plan'), []);
@@ -100,6 +133,8 @@ test('plan: the first entry with no verdict, the features ready and those that w
     assert.equal(json.next.id, 'nothing-without-a-reason');
     assert.equal(json.next.kind, 'decision');
     assert.equal(json.next.asks, basePlan()['decisions/nothing-without-a-reason.json'].asks);
+    assert.deepEqual(json.building, []);
+    assert.match(out, /^Being built: none\.$/m);
     assert.deepEqual(json.ready, []);
     assert.deepEqual(json.waiting, [{ id: 'start-computer', name: 'Start a computer', for: ['linux-vm-engine'] }]);
   });

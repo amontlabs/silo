@@ -168,10 +168,11 @@ describe('the Workshop without JavaScript', () => {
     expect(partA?.querySelector('h2')?.textContent).toBe('Part A');
     expect(rowsOf(partA)).toEqual([
       'core-in-zig Which language is the core written in? Decided.',
-      'core The engine runs on its own Planned.',
-      'calls Every call defined once Planned.',
+      'core The engine runs on its own Decided.',
+      'calls Every call defined once Decided.',
     ]);
-    expect(rowsOf(box.querySelector('section[data-part="part-b"]'))).toContain('create Create and delete a computer Not decided yet.');
+    expect(rowsOf(box.querySelector('section[data-part="part-b"]'))).toContain('create Create and delete a computer Not decided.');
+    expect(rowsOf(box.querySelector('section[data-part="part-c"]'))).toContain('shells Your shell inside Being built.');
     expect([...box.querySelectorAll('section')].map((section) => section.getAttribute('data-part'))).toEqual([...buildData().parts.map((part) => part.id), 'product']);
   });
 

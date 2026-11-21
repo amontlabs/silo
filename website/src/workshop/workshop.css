@@ -79,7 +79,9 @@
 .ws-pip::before { content: ""; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid transparent; transition: background-color .2s, border-color .2s, box-shadow .2s; }
 .ws-pip.built::before { background: var(--ink); border-color: var(--ink); }
 .ws-pip.next::before { border-color: var(--accent); }
-.ws-pip.planned::before { border-color: var(--ink); }
+.ws-pip.decided::before { border-color: var(--ink); }
+/* Being built: between the ring of a decided entry and the full dot of a built one, half filled, in the accent. */
+.ws-pip.building::before { border-color: var(--accent); background: linear-gradient(90deg, var(--accent) 50%, transparent 50%); }
 .ws-pip.undecided::before { border-color: color-mix(in srgb, var(--faint) 70%, transparent); }
 .ws-pip.dropped::before, .ws-pip.replaced::before { width: 9px; height: 1.5px; border: 0; border-radius: 0; background: var(--faint); }
 
@@ -114,9 +116,9 @@
 .ws-wl.mid { transform: translate(-50%, -80%); }
 .ws-stage.fold .ws-wl { opacity: 0; }
 .ws-stage:not(.fold) .ws-wl { transition: opacity .22s .2s, color .3s; }
-.ws-wire.s-done path { stroke: var(--ink); } .ws-wire.s-done .ah { fill: var(--ink); }
-.ws-wire.s-next path, .ws-wire.s-planned path { stroke: var(--muted); }
-.ws-wire.s-next .ah, .ws-wire.s-planned .ah { fill: var(--muted); }
+.ws-wire.s-built path { stroke: var(--ink); } .ws-wire.s-built .ah { fill: var(--ink); }
+.ws-wire.s-building path, .ws-wire.s-next path, .ws-wire.s-decided path { stroke: var(--muted); }
+.ws-wire.s-building .ah, .ws-wire.s-next .ah, .ws-wire.s-decided .ah { fill: var(--muted); }
 .ws-node { font-size: max(12px, calc(13 * var(--u))); line-height: 1.3; color: var(--muted); white-space: nowrap; pointer-events: none; }
 .ws-node b { display: block; font-weight: 400; color: var(--ink); }
 .ws-node span { display: block; white-space: normal; text-wrap: balance; transition: opacity .2s; }
@@ -134,7 +136,7 @@
 .ws-mapkey path { stroke: var(--muted); }
 .ws-stage.fold .ws-mapkey { opacity: 0; transition: opacity .1s; }
 .ws-ghost { border: 1px dashed var(--faint); border-radius: 3px; background: var(--paper); opacity: .6; pointer-events: none; }
-.ws-ghost.s-done, .ws-ghost.s-next, .ws-ghost.s-planned { border-style: solid; border-color: var(--muted); }
+.ws-ghost.s-built, .ws-ghost.s-building, .ws-ghost.s-next, .ws-ghost.s-decided { border-style: solid; border-color: var(--muted); }
 .ws-zone.undecided { border-style: dashed; }
 .ws-stage.fold .ws-ghost { opacity: 0; }
 
@@ -154,13 +156,14 @@
 .ws-gl .solid { fill: currentColor; stroke: none; }
 
 .ws-part.s-open .ws-p-st { visibility: hidden; }
-.ws .ws-part.s-planned, .ws .ws-part.s-next { --g: var(--muted); border-style: solid; border-color: var(--ink); color: var(--ink); }
-.ws-part.s-planned .ws-mk { border-color: var(--ink); }
+.ws .ws-part.s-decided, .ws .ws-part.s-next, .ws .ws-part.s-building { --g: var(--muted); border-style: solid; border-color: var(--ink); color: var(--ink); }
+.ws-part.s-decided .ws-mk { border-color: var(--ink); }
 .ws-part.s-next .ws-mk { border-color: var(--accent); border-width: 1.6px; }
-.ws-part.s-next .ws-p-st { color: var(--accent-ink); }
-.ws .ws-part.s-done { --g: var(--muted); border-style: solid; border-color: var(--ink); background: var(--built); color: var(--ink); }
-.ws-part.s-done .ws-mk { background: var(--ink); border-color: var(--ink); }
-.ws-part.s-done .core { stroke: var(--accent); stroke-width: 1.6; }
+.ws-part.s-building .ws-mk { border-color: var(--accent); border-width: 1.6px; background: linear-gradient(90deg, var(--accent) 50%, transparent 50%); }
+.ws-part:is(.s-next, .s-building) .ws-p-st { color: var(--accent-ink); }
+.ws .ws-part.s-built { --g: var(--muted); border-style: solid; border-color: var(--ink); background: var(--built); color: var(--ink); }
+.ws-part.s-built .ws-mk { background: var(--ink); border-color: var(--ink); }
+.ws-part:is(.s-built, .s-building) .core { stroke: var(--accent); stroke-width: 1.6; }
 .ws .ws-part:hover { border-style: solid; border-color: var(--accent-ink); background: var(--surface-hover); color: var(--ink); }
 .ws .ws-part.on { border-style: solid; border-color: var(--accent-ink); box-shadow: 0 0 0 1.5px var(--accent-ink); color: var(--ink); }
 
@@ -184,9 +187,10 @@
 .ws-title { font: 21px/1.25 var(--serif); letter-spacing: -0.3px; margin-top: 8px; transition: color .16s; }
 .ws-tline { font-size: 13.5px; line-height: 1.45; color: var(--muted); margin-top: 4px; text-wrap: pretty; }
 .ws-mark { display: none; flex: none; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--faint); }
-.s-done .ws-mark { background: var(--ink); border-color: var(--ink); }
+.s-built .ws-mark { background: var(--ink); border-color: var(--ink); }
+.s-building .ws-mark { border-color: var(--accent); background: linear-gradient(90deg, var(--accent) 50%, transparent 50%); }
 .s-next .ws-mark { border-color: var(--accent); }
-.s-planned .ws-mark { border-color: var(--ink); }
+.s-decided .ws-mark { border-color: var(--ink); }
 .s-open .ws-mark { border-color: color-mix(in srgb, var(--faint) 55%, transparent); }
 .ws-pips { display: flex; flex-wrap: wrap; }
 .ws-tile .ws-pips { margin: auto 24px 0 -3px; padding-top: 12px; }
@@ -208,12 +212,12 @@
 .is-sheet .ws-tile:hover .ws-tile-hit::after, .is-sheet .ws-tile-hit:focus-visible::after { opacity: 1; transform: none; }
 .is-sheet .ws-tile:hover { background-color: var(--surface-hover); }
 .is-sheet .ws-tile:hover .ws-title { color: var(--accent-ink); }
-.is-sheet .ws-tile.s-done { background-color: var(--built); }
-.is-sheet .ws-tile.s-done:hover { background-color: var(--surface-hover); }
+.is-sheet .ws-tile.s-built { background-color: var(--built); }
+.is-sheet .ws-tile.s-built:hover { background-color: var(--surface-hover); }
 .is-sheet .ws-tile.part-built { background-image: linear-gradient(90deg, var(--built) calc(var(--p) * 1% - 22%), transparent calc(var(--p) * 1%)); }
 .is-sheet .ws-tile.part-built:hover { background-image: none; }
-.is-sheet .ws-tile.s-done .ws-lab { color: var(--ink); }
-.is-sheet .ws-tile.s-next .ws-lab { color: var(--accent-ink); }
+.is-sheet .ws-tile.s-built .ws-lab { color: var(--ink); }
+.is-sheet .ws-tile:is(.s-next, .s-building) .ws-lab { color: var(--accent-ink); }
 .is-sheet .ws-tile.s-open .ws-title { color: var(--muted); }
 .is-sheet .ws-tile.s-open:hover .ws-title { color: var(--accent-ink); }
 .ws-cut { position: relative; padding: 9px 20px 8px; font: 12px/12px var(--mono); letter-spacing: 1.3px; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); margin-right: 1px; }

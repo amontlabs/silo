@@ -204,6 +204,21 @@ test('rule 9: built, and the files named by at', () => {
   assert.deepEqual(checkFiles(filesOf(basePlan())).notes.map((n) => n.message), ['the files named by at were not looked for']);
 });
 
+test('rule 9: started, on a taken feature whose needs are done, on or before built', () => {
+  const feature = (f) => f['engine/features/start-computer.json'];
+  const needsDone = (f) => { f['engine/decisions/linux-vm-engine.json'].verdict = 'take'; };
+  assert.deepEqual(errorsOf(variant((f) => { needsDone(f); feature(f).started = '2026-11-18'; })), []);
+  assert.deepEqual(errorsOf(variant((f) => { needsDone(f); delete feature(f).verdict; feature(f).started = '2026-11-18'; })), ['plan/engine/features/start-computer.json started: started without the verdict take']);
+  assert.deepEqual(errorsOf(variant((f) => { feature(f).started = '2026-11-18'; })), ['plan/engine/features/start-computer.json started: started while linux-vm-engine is not done']);
+  assert.deepEqual(errorsOf(variant((f) => { needsDone(f); feature(f).started = '2026-11-21'; feature(f).built = '2026-11-20'; })), ['plan/engine/features/start-computer.json started: started on 2026-11-21, after it was built on 2026-11-20']);
+  assert.deepEqual(errorsOf(variant((f) => { needsDone(f); feature(f).started = '2026-11-20'; feature(f).built = '2026-11-20'; })), []);
+  assert.deepEqual(errorsOf(variant((f) => { needsDone(f); feature(f).started = '2026-02-30'; })), ['plan/engine/features/start-computer.json started: "2026-02-30" is not a date']);
+  // built does not need started.
+  assert.deepEqual(errorsOf(variant((f) => { needsDone(f); feature(f).built = '2026-11-20'; })), []);
+  // A decision has no started.
+  assert.deepEqual(errorsOf(variant((f) => { f['engine/decisions/linux-vm-engine.json'].started = '2026-11-18'; })), ['plan/engine/decisions/linux-vm-engine.json started: unknown key']);
+});
+
 test('rule 9: every path of an at is relative and stays inside the repository, whatever exists says', () => {
   const withPath = (path) => variant((f) => { f['record/properties.json'][0].at = [path]; });
   for (const path of ['/etc/passwd', '../outside.txt', 'engine/../../outside.txt', './engine/x.zig', 'engine//x.zig', 'engine/x.zig/', 'C:/x.zig', 'engine\\x.zig']) {
@@ -226,6 +241,7 @@ test('a malformed field is a problem, never a throw: the check always returns { 
     (f, v) => { f['engine/decisions/model-tool.json'].suggest = { verdict: v, why: 'W.' }; },
     (f, v) => { f['engine/decisions/model-tool.json'].suggest = v; },
     (f, v) => { f['engine/features/start-computer.json'].built = v; },
+    (f, v) => { f['engine/features/start-computer.json'].started = v; },
     (f, v) => { f['record/decisions/losses-show.json'].sets[0].in = v; },
     (f, v) => { f['record/decisions/losses-show.json'].sets[0].kind = v; },
     (f, v) => { f['record/decisions/losses-show.json'].sets[0].id = v; },

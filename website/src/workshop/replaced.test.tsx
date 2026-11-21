@@ -86,7 +86,7 @@ describe('a decision that replaces another', () => {
     expect(line).toHaveTextContent(`Would replace ${CURRENT}`);
     expect(within(line).getByRole('link', { name: CURRENT })).toHaveAttribute('href', '#part-e/signed-logs');
     expect(line).not.toHaveTextContent(/^Replaces/);
-    expect(within(item).getByText('Not decided yet.')).toBeInTheDocument();
+    expect(within(item).getByText('Not decided.')).toBeInTheDocument();
   });
 
   it('shows no such line when it is dropped', async () => {

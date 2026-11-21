@@ -9,8 +9,8 @@ export type Box = [x: number, y: number, w: number, h: number];
 /**
  * What the plan says that a wire, a zone or a placement draws, read only by the build (`checkLayout`): the id of a
  * decision or a feature, `word:<id>` for a word of plan/words.json, or `part:<id>` for what only the part's own line
- * says. A taken decision, a taken or built feature, a word and a part are in force. A decision with an answer and no
- * verdict, and a feature with no verdict, are proposed: what rests on one of them is drawn as not decided.
+ * says. A taken decision, a taken, being built or built feature, a word and a part are in force. A decision with an
+ * answer and no verdict, and a feature with no verdict, are proposed: what rests on one of them is drawn as not decided.
  */
 export type Rests = string[];
 
@@ -253,7 +253,7 @@ export interface LayoutPlan {
   /** By id; `replacedBy` is the decision that replaced a replaced one. */
   decisions: Record<string, { status: 'dropped' | 'replaced' | 'taken' | 'answered' | 'open'; replacedBy: string | null }>;
   /** By id, as the plan tool's model gives it. */
-  features: Record<string, { status: 'built' | 'ready' | 'taken' | 'undecided' | 'dropped' }>;
+  features: Record<string, { status: 'built' | 'building' | 'ready' | 'taken' | 'undecided' | 'dropped' }>;
   /** The ids of the words of plan/words.json. */
   words: string[];
 }

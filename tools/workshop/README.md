@@ -20,7 +20,7 @@ be used.
 | `workshop setup [--org <org>] [--site <url>] [--replace]` | Creates the App (below). |
 | `workshop store [--replace]` | Finishes a setup whose Keychain step failed, from `vercel.env`. |
 | `workshop doctor` | Where each credential comes from (never a value), whether the App is public and installed, its permissions, whether the two labels the site sets exist, and the entries that several issues name. Exit 1 on a problem. |
-| `workshop decline <issue> --why "…"` | Closes an open suggestion as not planned, the reason as the bot's comment. Refuses an issue that is not an open suggestion (an entry, an issue without the suggestion label, a closed one). A run stopped after the comment and run again posts no second comment. |
+| `workshop decline <issue> --why "…"` | Drops an open suggestion, the Workshop's word for it: closes it with GitHub's own reason for closing, "not planned", and the reason as the bot's comment. Refuses an issue that is not an open suggestion (an entry, an issue without the suggestion label, a closed one). A run stopped after the comment and run again posts no second comment. |
 
 `doctor` checks both labels: `workshop:suggestion`, which the site puts on each new suggestion, and
 `workshop:entry`, the label of an entry's thread, which the bot opens. GitHub's documentation of

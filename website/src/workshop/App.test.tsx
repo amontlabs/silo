@@ -9,40 +9,60 @@ import {
 } from './test-support';
 import type { Route } from './test-support';
 
-// `core`, `calls` and `create` are built and `fork` is taken, as their files say.
-const builtData = () => buildData({ features: FEATURES.map((feature) => (['core', 'calls', 'create'].includes(feature.id) ? { ...feature, verdict: 'take' as const, built: '2026-11-16' } : feature.id === 'fork' ? { ...feature, verdict: 'take' as const } : feature)) });
+// `core`, `calls` and `create` are built and `fork` is taken, as their files say; `shells` is being built, or with
+// `started` false only taken.
+const builtData = (started = true) => buildData({ features: FEATURES.map((feature) => (['core', 'calls', 'create'].includes(feature.id) ? { ...feature, verdict: 'take' as const, built: '2026-11-16' } : feature.id === 'fork' ? { ...feature, verdict: 'take' as const } : feature.id === 'shells' && !started ? { ...feature, started: undefined } : feature)) });
 
 describe('the map', () => {
   it('shows the title, one line, every part with its state and only the states present', async () => {
     mockApi();
     await renderApp();
     expect(screen.getByRole('heading', { level: 1, name: 'Workshop' })).toBeInTheDocument();
-    expect(screen.getByText('Starting with Part A.')).toBeInTheDocument();
+    expect(screen.getByText('Part C is being built.')).toBeInTheDocument();
     expect(document.querySelectorAll('.ws-part')).toHaveLength(5);
     expect(part('part-a')).toHaveClass('s-next');
     expect(part('part-a')).toHaveTextContent('next');
-    expect(part('part-c')).toHaveClass('s-planned');
-    expect(part('part-c')).toHaveTextContent('1 planned');
+    expect(part('part-c')).toHaveClass('s-building');
+    expect(part('part-c')).toHaveTextContent('being built');
     expect(part('part-b')).toHaveClass('s-open');
-    expect(part('part-b')).toHaveAccessibleName('Part B, not decided yet, 2 features. A part that holds another.');
-    expect(part('part-c')).toHaveAccessibleName('Part C, 1 planned, 1 feature. A part inside Part B.');
-    expect(part('part-d')).toHaveAccessibleName('Part D, not decided yet, 7 features, 2 decisions. A part with copies behind it.');
+    expect(part('part-a')).toHaveAccessibleName('Part A, next, 2 features, 1 decision. A tall part with a glyph.');
+    expect(part('part-b')).toHaveAccessibleName('Part B, not decided, 2 features. A part that holds another.');
+    expect(part('part-c')).toHaveAccessibleName('Part C, being built, 1 feature. A part inside Part B.');
+    expect(part('part-d')).toHaveAccessibleName('Part D, not decided, 7 features, 2 decisions. A part with copies behind it.');
+    expect(tile('part-c').parentElement).toHaveClass('s-building');
+    expect(tile('part-c')).toHaveTextContent('being built');
+    expect(tile('part-c')).toHaveAccessibleName('Part C, being built, 1 feature. A part inside Part B.');
+    // The feature being built has its own mark, in its part's dots.
+    expect([...tile('part-c').querySelectorAll('.ws-pips i')].map((pip) => pip.className)).toEqual(['ws-pip building']);
     const key = screen.getByRole('list', { name: 'Key' });
-    expect(within(key).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['next', 'planned']);
+    expect(within(key).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['being built', 'next']);
   });
 
   it('shows built and next parts, on the map and the tiles alike', async () => {
     mockApi();
     await renderApp(builtData());
-    expect(screen.getByText('Part D is next.')).toBeInTheDocument();
-    expect(part('part-a')).toHaveClass('s-done');
-    expect(part('part-b')).toHaveClass('s-done');
+    expect(screen.getByText('Part C is being built.')).toBeInTheDocument();
+    expect(part('part-a')).toHaveClass('s-built');
+    expect(part('part-a')).toHaveTextContent('built');
+    expect(part('part-b')).toHaveClass('s-built');
     expect(part('part-d')).toHaveClass('s-next');
-    for (const [id, state] of [['part-a', 's-done'], ['part-b', 's-done'], ['part-d', 's-next'], ['part-c', 's-planned'], ['part-e', 's-open']]) {
+    for (const [id, state] of [['part-a', 's-built'], ['part-b', 's-built'], ['part-d', 's-next'], ['part-c', 's-building'], ['part-e', 's-open']]) {
       expect(tile(id).parentElement).toHaveClass(state);
     }
-    expect(tile('part-c')).toHaveTextContent('1 planned');
-    expect(within(screen.getByRole('list', { name: 'Key' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['done', 'next', 'planned']);
+    expect(tile('part-a')).toHaveTextContent('built');
+    expect(within(screen.getByRole('list', { name: 'Key' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['built', 'being built', 'next']);
+  });
+
+  it('shows a decided part, and the line says what is next, when no part is being built', async () => {
+    mockApi();
+    await renderApp(builtData(false));
+    expect(screen.getByText('Part D is next.')).toBeInTheDocument();
+    expect(part('part-c')).toHaveClass('s-decided');
+    expect(part('part-c')).toHaveTextContent('1 decided');
+    expect(part('part-c')).toHaveAccessibleName('Part C, 1 decided, 1 feature. A part inside Part B.');
+    expect(tile('part-c').parentElement).toHaveClass('s-decided');
+    expect(tile('part-c')).toHaveTextContent('1 decided');
+    expect(within(screen.getByRole('list', { name: 'Key' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['built', 'next', 'decided']);
   });
 
   it('switches to the tiles in build order and back', async () => {
@@ -135,7 +155,7 @@ describe('a part', () => {
     history.replaceState(null, '', '/workshop#part-a');
     mockApi();
     await renderApp();
-    expect(within(itemOf('The engine runs on its own')).getByText('planned')).toBeInTheDocument();
+    expect(within(itemOf('The engine runs on its own')).getByText('decided')).toBeInTheDocument();
     expect(within(itemOf('The engine runs on its own')).getByRole('link', { name: '8 votes, sign in to vote' })).toHaveTextContent('👍8');
     act(() => { location.hash = '#part-b'; });
     await waitFor(() => expect(within(itemOf('Create and delete a computer')).getByText('💬 2')).toBeInTheDocument());
@@ -152,7 +172,7 @@ describe('an entry', () => {
     await userEvent.click(rowButton('Create and delete a computer'));
     expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('Make a Linux computer.')).toBeInTheDocument();
-    expect(screen.getByText('Not decided yet.')).toBeInTheDocument();
+    expect(screen.getByText('Not decided.')).toBeInTheDocument();
     expect(await screen.findByText('Keep stop separate from pause.')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'or comment directly on GitHub' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/12');
     expect(calls.some((call) => call.path === 'issue' && call.method === 'GET')).toBe(true);
@@ -174,26 +194,31 @@ describe('an entry', () => {
     expect(location.hash).toBe('#part-b');
   });
 
-  it('says planned, decided and not decided in a few words', async () => {
+  it('says decided, being built and not decided in a few words', async () => {
     mockApi();
     history.replaceState(null, '', '/workshop#part-c/shells');
     await renderApp();
-    expect(await screen.findByText('Planned.')).toBeInTheDocument();
-    expect(within(itemOf('Your shell inside')).getByText('planned')).toBeInTheDocument();
-    act(() => { location.hash = '#part-a/core-in-zig'; });
+    expect(await screen.findByText('Being built.')).toBeInTheDocument();
+    expect(within(itemOf('Your shell inside')).getByText('being built')).toBeInTheDocument();
+    expect(itemOf('Your shell inside').querySelector('.ws-pip')).toHaveClass('building');
+    act(() => { location.hash = '#part-a/calls'; });
     await waitFor(() => expect(screen.getByText('Decided.')).toBeInTheDocument());
+    expect(within(itemOf('Every call defined once')).getByText('decided')).toBeInTheDocument();
+    expect(itemOf('Every call defined once').querySelector('.ws-pip')).toHaveClass('decided');
+    act(() => { location.hash = '#part-a/core-in-zig'; });
+    await waitFor(() => expect(within(itemOf('Which language is the core written in?')).getByText('Decided.')).toBeInTheDocument());
     expect(within(itemOf('Which language is the core written in?')).getByText('decided')).toBeInTheDocument();
     expect(screen.getByText('Zig. It is the core piece.')).toBeInTheDocument();
     act(() => { location.hash = '#part-d/one-way'; });
-    await waitFor(() => expect(screen.getByText('Not decided yet.')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Not decided.')).toBeInTheDocument());
     expect(itemOf('Which way do changes go?')).toHaveClass('st-undecided');
   });
 
-  it('shows a verdict written in the file as planned, with nothing to confirm', async () => {
+  it('shows a verdict written in the file as decided, with nothing to confirm', async () => {
     mockApi();
     history.replaceState(null, '', '/workshop#part-a/calls');
     await renderApp();
-    expect(await screen.findByText('Planned.')).toBeInTheDocument();
+    expect(await screen.findByText('Decided.')).toBeInTheDocument();
     expect(screen.queryByText(/carried over/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Confirm/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Refine/ })).not.toBeInTheDocument();
@@ -280,6 +305,20 @@ describe('the places of the title row', () => {
     expect(screen.getByText('Dropped.')).toBeInTheDocument();
   });
 
+  it('counts a part\'s features as built, being built, decided, not decided and dropped, in that order, each with its mark', async () => {
+    const states: Record<string, object> = { triggers: { verdict: 'take', built: '2026-11-16' }, linux: { verdict: 'take', started: '2026-11-15' }, release: { verdict: 'take' } };
+    mockApi();
+    history.replaceState(null, '', '/workshop#part-e');
+    await renderApp(buildData({ features: FEATURES.map((feature) => ({ ...feature, ...states[feature.id] })) }));
+    expect(document.querySelector('.ws-detail .ws-tally')?.textContent?.replace(/\u00a0/g, ' ')).toBe('1 built · 1 being built · 1 decided · 4 not decided · 1 dropped');
+    expect(within(itemOf('A Linux server')).getByText('being built')).toBeInTheDocument();
+    expect(within(itemOf('Signed releases')).getByText('decided')).toBeInTheDocument();
+    expect(within(itemOf('Tasks from GitHub events')).getByText('built')).toBeInTheDocument();
+    expect([...tile('part-e').querySelectorAll('.ws-pips i')].map((pip) => pip.className).slice(0, 3)).toEqual(['ws-pip built', 'ws-pip building', 'ws-pip decided']);
+    expect(part('part-e')).toHaveClass('s-building');
+    expect(part('part-e')).toHaveAccessibleName('Part E, being built, 7 features, 2 decisions. A wide bar under the drawing.');
+  });
+
   it('opens the decisions of the whole product, with their tally', async () => {
     mockApi();
     await renderApp();
@@ -362,7 +401,7 @@ describe('when the API is missing or slow', () => {
       await userEvent.click(part('part-b'));
       expect(document.querySelector('.ws-vote')).toBeNull();
       await userEvent.click(rowButton('Create and delete a computer'));
-      expect(screen.getByText('Not decided yet.')).toBeInTheDocument();
+      expect(screen.getByText('Not decided.')).toBeInTheDocument();
       expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
     });
   }

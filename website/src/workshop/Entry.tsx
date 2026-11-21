@@ -28,9 +28,8 @@ export interface EntryContext {
   open: ReadonlySet<string>;
 }
 
-const WORDS: Partial<Record<Row['status'], string>> = { planned: 'planned', built: 'built', dropped: 'dropped' };
-/** A decision's word on its row: taken is decided; open or answered says nothing, as an undecided feature does. */
-const DECISION_WORDS: Partial<Record<Row['status'], string>> = { planned: 'decided', replaced: 'replaced', dropped: 'dropped' };
+/** A row's word: one that is not decided says nothing on its own row. */
+const WORDS: Partial<Record<Row['status'], string>> = { decided: 'decided', building: 'being built', built: 'built', replaced: 'replaced', dropped: 'dropped' };
 
 export function pipClass(row: Row): string {
   return `ws-pip ${row.status}`;
@@ -42,17 +41,16 @@ function initials(login: string): string {
 }
 
 export function stateText(row: Row): string {
-  if (row.of === 'decision') {
-    return row.status === 'planned' ? 'Decided.' : row.status === 'replaced' ? 'Replaced.' : row.status === 'dropped' ? 'Dropped.' : 'Not decided yet.';
-  }
   switch (row.status) {
-    case 'planned': return 'Planned.';
+    case 'decided': return 'Decided.';
+    case 'building': return 'Being built.';
     case 'built': {
       const day = row.built ?? row.closedAt;
       return day ? `Built, ${shortDate(day)}.` : 'Built.';
     }
+    case 'replaced': return 'Replaced.';
     case 'dropped': return 'Dropped.';
-    default: return 'Not decided yet.';
+    default: return 'Not decided.';
   }
 }
 
@@ -165,7 +163,7 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
   });
   useEffect(() => () => clearTimeout(settling.current), []);
 
-  const word = (row.of === 'decision' ? DECISION_WORDS : WORDS)[row.status];
+  const word = WORDS[row.status];
   const quiet = !isDecided(row);
   const classes = ['ws-item', `st-${row.status}`, open ? 'open' : '', quiet ? 'quiet' : ''].filter(Boolean).join(' ');
   return (
@@ -449,7 +447,7 @@ function ChangePhrases({ change, row, ctx, panel, open, onToggle }: { change: Ch
   return (
     <span className="ws-h-what">
       {change.what.map((name, index) => {
-        const phrase = changePhrase(name, row.of);
+        const phrase = changePhrase(name);
         return (
           <Fragment key={name}>
             {index ? ' · ' : ''}
@@ -514,7 +512,7 @@ function HistoryList({ row, ctx }: { row: Row; ctx: EntryContext }) {
 function historySummary(row: Row): string {
   const last = row.history;
   if (!last) return '';
-  return `${changeLine(last.what, row.of)}, ${shortDate(last.date)}${last.count > 1 ? ` · ${last.count} changes` : ''}`;
+  return `${changeLine(last.what)}, ${shortDate(last.date)}${last.count > 1 ? ` · ${last.count} changes` : ''}`;
 }
 
 /** The entry's notes and its history, each closed until asked for; `onMove` tells the panel to grow or shrink to them. */
@@ -633,7 +631,7 @@ function YesLines({ own, facts }: { own: EntryFacts; facts: Facts }) {
 
 /** The state word of a row that another one needs; one that is not decided says nothing on its own row, and here says so. */
 function needWord(row: Row): string {
-  return (row.of === 'decision' ? DECISION_WORDS : WORDS)[row.status] ?? 'not decided yet';
+  return WORDS[row.status] ?? 'not decided';
 }
 
 function NeedsLines({ row, ctx }: { row: Row; ctx: EntryContext }) {

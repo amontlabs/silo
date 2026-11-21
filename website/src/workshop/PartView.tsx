@@ -48,10 +48,11 @@ const joined = (items: ReactNode[]) => items.flatMap((item, index) => (index ? [
 
 /** The counts of a part's features. */
 function tally(counts: Counts): ReactNode[] {
-  const { built, planned, undecided, dropped } = counts;
+  const { built, building, decided, undecided, dropped } = counts;
   const items: ReactNode[] = [];
   if (built) items.push(one(built, 'built'));
-  if (planned) items.push(one(planned, 'planned'));
+  if (building) items.push(one(building, 'being built'));
+  if (decided) items.push(one(decided, 'decided'));
   if (undecided) items.push(one(undecided, 'not decided'));
   if (dropped) items.push(one(dropped, 'dropped'));
   return joined(items);

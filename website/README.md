@@ -247,16 +247,16 @@ dashed outline or line has one source for each kind of thing:
   it. The day the owner takes the entry, the same thing is
   drawn decided, with no change to the layout.
 - A part's box and a copy behind a part are drawn by the part's state alone,
-  as the map has always drawn them: dashed while the part is "not decided yet",
-  solid once it is planned, next or done. What a place or a copy rests on
+  as the map has always drawn them: dashed while the part is not decided,
+  solid once it is decided, next, being built or built. What a place or a copy rests on
   changes nothing there, and the page gets no mark for either.
 
 A key on the full map (class `ws-mapkey`, not the header's `ws-key`) says what a
 solid and a dashed line mean ("decided", "not decided"). The header's key, at
 the end of the title row in the Map and the Order view, has an entry only for a
-state a part is in: "done", "next" and "planned", each with its pip. It has no
-entry for a part not decided yet: the map's key says what a dashed line means,
-and a screen reader still hears "not decided yet" for such a part. With no entry
+state a part is in: "built", "being built", "next" and "decided", each with its
+pip. It has no entry for a part not decided: the map's key says what a dashed
+line means, and a screen reader still hears "not decided" for such a part. With no entry
 it draws nothing and is no list, but its empty box keeps the title row's height.
 
 A layout as written (`MapLayout`: `SILO_MAP`, the example, `NO_MAP`) has `rests`
@@ -378,8 +378,15 @@ What a person sees:
   once. With
   reduced motion, none of these moves animates.
 - A part's rows are its decisions and features, in the order of `order.json`,
-  drawn by the same row. A feature is planned (taken, ready or not), built (its
-  file says `built`), dropped, or not decided. A decision's name is its `asks`
+  drawn by the same row. The page says how far an entry is in one set of
+  words: not decided, decided, being built, built (`plan/README.md`, "States").
+  A feature is decided (taken, ready or not), being built (its file says
+  `started`), built (its file says `built`), dropped, or not decided. A row not
+  decided shows no word; wherever a word is said for it (the counts, what a
+  screen reader hears, the line of a need) it is "not decided". A feature being
+  built has a mark of its own, half filled in the accent, between the ring of a
+  decided one and the full dot of a built one, in a row, in a part's dots and on
+  a tile. A decision's name is its `asks`
   and its body its `answer`; it is decided (taken), not decided (open or
   answered), replaced or dropped. A decision is replaced when its file has a
   `replaced_by`, which `plan take` writes into each decision a taken decision
@@ -394,10 +401,17 @@ What a person sees:
   as links; a dropped one shows no such line. In Latest, a change of
   `replaces` reads "Replaces changed".
 - A part's state, counts and the line under the title come from its features
-  only: done (something built, nothing planned), next (the part holding the
-  first planned feature in order), planned, not decided yet. An open part shows
-  one dot per feature, its features' counts, and its decisions' counts on a
-  line of their own ("Decisions: 1 decided · 2 not decided").
+  only: being built (one of its features is), built (something built, nothing
+  decided left), next (the part holding the first decided feature in order that
+  is neither being built nor built), decided, not decided. A part both next and
+  being built is being built. On the map and on a tile a part reads "being
+  built", "built", "next", "N decided", or "n/m built" while some are built and
+  others decided; a part not decided has no line. A part being built takes the
+  accent, as the next one does. The line under the title says "<Part> is being
+  built." while a part is, and otherwise what is next. An open part shows one
+  dot per feature, its features' counts (built, being built, decided, not
+  decided, dropped), and its decisions' counts on a line of their own
+  ("Decisions: 1 decided · 2 not decided").
 - Opening a part folds the map to a strip that stays on screen (when there is
   a map and the window is at least 760 px tall); the part's rows open in place,
   each on its own. Opening or closing a row never moves it or the rows above it.
@@ -500,9 +514,9 @@ What a person sees:
   "Added", "Moved to another part", "Text changed", "What a yes would do
   changed", "Needs changed", "What it must keep changed", "Where it shows
   changed", "Recommendation changed", "Notes edited", "Decided" on a decision
-  and "Planned" on a feature, "Dropped", "Back to not decided", "Replaced by"
+  and on a feature, "Dropped", "Back to not decided", "Replaced by"
   (followed by the question of the decision that replaced it, a link that
-  opens it) and "Built"; no name of a key ever shows. "Text changed" opens
+  opens it), "Being built" and "Built"; no name of a key ever shows. "Text changed" opens
   the title and the body before and after, whichever differ.
   The history is read from git when the site is built (`readSteps` and
   `entryHistory`, called by `data.ts`): nothing asks GitHub for it. A
@@ -543,7 +557,7 @@ What a person sees:
 - A row that takes a thread, or whose thread's number changes, while it is open asks for that thread and for the
   person's votes, as an opening does.
 - The person's own comment stays shown from the page's kept writes until an answer holds it.
-- A 👍 works the same on a decision, a feature and a suggestion, whether the entry is decided, planned, dropped
+- A 👍 works the same on a decision, a feature and a suggestion, whether the entry is not decided, decided, being built, built, dropped
   or replaced.
 - A comment that the server answers twice (a retry after an error) shows once.
 - The page applies and keeps its own writes in the order it sent them, not the order their answers came.

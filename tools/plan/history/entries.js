@@ -4,7 +4,7 @@ import { entryPath } from './paths.js';
 
 /** What a change can name, in the order they are always listed. Nothing else is ever put in `what`. */
 export const WHAT = Object.freeze([
-  'added', 'moved', 'text', 'sets', 'needs', 'keeps', 'surfaces', 'suggest', 'notes', 'taken', 'dropped', 'cleared', 'replaced', 'built',
+  'added', 'moved', 'text', 'sets', 'needs', 'keeps', 'surfaces', 'suggest', 'notes', 'taken', 'dropped', 'cleared', 'replaced', 'started', 'built',
 ]);
 
 /** The keys that give an entry's title and body, by kind. */
@@ -60,6 +60,7 @@ function compare(before, after) {
   if (verdictAfter === 'drop' && verdictBefore !== 'drop') names.add('dropped');
   if (verdictBefore !== null && verdictAfter === null) names.add('cleared');
   if (was.replaced_by === undefined && now.replaced_by !== undefined) names.add('replaced');
+  if (was.started === undefined && now.started !== undefined) names.add('started');
   if (was.built === undefined && now.built !== undefined) names.add('built');
   const what = WHAT.filter((name) => names.has(name));
   const extra = {};

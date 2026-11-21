@@ -8,10 +8,11 @@ import type { PageLayout } from './map';
 export type { Verdict };
 
 /**
- * A row's status, in the page's words. A taken feature, ready or not, is planned; a taken decision is decided, or
- * replaced once a later decision has taken its place: a replaced decision is no longer in force.
+ * A row's status, in the page's words: not decided, decided, being built, built. A taken feature is decided until its
+ * build starts; a taken decision is decided, or replaced once a later decision has taken its place: a replaced
+ * decision is no longer in force.
  */
-export type Status = 'built' | 'planned' | 'undecided' | 'dropped' | 'replaced';
+export type Status = 'built' | 'building' | 'decided' | 'undecided' | 'dropped' | 'replaced';
 
 /** A decision or a feature, as the page holds it. */
 export interface Entry {
@@ -32,6 +33,8 @@ export interface Entry {
   replaces: string[];
   /** A decision's `replaced_by`: the id of the decision that replaced it, written by `plan take`. */
   replacedBy: string | null;
+  /** The day its build started, `YYYY-MM-DD`. */
+  started: string | null;
   /** The day it was built, `YYYY-MM-DD`. */
   built: string | null;
   /** Whether it has notes; their text is a chunk of its own (`virtual:workshop-notes`), loaded on demand. */
@@ -43,7 +46,7 @@ export interface Entry {
 }
 
 /** What the history of an entry names (tools/plan/history `WHAT`), never the name of a key of its file. */
-export type ChangeName = 'added' | 'moved' | 'text' | 'sets' | 'needs' | 'keeps' | 'surfaces' | 'suggest' | 'notes' | 'taken' | 'dropped' | 'cleared' | 'replaced' | 'built';
+export type ChangeName = 'added' | 'moved' | 'text' | 'sets' | 'needs' | 'keeps' | 'surfaces' | 'suggest' | 'notes' | 'taken' | 'dropped' | 'cleared' | 'replaced' | 'started' | 'built';
 
 /** A title and a body, as an entry's text before or after a change; a part is null when the entry has none. */
 export interface ChangeText {
@@ -192,6 +195,8 @@ export interface Row {
   verdict: Verdict | null;
   /** The keys of the rows of the entries it needs. */
   needs: string[];
+  /** The day the file says its build started. */
+  started: string | null;
   /** The day the file says it was built. */
   built: string | null;
   author: string | null;
@@ -223,7 +228,8 @@ export const LATEST_LINES = 30;
 /** A part's features by status. */
 export interface Counts {
   built: number;
-  planned: number;
+  building: number;
+  decided: number;
   undecided: number;
   dropped: number;
 }
@@ -236,8 +242,11 @@ export interface DecisionCounts {
   dropped: number;
 }
 
-/** done: something built and nothing planned; next: holds the first planned feature in order (one part at most); planned; open. */
-export type PartState = 'done' | 'next' | 'planned' | 'open';
+/**
+ * building: a feature being built; built: something built and nothing decided left; next: holds the first decided
+ * feature in order, neither being built nor built (one part at most); decided; open: no feature decided.
+ */
+export type PartState = 'building' | 'built' | 'next' | 'decided' | 'open';
 
 export interface PartGroup {
   part: Part;
@@ -282,6 +291,7 @@ function modelEntry(entry: Entry): ModelEntry {
     kind: entry.kind,
     ...(entry.verdict ? { verdict: entry.verdict } : {}),
     ...(entry.kind === 'decision' && entry.what !== null ? { answer: entry.what } : {}),
+    ...(entry.started ? { started: entry.started } : {}),
     ...(entry.built ? { built: entry.built } : {}),
     // The model reads a replaced decision from this key alone.
     ...(entry.kind === 'decision' && entry.replacedBy !== null ? { replaced_by: entry.replacedBy } : {}),
@@ -295,9 +305,10 @@ export function entryStatuses(entries: Entry[]): Map<string, Status> {
   return new Map(entries.map((entry) => {
     switch (modelStatus(models[entry.id], models)) {
       case 'built': return [entry.id, 'built'];
+      case 'building': return [entry.id, 'building'];
       case 'dropped': return [entry.id, 'dropped'];
       case 'replaced': return [entry.id, 'replaced'];
-      case 'taken': case 'ready': return [entry.id, 'planned'];
+      case 'taken': case 'ready': return [entry.id, 'decided'];
       default: return [entry.id, 'undecided'];
     }
   }));
@@ -312,14 +323,14 @@ function suggestionStatus(live: LiveIssue): Status {
 
 function baseRow(key: string, kind: RowKind, name: string): Row {
   return {
-    key, kind, of: null, name, what: null, issue: null, status: 'undecided', stage: null, part: null, n: null, notes: false, more: false, history: null, verdict: null, needs: [], built: null,
+    key, kind, of: null, name, what: null, issue: null, status: 'undecided', stage: null, part: null, n: null, notes: false, more: false, history: null, verdict: null, needs: [], started: null, built: null,
     author: null, up: null, comments: null, replaces: [], replacedBy: null, date: null, closedAt: null, closed: false,
   };
 }
 
 /** @param rows the features of a part */
 export function countRows(rows: { status: Status }[]): Counts {
-  const counts: Counts = { built: 0, planned: 0, undecided: 0, dropped: 0 };
+  const counts: Counts = { built: 0, building: 0, decided: 0, undecided: 0, dropped: 0 };
   for (const row of rows) if (row.status !== 'replaced') counts[row.status] += 1;
   return counts;
 }
@@ -336,25 +347,28 @@ export function countDecisions(rows: { status: Status }[]): DecisionCounts {
   return counts;
 }
 
-/** Each part's state, from its features: done, next (at most one), planned, open. */
+/** Each part's state, from its features: being built, built, next (at most one), decided, open. */
 export function partStates(groups: { rows: Row[]; counts: Counts }[]): PartState[] {
-  const states: PartState[] = groups.map(({ counts }) => (counts.built && !counts.planned ? 'done' : counts.planned ? 'planned' : 'open'));
+  const states: PartState[] = groups.map(({ counts }) => (counts.building ? 'building' : counts.built && !counts.decided ? 'built' : counts.decided ? 'decided' : 'open'));
   let next = -1;
   let lowest = Infinity;
   groups.forEach(({ rows }, index) => {
     for (const row of rows) {
-      if (row.of === 'feature' && row.status === 'planned' && row.n !== null && row.n < lowest) {
+      if (row.of === 'feature' && row.status === 'decided' && row.n !== null && row.n < lowest) {
         lowest = row.n;
         next = index;
       }
     }
   });
-  if (next !== -1) states[next] = 'next';
+  // A part both next and being built reads being built.
+  if (next !== -1 && states[next] !== 'building') states[next] = 'next';
   return states;
 }
 
-/** Where the build is, in one line: the part that holds the first planned feature. */
+/** Where the build is, in one line: the part being built, or else the part that holds the first decided feature. */
 export function statusLine(groups: { part: Part; state: PartState; counts: Counts }[]): string {
+  const building = groups.find((group) => group.state === 'building');
+  if (building) return `${building.part.title} is being built.`;
   const next = groups.find((group) => group.state === 'next');
   if (!next) return '';
   if (groups.some((group) => group.counts.built > 0)) return `${next.part.title} is next.`;
@@ -363,11 +377,12 @@ export function statusLine(groups: { part: Part; state: PartState; counts: Count
 
 /** The few words on a part's tile or place on the map. */
 export function stateWords(group: { state: PartState; counts: Counts }): string {
-  const { built, planned } = group.counts;
+  const { built, decided } = group.counts;
   switch (group.state) {
-    case 'done': return 'done';
+    case 'building': return 'being built';
+    case 'built': return 'built';
     case 'next': return 'next';
-    case 'planned': return built ? `${built}/${built + planned} built` : `${planned} planned`;
+    case 'decided': return built ? `${built}/${built + decided} built` : `${decided} decided`;
     default: return '';
   }
 }
@@ -406,6 +421,7 @@ export function buildPlan(data: BuildData, live: LiveState | null, histories: Hi
     row.history = entry.history;
     row.verdict = entry.verdict;
     row.needs = entry.needs.map((id) => `entry-${id}`);
+    row.started = entry.started;
     row.built = entry.built;
     // A dropped decision replaces nothing, so it names nothing.
     row.replaces = entry.kind === 'decision' && statuses.get(entry.id) !== 'dropped' ? entry.replaces.map((id) => `entry-${id}`) : [];
@@ -471,8 +487,8 @@ export function allRows(plan: Plan): Row[] {
   return [...plan.parts.flatMap((group) => group.rows), ...plan.product, ...plan.suggestions];
 }
 
-/** The page's words for each name of a change; a taken decision is decided, a taken feature planned. */
-const PHRASES: Record<Exclude<ChangeName, 'taken'>, string> = {
+/** The page's words for each name of a change; a taken entry is decided. */
+const PHRASES: Record<ChangeName, string> = {
   added: 'Added',
   moved: 'Moved to another part',
   text: 'Text changed',
@@ -485,18 +501,19 @@ const PHRASES: Record<Exclude<ChangeName, 'taken'>, string> = {
   dropped: 'Dropped',
   cleared: 'Back to not decided',
   replaced: 'Replaced by',
+  taken: 'Decided',
+  started: 'Being built',
   built: 'Built',
 };
 
-/** What one name of a change says on an entry of this kind. */
-export function changePhrase(name: ChangeName, of: Entry['kind'] | null): string {
-  if (name === 'taken') return of === 'feature' ? 'Planned' : 'Decided';
+/** What one name of a change says, on an entry of either kind. */
+export function changePhrase(name: ChangeName): string {
   return PHRASES[name];
 }
 
 /** What a change says on one line: its phrases, in the module's order, joined by " · ". */
-export function changeLine(what: readonly ChangeName[], of: Entry['kind'] | null): string {
-  return what.map((name) => changePhrase(name, of)).join(' · ');
+export function changeLine(what: readonly ChangeName[]): string {
+  return what.map((name) => changePhrase(name)).join(' · ');
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

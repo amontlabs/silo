@@ -18,7 +18,7 @@ export const COMMANDS = [
   { name: 'setup', usage: 'workshop setup [--org <org>] [--site <url>] [--replace]', what: 'Creates the Workshop GitHub App.' },
   { name: 'store', usage: 'workshop store [--replace]', what: "Stores the App's credentials from vercel.env in the Keychain." },
   { name: 'doctor', usage: 'workshop doctor', what: 'Checks the credentials, the App, the labels and the entries\' issues.' },
-  { name: 'decline', usage: 'workshop decline <issue> --why "…"', what: 'Closes a suggestion as not planned.' },
+  { name: 'decline', usage: 'workshop decline <issue> --why "…"', what: 'Drops a suggestion: closes it, with GitHub\'s own reason for closing, "not planned".' },
 ];
 
 /**
@@ -146,6 +146,6 @@ async function declineCommand(ctx, argv) {
   const gh = new GitHub({ api: deps.api, repo: deps.repo, fetch: deps.fetch, writeDelayMs: deps.writeDelayMs, sleep: deps.sleep });
   await gh.authenticate(appCredentials(deps));
   const result = await decline({ gh, number: Number(text), why });
-  emit(ctx, flags.has('json'), { ok: true, ...result }, `Closed #${result.number} as not planned.`);
+  emit(ctx, flags.has('json'), { ok: true, ...result }, `Dropped #${result.number}: closed with GitHub's own reason "not planned".`);
   return 0;
 }

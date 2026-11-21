@@ -189,7 +189,9 @@ export function take(files, id, options = {}) {
 }
 
 /**
- * The owner's no: `"verdict": "drop"`, with `sets`, `removes` and `replaces` kept. Refused on a
+ * The owner's no: `"verdict": "drop"`, with `sets`, `removes` and `replaces` kept. Only a taken
+ * feature holds `started`, so a feature being built loses it in the same write, and the message
+ * says so. Refused on a
  * replaced decision, on a taken entry that has `adds` (its statements are in force), and on a taken
  * decision that has `replaces` (the decisions it replaced would be in force again).
  * @param {Map<string, string>} files @param {string} id @param {Options} [options] @returns {Outcome}
@@ -210,9 +212,11 @@ export function drop(files, id, options = {}) {
   }
   if (entry.verdict === 'take') {
     const waiting = Object.values(plan.entries).filter((other) => other.kind === 'decision' && other.verdict === undefined && Array.isArray(other.replaces) && other.replaces.includes(id)).map((other) => other.id);
-    if (waiting.length) return refused(`${id} is named in the replaces of ${waiting.join(', ')}, not decided yet: take or drop ${waiting.length === 1 ? 'it' : 'them'} first, or remove ${id} from ${waiting.length === 1 ? 'its' : 'their'} replaces`);
+    if (waiting.length) return refused(`${id} is named in the replaces of ${waiting.join(', ')}, not decided: take or drop ${waiting.length === 1 ? 'it' : 'them'} first, or remove ${id} from ${waiting.length === 1 ? 'its' : 'their'} replaces`);
   }
   const data = structuredClone(json.get(file));
   data.verdict = 'drop';
-  return finish(files, new Map([[file, entryText(entry.kind, data)]]), options, `dropped ${id}`);
+  const building = data.started !== undefined;
+  delete data.started;
+  return finish(files, new Map([[file, entryText(entry.kind, data)]]), options, building ? `dropped ${id}, which was being built: its started date is removed` : `dropped ${id}`);
 }

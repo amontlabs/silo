@@ -82,14 +82,15 @@ test('a decision that puts forward only statements is answered: a sets stands fo
 });
 
 /** The table of the contract, written out for a feature. */
-function expectedFeature(built, verdict, needsDone) {
+function expectedFeature(built, verdict, needsDone, started) {
   if (built) return 'built';
   if (verdict === 'drop') return 'dropped';
+  if (verdict === 'take' && started) return 'building';
   if (verdict === 'take') return needsDone ? 'ready' : 'taken';
   return 'undecided';
 }
 
-test('the status of a feature: every combination of built, the verdict and the needs', () => {
+test('the status of a feature: every combination of built, started, the verdict and the needs', () => {
   const entries = {
     'taken-decision': { kind: 'decision', verdict: 'take' },
     'answered-decision': { kind: 'decision', answer: 'A' },
@@ -98,24 +99,28 @@ test('the status of a feature: every combination of built, the verdict and the n
   };
   const needsChoices = [[[], true], [['taken-decision'], true], [['taken-decision', 'built-feature'], true], [['answered-decision'], false], [['taken-feature'], false], [['missing'], false], [['constructor'], false], [['built-feature', 'taken-feature'], false]];
   let cases = 0;
-  for (const built of [undefined, '2026-11-02']) {
-    for (const verdict of [undefined, 'take', 'drop']) {
-      for (const [needs, done] of needsChoices) {
-        const feature = { kind: 'feature', name: 'N', what: 'W', needs, ...(verdict ? { verdict } : {}), ...(built ? { built } : {}) };
-        assert.equal(entryStatus(feature, entries), expectedFeature(built, verdict, done), JSON.stringify(feature));
-        cases += 1;
+  for (const started of [undefined, '2026-11-01']) {
+    for (const built of [undefined, '2026-11-02']) {
+      for (const verdict of [undefined, 'take', 'drop']) {
+        for (const [needs, done] of needsChoices) {
+          const feature = { kind: 'feature', name: 'N', what: 'W', needs, ...(verdict ? { verdict } : {}), ...(started ? { started } : {}), ...(built ? { built } : {}) };
+          assert.equal(entryStatus(feature, entries), expectedFeature(built, verdict, done, started), JSON.stringify(feature));
+          cases += 1;
+        }
       }
     }
   }
-  assert.equal(cases, 2 * 3 * needsChoices.length);
+  assert.equal(cases, 2 * 2 * 3 * needsChoices.length);
   assert.equal(entryStatus({ kind: 'feature', verdict: 'take' }, entries), 'ready');
-  assert.deepEqual(FEATURE_STATUSES, ['built', 'dropped', 'ready', 'taken', 'undecided']);
+  assert.equal(entryStatus({ kind: 'feature', verdict: 'take', started: '2026-11-01' }, entries), 'building');
+  assert.deepEqual(FEATURE_STATUSES, ['built', 'dropped', 'building', 'ready', 'taken', 'undecided']);
 });
 
 test('done and what an entry waits for', () => {
   assert.equal(isDone({ kind: 'decision', verdict: 'take' }), true);
   assert.equal(isDone({ kind: 'decision', answer: 'A' }), false);
   assert.equal(isDone({ kind: 'feature', verdict: 'take' }), false);
+  assert.equal(isDone({ kind: 'feature', verdict: 'take', started: '2026-11-01' }), false);
   assert.equal(isDone({ kind: 'feature', verdict: 'take', built: '2026-11-01' }), true);
   assert.equal(isDone(undefined), false);
   const entries = { a: { kind: 'decision', verdict: 'take' }, b: { kind: 'feature', verdict: 'take' } };
@@ -133,8 +138,8 @@ test('canonical form: key order of each kind, two spaces, final newline', () => 
   assert.deepEqual(Object.keys(decision), ['asks', 'answer', 'sets', 'removes', 'suggest', 'verdict']);
   assert.deepEqual(Object.keys(decision.sets[0]), ['in', 'id', 'says', 'asks', 'known_as', 'why']);
   assert.deepEqual(Object.keys(decision.suggest), ['verdict', 'why']);
-  const feature = canonicalFeature({ built: '2026-12-01', verdict: 'take', keeps: ['k'], adds: ['a'], needs: [], what: 'W', name: 'N', surfaces: { cli: 'c', app: 'a' } });
-  assert.deepEqual(Object.keys(feature), ['name', 'what', 'needs', 'adds', 'keeps', 'surfaces', 'verdict', 'built']);
+  const feature = canonicalFeature({ built: '2026-12-01', started: '2026-11-30', verdict: 'take', keeps: ['k'], adds: ['a'], needs: [], what: 'W', name: 'N', surfaces: { cli: 'c', app: 'a' } });
+  assert.deepEqual(Object.keys(feature), ['name', 'what', 'needs', 'adds', 'keeps', 'surfaces', 'verdict', 'started', 'built']);
   assert.deepEqual(Object.keys(feature.surfaces), ['app', 'cli']);
   assert.deepEqual(Object.keys(canonicalOrder({ stages: [{ entries: [], line: 'l', title: 't', id: 'i' }] }).stages[0]), ['id', 'title', 'line', 'entries']);
   assert.equal(canonicalText({ a: [1] }), '{\n  "a": [\n    1\n  ]\n}\n');
