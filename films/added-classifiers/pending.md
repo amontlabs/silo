@@ -4,9 +4,10 @@ What the owner settled and the film does not carry yet. Delete this file once th
 
 "Owner" marks what the owner said first. The rest the owner agreed to.
 
-Film 5, "What you can add". The film needs a new script, about extensions. What it is made from
-is the part `extensions` of the plan, starting at `extension-manifest`, whose notes hold the
-picture as a whole.
+Film 5, "What you can add". Its new script, about extensions, is written in `script.md` and
+waits for the owner's reading. The film itself, its `film.json`, its narration and its picture,
+still follows the older script. What the script is made from is the part `extensions` of the
+plan, starting at `extension-manifest`, whose notes hold the picture as a whole.
 
 - The word is "extension", and what it says of itself is its "manifest". Owner. An extension adds
   rules, a computer, or both (`extension-manifest`).

@@ -4,8 +4,8 @@ Extensions: rules, a computer, or both, that someone made and you add to Silo.
 
 ## For
 
-To let people watch a lot of agent work in their own way, without giving what they add any power
-to open or delete something.
+To let people watch a lot of agent work in their own way. What an extension executes can never
+grant or destroy anything, and the rules it adds are shown before they are switched on.
 
 ## Why it is so
 
