@@ -29,7 +29,7 @@
     "says": "Importing an extension changes nothing: it shows the rules it adds, the computer it would make, what wakes that computer and the tools it may use.",
     "kind": "safety",
     "check": [
-      "model"
+      "bounded exhaustive test"
     ]
   },
   {

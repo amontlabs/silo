@@ -33,7 +33,7 @@
     "kind": "safety",
     "from": "less-sure-less-power",
     "check": [
-      "model",
+      "bounded exhaustive test",
       "simulator"
     ]
   },
@@ -42,7 +42,7 @@
     "says": "Deny beats hold, hold beats allow, and no rule means deny.",
     "kind": "safety",
     "check": [
-      "model"
+      "bounded exhaustive test"
     ]
   },
   {
@@ -50,7 +50,7 @@
     "says": "The order in which rules were written never changes the result, and a new rule never overrides a deny or a hold that already applies.",
     "kind": "safety",
     "check": [
-      "model"
+      "bounded exhaustive test"
     ]
   },
   {
@@ -66,7 +66,7 @@
     "says": "A proposal changes nothing until you accept it.",
     "kind": "safety",
     "check": [
-      "model"
+      "bounded exhaustive test"
     ]
   },
   {

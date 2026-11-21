@@ -232,8 +232,9 @@ Keys are written in this order. A key in brackets is optional: when it has no va
 - `known_as`: the principle's standard name.
 - `kind`: `safety` (something that never happens), `liveness` (something that always ends up
   happening) or `measured` (a number we commit to).
-- `check`: one or more of `types`, `model`, `simulator`, `hostile test`, `live check`,
-  `benchmark`, `test`, `assertion`.
+- `check`: one or more of `types`, `bounded exhaustive test`, `simulator`, `hostile test`,
+  `live check`, `benchmark`, `test`, `assertion`. `bounded exhaustive test` is a test that runs the
+  real code on every possible sequence of calls up to a length.
 - `surfaces`: where the feature shows, as `{ "app", "cli" }`: its place in the app and its
   command.
 - `suggest`: what is recommended to the owner, as `{ "verdict", "why" }`. A recommended answer to
