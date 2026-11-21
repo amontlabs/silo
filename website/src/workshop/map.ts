@@ -118,7 +118,7 @@ export const NO_MAP: MapLayout = { places: {}, zones: [], notes: [], ghosts: [],
 /**
  * Silo's map: your Mac, and inside it the virtual machines where the computers run. The app and the engine sit on the
  * left, the record, the opinions and the rules along the bottom, the boundary on the edge of the virtual machines, and
- * outside the Mac the hosts a computer reaches, and the servers and clouds where computers also run later. The wires
+ * outside the Mac the hosts a computer reaches, and the servers and clouds where computers also run. The wires
  * follow a request out through the boundary to the internet, the calls to model providers that Model traffic and spend
  * reads on the way, the facts the boundary leaves in the record, what the record triggers back at the boundary, the
  * record shown in the app, and your own terminal reaching a computer over SSH. The boundary's channels are written
@@ -150,7 +150,7 @@ export const SILO_MAP: MapLayout = {
   ],
   notes: [
     { title: 'Your terminal', line: 'and your editor', full: [326, 44, 124, 40], rests: ['computer-reached-over-ssh', 'you-visit-a-computer', 'reaching-a-computer'] },
-    { title: 'A server or a cloud', line: 'where computers also run, later', full: [990, 21, 122, 52], rests: ['where-it-runs', 'many-forks-elsewhere'] },
+    { title: 'A server or a cloud', line: 'where computers also run', full: [990, 21, 122, 52], rests: ['where-it-runs', 'many-forks-elsewhere'] },
     { title: 'Model providers', line: 'some of the hosts', full: [990, 96, 122, 40], fold: [878, 27, 144, 20], rests: ['part:traffic'] },
     { title: 'The internet', line: 'every other host', full: [990, 200, 122, 40], fold: [878, 71, 144, 20] },
     { title: 'The boundary\'s channels', line: 'the network, ports, files, secrets, the screen, the clipboard, repository access', full: [728, 240, 212, 96], rests: ['channel-list'] },
@@ -163,7 +163,7 @@ export const SILO_MAP: MapLayout = {
   wires: [
     { of: 'views', d: 'M184 178H197', arrows: [[204, 178, 'r']], rests: ['engine-language'], fold: { d: 'M156 45H165', arrows: [[172, 45, 'r']] } },
     { of: 'computers', d: 'M316 194H365', arrows: [[372, 194, 'r']], label: [332, 186, 'runs', 'middle'], rests: ['macos-vm-driver'], fold: { d: 'M268 75H293', arrows: [[300, 75, 'r']] } },
-    // Later the engine also runs computers on a server or in a cloud.
+    // The engine also runs computers on a server or in a cloud.
     { of: 'computers', d: 'M230 114V30H977', arrows: [[984, 30, 'r']], label: [640, 46, 'runs'], rests: ['linux-server-host', 'forks-on-a-cloud-machine'] },
     // Your own terminal and editor reach a computer over SSH, from the Mac.
     { of: 'agent-programs', d: 'M336 88V150H365', arrows: [[372, 150, 'r']], label: [303, 104, 'SSH'], rests: ['computer-reached-over-ssh', 'you-visit-a-computer', 'reaching-a-computer'] },
