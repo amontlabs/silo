@@ -51,7 +51,6 @@ export interface Zone {
   rounded?: boolean;
   /** Every zone has it; the build checks it. */
   rests?: Rests;
-  undecided?: boolean;
 }
 
 /**
@@ -64,7 +63,6 @@ export interface Note {
   full: Box;
   fold?: Box;
   rests?: Rests;
-  undecided?: boolean;
 }
 
 /** A copy stacked behind a part, coloured by that part's state. */
@@ -96,9 +94,12 @@ export interface Wire extends Drawing {
   fold?: Drawing;
   /** Every wire has it; the build checks it. */
   rests?: Rests;
-  undecided?: boolean;
 }
 
+/**
+ * A layout as written: what each thing rests on, and no mark of not decided. `pageLayout` alone derives that mark
+ * from `rests`, so a thing is drawn decided the day the owner takes what it rests on, with no change here.
+ */
 export interface MapLayout {
   /** The file that holds the layout, as the build's messages name it. */
   file?: string;
@@ -112,8 +113,27 @@ export interface MapLayout {
   key?: [x: number, y: number];
 }
 
-/** A layout that draws no map: with it any plan builds, and the page shows the parts as tiles only. */
-export const NO_MAP: MapLayout = { places: {}, zones: [], notes: [], ghosts: [], wires: [] };
+/** A thing as the page gets it: without what it rests on, which is the build's alone. */
+type Plain<T> = Omit<T, 'rests'> & { rests?: never };
+/** A wire, a zone or a text as the page gets it: `undecided` when `pageLayout` found a proposal in its `rests`. */
+type Marked<T> = Plain<T> & { undecided?: true };
+
+/** The layout as the page gets it, from `pageLayout`: no file, no `rests`, and `undecided` only where it was derived. */
+export interface PageLayout {
+  file?: never;
+  places: Record<string, Plain<Place>>;
+  zones: Marked<Zone>[];
+  notes: Marked<Note>[];
+  ghosts: Plain<Ghost>[];
+  wires: Marked<Wire>[];
+  key?: [x: number, y: number];
+}
+
+/**
+ * A layout that draws no map: with it any plan builds, and the page shows the parts as tiles only. It holds nothing
+ * to strip, so the page gets it as it is.
+ */
+export const NO_MAP: MapLayout & PageLayout = { places: {}, zones: [], notes: [], ghosts: [], wires: [] };
 
 /**
  * Silo's map: your Mac, and inside it the virtual machines where the computers run. The app and the engine sit on the
@@ -217,7 +237,7 @@ export function placeStyle(full: Box, fold: Box, place?: Pick<Place, 'ty' | 'sy'
 }
 
 /** Whether a layout draws a map: it places at least one part. */
-export const hasMap = (layout: MapLayout) => Object.keys(layout.places).length > 0;
+export const hasMap = (layout: MapLayout | PageLayout) => Object.keys(layout.places).length > 0;
 
 export class LayoutError extends Error {}
 
@@ -271,14 +291,14 @@ function undecided(rests: Rests | undefined, plan: LayoutPlan): boolean {
 /**
  * The layout as the page gets it: its file and what each thing rests on are the build's alone. A wire, a zone and a
  * text that rest on something proposed get `undecided`; a place and a copy get nothing, since the part's state draws
- * them. Nothing else of `rests` is kept. A layout with no file and no `rests` is returned as it is.
+ * them. Nothing else of `rests` is kept. This is the only place that sets `undecided`. `NO_MAP` is returned as it is.
  */
-export function pageLayout(layout: MapLayout, plan: LayoutPlan): MapLayout {
-  const things = [...layout.wires, ...layout.zones, ...layout.notes, ...layout.ghosts, ...Object.values(layout.places)];
-  if (layout.file === undefined && !things.some((thing) => thing.rests)) return layout;
-  const drawn = <T extends { rests?: Rests }>({ rests, ...rest }: T): Omit<T, 'rests'> =>
-    (undecided(rests, plan) ? { ...rest, undecided: true } : rest) as Omit<T, 'rests'>;
-  const plain = <T extends { rests?: Rests }>({ rests: _, ...rest }: T): Omit<T, 'rests'> => rest;
+export function pageLayout(layout: MapLayout, plan: LayoutPlan): PageLayout {
+  if (layout === NO_MAP) return NO_MAP;
+  // A mark that reached a layout past its types (plain JavaScript, a cast) is dropped: only `rests` sets it.
+  const drawn = <T extends { rests?: Rests; undecided?: never }>({ rests, undecided: _, ...rest }: T): Marked<T> =>
+    (undecided(rests, plan) ? { ...rest, undecided: true } : rest) as Marked<T>;
+  const plain = <T extends { rests?: Rests }>({ rests: _, ...rest }: T): Plain<T> => rest as Plain<T>;
   return {
     places: Object.fromEntries(Object.entries(layout.places).map(([id, place]) => [id, plain(place)])),
     zones: layout.zones.map(drawn),
