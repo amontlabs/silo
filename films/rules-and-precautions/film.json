@@ -9,10 +9,10 @@
     "what-a-precaution-may-do",
     "less-sure-less-power",
     "what-you-may-do",
-    "how-an-opinion-acts",
+    "opinion-acts-through-a-precaution",
     "synchronous-or-asynchronous",
     "classifier-asked-synchronously",
-    "denied-call-in-the-reply",
+    "denied-tool-call",
     "promise-and-caution",
     "no-detour",
     "classifier-wait-limit",
@@ -22,7 +22,9 @@
     "precautions-out-of-reach",
     "rule-holds-when-known",
     "bad-state",
-    "precaution-grants-nothing"
+    "precaution-grants-nothing",
+    "word-request",
+    "what-wakes-an-extension"
   ],
   "words": [
     {
@@ -31,11 +33,11 @@
     },
     {
       "word": "precaution",
-      "means": "data you set. It is triggered by a report or an opinion, so it can be wrong, and it takes only reversible actions."
+      "means": "data you set. It is triggered by a report or an opinion, so it can be wrong, and it takes only protective actions."
     },
     {
       "word": "synchronous",
-      "means": "the thing waits at the boundary for the answer."
+      "means": "the request waits at the boundary for the answer."
     },
     {
       "word": "asynchronous",

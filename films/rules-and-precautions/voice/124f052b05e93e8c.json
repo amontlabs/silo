@@ -1,0 +1,1 @@
+{"engine": "kokoro", "voice": "af_heart", "speed": 1.0, "text": "Synchronous: the request waits at the boundary for the answer, so it can still be denied or held.", "length": 5.453}
