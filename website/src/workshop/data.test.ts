@@ -427,7 +427,7 @@ describe('the map layout', () => {
     const uses = (rests: string[]): MapLayout => ({ ...EXAMPLE_MAP, wires: EXAMPLE_MAP.wires.map((wire, index) => (index === 0 ? { ...wire, rests } : wire)) });
     const drawn = (layout: MapLayout, options?: Parameters<typeof planFiles>[0]) => buildDataFrom(planFiles(options), { map: layout }).map;
     const taking = (id: string) => ({ decisions: DECISIONS.map((decision) => (decision.id === id ? { ...decision, verdict: 'take' as const } : decision)) });
-    const takingFeature = (id: string, built?: string) => ({ features: FEATURES.map((feature) => (feature.id === id ? { ...feature, verdict: 'take' as const, ...(built ? { built } : {}) } : feature)) });
+    const takingFeature = (id: string, built?: string, started?: string) => ({ features: FEATURES.map((feature) => (feature.id === id ? { ...feature, verdict: 'take' as const, ...(started ? { started } : {}), ...(built ? { built } : {}) } : feature)) });
     // The page's layout with every mark of not decided taken off: what is left is the drawing itself.
     const bare = (layout: PageLayout) => JSON.parse(JSON.stringify(layout, (key, value) => (key === 'undecided' ? undefined : value)));
 
@@ -448,9 +448,9 @@ describe('the map layout', () => {
       expect(drawn(uses(['bound-a-wait']), withLists()).wires[0].undecided).toBe(true);
     });
 
-    it('builds a wire that rests on a feature with no verdict, and draws it as decided once the feature is taken or built, with the same layout', () => {
+    it('builds a wire that rests on a feature with no verdict, and draws it as decided once the feature is taken, being built or built, with the same layout', () => {
       const proposed = drawn(EXAMPLE_MAP);
-      for (const options of [takingFeature('export'), takingFeature('export', '2026-11-16')]) {
+      for (const options of [takingFeature('export'), takingFeature('export', undefined, '2026-11-16'), takingFeature('export', '2026-11-16')]) {
         const taken = drawn(EXAMPLE_MAP, options);
         expect(taken.wires.every((wire) => wire.undecided === undefined)).toBe(true);
         expect(bare(taken)).toEqual(bare(proposed));
