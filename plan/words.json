@@ -145,5 +145,9 @@
   {
     "word": "task",
     "means": "A command run in a fork or in a fresh computer, with an end."
+  },
+  {
+    "word": "unverified",
+    "means": "Told to Silo, not seen by it. Said of every report, and of a result computed from reports."
   }
 ]
