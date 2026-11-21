@@ -18,7 +18,8 @@
 // - Notes opening changes the panel's height in fewer than four steps;
 // - a comment's height or the comment box's top changes when the comment is confirmed;
 // - a row's opening or closing covers more than 16% of its way in its first frame;
-// - in All, a row that opens or closes, or a row above it, moves on the page (`still`).
+// - in All, a row that opens or closes, or a row above it, moves on the page (`still`);
+// - a box a move expects (`expect`, by default its `still` boxes) is not found in a sample: the problem names it.
 // On a page with a map, the moves on the tiles run under 1200 px, where the tiles stand in the map's place; the flows
 // named map-* run on the map, at 1440 x 900: the map to a part and back, a scrolled map to a part and back from a
 // scrolled part. Each flow runs on the map's side, whatever view the url names.
@@ -212,7 +213,7 @@ function problemsOf(kind, rows, t0, keys, meant = {}) {
 }
 
 /** Runs one action, writes its sheet and its text, and returns its problems. */
-async function capture(out, page, name, action, { selectors = ROWS, kind = null, ms = 1500, still = [] } = {}) {
+async function capture(out, page, name, action, { selectors = ROWS, kind = null, ms = 1500, still = [], expect = still } = {}) {
   const meant = MEANT[name] ?? {};
   const client = await page.context().newCDPSession(page);
   const frames = [];
@@ -234,6 +235,11 @@ async function capture(out, page, name, action, { selectors = ROWS, kind = null,
   await client.detach().catch(() => {});
 
   const problems = problemsOf(kind, data.rows, t0, Object.keys(selectors), meant);
+  // Boxes the move expects: each is found in every sample, or the move fails with its name.
+  for (const key of expect) {
+    const missing = data.rows.filter((row) => !row[key]).length;
+    if (missing) problems.push(`${key} (${typeof selectors[key] === 'string' ? selectors[key] : selectors[key]?.selector}) is not found in ${missing} of ${data.rows.length} samples`);
+  }
   // Boxes that must not move at all: their top on the page stays within half a pixel.
   for (const key of still) {
     const tops = data.rows.filter((row) => row[key]).map((row) => row[key][1] + row.y);
@@ -379,8 +385,9 @@ const FLOWS = {
     const item = (n) => `.wa-list > section > .wa-item:nth-of-type(${n})`;
     const selectors = { above1: `${item(1)} > .wa-row`, above2: `${item(2)} > .wa-row`, opened: `${item(3)} > .wa-row`, next: `${item(4)} > .wa-row`, more: `${item(3)} > .ws-more` };
     const still = ['above1', 'above2', 'opened'];
-    const problems = await capture(s.out, page, 'all-row-open', pressRow(`${item(3)} > .wa-row`), { kind: 'row', ms: 900, selectors, still });
-    return [...problems, ...await capture(s.out, page, 'all-row-close', pressRow(`${item(3)} > .wa-row`), { kind: 'row', ms: 900, selectors, still })];
+    const expect = Object.keys(selectors);
+    const problems = await capture(s.out, page, 'all-row-open', pressRow(`${item(3)} > .wa-row`), { kind: 'row', ms: 900, selectors, still, expect });
+    return [...problems, ...await capture(s.out, page, 'all-row-close', pressRow(`${item(3)} > .wa-row`), { kind: 'row', ms: 900, selectors, still, expect })];
   },
   // The Notes of an open row, their chunk loaded on the click.
   notes: async (s) => {
