@@ -3,5 +3,16 @@
   "answer": "The same inputs in the same order give the same state and the same outputs. Time and randomness are inputs. The core runs on one thread.",
   "needs": [
     "engine-inputs"
+  ],
+  "sets": [
+    {
+      "in": "engine/properties",
+      "id": "core-touches-nothing",
+      "says": "The core reads no clock, no randomness, no file and no network, and starts no thread.",
+      "kind": "safety",
+      "check": [
+        "test"
+      ]
+    }
   ]
 }
