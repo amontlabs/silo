@@ -14,17 +14,17 @@ the shortest one that breaks a property.
 
 Java 25 and Node 26 are on the owner's Mac.
 
-## Not done
+## What decides
 
-No tool has been run on a model of Silo. A trial settles this: the same small model written for
-each candidate. Two things decide, agreed with the owner on 21 November 2026:
+A trial settles this: the same small model written for each candidate. Two things decide, agreed
+with the owner on 21 November 2026:
 
 - a person reads the model easily;
 - the tool can check a history that the Zig simulator produced, so that the model cannot drift
   away from the core. `model-of-access-first` says the simulator compares the core with the model,
   and this is what makes that possible.
 
-The trial runs on the branch `trial/model-tool`. Its candidates are the three above, FizzBee, and
+The trial ran on the branch `trial/model-tool`. Its candidates were the three above, FizzBee, and
 the model written in Zig itself and run over every sequence of calls up to a size.
 
 One fact for the second point, read on 21 November 2026 in Quint's own documentation
