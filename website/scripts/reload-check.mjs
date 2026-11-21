@@ -74,20 +74,30 @@ const buildOfPage = (page) => page.evaluate(() => document.querySelector('meta[n
 const item = (page, id) => page.locator(`[id="entry-${id}-more"]`);
 const row = (page, id) => page.locator(`[data-row="entry-${id}"]`);
 
-/** A part with a feature whose facts, notes and history the page loads later (F), and a feature with no facts (X). */
+/**
+ * A part with a feature whose facts, notes and history the page loads later (F), and a feature with no facts (X).
+ * F is one whose facts give a label the check can look for after the reload (`labelOf`), so that the choice and
+ * what is looked for always agree.
+ */
 async function chooseEntries(page) {
-  const found = await page.evaluate(() => {
+  const parts = await page.evaluate(() => {
     const data = window.__workshopData;
-    for (const part of data.parts) {
+    return data.parts.map((part) => {
       const features = data.entries.filter((entry) => entry.part === part.id && entry.kind === 'feature');
-      const f = features.find((entry) => entry.more && entry.notes && entry.history);
-      const x = features.find((entry) => !entry.more && entry !== f);
-      if (f && x) return { part: part.id, f: f.id, x: x.id };
-    }
-    return null;
+      return {
+        part: part.id,
+        later: features.filter((entry) => entry.more && entry.notes && entry.history).map((entry) => entry.id),
+        plain: features.filter((entry) => !entry.more).map((entry) => entry.id),
+      };
+    });
   });
-  assert.ok(found, 'the plan has a part with a feature with facts, notes and history, and a feature with none');
-  return found;
+  const facts = await factsOfB();
+  for (const { part, later, plain } of parts) {
+    const f = later.find((id) => labelOf(facts[id]));
+    const x = plain.find((id) => id !== f);
+    if (f && x) return { part, f, x };
+  }
+  assert.fail('the plan has no part with a feature whose facts give a label to look for, with notes and history, and a feature with no facts');
 }
 
 async function signIn() {
@@ -139,16 +149,22 @@ async function reloadAnyway(page, entries) {
   await Promise.all([page.waitForEvent('load'), f.getByRole('button', { name: 'Reload anyway' }).click()]);
 }
 
-/** A label of F's open view that only B's facts chunk gives: read from that chunk. */
-async function factLabel(entries) {
+/** What build B's facts chunk says of each entry. */
+async function factsOfB() {
   const name = (await readdir(join(dir, 'b', 'assets'))).find((file) => /workshop-facts.*\.js$/.test(file));
   assert.ok(name, "build B's facts chunk");
   const { default: facts } = await import(pathToFileURL(join(dir, 'b', 'assets', name)).href);
-  const own = facts.entries[entries.f];
-  if (own?.keeps?.length) return 'Must keep';
-  if (own?.surfaces) return 'Where it shows';
-  if (own?.suggest) return `Recommended: ${own.suggest.verdict}`;
-  assert.fail(`the facts of ${entries.f} have no label to look for`);
+  return facts.entries;
+}
+
+/** A label of an entry's open view that only the facts chunk gives, or null when its facts give none the check knows. */
+const labelOf = (own) => (own?.keeps?.length ? 'Must keep' : own?.surfaces ? 'Where it shows' : own?.suggest ? `Recommended: ${own.suggest.verdict}` : null);
+
+/** The label of F to look for after the reload: read from build B's facts chunk. */
+async function factLabel(entries) {
+  const label = labelOf((await factsOfB())[entries.f]);
+  assert.ok(label, `the facts of ${entries.f} have no label to look for`);
+  return label;
 }
 
 /** After the reload: the page is B, F is open, F's parts load, and nothing offers Reload. */
