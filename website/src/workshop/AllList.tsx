@@ -220,7 +220,7 @@ function ItemView({ item, props }: { item: Item; props: ListProps }) {
 /** A row's own line and its panel; a press anywhere on the line opens or closes it. */
 function Line({ row, instance, props, cls, label, children, lead }: { row: Row; instance: string; props: ListProps; cls: string; label: string; children: ReactNode; lead?: ReactNode }) {
   const { ctx } = props;
-  const open = ctx.open.has(instance);
+  const open = ctx.open.has(row.key);
   const toggle = (event: MouseEvent) => {
     // A click with a modifier key on a link is the browser's.
     if ((event.target as Element).closest('a, .wa-caret')) return;
@@ -265,7 +265,7 @@ function filmLead(row: Row, props: ListProps): ReactNode {
 
 function FeatureView({ item, props }: { item: FeatureItem; props: ListProps }) {
   const { row } = item;
-  const open = props.ctx.open.has(item.key);
+  const open = props.ctx.open.has(row.key);
   const gone = row.status === 'dropped' || row.status === 'replaced';
   const body = (unfolded: boolean | null, toggle: (() => void) | null) => (
     <div className={['wa-item f', open ? 'open' : '', gone ? 'gone' : ''].filter(Boolean).join(' ')} id={item.key}>
@@ -319,7 +319,7 @@ function Kids({ holder, part, kids, passing, props }: { holder: string; part: st
 }
 
 function DecisionView({ row, instance, props, flat = false, change, holderPart }: { row: Row; instance: string; props: ListProps; flat?: boolean; change?: string; holderPart?: string | null }) {
-  const open = props.ctx.open.has(instance);
+  const open = props.ctx.open.has(row.key);
   const gone = row.status === 'dropped' || row.status === 'replaced';
   const part = flat ? (props.inPart && props.inPart === row.part ? '' : partTitle(props.plan, row.part)) : row.part !== holderPart ? partTitle(props.plan, row.part) : '';
   return (

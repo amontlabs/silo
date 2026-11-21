@@ -470,14 +470,15 @@ describe('`me`', () => {
 });
 
 describe('addresses', () => {
-  it('hold a named row closed only while nothing is shown and the load is pending', async () => {
+  it('open a named entry at once from the build\'s data, its comments coming with the load', async () => {
     const answer = held<{ status: number; body: unknown }>();
     mockApi({ state: () => answer.promise });
     history.replaceState(null, '', '/workshop#part-b/create');
     render(<App data={buildData()} />);
-    expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'false');
+    expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Make a Linux computer.')).toBeInTheDocument();
     await act(async () => answer.release(ok(liveState())));
-    await waitFor(() => expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'true'));
+    await waitFor(() => expect(within(itemOf('Create and delete a computer')).getByRole('link', { name: /12 votes/ })).toBeInTheDocument());
   });
 
   it('wait for the load before falling back to the plan when the state shown lacks what they name', async () => {

@@ -278,9 +278,13 @@ describe('addresses', () => {
     await userEvent.click(rowButton('Run a command'));
     expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true');
     expect(location.hash).toBe('#part-b/exec');
-    act(() => { history.replaceState(null, '', '/workshop#left/exec'); dispatchEvent(new PopStateEvent('popstate')); });
+    // Followed by hand, the old address is written in its own form; read from the history, it is shown as it is.
+    act(() => { history.pushState(null, '', '/workshop#left/exec'); dispatchEvent(new HashChangeEvent('hashchange')); });
     await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Part B' })).toBeInTheDocument());
     expect(location.hash).toBe('#part-b/exec');
+    act(() => { history.replaceState(null, '', '/workshop#left/exec'); dispatchEvent(new PopStateEvent('popstate')); });
+    expect(screen.getByRole('heading', { level: 2, name: 'Part B' })).toBeInTheDocument();
+    expect(location.hash).toBe('#left/exec');
   });
 
   it('open the part when its entry no longer exists, and find an entry under another part', async () => {

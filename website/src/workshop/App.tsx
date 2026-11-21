@@ -64,7 +64,7 @@ const noHistory = () => Promise.resolve({});
 /** What the page uses of the browser's `ViewTransition`. */
 type ViewTransitionLike = { finished: Promise<void>; ready?: Promise<void>; skipTransition?: () => void };
 /** `bring`: what takes the focus is brought into view at once (going back off the map). */
-type Focus = { kind: 'title' } | { kind: 'part'; part: string; bring?: boolean } | { kind: 'selector'; selector: string; bring?: boolean } | { kind: 'row'; key: string; reveal?: boolean } | { kind: 'reveal'; key: string };
+type Focus = { kind: 'title' } | { kind: 'part'; part: string; bring?: boolean } | { kind: 'selector'; selector: string; bring?: boolean } | { kind: 'row'; key: string; reveal?: boolean; again?: boolean } | { kind: 'reveal'; key: string; again?: boolean };
 
 const LEAVE_MS = 140;
 /** How long what just arrived is marked, for its fade in (about 150 ms). */
@@ -211,10 +211,12 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   const mapped = hasMap(data.map);
   const [first] = useState(fromAddress);
   const [place, setPlace] = useState<Place>(HOME);
-  // Rows open independently, by instance key (all.ts `underKey`); `openKey` is the one opened last: the address and the
-  // relations follow it.
+  // Rows open independently. Being open belongs to the entry, by its row's key, not to one drawing of it: a decision
+  // opened under its feature is open wherever the list draws it. `openKey` is the one opened last: the address follows
+  // it. `openAt` is the drawing of it last opened or found (all.ts `underKey`), whose relations are drawn.
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [openKeys, setOpenKeys] = useState<ReadonlySet<string>>(new Set());
+  const [openAt, setOpenAt] = useState<string | null>(null);
   const [openings, setOpenings] = useState(0);
   const [view, setViewState] = useState<View>(first.view);
   const [query, setQueryState] = useState<Query>(first.query);
@@ -237,17 +239,12 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   const [boot, setBoot] = useState(true);
   // The row opened last, read by handlers that run after a render.
   const openKeyRef = useRef<string | null>(null);
-  const rowOpenKeys = useMemo(() => new Set([...openKeys].map(rowKeyOf)), [openKeys]);
-  const w = useWorkshop(data, openKey === null ? null : rowKeyOf(openKey), rowOpenKeys, openings, loadNotes, loadFacts, loadHistory);
+  const w = useWorkshop(data, openKey, openKeys, openings, loadNotes, loadFacts, loadHistory);
   const { plan, rowByKey, live } = w;
   const graph = useMemo(() => graphOf(plan), [plan]);
   const sections = useMemo(() => allSections(plan, graph, data.stages, query), [plan, graph, data.stages, query]);
-  /** No state is shown and the first answer is still to come. */
-  const holding = !live.state && live.load === 'pending';
   const focusNext = useRef<Focus | null>(null);
   const wantedHash = useRef<string | null>(null);
-  /** A row named by the address while the live state loads; it opens once the state is there. */
-  const heldOpen = useRef<string | null>(null);
   const foldedAt = useRef(0);
   /** The scroll driven by the fold, from a scrolled full map. */
   const lift = useRef<{ frame: number; from: number; full: number } | null>(null);
@@ -307,7 +304,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     if (accountSlot) accountSlot.classList.toggle('ws-arr-p', arrivedPerson);
   }, [accountSlot, arrivedPerson]);
   // The row opened last draws its relations while the pointer and the focus are elsewhere.
-  useEffect(() => store.open(openKey), [store, openKey]);
+  useEffect(() => store.open(openAt), [store, openAt]);
 
   const shown: Place = place;
   const isAll = view === 'all';
@@ -335,17 +332,17 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     return found.instance;
   };
 
-  /** Moves to a place, with at most the one row open. */
-  function settle(next: Place, instance: string | null) {
+  /** Moves to a place, with at most the one row open; `instance` is the drawing of it to show open (its own key by default). */
+  function settle(next: Place, key: string | null, instance: string | null = key) {
     timers.current.forEach(clearTimeout);
     timers.current = [];
-    heldOpen.current = null;
     setLeaving(false);
     setPlace(next);
-    setOpenKey(instance);
-    setOpenKeys(instance ? new Set([instance]) : new Set());
-    if (instance) setOpenings((n) => n + 1);
-    openKeyRef.current = instance;
+    setOpenKey(key);
+    setOpenKeys(key ? new Set([key]) : new Set());
+    setOpenAt(key ? instance : null);
+    if (key) setOpenings((n) => n + 1);
+    openKeyRef.current = key;
     navigations.current += 1;
   }
 
@@ -435,23 +432,26 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     return mine;
   }
 
-  /** Opens a row: next to the open ones where it stands now, or alone in the place where it lives. */
+  /**
+   * Opens an entry: next to the open ones where it stands now, or alone in the place where it lives. A link to an entry
+   * always opens it: in All when the list holds it, else in its own place (its part, Product, the suggestions).
+   * `instance` names the drawing pressed, when one was.
+   */
   function openRow(key: string | null, options: { focus?: boolean; reveal?: boolean; push?: boolean; closing?: string; instance?: string } = {}) {
     const row = key ? rowByKey.get(key) : undefined;
     if (!row) {
       if (options.closing) closeRow(options.closing);
       return;
     }
-    // In All, a row opens in the list when the list holds it; otherwise it opens where it lives, on the map.
     const inList = isAll && (options.instance !== undefined || locate(sections, row.key, more) !== null);
     const target = isAll ? (inList ? HOME : placeOf$(row)) : placeFrom(row, shown, plan);
     if (!inList && (isAll || !samePlace(target, shown))) {
       w.fetchNow(row);
       if (isAll) setViewState('map');
       const instance = standing(row.key, target, false);
-      address$(target, instance, options.push !== false, false);
+      address$(target, row.key, options.push !== false, false);
       if ((target.kind === 'part' || target.kind === 'film') && shown.kind === 'home') foldedAt.current = Date.now();
-      settle(target, instance);
+      settle(target, row.key, instance);
       w.setAnnounce(`${row.name}, open`);
       focusNext.current = options.focus ? { kind: 'row', key: instance, reveal: options.reveal !== false } : null;
       return;
@@ -459,30 +459,32 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     const instance = options.instance ?? standing(row.key, shown, isAll);
     // Asked for in the same event as the opening, so a failed early fetch shows as loading, not as an error.
     w.fetchNow(row);
-    address$(shown, instance);
+    address$(shown, row.key);
     setOpenKeys((current) => {
       const next = new Set(current);
       if (options.closing) next.delete(options.closing);
-      next.add(instance);
+      next.add(row.key);
       return next;
     });
-    setOpenKey(instance);
+    setOpenKey(row.key);
+    setOpenAt(instance);
     setOpenings((n) => n + 1);
-    openKeyRef.current = instance;
+    openKeyRef.current = row.key;
     w.setAnnounce(`${row.name}, open`);
     focusNext.current = options.focus ? { kind: 'row', key: instance, reveal: options.reveal !== false } : null;
   }
 
-  /** Closes one row and leaves the others as they are. */
-  function closeRow(instance: string) {
+  /** Closes one entry, wherever it is drawn, and leaves the others as they are. */
+  function closeRow(key: string) {
     setOpenKeys((current) => {
       const next = new Set(current);
-      next.delete(instance);
+      next.delete(key);
       return next;
     });
-    if (openKey === instance || openKeyRef.current === instance) {
+    if (openKey === key || openKeyRef.current === key) {
       address$(shown, null);
       setOpenKey(null);
+      setOpenAt(null);
       openKeyRef.current = null;
     }
   }
@@ -536,7 +538,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
       // From All, a place opens on the map's side, at once.
       moveStarts();
       setViewState('map');
-      rememberHabit({ view: 'map', order: query.order });
+      rememberHabit({ view: 'map', order: recallHabit()?.order ?? 'build' });
       const title = next.kind === 'part' ? plan.parts.find((group) => group.part.id === next.part)?.part.title : null;
       address$(next, null, true, false);
       if (next.kind === 'part' || next.kind === 'film') foldedAt.current = Date.now();
@@ -583,8 +585,13 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     if (next === view && isHome) return;
     moveStarts();
     setViewState(next);
-    rememberHabit({ view: next, order: query.order });
-    address$(HOME, null, true, next === 'all');
+    // Pressing All shows the order used last, and writes it into the address. The order is remembered only from its own
+    // control: an address that shows another one changes nothing remembered.
+    const order = recallHabit()?.order ?? 'build';
+    const q = next === 'all' ? { ...query, order } : query;
+    if (next === 'all') setQueryState(q);
+    rememberHabit({ view: next, order });
+    address$(HOME, null, true, next === 'all', q);
     settle(HOME, null);
     focusNext.current = null;
   }
@@ -606,17 +613,27 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
       settle(HOME, null);
       return;
     }
-    address$(HOME, openKeyRef.current, false, true, next);
+    // The entry open last stays named only while the list still draws it; open, it is drawn open wherever it now stands.
+    const open = openKeyRef.current;
+    const found = open ? locate(allSections(plan, graph, data.stages, next), open, new Set()) : null;
+    if (open && !found) {
+      setOpenKey(null);
+      setOpenAt(null);
+      openKeyRef.current = null;
+    } else if (found) setOpenAt(found.instance);
+    address$(HOME, found ? open : null, false, true, next);
   }
 
   /** The entries a film shows, in All. */
   function filmEntries(film: string) {
-    setQuery({ ...NO_QUERY, films: [film] });
+    setQuery({ ...NO_QUERY, films: [film], order: query.order });
     if (isAll) scrollTo({ top: 0, behavior: 'instant' });
   }
 
-  // Addresses: on load, on Back and Forward, and once rows that did not exist yet arrive.
-  const follow = useCallback(() => {
+  // Addresses: on load, on Back and Forward, and once rows that did not exist yet arrive. The address is the truth: an
+  // address with no `order` is Build order. An entry it names opens at once, from the build's data: its comments fill
+  // their placeholders when the live state comes.
+  const follow = useCallback((fromHistory: boolean) => {
     const resolved = resolveHash(location.hash, plan, rowByKey);
     if (!resolved) {
       wantedHash.current = location.hash;
@@ -624,51 +641,38 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     }
     wantedHash.current = null;
     const asked = parseQuery(location.search);
-    // The address says the view: one without `view=all` is the map's side.
     let inAll = asked.view === 'all';
-    let q = inAll ? { ...asked.query, order: asked.order ?? queryRef.current.order } : queryRef.current;
+    let q = asked.query;
     // An old address that was a place (Latest, Left out) opens All as it asks.
     if (resolved.all) {
       inAll = true;
       q = { ...NO_QUERY, ...resolved.all };
     }
-    // In All, the row the address names opens in the list; Product and a film open as places on the map's side.
-    const place = inAll ? HOME : resolved.place;
+    // In All, a place's address (Product, a film, a part with no row) opens that place on the map's side.
     if (inAll && resolved.key === null && resolved.place.kind !== 'home') inAll = false;
+    const row = resolved.key === null ? undefined : rowByKey.get(resolved.key);
+    const lists = inAll ? allSections(plan, graphOf(plan), data.stages, q) : null;
+    let found = lists && resolved.key !== null ? locate(lists, resolved.key, new Set()) : null;
+    // A link to an entry always opens it: when the list does not hold it, in its own place.
+    if (inAll && row && !found) inAll = false;
+    // In All, the list; asked in All but not held there, the entry's own place; else the place the address names.
+    const where: Place = inAll ? HOME : row && lists ? placeOf$(row) : resolved.place;
+    if (!inAll && row) found = locate(sectionsOf(where, false), row.key, new Set());
+    if (found?.holder) {
+      const holder = found.holder;
+      setFolds((now) => new Map(now).set(holder, true));
+      if (found.more) setMore((now) => new Set(now).add(holder));
+    }
     setViewState(inAll ? 'all' : 'map');
     setQueryState(q);
-    const where = inAll ? HOME : resolved.place;
-    const lists = inAll ? allSections(plan, graphOf(plan), data.stages, q) : null;
-    let instance: string | null = null;
-    if (resolved.key !== null) {
-      const found = lists ? locate(lists, resolved.key, new Set()) : null;
-      instance = lists ? found?.instance ?? null : resolved.key;
-      if (found?.holder) {
-        const holder = found.holder;
-        setFolds((now) => new Map(now).set(holder, true));
-        if (found.more) setMore((now) => new Set(now).add(holder));
-      } else if (!lists && resolved.key) {
-        instance = null;
-        const kept = locate(sectionsOf(where, false), resolved.key, new Set());
-        instance = kept?.instance ?? resolved.key;
-        if (kept?.holder) {
-          const holder = kept.holder;
-          setFolds((now) => new Map(now).set(holder, true));
-          if (kept.more) setMore((now) => new Set(now).add(holder));
-        }
-      }
-    }
-    const canonical = address(formatQuery(location.search, inAll ? 'all' : 'map', q), inAll ? (instance ? location.hash && resolved.key ? rowHash(rowByKey.get(resolved.key)!) : '' : '') : formatHash(inAll ? place : resolved.place, resolved.key));
-    if (`${location.pathname}${location.search}${location.hash}` !== canonical && (location.hash || resolved.all || location.search)) history.replaceState(history.state, '', canonical);
-    // While the live state loads, the named row waits closed: it would grow when votes and comments arrive.
-    const hold = instance !== null && holdingRef.current;
-    settle(where, hold ? null : instance);
-    if (hold) heldOpen.current = instance;
-    focusNext.current = instance && !hold ? { kind: 'reveal', key: instance } : null;
+    const canonical = address(formatQuery(location.search, inAll ? 'all' : 'map', q), inAll ? (row ? rowHash(row) : '') : formatHash(where, row ? row.key : null));
+    // An address read from the history is shown as it is; one followed on load or by hand is written in its own form.
+    if (!fromHistory && `${location.pathname}${location.search}${location.hash}` !== canonical && (location.hash || resolved.all || location.search)) history.replaceState(history.state, '', canonical);
+    const instance = row ? found?.instance ?? row.key : null;
+    settle(where, row ? row.key : null, instance);
+    focusNext.current = instance ? { kind: 'reveal', key: instance } : null;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan, rowByKey]);
-  const holdingRef = useRef(holding);
-  holdingRef.current = holding;
   const followRef = useRef(follow);
   followRef.current = follow;
   const moveStartsRef = useRef(moveStarts);
@@ -678,22 +682,26 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   // not known yet. A view recalled for a plain address is written into it.
   useLayoutEffect(() => {
     if (first.recalled) history.replaceState(history.state, '', address(formatQuery(location.search, 'all', first.query), location.hash));
-    followRef.current();
-    const listener = () => {
+    followRef.current(false);
+    const onPop = () => {
       moveStartsRef.current();
-      followRef.current();
+      followRef.current(true);
     };
-    addEventListener('popstate', listener);
-    addEventListener('hashchange', listener);
+    const onHash = () => {
+      moveStartsRef.current();
+      followRef.current(false);
+    };
+    addEventListener('popstate', onPop);
+    addEventListener('hashchange', onHash);
     return () => {
-      removeEventListener('popstate', listener);
-      removeEventListener('hashchange', listener);
+      removeEventListener('popstate', onPop);
+      removeEventListener('hashchange', onHash);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
     if (wantedHash.current === null) return;
-    if (resolveHash(wantedHash.current, plan, rowByKey)) follow();
+    if (resolveHash(wantedHash.current, plan, rowByKey)) follow(false);
     else if (w.settled) {
       // A link to something that the state shown does not have falls back to the plan, once the load has ended
       // (the `fresh=1` ask included, when one was made: what was just suggested may be only in that answer).
@@ -702,19 +710,6 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
       settle(HOME, null);
     }
   }, [plan, rowByKey, w.settled, follow]);
-  useEffect(() => {
-    const key = heldOpen.current;
-    if (holding || !key) return;
-    heldOpen.current = null;
-    if (!rowByKey.has(rowKeyOf(key))) return;
-    setOpenKeys((current) => new Set([...current, key]));
-    // When the person opened another row meanwhile, that row stays the current one and keeps the address.
-    if (openKeyRef.current !== null) return;
-    setOpenKey(key);
-    setOpenings((n) => n + 1);
-    openKeyRef.current = key;
-    focusNext.current = { kind: 'reveal', key };
-  }, [holding, rowByKey]);
 
   // Focus follows what the person asked for; a new part starts at its top, under the folded map.
   useLayoutEffect(() => {
@@ -723,6 +718,11 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     focusNext.current = null;
     if (target.kind === 'row' || target.kind === 'reveal') {
       const item = document.getElementById(target.key);
+      // A row under a feature that unfolds in this same move is drawn on the next render: wait for it, once.
+      if (!item && !target.again) {
+        focusNext.current = { ...target, again: true };
+        return;
+      }
       if (target.kind === 'row') item?.querySelector<HTMLElement>(':scope > .wa-row > .wa-hit, :scope > .ws-line > .ws-row')?.focus({ preventScroll: true });
       // While the map folds, the page under it moves: the row is brought into view once the fold is done.
       const wait = Math.max(0, foldedAt.current + FOLD_MS - Date.now());
@@ -804,8 +804,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   const ctx: EntryContext = {
     w, signIn, open: openKeys,
     onToggle: (row, instance) => {
-      const key = instance ?? [...openKeys].find((one) => rowKeyOf(one) === row.key) ?? row.key;
-      if (openKeys.has(key)) closeRow(key);
+      if (openKeys.has(row.key)) closeRow(row.key);
       else openRow(row.key, instance === undefined ? {} : { instance });
     },
     onFilmEntries: filmEntries,

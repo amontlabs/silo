@@ -189,6 +189,67 @@ describe('the address', () => {
   });
 });
 
+describe('a link to an entry', () => {
+  it.each([
+    ['decisions not displayed', '?view=all&show=feature#product/one-host', 'Product', 'Which host runs Silo first?', '#product/one-host'],
+    ['a search that leaves it out', '?view=all&q=nothing-like-it#part-b/create', 'Part B', 'Create and delete a computer', '#part-b/create'],
+    ['Latest, for an entry with no history', '?view=all&order=latest#part-a/core', 'Part A', 'The engine runs on its own', '#part-a/core'],
+    ['a filter that leaves it out', '?view=all&state=dropped#part-d/fork', 'Part D', 'Fork a computer', '#part-d/fork'],
+  ])('opens it in its own place when All does not hold it: %s', async (_, link, place, name, hash) => {
+    mockApi();
+    history.replaceState(null, '', `/workshop${link}`);
+    await renderApp(withNeeds());
+    expect(screen.getByRole('heading', { level: 2, name: place })).toBeInTheDocument();
+    await waitFor(() => expect(rowButton(name.replace('?', '\\?'))).toHaveAttribute('aria-expanded', 'true'));
+    expect(location.search).toBe('');
+    expect(location.hash).toBe(hash);
+  });
+
+  it('opens a suggestion named in All where it lives', async () => {
+    mockApi();
+    history.replaceState(null, '', '/workshop?view=all#issue-30');
+    await renderApp(withNeeds());
+    await waitFor(() => expect(rowButton('Start a task from Slack')).toHaveAttribute('aria-expanded', 'true'));
+    expect(location.hash).toBe('#suggested/issue-30');
+  });
+});
+
+describe('the address is the truth', () => {
+  it('shows Build order for an address with no order, read from the history, whatever the page last showed or remembers', async () => {
+    mockApi();
+    history.replaceState(null, '', '/workshop?view=all');
+    await renderApp(withNeeds());
+    await userEvent.click(screen.getByRole('button', { name: 'Latest' }));
+    expect(location.search).toBe('?view=all&order=latest');
+    act(() => { history.replaceState(null, '', '/workshop?view=all'); dispatchEvent(new PopStateEvent('popstate')); });
+    expect(screen.getByRole('button', { name: 'Build order' })).toHaveAttribute('aria-pressed', 'true');
+    expect(location.search).toBe('?view=all');
+    // Pressing All shows the order used last, and writes it.
+    await userEvent.click(screen.getByRole('button', { name: /^Map/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'All' }));
+    expect(screen.getByRole('button', { name: 'Latest' })).toHaveAttribute('aria-pressed', 'true');
+    expect(location.search).toBe('?view=all&order=latest');
+  });
+});
+
+describe('an open entry', () => {
+  it('stays open when a search shows it on a line of its own, and the address stops naming it when a filter removes it', async () => {
+    mockApi();
+    history.replaceState(null, '', '/workshop?view=all#part-d/one-way');
+    await renderApp(withNeeds());
+    await waitFor(() => expect(rowButton('Which way do changes go\\?')).toHaveAttribute('aria-expanded', 'true'));
+    expect(rowButton('Which way do changes go\\?').closest('.wa-item')).toHaveAttribute('id', 'entry-one-way@entry-fork-keeps');
+    await userEvent.click(screen.getByRole('button', { name: 'Search' }));
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search' }), 'way do');
+    expect(rowButton('Which way do changes go\\?').closest('.wa-item')).toHaveAttribute('id', 'entry-one-way');
+    expect(rowButton('Which way do changes go\\?')).toHaveAttribute('aria-expanded', 'true');
+    expect(location.hash).toBe('#part-d/one-way');
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search' }), 'zz');
+    expect(screen.queryByRole('button', { name: /^Which way do changes go/ })).toBeNull();
+    expect(location.hash).toBe('');
+  });
+});
+
 describe('relations', () => {
   it('ring a row\'s pip on the strip, ink what it needs and what waits for it, and light those rows in the list, after a rest of the pointer', async () => {
     mockApi();

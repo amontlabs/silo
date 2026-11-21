@@ -504,7 +504,8 @@ What a person sees:
   or closes, and when their text arrives after its placeholder. A comment
   being sent shows its 👍 disabled, so it keeps its height once confirmed, and
   "GitHub #N" next to the box keeps at least the room of "GitHub #000 ↗". An entry named by the address
-  waits closed until the first answer when no live state is shown yet. An
+  opens at once, from the build's data; its comments fill their placeholders when the
+  live state comes. An
   address naming something the state shown lacks falls back to the plan only
   once the load has answered or failed, and the `fresh=1` ask has too when one
   was made. The person's own vote on an opened row and their votes on its comments
@@ -672,10 +673,16 @@ What a person sees:
 - Search is an icon until pressed (or `/`), then a field. Typing shows All with
   the entries whose name or question holds the text, from any view; Escape
   empties and closes it.
-- The page remembers the view and All's order used last (`memory.ts`): a plain
-  address shows them again, written into the address, so a person who left on
-  Latest comes back to Latest. An address that names a view, a place or a row
-  shows what it names.
+- The page remembers the view and All's order used last (`memory.ts`): a person
+  who arrives at the plain address, or presses All, gets them again, written into
+  the address, so a person who left on Latest comes back to Latest. The order is
+  remembered only from its own control. Otherwise the address is the truth: one
+  with no `order` is Build order, and an address read from the history is shown
+  as it is, never rewritten.
+- Being open belongs to the entry, not to one drawing of it: a decision opened
+  under its feature is open wherever the list draws it, a search showing it on a
+  line of its own included. When a search or a filter takes an open entry out of
+  the list, the address stops naming it.
 - The films: one control per film on the line between the title row and the map
   or the tiles, in the order of `films/README.md`, at every width (it scrolls
   sideways under 760 px). Pointing at a film, or focusing it, marks its parts on
@@ -713,7 +720,9 @@ What a person sees:
 Addresses: `#<part>`, `#<part>/<entry id>`, `#product` and `#suggested`, each
 with an optional open row (`#suggested/issue-<n>`), and `#films/<film id>`. All is
 `?view=all` with its query (above); there, `#<part>/<entry id>` opens the row in the
-list, under the feature that holds it when it is folded there. The older `#latest`
+list, under the feature that holds it when it is folded there. A link to an entry
+always opens it: when All does not hold it (a filter, a search, Latest, or a kind
+not displayed), it opens in its own place, as pressing it does. The older `#latest`
 opens All in the order Latest and `#left` opens All with the dropped entries;
 `#left/<entry id>` opens the row where it lives, and `?view=order` shows the map.
 A row named by an address is looked for first
