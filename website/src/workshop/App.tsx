@@ -630,17 +630,20 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
       setFolds(folds);
       setMore(shownMore);
     }
-    if (!isAll) {
-      // A search typed elsewhere shows All with its matches.
-      moveStarts();
-      setViewState('all');
-      address$(HOME, null, true, true, next);
-      settle(HOME, null);
-      return;
-    }
     // The entry open last stays named only while the list still draws it; open, it is drawn open wherever it now stands.
     const open = openKeyRef.current;
     const found = open ? locate(nextSections, open, new Set()) : null;
+    if (!isAll) {
+      // A search typed elsewhere shows All with its matches; the open entries the results hold stay open, and the one
+      // opened last stays named in the address.
+      const kept = [...openKeys].filter((key) => locate(nextSections, key, new Set()) !== null);
+      moveStarts();
+      setViewState('all');
+      address$(HOME, found ? open : null, true, true, next);
+      settle(HOME, found ? open : null, found?.instance ?? null);
+      setOpenKeys(new Set(kept));
+      return;
+    }
     if (open && !found) {
       setOpenKey(null);
       setOpenAt(null);

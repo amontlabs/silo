@@ -269,6 +269,29 @@ describe('an address from the history', () => {
 });
 
 describe('an open entry', () => {
+  it('stays open and named when a search typed in its part takes the person to All and the results hold it', async () => {
+    mockApi();
+    history.replaceState(null, '', '/workshop#part-d/fork');
+    await renderApp(withNeeds());
+    await waitFor(() => expect(rowButton('Fork a computer')).toHaveAttribute('aria-expanded', 'true'));
+    await userEvent.click(screen.getByRole('button', { name: 'Search' }));
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search' }), 'fork');
+    expect(document.querySelector('.ws')).toHaveClass('v-all');
+    expect(rowButton('Fork a computer')).toHaveAttribute('aria-expanded', 'true');
+    expect(location.search).toBe('?view=all&q=fork');
+    expect(location.hash).toBe('#part-d/fork');
+  });
+
+  it('is not named when a search typed in its part takes the person to results that do not hold it', async () => {
+    mockApi();
+    history.replaceState(null, '', '/workshop#part-d/fork');
+    await renderApp(withNeeds());
+    await waitFor(() => expect(rowButton('Fork a computer')).toHaveAttribute('aria-expanded', 'true'));
+    await userEvent.click(screen.getByRole('button', { name: 'Search' }));
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search' }), 'z');
+    expect(location.hash).toBe('');
+  });
+
   it('stays drawn, its feature unfolded and past the first six, through a change of filter, and is named until the list no longer holds it', async () => {
     const decisions = Array.from({ length: 8 }, (_, i) => ({ id: `q${i}`, stage: 'first', part: 'part-a', asks: `Question ${i}?` }));
     const data = { ...buildData({ features: [...FEATURES, { id: 'asks-much', stage: 'second', part: 'part-a', name: 'Asks much', what: 'x', needs: decisions.map((d) => d.id) }], decisions: [...DECISIONS, ...decisions] }), films: [] };
