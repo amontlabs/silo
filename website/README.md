@@ -413,8 +413,8 @@ What a person sees:
   and its votes ("👍 3" from one vote up). The decisions a feature needs fold
   under it, those not decided first, then the others, each in the plan's order;
   six show, then a line "N more" opens the rest. After the last feature come the
-  decisions no feature needs, one foldable row per part, under "Decisions no
-  feature needs". A dropped or replaced row is struck through. Above the list,
+  decisions no feature needs, one foldable row per part, under "Other
+  decisions". A dropped or replaced row is struck through. Above the list,
   under the header and staying there while it scrolls, are the line of controls
   and the strip.
 - The line of controls: Build order or Latest; Filter, a menu with a field and
@@ -1250,7 +1250,8 @@ into `dist/films/`:
   `voice.json` is inlined, each clip's source pointing at `/films/<id>/voice/`.
   It opens paused on a picture of the film: the stage as it stands at the end
   of its last scene (the frame the player holds for `?scene=<last>`), with the
-  Play control over it. Of the end of the first scene and the end of the last,
+  Play control over it; while it is held, the bar reads as at the start ("0:00 / 3:23",
+  no scene played). Of the end of the first scene and the end of the last,
   the last gives the better picture on all five films; several first scenes are
   an almost empty stage. The first press on Play, the play control or the space
   bar starts the film from its beginning, with sound; no sound starts without a
@@ -1258,7 +1259,7 @@ into `dist/films/`:
   player reads it. In the Workshop's frame (`?in=workshop`) the page takes the
   Workshop's paper around the stage in both themes, keeps no margin of its own,
   and posts its height to the Workshop; under 480 px wide it shows the stage
-  alone until the film plays. The page's script and styles for this are inline
+  alone, with a round play button of 40 px and no word, until the film plays. The page's script and styles for this are inline
   (`PICTURE` and `FRAMED` in `scripts/films.mjs`); nothing in `films/player/`
   changes. It
   takes the site's theme from `/theme.js` (light, dark or the system's, as the

@@ -246,7 +246,7 @@ export function allSections(plan: Plan, graph: Graph, stages: Stage[], query: Qu
     if (passing && !passing.length) continue;
     bundles.push({ type: 'bundle', key: `bundle-${part ?? PRODUCT}`, part, title: partTitle(plan, part), kids, passing, decided: decidedOf(kids) });
   }
-  if (bundles.length) sections.push({ key: 'loose', title: 'Decisions no feature needs', items: bundles });
+  if (bundles.length) sections.push({ key: 'loose', title: 'Other decisions', items: bundles });
   return sections;
 }
 

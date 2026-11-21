@@ -38,7 +38,7 @@ describe('the list in build order', () => {
 
   it('numbers every feature by its place in the plan, groups them by stage, and ends with the decisions no feature needs, one row per part', () => {
     const sections = allSections(plan, graph, withNeeds().stages, query());
-    expect(sections.map((section) => section.title)).toEqual(['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth', 'Eleventh', 'Twelfth', 'Gone', 'Decisions no feature needs']);
+    expect(sections.map((section) => section.title)).toEqual(['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth', 'Eleventh', 'Twelfth', 'Gone', 'Other decisions']);
     const steps = sections.flatMap((section) => section.items).flatMap((item) => (item.type === 'feature' ? [item.step] : []));
     expect(steps).toEqual(steps.map((_, index) => index + 1));
     const loose = sections.at(-1)!.items.map((item) => (item.type === 'bundle' ? [item.title, item.kids.map((kid) => kid.key)] : null));
@@ -217,6 +217,16 @@ describe('relations', () => {
     await waitFor(() => expect(rowButton('Which way do changes go?')).toHaveAttribute('aria-expanded', 'true'));
     await waitFor(() => expect([...document.querySelectorAll('.wa-sp.rel')].map((pip) => pip.getAttribute('data-row'))).toEqual(['entry-fork-keeps']));
     expect([...document.querySelectorAll('.wa-row.lit')].map((lit) => lit.getAttribute('data-row'))).toEqual(['entry-fork-keeps']);
+  });
+
+  it('let the keyboard go on from a row pressed on its name', async () => {
+    mockApi();
+    history.replaceState(null, '', '/workshop?view=all');
+    await renderApp(withNeeds());
+    fireEvent.click(itemOf('Fork a computer').querySelector('.wa-name > span') as HTMLElement);
+    expect(document.activeElement).toBe(rowButton('Fork a computer'));
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(rowButton('Save a checkpoint'));
   });
 
   it('give each pip of the strip a target and one stop for the keyboard, the arrows moving along it, a press bringing its row', async () => {

@@ -224,6 +224,10 @@ function Line({ row, instance, props, cls, label, children, lead }: { row: Row; 
   const toggle = (event: MouseEvent) => {
     // A click with a modifier key on a link is the browser's.
     if ((event.target as Element).closest('a, .wa-caret')) return;
+    // A press on a cell gives the line's button the focus, as a press on the button does, so the arrows go on from here.
+    // A pointer's press draws no ring: only the keyboard's focus does.
+    const hit = (event.currentTarget as HTMLElement).querySelector<HTMLElement>(':scope > .wa-hit');
+    if (hit && document.activeElement !== hit) hit.focus({ preventScroll: true, focusVisible: event.detail === 0 } as FocusOptions);
     ctx.onToggle(row, instance);
   };
   return (

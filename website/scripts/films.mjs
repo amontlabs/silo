@@ -228,8 +228,10 @@ const PICTURE = `(() => {
   const hold = () => {
     const timing = window.__timing, player = window.__player;
     if (shown || q.has('t') || q.has('scene') || q.has('embed') || !timing || !player || !timing.scenes.length) return;
+    held = true;
     player.seek(timing.scenes[timing.scenes.length - 1][1]);
-    shown = held = true;
+    shown = true;
+    atStart();
   };
   const fromStart = (event) => {
     if (!held || (event.type === 'keydown' && event.key !== ' ')) return;
@@ -239,6 +241,21 @@ const PICTURE = `(() => {
   };
   addEventListener('click', fromStart, true);
   addEventListener('keydown', fromStart, true);
+  // While the picture is held, the bar reads as at the start: no time gone, no scene played. The picture is the end of
+  // the last scene; the bar is not.
+  const clock = (t) => Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0');
+  const atStart = () => {
+    const tl = window.__film && window.__film.timeline, time = document.querySelector('.time');
+    if (!held || !tl || !time) return;
+    const text = '0:00 / ' + clock(tl.duration());
+    if (time.textContent !== text) time.textContent = text;
+    document.querySelectorAll('.segs .seg').forEach((seg, k) => {
+      if (seg.firstChild && seg.firstChild.style.transform !== 'scaleX(0)') seg.firstChild.style.transform = 'scaleX(0)';
+      if (seg.classList.contains('on') !== (k === 0)) seg.classList.toggle('on', k === 0);
+    });
+  };
+  const nav = document.querySelector('nav');
+  if (nav) new MutationObserver(atStart).observe(nav, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['style', 'class'] });
   const started = () => {
     const tl = window.__film && window.__film.timeline;
     if (tl && !tl.paused()) root.classList.add('started');
@@ -261,8 +278,10 @@ const FRAMED = [
   '.in-workshop .subtitle { margin-top: 10px; font-size: 17px; }',
   '@media (max-width: 480px) {',
   '  .in-workshop:not(.started) #frame > :not(.screen) { display: none; }',
-  '  .in-workshop .bigplay { padding: 9px 18px 9px 14px; font-size: 15px; gap: 6px; }',
-  '  .in-workshop .bigplay svg { width: 20px; height: 20px; }',
+  // Small, the control is a round play button of 40 px with no word, so the picture stays in sight.
+  '  .in-workshop .bigplay { width: 40px; height: 40px; padding: 0; gap: 0; justify-content: center; border: 1px solid var(--ink); background: var(--bg); color: var(--ink); box-shadow: none; }',
+  '  .in-workshop .bigplay span { display: none; }',
+  '  .in-workshop .bigplay svg { width: 18px; height: 18px; margin-left: 2px; }',
   '  .in-workshop #frame .caption { font-size: 13px; min-height: 18px; margin-bottom: 6px; }',
   '  .in-workshop .subtitle { font-size: 13px; margin-top: 6px; }',
   '}',

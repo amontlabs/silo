@@ -276,10 +276,15 @@ use it) and `?voice=<id>`.
 
 ## On the site
 
-The site plays every film at `/films/<id>/`, and the Workshop offers "Watch" for it. That page is
-the film alone: the stage, its caption, its subtitles and its controls, opening paused on Play, with
-the film's title in the tab and the site's light or dark theme. It holds nothing of the page above:
-no title and line, no entries, no questions.
+The site plays every film at `/films/<id>/`. That page is the film alone: the stage, its caption,
+its subtitles and its controls, opening paused on a picture of the film (the end of its last scene)
+with Play over it, with the film's title in the tab and the site's light or dark theme. The first
+press plays the film from its beginning. It holds nothing of the page above: no title and line, no
+entries, no questions.
+
+In the Workshop, every film stands on a line above the map. Pressing one opens it in a place of its
+own, as a part opens, and it plays there, in a frame of its page; an entry the film shows also has
+the film at the top of its opened row.
 
 The site's build makes it from the tracked files of `films/` each time, with Node only
 (`website/scripts/films.mjs`, described in [`website/README.md`](../website/README.md#films)). It
