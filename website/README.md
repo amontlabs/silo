@@ -1256,6 +1256,8 @@ snapshots catch up when the hour resets.
 | `website/scripts/films.mjs` | Makes each film's page and the player they share, into `dist/films/` (see [Films](#films)). |
 | `website/scripts/films.test.mjs` | The films' pages on a small made-up film: what is written, the films, folders and links refused, the hook `vite.config.ts` registers, and the shared files equal to what a real page asks for. |
 | `website/scripts/films-test-support.mjs` | The made-up `films/` folder of those tests and of `src/workshop/data.test.ts`. |
+| `website/scripts/film-seams.mjs` | Reads the seams in the films' soft shapes (shadows, glows) on the built site, in WebKit, Chromium and Firefox, at both widths, both themes and device scales 1, 2 and 3; exits non-zero when a line stands out by more than 3 levels of 255. `npm --prefix website run film-seams`. |
+| `website/scripts/film-seams.test.mjs` | The seam reading on made-up pictures, and that the player keeps the tiles of a soft shape off `crispEdges` and snaps them. |
 | `website/scripts/plan-entries.mjs` | Makes the list of the plan's entries from `plan/`, for `prepare-vercel.mjs` and the local server. |
 | `website/scripts/workshop-dev.mjs` | Local server for the site and the API. |
 | `website/scripts/fake-github.mjs` | Fake GitHub used by the tests and by `--fake`. |

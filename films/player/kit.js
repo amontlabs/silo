@@ -73,17 +73,25 @@
   // Depth without filters. A soft shape (a shadow, a glow, the ground under big type) is nine gradient tiles: four
   // corners, four edges and a middle. It is as smooth as a blur and costs almost nothing to redraw, so a camera move
   // over twenty pieces stays smooth. `fall` px of falloff around the shape shrunk by `inset`, dropped by `dy`.
+  //
+  // The tiles meet along four lines. A line that falls inside a device pixel leaves each tile a part of it, and the two
+  // parts together cover less than the whole (a faint seam); `crispEdges` rounds a tile's edges, but WebKit rounds
+  // them outwards, so the neighbours overlap by a pixel and add their alpha (a dark seam). So every tile edge on a
+  // line is put on a whole device pixel (`snapSofts`), and no tile covers part of a pixel along the lines.
   const FALL = [1, 0.94, 0.78, 0.55, 0.32, 0.14, 0.04, 0];
+  let softs = [];
   function soft(parent, w, h, rx, { color, alpha, fall, inset = 0, dy = 0 }) {
-    const g = make("g", { "shape-rendering": "crispEdges" }, parent);
+    const g = make("g", {}, parent);
     const rc0 = Math.max(rx - inset, 2);
-    const tiles = w2 => {
+    // The shape `w2` wide: the corner radius `rc`, the falloff `R` past it and the four lines the tiles meet along.
+    const frame = w2 => {
       const l = -w2 / 2 + inset, r = w2 / 2 - inset, t = -h / 2 + inset + dy, b = h / 2 - inset + dy;
-      const rc = Math.max(0.5, Math.min(rc0, (r - l) / 2, (b - t) / 2)), R = rc + fall, xl = l + rc, xr = r - rc, yt = t + rc, yb = b - rc;
-      return { rc, R, at: [[xl - R, yt - R, R, R], [xr, yt - R, R, R], [xl - R, yb, R, R], [xr, yb, R, R],
-                            [xl, yt - R, xr - xl, R], [xl, yb, xr - xl, R], [xl - R, yt, R, yb - yt], [xr, yt, R, yb - yt], [xl, yt, xr - xl, yb - yt]] };
+      const rc = Math.max(0.5, Math.min(rc0, (r - l) / 2, (b - t) / 2));
+      return { rc, R: rc + fall, xl: l + rc, xr: r - rc, yt: t + rc, yb: b - rc };
     };
-    const first = tiles(w), q = first.rc / first.R, id = `fj-s${color.replace(/\W/g, "")}-${Math.round(alpha * 1000)}-${Math.round(first.rc * 10)}-${Math.round(fall)}`;
+    const cut = ({ R, xl, xr, yt, yb }) => [[xl - R, yt - R, R, R], [xr, yt - R, R, R], [xl - R, yb, R, R], [xr, yb, R, R],
+                                            [xl, yt - R, xr - xl, R], [xl, yb, xr - xl, R], [xl - R, yt, R, yb - yt], [xr, yt, R, yb - yt], [xl, yt, xr - xl, yb - yt]];
+    const first = frame(w), q = first.rc / first.R, id = `fj-s${color.replace(/\W/g, "")}-${Math.round(alpha * 1000)}-${Math.round(first.rc * 10)}-${Math.round(fall)}`;
     if (!stage.querySelector(`#${id}-0`)) {
       const stops = FALL.map((f, i) => `<stop offset="${(q + (1 - q) * i / (FALL.length - 1)).toFixed(4)}" stop-color="${color}" stop-opacity="${(alpha * f).toFixed(4)}"/>`).join("");
       const defs = stage.querySelector("defs");
@@ -91,9 +99,32 @@
       [[0, 1, 0, 0], [0, 0, 0, 1], [1, 0, 0, 0], [0, 0, 1, 0]].forEach(([x1, y1, x2, y2], i) => defs.insertAdjacentHTML("beforeend", `<linearGradient id="${id}-${i + 4}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}">${stops}</linearGradient>`));
     }
     const box = ([x, y, w2, h2]) => ({ x, y, width: Math.max(0, w2), height: Math.max(0, h2) });
-    const els = first.at.map((r, i) => make("rect", { ...box(r), fill: i < 8 ? `url(#${id}-${i})` : color, "fill-opacity": i < 8 ? null : alpha }, g));
-    g.fit = (w2, t, dur) => tiles(w2).at.forEach((r, i) => { if (t) t.to(els[i], { attr: box(r), duration: dur, ease: EASE.inOut }, 0); else set(els[i], box(r)); });
+    const els = cut(first).map((r, i) => make("rect", { ...box(r), fill: i < 8 ? `url(#${id}-${i})` : color, "fill-opacity": i < 8 ? null : alpha }, g));
+    const now = { w, at: "" };   // the width the shape has now, and the matrix and device scale the tiles were last placed for
+    // Places the tiles for the width `now.w`, their lines on whole device pixels of the stage's grid: `m` takes the
+    // shape's space to the stage's, `k` is device pixels per px of the page. The engines put the stage itself on whole
+    // pixels, so its own grid is the one to follow, not the screen's.
+    g.place = (m, k) => {
+      const at = m ? `${now.w} ${m.a.toFixed(5)} ${m.d.toFixed(5)} ${m.e.toFixed(4)} ${m.f.toFixed(4)} ${k}` : `${now.w}`;
+      if (at === now.at) return;
+      now.at = at;
+      const c = frame(now.w);
+      if (m && Math.abs(m.b) < 1e-6 && Math.abs(m.c) < 1e-6 && m.a > 0 && m.d > 0) {
+        const X = x => (Math.round((m.a * x + m.e) * k) / k - m.e) / m.a, Y = y => (Math.round((m.d * y + m.f) * k) / k - m.f) / m.d;
+        c.xl = X(c.xl); c.xr = X(c.xr); c.yt = Y(c.yt); c.yb = Y(c.yb);
+      }
+      cut(c).forEach((r, i) => set(els[i], box(r)));
+    };
+    g.fit = (w2, t, dur) => { if (t) t.to(now, { w: w2, duration: dur, ease: EASE.inOut }, 0); else now.w = w2; };
+    softs.push(g);
     return g;
+  }
+  // Every soft shape placed again for where it now stands on screen. It runs after each frame of the film, and when the
+  // window changes size or scale, since a tile's place on the pixel grid depends on both. All the matrices are read
+  // before any tile is written, so the page lays out once.
+  function snapSofts() {
+    const k = window.devicePixelRatio || 1, ms = softs.map(g => (g.isConnected ? g.getCTM() : null));
+    softs.forEach((g, i) => g.place(ms[i], k));
   }
   // A shadow is two soft shapes: where the piece touches the ground, and the light from above. 0 a chip, 1 a card, 2 a window.
   const DEPTH = [{ fall: 14, inset: 3, dy: 5 }, { fall: 26, inset: 5, dy: 9 }, { fall: 58, inset: 10, dy: 24 }];
@@ -181,7 +212,7 @@
   // ---------- the stage ----------
   function setStage() {
     stage.replaceChildren();
-    uidN = 0; pieces = []; links = []; notes = [];
+    uidN = 0; pieces = []; links = []; notes = []; softs = [];
     make("defs", {}, stage).innerHTML = `
       <radialGradient id="fj-bg" cx="50%" cy="-12%" r="110%"><stop offset="0" stop-color="${P.bgHi}"/><stop offset="${dark ? 1 : 0.7}" stop-color="${P.bg}"/></radialGradient>
       <radialGradient id="fj-light" cx="50%" cy="0%" r="72%"><stop offset="0" stop-color="${P.accent}" stop-opacity="0.1"/><stop offset="1" stop-color="${P.accent}" stop-opacity="0"/></radialGradient>
@@ -1033,6 +1064,7 @@
   const clock = t => Math.floor(t / 60) + ":" + String(Math.floor(t % 60)).padStart(2, "0");
   const GLYPH = { Play: "M8 5.5v13l11-6.5z", Pause: "M7 5h3.6v14H7zM13.4 5H17v14h-3.6z", Replay: "M12 5a7 7 0 1 1-6.6 4.7M12 5 8.5 2M12 5 8.5 8" };
   function show() {
+    snapSofts();
     const t = tl.time(), i = sceneAt(t), n = spec.scenes.length, segs = $(".segs");
     if (i !== shown) {
       shown = i; const s = spec.scenes[i] || {};
@@ -1163,6 +1195,8 @@
     });
     const retheme = () => { if (themeNow() !== theme) { mount(); show(); post(true); } };
     new MutationObserver(retheme).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+    new ResizeObserver(snapSofts).observe(stage);   // a new size of the stage moves its pixel grid under every soft shape
+    addEventListener("resize", snapSofts);
     scheme.addEventListener("change", retheme);
     if (query.has("t")) tl.seek(Math.min(+query.get("t"), tl.duration()));
     else if (query.has("scene")) tl.seek(ends[Math.min(+query.get("scene"), n - 1)]);
