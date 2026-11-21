@@ -211,14 +211,17 @@ A part whose id is `product`, `left`, `suggested` or `latest` stops the build:
 those are the page's own addresses, and the message names the part and the fix.
 `map.ts` holds the drawing, `SILO_MAP`. It places every part of
 `plan/parts.json` on the full map and on the folded one, inside two zones: your
-Mac, and the virtual machines in it. Text that is not a part stands for what
-is not Silo: outside the Mac, the internet, the model providers, and a server
-or a cloud where computers also run; inside it, your own terminal and
-editor; under the boundary, its channels. Wires join them, most with one word,
-such as "facts" from the boundary to the record or "requests" from the
-boundary to the internet. A wire that the folded map draws again carries that
-drawing as its `fold`, so it looks the same there; a wire or a text with no
-folded place fades out as the map folds.
+Mac, and the virtual machines in it. Text that is not a part stands for what is
+not Silo: outside the Mac, the internet, the model providers, and a server or a
+cloud where computers also run, and under it, beside the app, your phone; inside
+it, your own terminal and editor; under the boundary, its channels. Wires join
+them, most with one word, such as "facts" from the boundary to the record or
+"requests" from the boundary to the internet. The wire from "What you see" to
+your phone has no word, since the phone's text says what travels; it runs down
+between the Mac's edge and the parts on the left, and "How it is checked" starts
+after the phone. A wire that the folded map draws again carries that drawing as
+its `fold`, so it looks the same there; a wire or a text with no folded place
+fades out as the map folds.
 
 Each wire and each zone says in `rests` what in the plan it draws. An entry of
 `rests` is the id of a decision or a feature, `word:<id>` for a word of

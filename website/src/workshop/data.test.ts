@@ -507,7 +507,7 @@ describe('the map layout', () => {
       }
     });
 
-    it('draws on Silo\'s map the channels, SSH and the servers and clouds as not decided, and the way to the internet as decided', () => {
+    it('draws on Silo\'s map the channels, SSH, the servers and clouds and your phone as not decided, and the way to the internet as decided', () => {
       const map = readBuildData(REPOSITORY).map;
       // Each thing must exist first: a missing one would give the `undefined` that a decided thing gives.
       const wires = (word: string) => map.wires.filter((one) => one.label?.[2] === word);
@@ -529,6 +529,9 @@ describe('the map layout', () => {
       expect(note('The boundary\'s channels').undecided).toBe(true);
       expect(note('Your terminal').undecided).toBe(true);
       expect(note('A server or a cloud').undecided).toBeUndefined();
+      // Your phone, and the wire with no word that reaches it from What you see, rest on features with no verdict.
+      expect(note('Your phone').undecided).toBe(true);
+      expect(map.wires.filter((one) => one.of === 'views' && !one.label).map((one) => one.undecided)).toEqual([undefined, true]);
     });
   });
 
