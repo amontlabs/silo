@@ -40,9 +40,10 @@
   text-wrap: pretty;
 }
 
-/* Hero: the headline and the pitch, centred in the height the window leaves over. */
+/* Hero: the headline and the pitch, centred, then the flow right under them as their picture, with no title of its
+   own. Kept short, so the whole flow, down to its step names, shows in a laptop's window. */
 .hero {
-  padding: 56px var(--gutter) 64px;
+  padding: 24px var(--gutter) 16px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -68,14 +69,17 @@
 .pitch span {
   display: block;
 }
+.hero .flow {
+  margin-top: 16px;
+}
 /* While a picture is put at a moment in one go, nothing in it animates. */
 .jump,
 .jump * {
   transition: none !important;
   animation: none !important;
 }
-/* Until their script has drawn them, the pictures stay hidden, with their room kept. */
-.pictures-pending .mini {
+/* Until their script has drawn them, the pictures and the flow's controls stay hidden, with their room kept. */
+.pictures-pending :is(.stage, .steps, .ctl, .mini) {
   visibility: hidden;
 }
 /* The notice: where Silo stands, under the same three columns as the points */
@@ -112,7 +116,7 @@
 }
 @media (max-width: 640px) {
   .hero {
-    padding: 46px var(--gutter) 48px;
+    padding: 28px var(--gutter) 22px;
   }
   .hero h1 {
     font-size: 36px;
@@ -123,6 +127,9 @@
   }
   .pitch span {
     display: inline;
+  }
+  .hero .flow {
+    margin-top: 20px;
   }
   .strip {
     flex-wrap: wrap;

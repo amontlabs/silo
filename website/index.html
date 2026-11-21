@@ -68,6 +68,7 @@
     <link rel="stylesheet" href="/fonts/fonts.css" />
     <link rel="stylesheet" href="/src/site.css" />
     <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="/src/flow.css" />
     <link rel="stylesheet" href="/src/cards.css" />
     <script type="module" src="/src/home.ts"></script>
   </head>
@@ -94,6 +95,8 @@
         <symbol id="go" viewBox="0 0 13 13"><path d="M2 6.5h9M7.5 3 11 6.5 7.5 10" /></symbol>
         <symbol id="computer" viewBox="0 0 14 14"><rect x="1.5" y="2.5" width="11" height="7.5" /><path d="M4.5 12.5h5M7 10v2.5" /></symbol>
         <symbol id="ok" viewBox="0 0 12 12"><path d="M2.5 6.3 5 8.7l4.6-5.4" /></symbol>
+        <symbol id="dm" viewBox="0 0 12 12"><path d="M6 1.5 10.5 6 6 10.5 1.5 6Z" /></symbol>
+        <symbol id="dm-half" viewBox="0 0 12 12"><path d="M6 1.5 1.5 6 6 10.5Z" fill="currentColor" stroke="none" /><path d="M6 1.5 10.5 6 6 10.5 1.5 6Z" fill="none" /></symbol>
         <symbol id="pointer" viewBox="0 0 20 20"><path class="cur-edge" d="M3 2l12.5 6.6-5.4 1.5L8.2 15.6z" fill="currentColor" stroke-width="1.4" stroke-linejoin="round" /></symbol>
       </defs>
     </svg>
@@ -133,6 +136,99 @@
             <span>Silo records everything they do there, shows you what matters, and takes you back to any moment.</span>
             <span>The computer is a virtual machine on your Mac. Nothing of yours is inside unless you put it there.</span>
           </p>
+          <div class="flow" id="flow">
+            <figure aria-labelledby="hero-title" aria-describedby="flow-caption">
+              <figcaption class="sr-only" id="flow-caption">Three agents work in main, a virtual machine on your Mac, in two repositories. Each runs its commands with sudo, and nothing asks for approval. Silo writes down what happens. What it saw itself, such as a tool call, a file change, a connection or a model call, is a fact. What a program inside told it is a report, and it is marked apart. A request to a host that a rule allows passes. A request to a host that no rule allows is denied at the edge of main, and the attempt is recorded. A short list shows what needs you, and the denied connection opens on the process, the tool call and the turn that led to it. Another list ranks repeated work by what it cost. Checkpoints are taken on their own. You go back to the one before that turn and continue from it in a fork, while main keeps running. Before you drop the fork, Silo lists what is only there. You bring one file back to main, and the fork goes to the bin.</figcaption>
+              <div class="stage" aria-hidden="true">
+                <div class="scene">
+                  <div class="mac"></div>
+                  <span class="mac-name">your Mac</span>
+                  <div class="tl">
+                    <i class="tl-line"></i>
+                    <i class="cp c1"></i><i class="cp c2"></i><i class="cp c3"></i><i class="cp c4"></i><i class="cp c5"></i><i class="cp c6"></i><i class="cp c7"></i><i class="cp c8"></i><i class="cp c9"></i><i class="cp c10"></i>
+                    <span class="cp-name">turn 14</span>
+                  </div>
+                  <div class="box main">
+                    <p class="hd"><b>main</b><span class="run">running</span></p>
+                    <div class="ag a1">
+                      <p class="who"><i class="dot"></i><span class="nm">Claude Code</span><span class="rp">~/api</span></p>
+                      <p class="cmd"><span class="ps">$ </span><span class="tx">sudo apt install postgresql-17</span><i class="caret"></i></p>
+                      <svg class="ok" viewBox="0 0 12 12"><use href="#ok" /></svg>
+                    </div>
+                    <div class="ag a2">
+                      <p class="who"><i class="dot"></i><span class="nm">Codex</span><span class="rp">~/web</span></p>
+                      <p class="cmd"><span class="ps">$ </span><span class="tx">npm install</span><i class="caret"></i></p>
+                      <p class="cmd curl"><span class="ps">$ </span><span class="tx">curl paste.rs</span><i class="caret"></i></p>
+                      <svg class="ok" viewBox="0 0 12 12"><use href="#ok" /></svg>
+                    </div>
+                    <div class="ag a3">
+                      <p class="who"><i class="dot"></i><span class="nm">Claude Code</span><span class="rp">~/api</span></p>
+                      <p class="cmd"><span class="ps">$ </span><span class="tx">cargo build</span><i class="caret"></i></p>
+                      <svg class="ok" viewBox="0 0 12 12"><use href="#ok" /></svg>
+                    </div>
+                  </div>
+                  <div class="rec">
+                    <p class="hd"><b>record</b><b>paste.rs denied</b></p>
+                    <p class="rr r1"><svg class="mk fact"><use href="#dm" /></svg><span class="k">tool call</span><span>cargo build</span></p>
+                    <p class="rr r2"><svg class="mk"><use href="#dm" /></svg><span class="k">process</span><span>cargo build</span></p>
+                    <p class="rr r3"><svg class="mk fact"><use href="#dm" /></svg><span class="k">files</span><span>214 changed</span></p>
+                    <p class="rr r4"><svg class="mk fact"><use href="#dm" /></svg><span class="k">model</span><span>18 calls · $0.42</span></p>
+                    <p class="rr r5"><svg class="mk opinion"><use href="#dm-half" /></svg><span>by Claude Code, run 2</span></p>
+                    <p class="rr r6"><svg class="mk fact"><use href="#dm" /></svg><span class="k">network</span><span>crates.io</span></p>
+                    <p class="rr r7"><svg class="mk fact"><use href="#dm" /></svg><span class="k">network</span><span>paste.rs</span><span>denied</span></p>
+                    <p class="legend"><span><svg class="mk fact"><use href="#dm" /></svg>fact</span><span><svg class="mk"><use href="#dm" /></svg>report</span><span><svg class="mk opinion"><use href="#dm-half" /></svg>opinion</span></p>
+                    <i class="chain-line"></i>
+                    <p class="cc k1"><svg class="mk fact"><use href="#dm" /></svg><span class="k">connection</span><span>paste.rs</span></p>
+                    <p class="cc k2"><svg class="mk"><use href="#dm" /></svg><span class="k">process</span><span>curl</span></p>
+                    <p class="cc k3"><svg class="mk fact"><use href="#dm" /></svg><span class="k">tool call</span><span>curl paste.rs</span></p>
+                    <p class="cc k4"><i class="mk"></i><span class="k">turn 14</span><span>Codex</span></p>
+                  </div>
+                  <div class="list">
+                    <p class="hd"><b>needs you</b><b>cost</b></p>
+                    <p class="nr n1"><span class="no">1</span><span class="tx">paste.rs denied</span></p>
+                    <p class="nr n2"><span class="no">2</span><span class="tx">Codex asks for a host</span></p>
+                    <p class="nr n3"><span class="no">3</span><span class="tx">a run looks stuck</span><svg class="mk opinion"><use href="#dm-half" /></svg></p>
+                    <div class="cr o1"><span class="nm">npm install</span><span class="fig"><span>41 times in 12 runs</span><span>38 min</span><span>2.1 GB</span></span><i class="bar"></i></div>
+                    <div class="cr o2"><span class="nm">cargo build</span><span class="fig"><span>9 times</span><span>12 min</span><span>1.1 GB</span></span><i class="bar"></i></div>
+                    <div class="cr o3"><span class="nm">apt update</span><span class="fig"><span>7 times</span><span>3 min</span><span>0.2 GB</span></span><i class="bar"></i></div>
+                  </div>
+                  <i class="edge e1"></i><i class="edge e2"></i>
+                  <i class="req q1"></i><i class="req q2"></i>
+                  <div class="host h1"><i class="hdot"></i><span>paste.rs</span></div>
+                  <div class="host h2"><i class="hdot"></i><span>crates.io</span></div>
+                  <span class="denied">denied</span>
+                  <i class="pk p1"></i><i class="pk p2"></i>
+                  <svg class="cross" viewBox="0 0 14 14"><path d="M2 2 12 12M12 2 2 12" /></svg>
+                  <div class="bin"><span>bin</span></div>
+                  <i class="back-wire"></i>
+                  <div class="box fork">
+                    <p class="hd"><b>fork</b><span class="pb drop">Drop</span><span class="run">running</span></p>
+                    <div class="ag"><p class="who"><i class="dot"></i><span class="nm">Codex</span><span class="rp">~/web</span></p></div>
+                  </div>
+                  <div class="only">
+                    <p class="hd"><b>only here</b></p>
+                    <p class="fn f1"><span class="fnm">notes.md</span><span class="nt">not committed</span><span class="pb bb">Bring back</span><svg class="ok" viewBox="0 0 12 12"><use href="#ok" /></svg></p>
+                    <p class="fn f2"><span class="fnm">CLAUDE.md</span><span class="nt">edited</span><span class="pb bb">Bring back</span></p>
+                  </div>
+                  <span class="file">notes.md</span>
+                  <svg class="ptr" viewBox="0 0 20 20"><use href="#pointer" /></svg>
+                </div>
+              </div>
+            </figure>
+            <div class="flow-foot">
+              <ol class="steps" aria-label="Steps of the picture">
+                <li><button type="button" aria-label="Main"><i><b></b></i><span class="lb">Main</span></button></li>
+                <li><button type="button" aria-label="Full access"><i><b></b></i><span class="lb">Full access</span></button></li>
+                <li><button type="button" aria-label="Record"><i><b></b></i><span class="lb">Record</span></button></li>
+                <li><button type="button" aria-label="Boundary"><i><b></b></i><span class="lb">Boundary</span></button></li>
+                <li><button type="button" aria-label="Needs you"><i><b></b></i><span class="lb">Needs you</span></button></li>
+                <li><button type="button" aria-label="Cost"><i><b></b></i><span class="lb">Cost</span></button></li>
+                <li><button type="button" aria-label="Go back"><i><b></b></i><span class="lb">Go back</span></button></li>
+                <li><button type="button" aria-label="Drop"><i><b></b></i><span class="lb">Drop</span></button></li>
+              </ol>
+              <button class="button small ctl" type="button">Pause</button>
+            </div>
+          </div>
         </section>
         <section class="for joint" aria-labelledby="for-title">
           <h2 class="title" id="for-title">What Silo does</h2>
