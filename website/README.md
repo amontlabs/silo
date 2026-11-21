@@ -1185,9 +1185,12 @@ into `dist/films/`:
   names is left out).
 - `player/`: what the pages share, loaded as files: `voice.js` and `kit.js` of
   `films/player/`, `page.css`, the kit's `player.css`, its vendor scripts and
-  fonts, and `licences/`, the texts the icons' and the fonts' licences ask to
-  go with every copy (`films/kit/NOTICE.md`). Each page names them in a
-  comment at its end.
+  fonts, and `licences/geist.txt` and `licences/lucide.txt`, the texts the
+  icons' and the fonts' licences ask to go with every copy
+  (`films/kit/NOTICE.md`). Each page names the two licence files in a comment
+  at its end. These shared files are a fixed list written in `films.mjs`:
+  nothing is found by listing a folder, and a file of the list that is missing
+  stops the build.
 
 The pages name every file by its absolute path under `/films/`, so a film's
 address works with or without its closing slash. A folder directly under
@@ -1195,9 +1198,17 @@ address works with or without its closing slash. A folder directly under
 film whose files are not complete stops the build with the film, the file and
 the fix, the way the plan's errors read: a `film.json` whose `id` is not the
 folder's, no title, no `explainer.js`, no `voice.json`, or a clip that is
-missing, a link or outside the film's `voice/`. A film's folder that is a link
-is refused too. The step uses Node only and reads only tracked files of the
-repository; nothing it makes is committed.
+missing or is not named `voice/<name>.mp3`. A film's folder that is a link
+is refused too.
+
+The build follows no link. For each file it reads or copies (a shared file,
+the page template `films/player/page.html`, a film's file or clip), every
+folder on its path under `films/` is a plain folder, the file is a plain file,
+and its real path is inside the real path of `films/`; otherwise the build
+stops and names the file and the link. So no file outside `films/` is
+published, nor its text put into a page. The step uses Node only, and nothing
+it makes is committed. It does not check that a file is tracked by git: the
+deployed site is always built from a fresh clone, where every file is tracked.
 
 The Workshop's build data says which films the site plays: `films`, one
 `{ id, playable }` per film, `playable` true for a film whose page the build

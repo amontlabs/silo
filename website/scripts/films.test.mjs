@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defaultFilmsDir, FilmError, filmFileFor, filmFiles, filmIds, readFilm, writeFilms } from './films.mjs';
@@ -63,7 +63,7 @@ test('writes each film\'s page, its explainer and the clips its voice names, and
     assert.equal(line.match(/<\/script/g).length, 1, 'a sentence cannot close the script');
     const voice = JSON.parse(line.match(/window\.FILM_VOICE_DATA = (.*);<\/script>/)[1]);
     assert.deepEqual(voice.voices[0].scenes.map((s) => s.sentences[0].src), ['/films/tiny/voice/a.mp3', '/films/tiny/voice/b.mp3']);
-    assert.match(page, /licences/);
+    assert.match(page, /<!-- The third-party files this page loads and their licences: \/films\/player\/licences\/geist\.txt and \/films\/player\/licences\/lucide\.txt, and films\/kit\/NOTICE\.md in the repository\. -->\n$/);
     assert.equal(readFileSync(join(out, 'films', 'tiny', 'explainer.js'), 'utf8'), 'window.TINY = "</script>";');
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -77,7 +77,7 @@ test('a film with a missing clip stops the build with the film, the file and the
     const out = join(root, 'dist');
     await assert.rejects(writeFilms(out, films), (error) => {
       assert.ok(error instanceof FilmError);
-      assert.equal(error.message, 'films/tiny/voice/b.mp3: (file): is missing, or is not a plain file (voice.json names it at voices[0].scenes[1].sentences[0].file). Fix: run tools/voice.py tiny from films/, which speaks the missing sentences again');
+      assert.equal(error.message, 'films/tiny/voice/b.mp3: (file): is missing (voice.json names it at voices[0].scenes[1].sentences[0].file). Fix: run tools/voice.py tiny from films/, which speaks the missing sentences again');
       return true;
     });
     assert.deepEqual(readdirSync(root), ['films']);
@@ -86,16 +86,62 @@ test('a film with a missing clip stops the build with the film, the file and the
   }
 });
 
-test('a clip that is a link, or a path out of voice/, is refused', () => {
+test('a clip that is a link, or any name but voice/<name>.mp3, is refused', () => {
   const { root, films } = made();
   try {
     unlinkSync(join(films, 'tiny', 'voice', 'a.mp3'));
     symlinkSync(join(films, 'tiny', 'voice', 'b.mp3'), join(films, 'tiny', 'voice', 'a.mp3'));
-    assert.throws(() => readFilm(films, 'tiny'), /^Error: films\/tiny\/voice\/a\.mp3: \(file\): is missing, or is not a plain file/);
-    const voice = JSON.parse(readFileSync(join(films, 'tiny', 'voice.json'), 'utf8'));
-    voice.voices[0].scenes[0].sentences[0].file = 'voice/../../other/x.mp3';
-    writeFileSync(join(films, 'tiny', 'voice.json'), JSON.stringify(voice));
-    assert.throws(() => readFilm(films, 'tiny'), /voices\[0\]\.scenes\[0\]\.sentences\[0\]\.file: "voice\/\.\.\/\.\.\/other\/x\.mp3" is not a clip of the film's voice\//);
+    assert.throws(() => readFilm(films, 'tiny'), (error) => error instanceof FilmError && error.message === 'films/tiny/voice/a.mp3: (file): is reached through a link, films/tiny/voice/a.mp3. Fix: make films/tiny/voice/a.mp3 a plain file: the site publishes nothing a link leads to');
+    const original = readFileSync(join(films, 'tiny', 'voice.json'), 'utf8');
+    for (const file of ['voice/../../other/x.mp3', 'voice/a.wav', 'voice/a.mp3.txt', 'voice/sub/a.mp3', 'explainer.js', '/etc/a.mp3', 'voice/.mp3', 'voice/a.MP3', 42]) {
+      const voice = JSON.parse(original);
+      voice.voices[0].scenes[0].sentences[0].file = file;
+      writeFileSync(join(films, 'tiny', 'voice.json'), JSON.stringify(voice));
+      assert.throws(() => readFilm(films, 'tiny'), (error) => error instanceof FilmError && error.message === `films/tiny/voice.json: voices[0].scenes[0].sentences[0].file: ${JSON.stringify(file)} is not a clip of the film's voice/ (voice/<name>.mp3). Fix: run tools/voice.py tiny from films/`, String(file));
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a link on the way to any file the build reads is refused, naming the file and the link', async () => {
+  // Each case replaces a folder or a file of films/ with a link to a copy of it outside films/.
+  const cases = [
+    ['tiny/voice', 'films/tiny/voice/a.mp3', 'folder'],
+    ['player', 'films/player/page.css', 'folder'],
+    ['kit/kit', 'films/kit/kit/player.css', 'folder'],
+    ['kit/kit/vendor', 'films/kit/kit/vendor/gsap.min.js', 'folder'],
+    ['kit/kit/fonts', 'films/kit/kit/fonts/geist-regular.otf', 'folder'],
+    ['kit/licences', 'films/kit/licences/geist.txt', 'folder'],
+    ['player/page.html', 'films/player/page.html', 'file'],
+    ['player/voice.js', 'films/player/voice.js', 'file'],
+    ['tiny/explainer.js', 'films/tiny/explainer.js', 'file'],
+  ];
+  for (const [linked, file, kind] of cases) {
+    const { root, films } = made();
+    try {
+      const outside = join(root, 'outside');
+      cpSync(join(films, linked), outside, { recursive: true });
+      rmSync(join(films, linked), { recursive: true });
+      symlinkSync(outside, join(films, linked));
+      const out = join(root, 'dist');
+      await assert.rejects(writeFilms(out, films), (error) => {
+        assert.ok(error instanceof FilmError, linked);
+        assert.equal(error.message, `${file}: (file): is reached through a link, films/${linked}. Fix: make films/${linked} a plain ${kind}: the site publishes nothing a link leads to`);
+        return true;
+      });
+      assert.ok(!existsSync(out), linked);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('a shared file missing from the fixed list stops the build: a licence text cannot drop out', async () => {
+  const { root, films } = made();
+  try {
+    unlinkSync(join(films, 'kit', 'licences', 'lucide.txt'));
+    await assert.rejects(writeFilms(join(root, 'dist'), films), (error) => error instanceof FilmError && error.message === 'films/kit/licences/lucide.txt: (file): is missing. Fix: restore it from git (the site publishes it as /films/player/licences/lucide.txt)');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

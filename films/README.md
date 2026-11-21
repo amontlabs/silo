@@ -284,10 +284,12 @@ no title and line, no entries, no questions.
 The site's build makes it from the tracked files of `films/` each time, with Node only
 (`website/scripts/films.mjs`, described in [`website/README.md`](../website/README.md#films)). It
 takes `player/page.html` without its parts, `player/voice.js`, `player/kit.js`, `player/page.css`,
-the kit's `player.css`, vendor scripts, fonts and `licences/`, and of each film `film.json`,
-`explainer.js`, `voice.json` and the clips it names. These are loaded as files, not inlined. The
-build stops on a film whose files are not complete, with the film, the file and the fix: a clip
-missing from `voice/` is fixed by `tools/voice.py <id>`.
+the kit's `player.css`, vendor scripts and fonts, and the licence texts `kit/licences/geist.txt`
+and `kit/licences/lucide.txt`, and of each film `film.json`, `explainer.js`, `voice.json` and the
+clips it names, each `voice/<name>.mp3`. These are loaded as files, not inlined. The build stops on
+a film whose files are not complete, with the film, the file and the fix: a clip missing from
+`voice/` is fixed by `tools/voice.py <id>`. It follows no link: a folder or a file of `films/` that
+is a link, on the way to a file it reads, stops it too.
 
 So after a film changes, nothing in `films/` is to be built for the site: commit the film's files
 (the clips of `voice/` included), and the next build of the site plays it. To see it locally, run
