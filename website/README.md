@@ -642,15 +642,18 @@ What a person sees:
 - A chunk that failed (facts, notes, history) says so in the place its content
   would be, with a Reload button: "Details could not load.", "Notes could not
   load." or "History could not load.". Nothing is left out silently. Each
-  deployment names its chunks after their content, and the site serves only
-  the newest, so a page opened before a deployment finds its chunks gone.
+  chunk's name is made from its content, and the site serves only the newest
+  build's files. So a page opened before a deployment finds gone each chunk
+  whose content that deployment changed (new notes, a new history line); a
+  chunk whose content did not change keeps its name and still loads.
   The build writes one id into the page (`<meta name="workshop-build">`) and
   into its script (`vite.config.ts`, `workshopBuild`). When a chunk fails, the
-  page fetches its own address again, with no cache, and compares the id of
-  that page with its own (`chunks.ts`). Another id means the site has changed:
+  page fetches its own address again, its query included, with no cache and
+  without following a redirect, and compares the id of that page with its own
+  exactly as written (`chunks.ts`). Another id means the site has changed:
   the part says "The Workshop has changed since this page opened." instead,
   and that chunk is not asked for again. The same id, an answer that is not
-  the Workshop's page (a sign-in or gateway page), a page with no id, or no
+  the Workshop's page (a redirect, a sign-in or gateway page), a page with no id, or no
   answer within 8 seconds is an ordinary failure. The dev server writes no id,
   so there nothing is ever called changed. An ordinary failure is tried again
   when its row, Notes or History opens again; a pointer, press or focus that

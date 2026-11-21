@@ -23,10 +23,31 @@ afterEach(() => {
 });
 
 describe('the probe', () => {
-  it('answers same for a page of this build, asking this address with no cache', async () => {
+  it('answers same for a page of this build, asking this address and its query with no cache and no redirect', async () => {
+    history.replaceState(null, '', '/workshop?view=all&state=undecided#part-a/core');
     const fetch = answering(async () => html(page('build-a')));
     expect(await probe('build-a')).toBe('same');
-    expect(fetch).toHaveBeenCalledWith('/workshop', expect.objectContaining({ cache: 'no-store' }));
+    expect(fetch).toHaveBeenCalledWith('/workshop?view=all&state=undecided', expect.objectContaining({ cache: 'no-store', redirect: 'manual' }));
+  });
+
+  it('answers failed for a redirect, wherever it leads', async () => {
+    // Refused, as a browser gives it with `redirect: 'manual'`.
+    answering(async () => ({ ok: false, status: 0, type: 'opaqueredirect', redirected: false, headers: new Headers(), text: async () => '' }) as unknown as Response);
+    expect(await probe('build-a')).toBe('failed');
+    // Followed anyway, to a page of another build.
+    answering(async () => {
+      const followed = html(page('build-b'));
+      Object.defineProperty(followed, 'redirected', { value: true });
+      return followed;
+    });
+    expect(await probe('build-a')).toBe('failed');
+  });
+
+  it('compares the ids exactly as written', async () => {
+    answering(async () => html(page(' build-a ')));
+    expect(await probe('build-a')).toBe('changed');
+    answering(async () => html(page('BUILD-A')));
+    expect(await probe('build-a')).toBe('changed');
   });
 
   it('answers changed for a page of another build', async () => {
@@ -83,7 +104,8 @@ describe('the probe', () => {
   it('reads the id from the meta of that name only', () => {
     expect(buildOf(page('build-a'))).toBe('build-a');
     expect(buildOf('<p>workshop-build build-a</p><meta name="other" content="build-a">')).toBeNull();
-    expect(buildOf('<meta name="workshop-build" content="  ">')).toBeNull();
+    expect(buildOf('<meta name="workshop-build" content="">')).toBeNull();
+    expect(buildOf('<meta name="workshop-build" content=" build-a ">')).toBe(' build-a ');
   });
 });
 

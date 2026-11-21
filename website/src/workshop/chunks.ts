@@ -1,6 +1,6 @@
-// The parts of the page loaded later (notes, history, what the entries say of the lists). Each deployment names
-// its chunks after their content, and the site serves only the newest, so a page opened before a deployment asks
-// for chunks that no longer exist. A reload is then the only way to them.
+// The parts of the page loaded later (notes, history, what the entries say of the lists). A chunk's name is made from
+// its content, and the site serves only the newest build's files, so a page opened before a deployment that changed a
+// chunk asks for one that no longer exists. A reload is then the only way to it.
 //
 // Whether the site changed is read from a mark made for it: the build writes one id into the page (a `meta` named
 // BUILD_META) and into the script (`__WORKSHOP_BUILD__`, vite.config.ts). The dev server writes none.
@@ -24,14 +24,17 @@ export class SiteChanged extends Error {
  */
 export type Probe = 'same' | 'changed' | 'failed';
 
-/** The build id a page's markup carries, or null when it carries none. */
+/** The build id a page's markup carries, exactly as written, or null when it carries none. */
 export function buildOf(html: string): string | null {
   const meta = new DOMParser().parseFromString(html, 'text/html').querySelector(`meta[name="${BUILD_META}"]`);
-  const id = meta?.getAttribute('content')?.trim();
+  const id = meta?.getAttribute('content');
   return id ? id : null;
 }
 
-/** Asks the site for this page's address again and compares the build id of its answer with `build`, this page's. */
+/**
+ * Asks the site for this page's address again, its query included, and compares the build id of its answer with
+ * `build`, this page's. A redirect is not followed: whatever it leads to (a sign-in, a gateway) is not this page.
+ */
 export async function probe(build: string): Promise<Probe> {
   // The dev server writes no id: nothing there is ever called changed.
   if (!build) return 'failed';
@@ -44,8 +47,8 @@ export async function probe(build: string): Promise<Probe> {
     }, probeConfig.ms);
   });
   const asked = (async (): Promise<Probe> => {
-    const response = await fetch(location.pathname, { cache: 'no-store', credentials: 'same-origin', signal: abort.signal });
-    if (!response.ok || !(response.headers.get('Content-Type') ?? '').includes('text/html')) return 'failed';
+    const response = await fetch(`${location.pathname}${location.search}`, { cache: 'no-store', credentials: 'same-origin', redirect: 'manual', signal: abort.signal });
+    if (!response.ok || response.redirected || response.type === 'opaqueredirect' || !(response.headers.get('Content-Type') ?? '').includes('text/html')) return 'failed';
     const id = buildOf(await response.text());
     if (id === null) return 'failed';
     return id === build ? 'same' : 'changed';
