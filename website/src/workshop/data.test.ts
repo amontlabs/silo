@@ -9,7 +9,7 @@ import { buildDataFrom, factsFrom, historiesFrom, historyFromGit, layoutPlanFrom
 import type { Git } from './data';
 import { buildData, CORE_NOTES, DECISIONS, emptyPlanFiles, FEATURES, PARTS, planFiles, withLists, ZIG_NOTES } from './fixtures';
 import { checkLayout, LayoutError, MAP_HEIGHT, NO_MAP, SILO_MAP, pageLayout } from './map';
-import type { Box, MapLayout } from './map';
+import type { Box, MapLayout, PageLayout, Wire } from './map';
 import { EXAMPLE_MAP } from './map-example';
 import { MAP_PIXELS, MONO_ADVANCE, SERIF_WIDTHS, shownTitle, stateNeeds, TITLE_FACE, TITLE_STYLE, titleEms, unknownCharacters } from './map-fit';
 import { stateWords } from './plan';
@@ -429,7 +429,7 @@ describe('the map layout', () => {
     const taking = (id: string) => ({ decisions: DECISIONS.map((decision) => (decision.id === id ? { ...decision, verdict: 'take' as const } : decision)) });
     const takingFeature = (id: string, built?: string) => ({ features: FEATURES.map((feature) => (feature.id === id ? { ...feature, verdict: 'take' as const, ...(built ? { built } : {}) } : feature)) });
     // The page's layout with every mark of not decided taken off: what is left is the drawing itself.
-    const bare = (layout: MapLayout) => JSON.parse(JSON.stringify(layout, (key, value) => (key === 'undecided' ? undefined : value)));
+    const bare = (layout: PageLayout) => JSON.parse(JSON.stringify(layout, (key, value) => (key === 'undecided' ? undefined : value)));
 
     it('draws the example\'s last wire, which rests on a feature with no verdict, as not decided, and the others as decided', () => {
       expect(buildData().map.wires.map((wire) => wire.undecided === true)).toEqual([false, false, false, true]);
@@ -455,6 +455,44 @@ describe('the map layout', () => {
         expect(taken.wires.every((wire) => wire.undecided === undefined)).toBe(true);
         expect(bare(taken)).toEqual(bare(proposed));
       }
+    });
+
+    it('takes no mark of not decided from a layout as written: pageLayout alone derives it from `rests`', () => {
+      const wire: Wire = {
+        of: 'part-b', d: 'M240 178H465', rests: ['part:part-b'],
+        // @ts-expect-error A layout as written has no `undecided`: a mark written by hand would stay after the owner takes the decision.
+        undecided: true,
+      };
+      // @ts-expect-error A zone as written has no `undecided` either.
+      const zone: MapLayout['zones'][number] = { ...EXAMPLE_MAP.zones[0], undecided: true };
+      // @ts-expect-error Nor a text.
+      const note: MapLayout['notes'][number] = { ...EXAMPLE_MAP.notes[0], undecided: true };
+      // @ts-expect-error The layout as the page gets it holds no `rests`.
+      const page: PageLayout['wires'][number] = { of: 'part-b', d: 'M0 0H1', rests: ['part:part-b'] };
+      // @ts-expect-error Nor the layout's file.
+      const file: PageLayout = { ...NO_MAP, file: 'website/src/workshop/map.ts' };
+      expect(page).toBeTruthy();
+      expect(file).toBeTruthy();
+      // A mark that got past the types anyway is dropped: what the wire, the zone and the text rest on is in force.
+      const map = drawn({ ...EXAMPLE_MAP, wires: [wire, ...EXAMPLE_MAP.wires.slice(1)], zones: [zone, EXAMPLE_MAP.zones[1]], notes: [note, EXAMPLE_MAP.notes[1]] });
+      expect(map.wires[0]).not.toHaveProperty('undecided');
+      expect(map.zones[0]).not.toHaveProperty('undecided');
+      expect(map.notes[0]).not.toHaveProperty('undecided');
+    });
+
+    it('drops a mark carried into a layout through a variable, which the type checker lets pass', () => {
+      // Built apart, then put in a layout: no excess-property check sees `undecided` here, so this type-checks.
+      const wire = { ...EXAMPLE_MAP.wires[0], undecided: true };
+      const zone = { ...EXAMPLE_MAP.zones[0], undecided: true };
+      const note = { ...EXAMPLE_MAP.notes[0], undecided: true };
+      const layout: MapLayout = { ...EXAMPLE_MAP, wires: [wire, ...EXAMPLE_MAP.wires.slice(1)], zones: [zone, EXAMPLE_MAP.zones[1]], notes: [note, EXAMPLE_MAP.notes[1]] };
+      // Each rests only on what is in force: a part.
+      expect([wire.rests, zone.rests, note.rests]).toEqual([['part:part-b'], ['part:part-a'], ['part:part-b']]);
+      const map = pageLayout(layout, plan());
+      expect(map.wires[0]).not.toHaveProperty('undecided');
+      expect(map.zones[0]).not.toHaveProperty('undecided');
+      expect(map.notes[0]).not.toHaveProperty('undecided');
+      expect(map.wires[0]).toEqual(pageLayout(EXAMPLE_MAP, plan()).wires[0]);
     });
 
     it('draws a thing as not decided when at least one id it rests on is proposed', () => {
@@ -484,7 +522,7 @@ describe('the map layout', () => {
       }
     });
 
-    it('draws on Silo\'s map the channels, SSH and the servers and clouds as not decided, and the way to the internet as decided', () => {
+    it('draws on Silo\'s map the channels, SSH, the servers and clouds and your phone as not decided, and the way to the internet as decided', () => {
       const map = readBuildData(REPOSITORY).map;
       // Each thing must exist first: a missing one would give the `undefined` that a decided thing gives.
       const wires = (word: string) => map.wires.filter((one) => one.label?.[2] === word);
@@ -506,6 +544,23 @@ describe('the map layout', () => {
       expect(note('The boundary\'s channels').undecided).toBe(true);
       expect(note('Your terminal').undecided).toBe(true);
       expect(note('A server or a cloud').undecided).toBeUndefined();
+      // Your phone, and the wire with no word that reaches it from What you see, rest on features with no verdict.
+      expect(note('Your phone').undecided).toBe(true);
+      expect(map.wires.filter((one) => one.of === 'views' && !one.label).map((one) => one.undecided)).toEqual([undefined, true]);
+      // That wire ends at the phone's text: its last arrow points into the text's box, at most 8 units before its left
+      // edge and within its height. Neither has a folded place: both leave the folded map.
+      const phone = note('Your phone');
+      const toPhone = map.wires.filter((one) => one.of === 'views' && !one.label)[1];
+      const [left, top, , height] = phone.full;
+      const [x, y, dir] = toPhone.arrows!.at(-1)!;
+      expect(dir).toBe('r');
+      expect(x).toBeLessThanOrEqual(left);
+      expect(x).toBeGreaterThanOrEqual(left - 8);
+      expect(y).toBeGreaterThanOrEqual(top);
+      expect(y).toBeLessThanOrEqual(top + height);
+      expect(toPhone.d.endsWith(`H${x - 7}`)).toBe(true);
+      expect(toPhone).not.toHaveProperty('fold');
+      expect(phone).not.toHaveProperty('fold');
     });
   });
 

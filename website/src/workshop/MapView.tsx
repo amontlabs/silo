@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { arrowPath, crossPath, FOLD_HEIGHT, MAP_HEIGHT, MAP_WIDTH, placeStyle } from './map';
-import type { Drawing, Glyph, MapLayout } from './map';
+import type { Drawing, Glyph, PageLayout } from './map';
 import { stateWords } from './plan';
 import type { PartGroup, PartState } from './plan';
 
@@ -75,7 +75,7 @@ function focusVisible(node: Element): boolean {
 const style = (vars: Record<string, string | number>) => vars as CSSProperties;
 
 export interface MapViewProps {
-  layout: MapLayout;
+  layout: PageLayout;
   groups: PartGroup[];
   folded: boolean;
   current: string | null;

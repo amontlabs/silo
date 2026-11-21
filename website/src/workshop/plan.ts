@@ -3,7 +3,7 @@
 // and states, and the words the page uses for them.
 import { entryStatus as modelStatus } from '../../../tools/plan/model/index.js';
 import type { Verdict } from '../../../tools/plan/model/status.js';
-import type { MapLayout } from './map';
+import type { PageLayout } from './map';
 
 export type { Verdict };
 
@@ -127,7 +127,7 @@ export interface BuildData {
   /** Every decision and feature, in the order of order.json. */
   entries: Entry[];
   /** Where the parts sit on the map: Silo's own (map.ts), or the example the tests draw. Without places, no map. */
-  map: MapLayout;
+  map: PageLayout;
   /** Set when the build could not read the whole history of the repository: every History ends with a line that says so. */
   shallow: boolean;
 }

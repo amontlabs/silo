@@ -32,6 +32,10 @@ describe('the Workshop with an empty plan', () => {
     // No part: no tile, and no board.
     expect(document.querySelector('.ws-tile, .ws-board')).toBeNull();
     expect(screen.queryByText('After that')).toBeNull();
+    // No part is done, next or planned: the key draws nothing and is no list, but its box keeps the title row's height.
+    expect(screen.queryByRole('list', { name: 'Key' })).toBeNull();
+    expect(document.querySelector('.ws-key')).toHaveAttribute('aria-hidden', 'true');
+    expect(document.querySelector('.ws-key')).toBeEmptyDOMElement();
     expect(screen.getByRole('link', { name: 'Sign in with GitHub' })).toBeInTheDocument();
     expect(calls.some((call) => call.method === 'GET' && call.path === 'state')).toBe(true);
     // The issue of a feature the plan no longer holds shows nowhere.

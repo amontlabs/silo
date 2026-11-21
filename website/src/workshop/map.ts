@@ -51,7 +51,6 @@ export interface Zone {
   rounded?: boolean;
   /** Every zone has it; the build checks it. */
   rests?: Rests;
-  undecided?: boolean;
 }
 
 /**
@@ -64,7 +63,6 @@ export interface Note {
   full: Box;
   fold?: Box;
   rests?: Rests;
-  undecided?: boolean;
 }
 
 /** A copy stacked behind a part, coloured by that part's state. */
@@ -96,9 +94,12 @@ export interface Wire extends Drawing {
   fold?: Drawing;
   /** Every wire has it; the build checks it. */
   rests?: Rests;
-  undecided?: boolean;
 }
 
+/**
+ * A layout as written: what each thing rests on, and no mark of not decided. `pageLayout` alone derives that mark
+ * from `rests`, so a thing is drawn decided the day the owner takes what it rests on, with no change here.
+ */
 export interface MapLayout {
   /** The file that holds the layout, as the build's messages name it. */
   file?: string;
@@ -112,17 +113,37 @@ export interface MapLayout {
   key?: [x: number, y: number];
 }
 
-/** A layout that draws no map: with it any plan builds, and the page shows the parts as tiles only. */
-export const NO_MAP: MapLayout = { places: {}, zones: [], notes: [], ghosts: [], wires: [] };
+/** A thing as the page gets it: without what it rests on, which is the build's alone. */
+type Plain<T> = Omit<T, 'rests'> & { rests?: never };
+/** A wire, a zone or a text as the page gets it: `undecided` when `pageLayout` found a proposal in its `rests`. */
+type Marked<T> = Plain<T> & { undecided?: true };
+
+/** The layout as the page gets it, from `pageLayout`: no file, no `rests`, and `undecided` only where it was derived. */
+export interface PageLayout {
+  file?: never;
+  places: Record<string, Plain<Place>>;
+  zones: Marked<Zone>[];
+  notes: Marked<Note>[];
+  ghosts: Plain<Ghost>[];
+  wires: Marked<Wire>[];
+  key?: [x: number, y: number];
+}
+
+/**
+ * A layout that draws no map: with it any plan builds, and the page shows the parts as tiles only. It holds nothing
+ * to strip, so the page gets it as it is.
+ */
+export const NO_MAP: MapLayout & PageLayout = { places: {}, zones: [], notes: [], ghosts: [], wires: [] };
 
 /**
  * Silo's map: your Mac, and inside it the virtual machines where the computers run. The app and the engine sit on the
  * left, the record, the opinions and the rules along the bottom, the boundary on the edge of the virtual machines, and
- * outside the Mac the hosts a computer reaches, and the servers and clouds where computers also run. The wires
- * follow a request out through the boundary to the internet, the calls to model providers that Model traffic and spend
- * reads on the way, the facts the boundary leaves in the record, what the record triggers back at the boundary, the
- * record shown in the app, and your own terminal reaching a computer over SSH. The boundary's channels are written
- * under it. What rests on a proposal (the channels, SSH, servers and clouds) is drawn as not decided until it is taken.
+ * outside the Mac the hosts a computer reaches, the servers and clouds where computers also run, and your phone. The
+ * wires follow a request out through the boundary to the internet, the calls to model providers that Model traffic and
+ * spend reads on the way, the facts the boundary leaves in the record, what the record triggers back at the boundary,
+ * the record shown in the app, what the app shows reaching your phone, and your own terminal reaching a computer over
+ * SSH. The boundary's channels are written under it. What rests on a proposal (the channels, SSH, servers and clouds,
+ * the phone) is drawn as not decided until it is taken.
  */
 export const SILO_MAP: MapLayout = {
   file: 'website/src/workshop/map.ts',
@@ -140,9 +161,9 @@ export const SILO_MAP: MapLayout = {
     rules: { full: [688, 418, 184, 64], fold: [580, 136, 160, 26], ty: 13, sy: 36, rests: ['where-precautions-live'] },
     // Above the way out: it reads the calls to model providers, not everything that leaves.
     traffic: { full: [744, 82, 196, 64], fold: [656, 22, 164, 28], ty: 13, sy: 36 },
-    // A low bar under the whole drawing: what holds in every part. Folded, it ends where it ends on the full map, low
-    // enough that it passes under Rules and precautions on its way there.
-    checking: { full: [24, 566, 1088, 48], fold: [944, 142, 168, 26], ty: 6, sy: 27, rests: ['properties-are-checked'] },
+    // A low bar under the drawing: what holds in every part. It leaves the lower left to your phone. Folded, it ends
+    // where it ends on the full map, low enough that it passes under Rules and precautions on its way there.
+    checking: { full: [272, 566, 840, 48], fold: [944, 142, 168, 26], ty: 6, sy: 27, rests: ['properties-are-checked'] },
   },
   zones: [
     { label: 'YOUR MAC', full: [24, 18, 936, 536], fold: [16, 8, 828, 164], corners: true, rests: ['who-it-is-for', 'where-it-runs'] },
@@ -153,6 +174,8 @@ export const SILO_MAP: MapLayout = {
     { title: 'A server or a cloud', line: 'where computers also run', full: [990, 21, 122, 52], rests: ['where-it-runs', 'many-forks-elsewhere'] },
     { title: 'Model providers', line: 'some of the hosts', full: [990, 96, 122, 40], fold: [878, 27, 144, 20], rests: ['part:traffic'] },
     { title: 'The internet', line: 'every other host', full: [990, 200, 122, 40], fold: [878, 71, 144, 20] },
+    // Under the Mac, beside the app: what the app shows reaches you there, away from the Mac. It leaves the folded map.
+    { title: 'Your phone', line: 'where alerts and asks reach you', full: [56, 566, 196, 48], rests: ['phone-app', 'forwarding-to-a-phone'] },
     { title: 'The boundary\'s channels', line: 'the network, ports, files, secrets, the screen, the clipboard, repository access', full: [728, 240, 212, 96], rests: ['channel-list'] },
   ],
   // Main is one computer among several: forks and fresh computers.
@@ -187,6 +210,9 @@ export const SILO_MAP: MapLayout = {
     { of: 'rules', d: 'M760 418V344H680V233', arrows: [[680, 226, 'u']], label: [769, 384, 'decides'], rests: ['where-limits-are-set', 'what-a-precaution-may-do'], fold: { d: 'M600 136V97', arrows: [[600, 90, 'u']] } },
     // The app shows facts, reports and opinions, each as what it is; facts and reports are the record.
     { of: 'views', d: 'M500 418V400H150V265', arrows: [[150, 258, 'u']], label: [159, 330, 'shown'], rests: ['kinds-look-different', 'word:record'] },
+    // What the app shows reaches your phone. It goes down between the Mac's edge and the parts on the left, and has no
+    // word: the text at its end says what travels. It leaves the folded map.
+    { of: 'views', d: 'M48 236H36V575H45', arrows: [[52, 575, 'r']], rests: ['phone-app', 'forwarding-to-a-phone'] },
   ],
   key: [984, 492],
 };
@@ -217,7 +243,7 @@ export function placeStyle(full: Box, fold: Box, place?: Pick<Place, 'ty' | 'sy'
 }
 
 /** Whether a layout draws a map: it places at least one part. */
-export const hasMap = (layout: MapLayout) => Object.keys(layout.places).length > 0;
+export const hasMap = (layout: MapLayout | PageLayout) => Object.keys(layout.places).length > 0;
 
 export class LayoutError extends Error {}
 
@@ -271,14 +297,14 @@ function undecided(rests: Rests | undefined, plan: LayoutPlan): boolean {
 /**
  * The layout as the page gets it: its file and what each thing rests on are the build's alone. A wire, a zone and a
  * text that rest on something proposed get `undecided`; a place and a copy get nothing, since the part's state draws
- * them. Nothing else of `rests` is kept. A layout with no file and no `rests` is returned as it is.
+ * them. Nothing else of `rests` is kept. This is the only place that sets `undecided`. `NO_MAP` is returned as it is.
  */
-export function pageLayout(layout: MapLayout, plan: LayoutPlan): MapLayout {
-  const things = [...layout.wires, ...layout.zones, ...layout.notes, ...layout.ghosts, ...Object.values(layout.places)];
-  if (layout.file === undefined && !things.some((thing) => thing.rests)) return layout;
-  const drawn = <T extends { rests?: Rests }>({ rests, ...rest }: T): Omit<T, 'rests'> =>
-    (undecided(rests, plan) ? { ...rest, undecided: true } : rest) as Omit<T, 'rests'>;
-  const plain = <T extends { rests?: Rests }>({ rests: _, ...rest }: T): Omit<T, 'rests'> => rest;
+export function pageLayout(layout: MapLayout, plan: LayoutPlan): PageLayout {
+  if (layout === NO_MAP) return NO_MAP;
+  // A mark that reached a layout past its types (plain JavaScript, a cast) is dropped: only `rests` sets it.
+  const drawn = <T extends { rests?: Rests; undecided?: never }>({ rests, undecided: _, ...rest }: T): Marked<T> =>
+    (undecided(rests, plan) ? { ...rest, undecided: true } : rest) as Marked<T>;
+  const plain = <T extends { rests?: Rests }>({ rests: _, ...rest }: T): Plain<T> => rest as Plain<T>;
   return {
     places: Object.fromEntries(Object.entries(layout.places).map(([id, place]) => [id, plain(place)])),
     zones: layout.zones.map(drawn),

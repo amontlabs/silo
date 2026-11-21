@@ -70,9 +70,9 @@ const SLIDE_MS = 260;
 const PIN_MS = 1500;
 /** How long the map takes to fold, and an entry to open. */
 const FOLD_MS = 440;
+/** The header's key: a state's mark and word, shown only when a part is in that state. The map's own key says what a dashed line means. */
 const KEY: [PartState, string, string][] = [
-  ['done', 'ws-pip built', 'done'], ['next', 'ws-pip next', 'next'],
-  ['planned', 'ws-pip planned', 'planned'], ['open', 'ws-dash', 'not decided yet'],
+  ['done', 'ws-pip built', 'done'], ['next', 'ws-pip next', 'next'], ['planned', 'ws-pip planned', 'planned'],
 ];
 
 function media(query: string, fallback: boolean): boolean {
@@ -758,6 +758,8 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   };
   const notes = notesOf(false);
   const present = new Set(plan.parts.map((group) => group.state));
+  // With no entry the key is an empty box that keeps the title row's height, and no list a screen reader would read.
+  const keyed = KEY.filter(([state]) => present.has(state));
   const current = shown.kind === 'part' ? shown.part : null;
   const link = (target: Place) => (event: { preventDefault: () => void }) => {
     event.preventDefault();
@@ -814,9 +816,11 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
                 </div>
               ) : null}
             </div>
-            <ul className="ws-key" aria-label="Key">
-              {KEY.filter(([state]) => present.has(state)).map(([state, mark, label]) => <KeyItem key={state} mark={mark} label={label} boot={boot} />)}
-            </ul>
+            {keyed.length ? (
+              <ul className="ws-key" aria-label="Key">
+                {keyed.map(([state, mark, label]) => <KeyItem key={state} mark={mark} label={label} boot={boot} />)}
+              </ul>
+            ) : <div className="ws-key" aria-hidden="true" />}
           </div>
         </section>
         {mapped ? (

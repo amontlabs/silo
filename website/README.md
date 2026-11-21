@@ -211,14 +211,17 @@ A part whose id is `product`, `left`, `suggested` or `latest` stops the build:
 those are the page's own addresses, and the message names the part and the fix.
 `map.ts` holds the drawing, `SILO_MAP`. It places every part of
 `plan/parts.json` on the full map and on the folded one, inside two zones: your
-Mac, and the virtual machines in it. Text that is not a part stands for what
-is not Silo: outside the Mac, the internet, the model providers, and a server
-or a cloud where computers also run; inside it, your own terminal and
-editor; under the boundary, its channels. Wires join them, most with one word,
-such as "facts" from the boundary to the record or "requests" from the
-boundary to the internet. A wire that the folded map draws again carries that
-drawing as its `fold`, so it looks the same there; a wire or a text with no
-folded place fades out as the map folds.
+Mac, and the virtual machines in it. Text that is not a part stands for what is
+not Silo: outside the Mac, the internet, the model providers, and a server or a
+cloud where computers also run, and under it, beside the app, your phone; inside
+it, your own terminal and editor; under the boundary, its channels. Wires join
+them, most with one word, such as "facts" from the boundary to the record or
+"requests" from the boundary to the internet. The wire from "What you see" to
+your phone has no word, since the phone's text says what travels; it runs down
+between the Mac's edge and the parts on the left, and "How it is checked" starts
+after the phone. A wire that the folded map draws again carries that drawing as
+its `fold`, so it looks the same there; a wire or a text with no folded place
+fades out as the map folds.
 
 Each wire and each zone says in `rests` what in the plan it draws. An entry of
 `rests` is the id of a decision or a feature, `word:<id>` for a word of
@@ -244,12 +247,26 @@ dashed outline or line has one source for each kind of thing:
   changes nothing there, and the page gets no mark for either.
 
 A key on the full map (class `ws-mapkey`, not the header's `ws-key`) says what a
-solid and a dashed line mean ("decided", "not decided"). The page's data gets
-`undecided: true` on a wire, a zone or a text that is not decided and nothing
-else of `rests`, and never the layout's `file`. A wire's word is in the second
-ink, never the faint one (2.53:1 on the light ground), whatever its part's state
-and whether the wire is decided: the line says that, not the word. The same
-holds for the title of a text that is not decided.
+solid and a dashed line mean ("decided", "not decided"). The header's key, at
+the end of the title row in the Map and the Order view, has an entry only for a
+state a part is in: "done", "next" and "planned", each with its pip. It has no
+entry for a part not decided yet: the map's key says what a dashed line means,
+and a screen reader still hears "not decided yet" for such a part. With no entry
+it draws nothing and is no list, but its empty box keeps the title row's height.
+
+A layout as written (`MapLayout`: `SILO_MAP`, the example, `NO_MAP`) has `rests`
+and no mark of not decided. The page gets the layout from `pageLayout`
+(`PageLayout`): no `rests`, never the layout's `file`, and `undecided: true` on
+a wire, a zone or a text that is not decided. `pageLayout` is the only place
+that sets the mark. The two types make the type checker refuse a mark written
+in place in a layout; `pageLayout` drops any other, such as one carried in
+through a variable, so nothing stays dashed once the owner takes what it rests
+on.
+
+A wire's word is in the second ink, never the faint one (2.53:1 on the light
+ground), whatever its part's state and whether the wire is decided: the line
+says that, not the word. The same holds for the title of a text that is not
+decided.
 
 The build checks the drawing against the plan. It stops, with the problem and
 the fix, when:
