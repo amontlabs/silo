@@ -8,47 +8,55 @@
   ],
   "scenes": [
     [
-      "Silo ships some classifiers.",
-      "You can add others: a script, a small model, or your own agent.",
-      "An added classifier is a program.",
-      "Nothing is loaded into Silo itself, so it runs in a computer of its own, with a boundary like any other.",
-      "It reads text that agents wrote: file names, commands, web pages.",
-      "That is how an agent could try to give it instructions.",
-      "Its boundary keeps that contained."
+      "An extension is something you add to Silo.",
+      "It adds rules, a computer, or both.",
+      "Its manifest lists them: the rules, the recipe of the computer, what wakes that computer, and the tools it may use.",
+      "What ships with Silo uses the same manifest as what people add."
     ],
     [
-      "Letting it read a computer's record is a grant, and you make it.",
-      "Silo says the worst case first: this classifier can read everything recorded about main, and send it wherever its own network rules allow.",
-      "Silo shows that as a path, before you confirm."
+      "First example: registry rules.",
+      "It adds one rule: allow crates.io on main.",
+      "Nothing in it is executed, so it has no computer.",
+      "Importing it changes nothing.",
+      "It shows the rule it adds.",
+      "Installing it switches the rule on."
     ],
     [
-      "What comes back is opinions, each pointing at the lines of the record that led to it.",
-      "It can also give panels for the app to draw, and questions for you.",
-      "It can never act on a computer, answer an ask, set or change a rule or a precaution, give a secret, or write into another computer.",
-      "What its opinion leads to is said by a precaution you set."
+      "Second example: disk watch.",
+      "Every minute it measures a folder of main.",
+      "That is something executed.",
+      "So the extension ships a computer.",
+      "Its manifest names the recipe, and installing the extension makes that computer.",
+      "Nothing of an extension is executed inside Silo.",
+      "You can always see that computer."
     ],
     [
-      "Classifiers work in three tiers.",
-      "Each wakes only when the one before cannot judge.",
-      "First the built-in classifiers.",
-      "They always run and cost no tokens.",
-      "Then a small model, for what they cannot judge.",
-      "Then an agent, which wakes when the small model is unsure, or when you ask it a question.",
-      "That third tier is the monitor agent you proposed: your own agent program, in its own computer.",
-      "Silo ships its recipe.",
-      "What an added classifier spends is your choice, and it is metered like any computer."
+      "That computer asks Silo for what it needs, through tools.",
+      "It can use only the tools its manifest names, and installing the extension grants them.",
+      "A tool reads, shows or protects.",
+      "Disk watch reads the folder /work on main.",
+      "It shows a panel and an alert in the app.",
+      "Where a tool applies to computers, you choose which ones when you install."
     ],
     [
-      "Pieces made by someone else arrive in a package, called a plugin: classifiers, rules and precautions, panels, and programs that forward alerts and asks to your phone.",
-      "Installing a plugin grants nothing.",
-      "Each rule, each precaution and each grant in it is shown to you, and you accept it or not.",
-      "In the older film a plugin could pause or stop a computer itself.",
-      "Not any more: it is only the package."
+      "Something wakes an extension.",
+      "Disk watch wakes on a time, and nothing waits for it.",
+      "Third example: request check.",
+      "It wakes when a network request of main waits at the boundary, and Silo asks it.",
+      "It answers one of three things: let it go on, deny it, or hold it.",
+      "Let it go on is not allow: the rules still decide.",
+      "If it does not answer in time, the wait ends as its manifest says.",
+      "You can always see what wakes an extension."
     ],
     [
-      "Before a classifier goes live, Silo can run it against the recorded past, in a fresh computer.",
-      "You see what it would have done: the opinions it would have given, and where it tried to connect.",
-      "How a piece is installed and started, and how you take a grant back, is not designed yet."
+      "Request check denies and holds by itself, because its manifest names that tool and you installed it.",
+      "A tool that protects names the computer it applies to.",
+      "Granting it sets a precaution on that computer, which rests on the extension."
+    ],
+    [
+      "No tool an extension can use grants or destroys.",
+      "There is no tool to allow a request, to open a network, or to drop a computer.",
+      "Only the rules it adds can allow something, and importing shows them."
     ]
   ]
 }

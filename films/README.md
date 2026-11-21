@@ -24,7 +24,7 @@ Each film ends as one HTML file: the film with its voice and subtitles, the entr
 | `extensions` | decides | 7 |
 
 What the owner settled and a film does not carry yet is in that film's `pending.md`; the file goes
-once the film carries it. The fifth film has a new script and is to be made from it.
+once the film carries it.
 
 ## What is here
 

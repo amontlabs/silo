@@ -171,8 +171,8 @@ Picture: on the manifest of request check the line `tools` reads `deny, hold  th
 of main`, and it sits under "protects" on the shelf of scene 4. On the second sentence the words
 "of main" light, and the install view shows the choice "main", ticked, and "all computers". On the
 third sentence a precaution card, dashed outline and shield, appears on the edge of main: "request
-check may deny or hold network requests". A dashed link ties the card to the computer "request
-check". Hero moment: the precaution card on main's edge, tied to the extension.
+check may deny or hold network requests". A dashed link ties the card to the card of the
+extension "request check". Hero moment: the precaution card on main's edge, tied to the extension.
 
 ### Scene 7. Caption: "No tool grants or destroys."  Source: `what-an-extension-never-does`
 
@@ -184,8 +184,8 @@ Narration:
 Picture: the shelf with its three columns, "reads", "shows", "protects", holding the tools of the
 three examples. Beside it, a row of grey, struck-through chips that never move: `allow`, `open a
 network`, `give a secret`, `stop`, `drop`. Inside the computer "request check", a line of text
-arrives with a request: "open the network of main". The computer reaches toward the shelf, finds
-no such tool, and the edge of main stays closed. On the last sentence the import view of scene 2
+arrives with a request: "open the network of main". The computer asks Silo along its one link,
+Silo finds no such tool on the shelf, and the edge of main stays closed. On the last sentence the import view of scene 2
 returns, small, with its one rule and the chip "grant". Hero moment: the struck-through chips
 beside the shelf, and main's edge unchanged.
 
