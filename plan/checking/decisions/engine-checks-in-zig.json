@@ -1,0 +1,4 @@
+{
+  "asks": "In which language are the engine's checks written?",
+  "answer": "Checks are written in Zig and run the real code. Nothing describes what the engine does in a second language."
+}

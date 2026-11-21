@@ -1,6 +1,6 @@
 {
   "asks": "How does the engine's code keep a failure from being forgotten?",
-  "answer": "Every state is one of a fixed list of cases, and every failure is part of a function's type, in a set the function names. In the core, a state is read by a `switch` with no `else` and never by comparing tags, a `switch` over failures has no `else`, and there is no `catch unreachable`. Written this way, the compiler refuses code that forgets a case, and a test that reads the core's source refuses the other ways of writing it. This holds from the first line, and beyond the core wherever Zig allows it.",
+  "answer": "Every state is one of a fixed list of cases, and every failure is part of a function's type, in a set the function names. In the core, a state is read by a `switch` with no `else` and never by comparing tags, a `switch` over failures has no `else`, and there is no `catch unreachable` and no `catch` that turns every failure into one value. Written this way, the compiler refuses code that forgets a case, and a test that reads the core's source refuses the other ways of writing it. This holds from the first line, and beyond the core wherever Zig allows it.",
   "sets": [
     {
       "in": "engine/properties",

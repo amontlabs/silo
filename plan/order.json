@@ -326,6 +326,8 @@
         "macos-vm-driver",
         "observing-speed",
         "properties-are-checked",
+        "engine-checks-in-zig",
+        "check-must-catch-a-fault",
         "speed-budgets",
         "model-of-access-first",
         "model-tool",
