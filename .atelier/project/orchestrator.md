@@ -12,6 +12,12 @@ Discussing:
 - Commit the plan files straight to `main` and push, so the Workshop shows it. No branch, review or approve. First run `tools/ci/check.sh plan`, then `links`, then `build` (seconds each; they read `plan/`), and commit only while no merge is running. Plan edits made while building stay on the build's branch.
 - A rejected push means the owner decided meanwhile: when no merge is running, `git pull --no-rebase`, then push again. Never force.
 
+Trials, for a question that building or measuring answers:
+- One agent builds or measures the smallest thing that answers it, on a branch `trial/<id>` that is never merged.
+- What it found goes in the entry's notes under "Found": the date, the machine, the numbers, what was not checked. Then the branch and its worktree are deleted.
+- A trial decides nothing. It may change the answer the entry proposes; the owner still says yes or no.
+- Trials run in parallel and never wait for the owner.
+
 Decisions (rule 2b):
 - About this entry: its notes file is the decision log.
 - Binding every entry: the plan's lists (`words.json`, `principles.json`, each part's `properties.json`) and every taken decision that is not replaced. `plan show <id>` prints the ones that bind an entry. Read them before deciding anything.
