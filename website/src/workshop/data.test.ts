@@ -8,7 +8,7 @@ import { loadDir } from '../../../tools/plan/read/index.js';
 import { buildDataFrom, factsFrom, historiesFrom, historyFromGit, layoutPlanFrom, notesFrom, planDir, readBuildData, readHistories, readHistory, unshallow } from './data';
 import type { Git } from './data';
 import { buildData, CORE_NOTES, DECISIONS, emptyPlanFiles, FEATURES, PARTS, planFiles, withLists, ZIG_NOTES } from './fixtures';
-import { checkLayout, LayoutError, MAP_HEIGHT, NO_MAP, SILO_MAP, pageLayout } from './map';
+import { checkLayout, LayoutError, MAP_HEIGHT, MAP_WIDTH, NO_MAP, SILO_MAP, pageLayout } from './map';
 import type { Box, MapLayout, PageLayout, Wire } from './map';
 import { EXAMPLE_MAP } from './map-example';
 import { MAP_PIXELS, MONO_ADVANCE, SERIF_WIDTHS, shownTitle, stateNeeds, TITLE_FACE, TITLE_STYLE, titleEms, unknownCharacters } from './map-fit';
@@ -544,23 +544,36 @@ describe('the map layout', () => {
       expect(note('The boundary\'s channels').undecided).toBe(true);
       expect(note('Your terminal').undecided).toBe(true);
       expect(note('A server or a cloud').undecided).toBeUndefined();
-      // Your phone, and the wire with no word that reaches it from What you see, rest on features with no verdict.
-      expect(note('Your phone').undecided).toBe(true);
-      expect(map.wires.filter((one) => one.of === 'views' && !one.label).map((one) => one.undecided)).toEqual([undefined, true]);
-      // That wire ends at the phone's text: its last arrow points into the text's box, at most 8 units before its left
-      // edge and within its height. Neither has a folded place: both leave the folded map.
-      const phone = note('Your phone');
-      const toPhone = map.wires.filter((one) => one.of === 'views' && !one.label)[1];
-      const [left, top, , height] = phone.full;
-      const [x, y, dir] = toPhone.arrows!.at(-1)!;
-      expect(dir).toBe('r');
-      expect(x).toBeLessThanOrEqual(left);
-      expect(x).toBeGreaterThanOrEqual(left - 8);
-      expect(y).toBeGreaterThanOrEqual(top);
-      expect(y).toBeLessThanOrEqual(top + height);
-      expect(toPhone.d.endsWith(`H${x - 7}`)).toBe(true);
-      expect(toPhone).not.toHaveProperty('fold');
+      // Your phone is a zone like the Mac, outside it, and rests on features with no verdict: its outline is dashed, the Mac's
+      // is solid. Neither it nor its text has a folded place: both leave the folded map.
+      const zone = (label: string) => {
+        const found = map.zones.filter((one) => one.label === label);
+        expect(found).toHaveLength(1);
+        return found[0];
+      };
+      const phone = zone('YOUR PHONE');
+      const mac = zone('YOUR MAC');
+      expect(phone.undecided).toBe(true);
+      expect(mac.undecided).toBeUndefined();
+      expect(phone.corners).toBe(mac.corners);
       expect(phone).not.toHaveProperty('fold');
+      expect(mac).toHaveProperty('fold');
+      // It stands right of the Mac, and holds a text of the same name as the part: what you see is shown in both.
+      expect(phone.full[0]).toBeGreaterThanOrEqual(mac.full[0] + mac.full[2]);
+      expect(phone.full[0] + phone.full[2]).toBeLessThanOrEqual(MAP_WIDTH);
+      const inside = note('What you see');
+      expect(inside.line).toBe('alerts and asks');
+      expect(inside.undecided).toBe(true);
+      expect(inside).not.toHaveProperty('fold');
+      expect(inside.full[0]).toBeGreaterThan(phone.full[0]);
+      expect(inside.full[1]).toBeGreaterThan(phone.full[1]);
+      expect(inside.full[0] + inside.full[2]).toBeLessThan(phone.full[0] + phone.full[2]);
+      expect(inside.full[1] + inside.full[3]).toBeLessThan(phone.full[1] + phone.full[3]);
+      expect(map.notes.some((one) => one.title === 'Your phone')).toBe(false);
+      // No wire joins What you see to the phone: the app's wires are the way to the engine and the one that shows it.
+      expect(map.wires.filter((one) => one.of === 'views').map((one) => one.label?.[2])).toEqual([undefined, 'shown']);
+      // How it is checked spans the Mac, as it did before the phone.
+      expect(map.places.checking.full).toEqual([24, 566, 1088, 48]);
     });
   });
 
@@ -692,7 +705,8 @@ describe('the map layout', () => {
         const parts = Object.entries(layout.places).filter(([, place]) => !place.inner).map(([id, place]) => [id, place[view]] as [string, Box]);
         const others: [string, Box][] = [
           ...layout.notes.flatMap((note) => { const box = note[view]; return box ? [[`the text ${note.title}`, box] as [string, Box]] : []; }),
-          ...layout.zones.map((zone) => [`label of ${zone.label}`, label(zone[view])] as [string, Box]),
+          // A zone with no folded place does not move: it fades out where it stands.
+          ...layout.zones.flatMap((zone) => { const box = zone[view]; return box ? [[`label of ${zone.label}`, label(box)] as [string, Box]] : []; }),
         ];
         const clashes = parts.flatMap(([id, box], index) => [...parts.slice(index + 1), ...others].filter(([, other]) => hit(box, other)).map(([name]) => `${view}: ${id} and ${name}`));
         expect(clashes).toEqual([]);

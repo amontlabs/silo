@@ -46,7 +46,8 @@ export const FOLD_HEIGHT = 180;
 export interface Zone {
   label: string;
   full: Box;
-  fold: Box;
+  /** A zone with no `fold` leaves the folded map: it fades out where it stands on the full one. */
+  fold?: Box;
   corners?: boolean;
   rounded?: boolean;
   /** Every zone has it; the build checks it. */
@@ -138,10 +139,10 @@ export const NO_MAP: MapLayout & PageLayout = { places: {}, zones: [], notes: []
 /**
  * Silo's map: your Mac, and inside it the virtual machines where the computers run. The app and the engine sit on the
  * left, the record, the opinions and the rules along the bottom, the boundary on the edge of the virtual machines, and
- * outside the Mac the hosts a computer reaches, the servers and clouds where computers also run, and your phone. The
- * wires follow a request out through the boundary to the internet, the calls to model providers that Model traffic and
+ * outside the Mac the hosts a computer reaches, the servers and clouds where computers also run, and your phone, a zone
+ * like the Mac that shows what you see too. The wires follow a request out through the boundary to the internet, the calls to model providers that Model traffic and
  * spend reads on the way, the facts the boundary leaves in the record, what the record triggers back at the boundary,
- * the record shown in the app, what the app shows reaching your phone, and your own terminal reaching a computer over
+ * the record shown in the app, and your own terminal reaching a computer over
  * SSH. The boundary's channels are written under it. What rests on a proposal (the channels, SSH, servers and clouds,
  * the phone) is drawn as not decided until it is taken.
  */
@@ -161,21 +162,23 @@ export const SILO_MAP: MapLayout = {
     rules: { full: [688, 418, 184, 64], fold: [580, 136, 160, 26], ty: 13, sy: 36, rests: ['where-precautions-live'] },
     // Above the way out: it reads the calls to model providers, not everything that leaves.
     traffic: { full: [744, 82, 196, 64], fold: [656, 22, 164, 28], ty: 13, sy: 36 },
-    // A low bar under the drawing: what holds in every part. It leaves the lower left to your phone. Folded, it ends
-    // where it ends on the full map, low enough that it passes under Rules and precautions on its way there.
-    checking: { full: [272, 566, 840, 48], fold: [944, 142, 168, 26], ty: 6, sy: 27, rests: ['properties-are-checked'] },
+    // A low bar under the drawing: what holds in every part. Folded, it ends where it ends on the full map, low enough
+    // that it passes under Rules and precautions on its way there.
+    checking: { full: [24, 566, 1088, 48], fold: [944, 142, 168, 26], ty: 6, sy: 27, rests: ['properties-are-checked'] },
   },
   zones: [
     { label: 'YOUR MAC', full: [24, 18, 936, 536], fold: [16, 8, 828, 164], corners: true, rests: ['who-it-is-for', 'where-it-runs'] },
     { label: 'VIRTUAL MACHINES', full: [348, 106, 296, 280], fold: [288, 48, 276, 82], rounded: true, rests: ['part:computers'] },
+    // Outside the Mac, on the right with the other things outside it: where alerts and asks reach you, away from the Mac.
+    { label: 'YOUR PHONE', full: [984, 296, 128, 100], corners: true, rests: ['phone-app', 'forwarding-to-a-phone'] },
   ],
   notes: [
     { title: 'Your terminal', line: 'and your editor', full: [326, 44, 124, 40], rests: ['computer-reached-over-ssh', 'you-visit-a-computer', 'reaching-a-computer'] },
     { title: 'A server or a cloud', line: 'where computers also run', full: [990, 21, 122, 52], rests: ['where-it-runs', 'many-forks-elsewhere'] },
     { title: 'Model providers', line: 'some of the hosts', full: [990, 96, 122, 40], fold: [878, 27, 144, 20], rests: ['part:traffic'] },
     { title: 'The internet', line: 'every other host', full: [990, 200, 122, 40], fold: [878, 71, 144, 20] },
-    // Under the Mac, beside the app: what the app shows reaches you there, away from the Mac. It leaves the folded map.
-    { title: 'Your phone', line: 'where alerts and asks reach you', full: [56, 566, 196, 48], rests: ['phone-app', 'forwarding-to-a-phone'] },
+    // The same name as the app's part, in the phone's zone: what you see is shown in both. It leaves the folded map.
+    { title: 'What you see', line: 'alerts and asks', full: [998, 322, 104, 40], rests: ['phone-app', 'forwarding-to-a-phone'] },
     { title: 'The boundary\'s channels', line: 'the network, ports, files, secrets, the screen, the clipboard, repository access', full: [728, 240, 212, 96], rests: ['channel-list'] },
   ],
   // Main is one computer among several: forks and fresh computers.
@@ -210,9 +213,6 @@ export const SILO_MAP: MapLayout = {
     { of: 'rules', d: 'M760 418V344H680V233', arrows: [[680, 226, 'u']], label: [769, 384, 'decides'], rests: ['where-limits-are-set', 'what-a-precaution-may-do'], fold: { d: 'M600 136V97', arrows: [[600, 90, 'u']] } },
     // The app shows facts, reports and opinions, each as what it is; facts and reports are the record.
     { of: 'views', d: 'M500 418V400H150V265', arrows: [[150, 258, 'u']], label: [159, 330, 'shown'], rests: ['kinds-look-different', 'word:record'] },
-    // What the app shows reaches your phone. It goes down between the Mac's edge and the parts on the left, and has no
-    // word: the text at its end says what travels. It leaves the folded map.
-    { of: 'views', d: 'M48 236H36V575H45', arrows: [[52, 575, 'r']], rests: ['phone-app', 'forwarding-to-a-phone'] },
   ],
   key: [984, 492],
 };

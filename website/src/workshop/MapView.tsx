@@ -117,7 +117,8 @@ export function MapView({ layout, groups, folded, current, onOpen }: MapViewProp
       <div className={['ws-stage', folded ? 'fold' : '', groups.length ? '' : 'ws-stage-empty'].filter(Boolean).join(' ')}>
         {groups.length ? null : <p className="ws-quiet">No part yet.</p>}
         {layout.zones.map((zone) => (
-          <div className={marks(`ws-geo ws-zone${zone.rounded ? ' rounded' : ''}`, zone)} key={zone.label} style={style(placeStyle(zone.full, zone.fold))} aria-hidden="true">
+          // A zone with no folded place stays where it is and fades out as the map folds.
+          <div className={marks(`ws-geo ws-zone${zone.rounded ? ' rounded' : ''}${zone.fold ? '' : ' off-fold'}`, zone)} key={zone.label} style={style(placeStyle(zone.full, zone.fold ?? zone.full))} aria-hidden="true">
             <span className="ws-zlabel">{zone.label}</span>
             {zone.corners ? <><i className="ws-dia tl" /><i className="ws-dia tr" /><i className="ws-dia bl" /><i className="ws-dia br" /></> : null}
           </div>
