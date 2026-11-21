@@ -78,8 +78,8 @@ describe('the home page', () => {
     ]);
     const kinds = (name: string) => [...doc.querySelectorAll(`.card[data-mini="${name}"] svg .dm`)].map((mark) => (mark.classList.contains('fact') ? 'fact' : 'report'));
     expect(kinds('record')).toEqual(['fact', 'report', 'fact', 'fact', 'fact', 'fact', 'report']);
-    expect(picture('needs')).toEqual(['1', 'paste.rs denied', '2', 'Codex asks for a host', '3', 'a run looks stuck', 'connection', 'paste.rs', 'process', 'curl', 'turn 14', 'Codex']);
-    expect(kinds('needs')).toEqual(['fact', 'report']);
+    expect(picture('needs')).toEqual(['1', 'paste.rs denied', '2', 'Codex asks for a host', '3', 'a run looks stuck', 'connection', 'paste.rs', 'turn 14', 'Codex']);
+    expect(kinds('needs')).toEqual(['fact']);
     expect(picture('back')).toEqual(['main', 'fork']);
     expect(doc.querySelectorAll('.card[data-mini="back"] svg .dm')).toHaveLength(5);
   });

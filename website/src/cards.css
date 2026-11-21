@@ -37,8 +37,8 @@
 .mini .p.left { transform-origin: 0% 50%; }
 .mini .p.on { opacity: 1; transform: none; }
 /* A part that gives way is there until it fades out. */
-.mini .g { transition: opacity 0.3s; }
-.mini .g.gone { opacity: 0; }
+.mini .g { transition: transform 0.4s ease; }
+.mini .g.low { transform: translateY(44px); }
 .mini .wr { fill: none; stroke: var(--wire); stroke-width: 1; stroke-dasharray: 1; stroke-dashoffset: 1; }
 .mini .wr.on { stroke-dashoffset: 0; transition: stroke-dashoffset 0.4s ease; }
 .mini .wr.acc { stroke: var(--accent); stroke-width: 1.6; }
@@ -82,7 +82,7 @@
 .points:not(.live) .mini :is(.f, .p):not(.mv) { opacity: 1; transform: none; }
 .points:not(.live) .mini .wr { stroke-dashoffset: 0; }
 .points:not(.live) .mini .ty { clip-path: none; }
-.points:not(.live) .mini .g { opacity: 0; }
+.points:not(.live) .mini .g { transform: translateY(44px); }
 .points:not(.live) .card[data-mini="edge"] .m1 { fill: var(--ink); stroke: var(--ink); }
 .points:not(.live) .card[data-mini="edge"] .gate rect { fill: var(--accent-wash); stroke: var(--accent); }
 .points:not(.live) .card[data-mini="edge"] .gate path { stroke: var(--accent-ink); }
