@@ -305,10 +305,10 @@ describe('the map layout', () => {
   };
 
   it('draws the fixture plan with the example, and Silo\'s plan with its own map', () => {
-    expect(buildData().map).toEqual(pageLayout(EXAMPLE_MAP));
+    expect(buildData().map).toEqual(pageLayout(EXAMPLE_MAP, plan()));
     expect(Object.keys(EXAMPLE_MAP.places)).toEqual(ids);
     // The real plan passes every check of Silo's map: its parts, what each wire rests on, and its titles.
-    expect(readBuildData(REPOSITORY).map).toEqual(pageLayout(SILO_MAP));
+    expect(readBuildData(REPOSITORY).map).toEqual(pageLayout(SILO_MAP, layoutPlanFrom(loadDir(join(REPOSITORY, 'plan')))));
     expect(() => checkLayout(plan(['engine', 'record']))).toThrow(LayoutError);
     // A layout that places nothing takes every plan, and the page shows the tiles alone.
     expect(() => checkLayout(plan(['engine', 'record']), NO_MAP)).not.toThrow();
@@ -320,20 +320,31 @@ describe('the map layout', () => {
     expect(() => checkLayout(plan(ids.filter((id) => id !== 'part-c')), EXAMPLE_MAP)).toThrow('website/src/workshop/map-example.ts places the part "part-c", which plan/parts.json does not have.');
     const without = (id: string): MapLayout => ({ ...EXAMPLE_MAP, places: Object.fromEntries(Object.entries(EXAMPLE_MAP.places).filter(([place]) => place !== id)) });
     expect(() => checkLayout(plan(ids.filter((id) => id !== 'part-b')), without('part-b'))).toThrow('website/src/workshop/map-example.ts draws a wire for the part "part-b", which plan/parts.json does not have.');
-    const noWires = { ...without('part-d'), wires: { full: EXAMPLE_MAP.wires.full.filter((wire) => wire.of !== 'part-d'), fold: EXAMPLE_MAP.wires.fold.filter((wire) => wire.of !== 'part-d') } };
+    const noWires = { ...without('part-d'), wires: EXAMPLE_MAP.wires.filter((wire) => wire.of !== 'part-d') };
     expect(() => checkLayout(plan(ids.filter((id) => id !== 'part-d')), noWires)).toThrow('website/src/workshop/map-example.ts stacks a copy behind the part "part-d", which plan/parts.json does not have.');
   });
 
   describe('what a wire or a zone rests on', () => {
     const LOOK = 'Fix: look at the wire, then name what it rests on now.';
     // The example with the first wire, "uses", resting on `rests`; the build's own path, so its message.
-    const uses = (rests: string[] | undefined): MapLayout => ({ ...EXAMPLE_MAP, wires: { ...EXAMPLE_MAP.wires, full: EXAMPLE_MAP.wires.full.map((wire, index) => (index === 0 ? { ...wire, rests } : wire)) } });
+    const uses = (rests: string[] | undefined): MapLayout => ({ ...EXAMPLE_MAP, wires: EXAMPLE_MAP.wires.map((wire, index) => (index === 0 ? { ...wire, rests } : wire)) });
     const build = (layout: MapLayout, options?: Parameters<typeof planFiles>[0]) => () => buildDataFrom(planFiles(options), { map: layout });
 
     it('keeps what each thing rests on out of the page\'s data', () => {
       expect(JSON.stringify(buildData().map)).not.toContain('rests');
       expect(buildData().map).not.toHaveProperty('file');
-      expect(pageLayout(NO_MAP)).toBe(NO_MAP);
+      expect(pageLayout(NO_MAP, plan())).toBe(NO_MAP);
+      // Of what a thing rests on, the page gets only whether it is not decided.
+      const keys = new Set<string>();
+      const walk = (value: unknown) => {
+        if (Array.isArray(value)) value.forEach(walk);
+        else if (value && typeof value === 'object') for (const [key, inner] of Object.entries(value)) { keys.add(key); walk(inner); }
+      };
+      walk(buildData().map);
+      walk(readBuildData(REPOSITORY).map);
+      expect(keys.has('rests')).toBe(false);
+      expect(keys.has('file')).toBe(false);
+      expect(keys.has('undecided')).toBe(true);
     });
 
     it('names in each message the file of the layout it checked', () => {
@@ -345,18 +356,20 @@ describe('the map layout', () => {
       expect(() => checkLayout(plan(), unnamed)).toThrow('the map\'s layout: the wire "uses" rests on nothing.');
     });
 
-    it('passes a taken decision, a word of the list and a part, and asks nothing of the fold\'s wires', () => {
-      expect(EXAMPLE_MAP.wires.fold.every((wire) => wire.rests === undefined)).toBe(true);
+    it('passes a taken decision, a taken or built feature, a word of the list and a part', () => {
       expect(build(uses(['core-in-zig', 'part:part-a']))).not.toThrow();
+      expect(build(uses(['core']))).not.toThrow();
+      const built = FEATURES.map((feature) => (feature.id === 'calls' ? { ...feature, built: '2026-11-01' } : feature));
+      expect(build(uses(['calls']), { features: built })).not.toThrow();
       expect(build(uses(['word:twin']), withLists())).not.toThrow();
       // A replaced decision was taken; the one that replaced it is in force.
       expect(build(uses(['signed-logs']))).not.toThrow();
     });
 
     it('stops on a wire of the full map that rests on nothing, named by its word or, with none, by its path', () => {
-      expect(build(uses(undefined))).toThrow('website/src/workshop/map-example.ts: the wire "uses" rests on nothing. Fix: give it `rests`: the decisions of the plan it draws, words as word:<id>, or part:<id> for what only a part\'s line says.');
+      expect(build(uses(undefined))).toThrow('website/src/workshop/map-example.ts: the wire "uses" rests on nothing. Fix: give it `rests`: the decisions and features of the plan it draws, words as word:<id>, or part:<id> for what only a part\'s line says.');
       expect(build(uses([]))).toThrow('the wire "uses" rests on nothing.');
-      const bare = { ...EXAMPLE_MAP, wires: { ...EXAMPLE_MAP.wires, full: EXAMPLE_MAP.wires.full.map((wire) => (wire.label ? wire : { ...wire, rests: undefined })) } };
+      const bare = { ...EXAMPLE_MAP, wires: EXAMPLE_MAP.wires.map((wire) => (wire.label ? wire : { ...wire, rests: undefined })) };
       expect(build(bare)).toThrow('website/src/workshop/map-example.ts: the wire with no word, drawn "M784 178H932" rests on nothing.');
     });
 
@@ -365,19 +378,19 @@ describe('the map layout', () => {
       expect(build({ ...EXAMPLE_MAP, zones })).toThrow('website/src/workshop/map-example.ts: the zone "ZONE TWO" rests on nothing.');
     });
 
-    it('stops on an id that is no decision of the plan, a feature\'s included', () => {
-      expect(build(uses(['no-such-decision']))).toThrow(`website/src/workshop/map-example.ts: the wire "uses" rests on "no-such-decision", which is no decision of the plan. ${LOOK}`);
-      expect(build(uses(['core']))).toThrow(`the wire "uses" rests on "core", which is no decision of the plan. ${LOOK}`);
+    it('stops on an id that is no decision or feature of the plan', () => {
+      expect(build(uses(['no-such-decision']))).toThrow(`website/src/workshop/map-example.ts: the wire "uses" rests on "no-such-decision", which is no decision or feature of the plan. ${LOOK}`);
+      expect(build(uses(['part-a']))).toThrow(`the wire "uses" rests on "part-a", which is no decision or feature of the plan. ${LOOK}`);
     });
 
-    it('stops on a decision that is not decided: open, or answered and not taken', () => {
-      expect(build(uses(['one-host']))).toThrow(`website/src/workshop/map-example.ts: the wire "uses" rests on the decision "one-host", which is open: nobody has answered it. ${LOOK}`);
-      expect(build(uses(['one-way']))).toThrow(`website/src/workshop/map-example.ts: the wire "uses" rests on the decision "one-way", which is answered and not taken. ${LOOK}`);
+    it('stops on an open decision: no answer says what to draw', () => {
+      expect(build(uses(['one-host']))).toThrow(`website/src/workshop/map-example.ts: the wire "uses" rests on the decision "one-host", which is open: nobody has answered it, so nothing says what to draw. ${LOOK}`);
     });
 
-    it('stops on a dropped decision, and on a replaced one with the decision that replaced it', () => {
+    it('stops on a dropped decision, on a replaced one with the decision that replaced it, and on a dropped feature', () => {
       expect(build(uses(['old-format']))).toThrow(`website/src/workshop/map-example.ts: the wire "uses" rests on the decision "old-format", which was dropped. ${LOOK}`);
       expect(build(uses(['plain-logs']))).toThrow(`website/src/workshop/map-example.ts: the wire "uses" rests on the decision "plain-logs", which was replaced by "signed-logs". ${LOOK}`);
+      expect(build(uses(['reviewer']))).toThrow(`website/src/workshop/map-example.ts: the wire "uses" rests on the feature "reviewer", which was dropped. ${LOOK}`);
     });
 
     it('stops on a word that is not in the list, and on a part that does not exist', () => {
@@ -390,7 +403,7 @@ describe('the map layout', () => {
         ...EXAMPLE_MAP,
         zones: EXAMPLE_MAP.zones.map((zone, index) => (index === 0 ? { ...zone, rests: ['one-host'] } : zone)),
         places: { ...EXAMPLE_MAP.places, 'part-a': { ...EXAMPLE_MAP.places['part-a'], rests: ['old-format'] } },
-        notes: EXAMPLE_MAP.notes.map((note) => ({ ...note, rests: ['part:billing'] })),
+        notes: EXAMPLE_MAP.notes.map((note, index) => (index === 0 ? { ...note, rests: ['part:billing'] } : note)),
         ghosts: EXAMPLE_MAP.ghosts.map((ghost, index) => (index === 1 ? { ...ghost, rests: ['word:scrap'] } : ghost)),
       };
       let message = '';
@@ -400,11 +413,82 @@ describe('the map layout', () => {
         message = (error as Error).message;
       }
       expect(message.split('\n')).toEqual([
-        'website/src/workshop/map-example.ts: the zone "ZONE ONE" rests on the decision "one-host", which is open: nobody has answered it. Fix: look at the zone, then name what it rests on now.',
+        'website/src/workshop/map-example.ts: the zone "ZONE ONE" rests on the decision "one-host", which is open: nobody has answered it, so nothing says what to draw. Fix: look at the zone, then name what it rests on now.',
         'website/src/workshop/map-example.ts: the place of the part "part-a" rests on the decision "old-format", which was dropped. Fix: look at the place, then name what it rests on now.',
         'website/src/workshop/map-example.ts: the text "Outside" rests on the part "part:billing", which plan/parts.json does not have. Fix: look at the text, then name what it rests on now.',
         'website/src/workshop/map-example.ts: copy 2 behind the part "part-d" rests on the word "word:scrap", which plan/words.json does not have. Fix: look at the copy, then name what it rests on now.',
       ]);
+    });
+  });
+
+  describe('what is not decided', () => {
+    // The example with the first wire, "uses", resting on `rests`, as the page gets it from the fixture plan.
+    const uses = (rests: string[]): MapLayout => ({ ...EXAMPLE_MAP, wires: EXAMPLE_MAP.wires.map((wire, index) => (index === 0 ? { ...wire, rests } : wire)) });
+    const drawn = (layout: MapLayout, options?: Parameters<typeof planFiles>[0]) => buildDataFrom(planFiles(options), { map: layout }).map;
+    const taking = (id: string) => ({ decisions: DECISIONS.map((decision) => (decision.id === id ? { ...decision, verdict: 'take' as const } : decision)) });
+    const takingFeature = (id: string, built?: string) => ({ features: FEATURES.map((feature) => (feature.id === id ? { ...feature, verdict: 'take' as const, ...(built ? { built } : {}) } : feature)) });
+    // The page's layout with every mark of not decided taken off: what is left is the drawing itself.
+    const bare = (layout: MapLayout) => JSON.parse(JSON.stringify(layout, (key, value) => (key === 'undecided' ? undefined : value)));
+
+    it('draws the example\'s last wire, which rests on a feature with no verdict, as not decided, and the others as decided', () => {
+      expect(buildData().map.wires.map((wire) => wire.undecided === true)).toEqual([false, false, false, true]);
+      expect(buildData().map.key).toEqual(EXAMPLE_MAP.key);
+    });
+
+    it('builds a wire that rests on an answered decision, and draws it as not decided until the decision is taken, with the same layout', () => {
+      const proposed = drawn(uses(['part:part-b', 'one-way']));
+      expect(proposed.wires[0].undecided).toBe(true);
+      const taken = drawn(uses(['part:part-b', 'one-way']), taking('one-way'));
+      expect(taken.wires[0]).not.toHaveProperty('undecided');
+      expect(bare(taken)).toEqual(bare(proposed));
+    });
+
+    it('treats a decision with only `sets` and no verdict as answered', () => {
+      expect(drawn(uses(['bound-a-wait']), withLists()).wires[0].undecided).toBe(true);
+    });
+
+    it('builds a wire that rests on a feature with no verdict, and draws it as decided once the feature is taken or built, with the same layout', () => {
+      const proposed = drawn(EXAMPLE_MAP);
+      for (const options of [takingFeature('export'), takingFeature('export', '2026-11-16')]) {
+        const taken = drawn(EXAMPLE_MAP, options);
+        expect(taken.wires.every((wire) => wire.undecided === undefined)).toBe(true);
+        expect(bare(taken)).toEqual(bare(proposed));
+      }
+    });
+
+    it('draws a thing as not decided when at least one id it rests on is proposed', () => {
+      expect(drawn(uses(['core-in-zig', 'one-way', 'part:part-a'])).wires[0].undecided).toBe(true);
+      expect(drawn(uses(['core-in-zig', 'part:part-a'])).wires[0]).not.toHaveProperty('undecided');
+    });
+
+    it('marks a zone, a place, a text and a copy that rest on a proposal, and draws one with no rests as decided', () => {
+      const layout: MapLayout = {
+        ...EXAMPLE_MAP,
+        zones: EXAMPLE_MAP.zones.map((zone, index) => (index === 1 ? { ...zone, rests: ['export'] } : zone)),
+        places: { ...EXAMPLE_MAP.places, 'part-a': { ...EXAMPLE_MAP.places['part-a'], rests: ['one-way'] } },
+        notes: EXAMPLE_MAP.notes.map((note, index) => (index === 0 ? { ...note, rests: ['one-way'] } : note)),
+        ghosts: EXAMPLE_MAP.ghosts.map((ghost, index) => (index === 0 ? { ...ghost, rests: ['export'] } : ghost)),
+      };
+      const map = drawn(layout);
+      expect(map.zones.map((zone) => zone.undecided === true)).toEqual([false, true]);
+      expect(map.places['part-a'].undecided).toBe(true);
+      expect(map.places['part-b']).not.toHaveProperty('undecided');
+      // The second text has no rests: it is drawn as decided.
+      expect(map.notes.map((note) => note.undecided === true)).toEqual([true, false]);
+      expect(map.ghosts.map((ghost) => ghost.undecided === true)).toEqual([true, false]);
+    });
+
+    it('draws on Silo\'s map the channels, SSH and the servers and clouds as not decided, and the way to the internet as decided', () => {
+      const map = readBuildData(REPOSITORY).map;
+      const wire = (word: string) => map.wires.find((one) => one.label?.[2] === word);
+      expect(wire('requests')?.undecided).toBeUndefined();
+      expect(wire('calls')?.undecided).toBeUndefined();
+      expect(wire('SSH')?.undecided).toBe(true);
+      const note = (title: string) => map.notes.find((one) => one.title === title);
+      expect(note('The internet')?.undecided).toBeUndefined();
+      expect(note('The boundary\'s channels')?.undecided).toBe(true);
+      expect(note('Your terminal')?.undecided).toBe(true);
+      expect(note('A server or a cloud')?.undecided).toBeUndefined();
     });
   });
 
@@ -516,7 +600,8 @@ describe('the map layout', () => {
       const hit = (a: Box, b: Box) => a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3];
       const boxes = [
         ...Object.entries(layout.places).filter(([, place]) => !place.inner).map(([id, place]) => [id, place.full, place.fold] as const),
-        ...layout.notes.map((note) => [`the text ${note.title}`, note.full, note.fold] as const),
+        // A text with no folded place does not move: it fades out where it stands.
+        ...layout.notes.flatMap((note) => (note.fold ? [[`the text ${note.title}`, note.full, note.fold] as const] : [])),
       ];
       const crossings = new Set<string>();
       for (let step = 0; step <= 100; step += 1) {
@@ -534,7 +619,7 @@ describe('the map layout', () => {
         // A part drawn inside another overlaps that one by design, and only that one.
         const parts = Object.entries(layout.places).filter(([, place]) => !place.inner).map(([id, place]) => [id, place[view]] as [string, Box]);
         const others: [string, Box][] = [
-          ...layout.notes.map((note) => [`the text ${note.title}`, note[view]] as [string, Box]),
+          ...layout.notes.flatMap((note) => { const box = note[view]; return box ? [[`the text ${note.title}`, box] as [string, Box]] : []; }),
           ...layout.zones.map((zone) => [`label of ${zone.label}`, label(zone[view])] as [string, Box]),
         ];
         const clashes = parts.flatMap(([id, box], index) => [...parts.slice(index + 1), ...others].filter(([, other]) => hit(box, other)).map(([name]) => `${view}: ${id} and ${name}`));

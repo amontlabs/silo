@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { arrowPath, crossPath, FOLD_HEIGHT, MAP_HEIGHT, MAP_WIDTH, placeStyle } from './map';
-import type { Glyph, MapLayout, Wire } from './map';
+import type { Drawing, Glyph, MapLayout } from './map';
 import { stateWords } from './plan';
 import type { PartGroup, PartState } from './plan';
 
@@ -28,16 +28,39 @@ function GlyphView({ glyph }: { glyph: Glyph }) {
   );
 }
 
-function Wires({ wires, height, className, states }: { wires: Wire[]; height: number; className: string; states: Map<string, PartState> }) {
+/** A wire as one map draws it: its lines there, the part whose state colours it, and whether it is not decided. */
+interface Drawn {
+  of: string;
+  drawing: Drawing;
+  undecided?: boolean;
+}
+
+/** The classes a thing of the map takes: its part's state when it has one, and `undecided` when it is not decided. */
+const marks = (base: string, thing: { undecided?: boolean }, state?: PartState) => [base, state ? `s-${state}` : '', thing.undecided ? 'undecided' : ''].filter(Boolean).join(' ');
+
+function Wires({ wires, height, className, states }: { wires: Drawn[]; height: number; className: string; states: Map<string, PartState> }) {
   return (
     <svg className={`ws-wires ${className}`} viewBox={`0 0 ${MAP_WIDTH} ${height}`} aria-hidden="true">
-      {wires.map((wire, index) => (
-        <g className={`ws-wire s-${states.get(wire.of) ?? 'open'}`} key={index}>
-          <path d={wire.cross ? `${wire.d}${crossPath(wire.cross)}` : wire.d} />
-          {wire.arrows?.map((arrow) => <path className="ah" key={arrow.join()} d={arrowPath(arrow)} />)}
+      {wires.map(({ of, drawing, undecided }, index) => (
+        <g className={marks('ws-wire', { undecided }, states.get(of) ?? 'open')} key={index}>
+          <path d={drawing.cross ? `${drawing.d}${crossPath(drawing.cross)}` : drawing.d} />
+          {drawing.arrows?.map((arrow) => <path className="ah" key={arrow.join()} d={arrowPath(arrow)} />)}
         </g>
       ))}
     </svg>
+  );
+}
+
+/** What a solid and a dashed line mean, drawn as the wires draw them. */
+function Key({ at: [x, y] }: { at: [number, number] }) {
+  const line = (undecided: boolean) => (
+    <svg className={marks('ws-wire', { undecided })} viewBox="0 0 24 2"><path d="M0 1H24" /></svg>
+  );
+  return (
+    <div className="ws-key" aria-hidden="true" style={style({ '--lx': x, '--ly': y })}>
+      <span>{line(false)}decided</span>
+      <span>{line(true)}not decided</span>
+    </div>
   );
 }
 
@@ -94,32 +117,34 @@ export function MapView({ layout, groups, folded, current, onOpen }: MapViewProp
       <div className={['ws-stage', folded ? 'fold' : '', groups.length ? '' : 'ws-stage-empty'].filter(Boolean).join(' ')}>
         {groups.length ? null : <p className="ws-quiet">No part yet.</p>}
         {layout.zones.map((zone) => (
-          <div className={`ws-geo ws-zone${zone.rounded ? ' rounded' : ''}`} key={zone.label} style={style(placeStyle(zone.full, zone.fold))} aria-hidden="true">
+          <div className={marks(`ws-geo ws-zone${zone.rounded ? ' rounded' : ''}`, zone)} key={zone.label} style={style(placeStyle(zone.full, zone.fold))} aria-hidden="true">
             <span className="ws-zlabel">{zone.label}</span>
             {zone.corners ? <><i className="ws-dia tl" /><i className="ws-dia tr" /><i className="ws-dia bl" /><i className="ws-dia br" /></> : null}
           </div>
         ))}
-        <Wires wires={layout.wires.full} height={MAP_HEIGHT} className="w-full" states={states} />
-        <Wires wires={layout.wires.fold} height={FOLD_HEIGHT} className="w-fold" states={states} />
-        {layout.wires.full.filter((wire) => wire.label).map((wire, index) => {
+        <Wires wires={layout.wires.map((wire) => ({ of: wire.of, drawing: wire, undecided: wire.undecided }))} height={MAP_HEIGHT} className="w-full" states={states} />
+        <Wires wires={layout.wires.flatMap((wire) => (wire.fold ? [{ of: wire.of, drawing: wire.fold, undecided: wire.undecided }] : []))} height={FOLD_HEIGHT} className="w-fold" states={states} />
+        {layout.wires.filter((wire) => wire.label).map((wire, index) => {
           const [x, y, text, anchor] = wire.label!;
           return (
-            <span className={`ws-wl s-${states.get(wire.of) ?? 'open'}${anchor === 'middle' ? ' mid' : ''}`} key={index} aria-hidden="true" style={style({ '--lx': x, '--ly': y })}>{text}</span>
+            <span className={marks(`ws-wl${anchor === 'middle' ? ' mid' : ''}`, wire, states.get(wire.of) ?? 'open')} key={index} aria-hidden="true" style={style({ '--lx': x, '--ly': y })}>{text}</span>
           );
         })}
+        {layout.key ? <Key at={layout.key} /> : null}
         {layout.notes.map((note) => (
-          <div className="ws-geo ws-node" key={note.title} style={style(placeStyle(note.full, note.fold))} aria-hidden="true">
+          // A text with no folded place stays where it is and fades out as the map folds.
+          <div className={marks(`ws-geo ws-node${note.fold ? '' : ' off-fold'}`, note)} key={note.title} style={style(placeStyle(note.full, note.fold ?? note.full))} aria-hidden="true">
             <b>{note.title}</b><span>{note.line}</span>
           </div>
         ))}
         {layout.ghosts.map((ghost, index) => (
-          <i className={`ws-geo ws-ghost s-${states.get(ghost.of) ?? 'open'}`} key={index} style={style(placeStyle(ghost.full, ghost.fold))} aria-hidden="true" />
+          <i className={marks('ws-geo ws-ghost', ghost, states.get(ghost.of) ?? 'open')} key={index} style={style(placeStyle(ghost.full, ghost.fold))} aria-hidden="true" />
         ))}
         {Object.entries(layout.places).map(([id, place]) => {
           const group = byId.get(id);
           if (!group) return null;
           const on = current === id;
-          const classes = ['ws-geo', 'ws-part', `s-${group.state}`, place.inner ? 'inner' : '', place.tall ? 'tall' : '', place.wide ? 'wide' : '', on ? 'on' : ''].filter(Boolean).join(' ');
+          const classes = ['ws-geo', 'ws-part', `s-${group.state}`, place.inner ? 'inner' : '', place.tall ? 'tall' : '', place.wide ? 'wide' : '', on ? 'on' : '', place.undecided ? 'undecided' : ''].filter(Boolean).join(' ');
           return (
             <button
               type="button" key={id} data-part={id} className={classes} style={style(placeStyle(place.full, place.fold, place))}
