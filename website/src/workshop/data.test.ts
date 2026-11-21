@@ -5,12 +5,15 @@ import { dirname, join } from 'node:path';
 import { canonicalText } from '../../../tools/plan/model/index.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadDir } from '../../../tools/plan/read/index.js';
-import { buildDataFrom, factsFrom, historiesFrom, historyFromGit, notesFrom, planDir, readBuildData, readHistories, readHistory, unshallow } from './data';
+import { buildDataFrom, factsFrom, historiesFrom, historyFromGit, layoutPlanFrom, notesFrom, planDir, readBuildData, readHistories, readHistory, unshallow } from './data';
 import type { Git } from './data';
 import { buildData, CORE_NOTES, DECISIONS, emptyPlanFiles, FEATURES, PARTS, planFiles, withLists, ZIG_NOTES } from './fixtures';
-import { checkLayout, LayoutError, MAP_HEIGHT, SILO_MAP } from './map';
+import { checkLayout, LayoutError, MAP_HEIGHT, NO_MAP, SILO_MAP, pageLayout } from './map';
 import type { Box, MapLayout } from './map';
 import { EXAMPLE_MAP } from './map-example';
+import { MAP_PIXELS, MONO_ADVANCE, SERIF_WIDTHS, shownTitle, stateNeeds, TITLE_FACE, TITLE_STYLE, titleEms, unknownCharacters } from './map-fit';
+import { stateWords } from './plan';
+import type { Counts, PartState } from './plan';
 
 const SAMPLE = join(dirname(new URL(import.meta.url).pathname), '../../../tools/plan/test/fixtures/sample');
 
@@ -45,7 +48,7 @@ describe('reading the plan files', () => {
   });
 
   it('holds no switch for entries\' threads: the page\'s data has none, in the real build and in the fixtures', () => {
-    expect(buildDataFrom(emptyPlanFiles())).not.toHaveProperty('threads');
+    expect(buildDataFrom(emptyPlanFiles(), { map: NO_MAP })).not.toHaveProperty('threads');
     expect(buildData()).not.toHaveProperty('threads');
     expect(buildData()).not.toHaveProperty('decide');
   });
@@ -100,14 +103,14 @@ describe('what an entry says of the plan\'s lists', () => {
 
 describe('a plan that holds no part', () => {
   it('reads with no part and no feature, and keeps the decisions of the whole product', () => {
-    const data = buildDataFrom(emptyPlanFiles());
-    expect(data).toMatchObject({ parts: [], map: SILO_MAP });
+    const data = buildDataFrom(emptyPlanFiles(), { map: NO_MAP });
+    expect(data).toMatchObject({ parts: [], map: NO_MAP });
     expect(data.entries.map((entry) => entry.id)).toEqual(['security-properly', 'one-host']);
     expect(notesFrom(emptyPlanFiles())).toEqual({});
   });
 
   it('reads a part with no feature: nothing stops the build', () => {
-    const data = buildDataFrom(planFiles({ features: FEATURES.filter((feature) => feature.part !== 'part-b') }));
+    const data = buildDataFrom(planFiles({ features: FEATURES.filter((feature) => feature.part !== 'part-b') }), { map: EXAMPLE_MAP });
     expect(data.parts.map((part) => part.id)).toContain('part-b');
   });
 });
@@ -127,10 +130,11 @@ describe('a plan with an error', () => {
     expect(message).toContain('Fix:');
   });
 
-  it('stops on a part the example map has no place for; Silo\'s own map, empty, draws no map and takes any plan', () => {
+  it('stops on a part the map has no place for; a layout that places nothing draws no map and takes any plan', () => {
     const files = planFiles({ parts: [...PARTS, { id: 'billing', title: 'Billing', line: 'Money.' }] });
-    expect(() => buildDataFrom(files, { map: EXAMPLE_MAP })).toThrow('The map has no place for the part "billing" of plan/parts.json. Add it to website/src/workshop/map.ts.');
-    expect(buildDataFrom(files).map).toBe(SILO_MAP);
+    expect(() => buildDataFrom(files, { map: EXAMPLE_MAP })).toThrow('The map has no place for the part "billing" of plan/parts.json. Add it to website/src/workshop/map-example.ts.');
+    expect(() => buildDataFrom(files)).toThrow('The map has no place for the part "part-a" of plan/parts.json.');
+    expect(buildDataFrom(files, { map: NO_MAP }).map).toBe(NO_MAP);
   });
 });
 
@@ -154,7 +158,7 @@ describe('reading plan/ from a repository folder', () => {
   it('reads the plan named by WORKSHOP_PLAN instead: the plan tool\'s sample', () => {
     expect(planDir('/repo', {})).toBe('/repo/plan');
     expect(planDir('/repo', { WORKSHOP_PLAN: SAMPLE })).toBe(SAMPLE);
-    const data = buildDataFrom(loadDir(SAMPLE));
+    const data = buildDataFrom(loadDir(SAMPLE), { map: NO_MAP });
     expect(data.parts.map((part) => part.id)).toEqual(['engine', 'record']);
     expect(data.entries.filter((entry) => entry.part === null).map((entry) => entry.id)).toEqual(['the-design', 'nothing-without-a-reason']);
   });
@@ -251,11 +255,11 @@ describe('the history of the entries', () => {
     const source = historyFromGit('/repo', still.git);
     expect(source.shallow).toBe(true);
     expect(still.calls.filter((call) => call === 'unshallow')).toHaveLength(1);
-    expect(buildDataFrom(emptyPlanFiles(), { history: source }).shallow).toBe(true);
-    expect(buildDataFrom(emptyPlanFiles()).shallow).toBe(false);
+    expect(buildDataFrom(emptyPlanFiles(), { map: NO_MAP, history: source }).shallow).toBe(true);
+    expect(buildDataFrom(emptyPlanFiles(), { map: NO_MAP }).shallow).toBe(false);
   });
 
-  it('gives a plan read from another folder none: the history is the caller\'s, or none', () => {
+  it('gives a plan read from another folder no history and no map: the history is the caller\'s, or none', () => {
     expect(readHistory(REPOSITORY)).not.toBeNull();
     const before = process.env.WORKSHOP_PLAN;
     process.env.WORKSHOP_PLAN = SAMPLE;
@@ -264,6 +268,7 @@ describe('the history of the entries', () => {
       const data = readBuildData(REPOSITORY);
       expect(data.entries.every((entry) => entry.history === null)).toBe(true);
       expect(data.shallow).toBe(false);
+      expect(data.map).toBe(NO_MAP);
       expect(readHistories(REPOSITORY)).toEqual({});
     } finally {
       if (before === undefined) delete process.env.WORKSHOP_PLAN;
@@ -286,29 +291,212 @@ describe('the history of the entries', () => {
     const files = planFiles();
     const source = { shallow: false, changes: new Map([['core', [{ commit: 'a'.repeat(40), date: '2026-11-01T10:00:00Z', what: ['added' as const] }]], ['gone', [{ commit: 'b'.repeat(40), date: '2026-11-01T10:00:00Z', what: ['added' as const] }]]]) };
     expect(Object.keys(historiesFrom(files, source))).toEqual(['core']);
-    expect(buildDataFrom(files, { history: source }).entries.filter((entry) => entry.history).map((entry) => entry.id)).toEqual(['core']);
+    expect(buildDataFrom(files, { map: EXAMPLE_MAP, history: source }).entries.filter((entry) => entry.history).map((entry) => entry.id)).toEqual(['core']);
     expect(historiesFrom(files, null)).toEqual({});
   });
 });
 
 describe('the map layout', () => {
   const ids = PARTS.map((part) => part.id);
+  // The fixture plan as the build gives it to the check, with only the parts named.
+  const plan = (partIds: string[] = ids, options?: Parameters<typeof planFiles>[0]) => {
+    const read = layoutPlanFrom(planFiles(options));
+    return { ...read, parts: partIds.map((id) => read.parts.find((part) => part.id === id) ?? { id, title: id }) };
+  };
 
   it('draws the fixture plan with the example, and Silo\'s plan with its own map', () => {
-    expect(buildData().map).toBe(EXAMPLE_MAP);
+    expect(buildData().map).toEqual(pageLayout(EXAMPLE_MAP));
     expect(Object.keys(EXAMPLE_MAP.places)).toEqual(ids);
-    // Silo's own map is empty: every plan passes, and the page shows the tiles alone.
-    expect(() => checkLayout(['engine', 'record'])).not.toThrow();
+    // The real plan passes every check of Silo's map: its parts, what each wire rests on, and its titles.
+    expect(readBuildData(REPOSITORY).map).toEqual(pageLayout(SILO_MAP));
+    expect(() => checkLayout(plan(['engine', 'record']))).toThrow(LayoutError);
+    // A layout that places nothing takes every plan, and the page shows the tiles alone.
+    expect(() => checkLayout(plan(['engine', 'record']), NO_MAP)).not.toThrow();
   });
 
   it('places exactly the parts of the plan', () => {
-    expect(() => checkLayout(ids, EXAMPLE_MAP)).not.toThrow();
-    expect(() => checkLayout([...ids, 'billing'], EXAMPLE_MAP)).toThrow(LayoutError);
-    expect(() => checkLayout(ids.filter((id) => id !== 'part-c'), EXAMPLE_MAP)).toThrow('website/src/workshop/map.ts places the part "part-c", which plan/parts.json does not have.');
+    expect(() => checkLayout(plan(), EXAMPLE_MAP)).not.toThrow();
+    expect(() => checkLayout(plan([...ids, 'billing']), EXAMPLE_MAP)).toThrow(LayoutError);
+    expect(() => checkLayout(plan(ids.filter((id) => id !== 'part-c')), EXAMPLE_MAP)).toThrow('website/src/workshop/map-example.ts places the part "part-c", which plan/parts.json does not have.');
     const without = (id: string): MapLayout => ({ ...EXAMPLE_MAP, places: Object.fromEntries(Object.entries(EXAMPLE_MAP.places).filter(([place]) => place !== id)) });
-    expect(() => checkLayout(ids.filter((id) => id !== 'part-b'), without('part-b'))).toThrow('website/src/workshop/map.ts draws a wire for the part "part-b", which plan/parts.json does not have.');
+    expect(() => checkLayout(plan(ids.filter((id) => id !== 'part-b')), without('part-b'))).toThrow('website/src/workshop/map-example.ts draws a wire for the part "part-b", which plan/parts.json does not have.');
     const noWires = { ...without('part-d'), wires: { full: EXAMPLE_MAP.wires.full.filter((wire) => wire.of !== 'part-d'), fold: EXAMPLE_MAP.wires.fold.filter((wire) => wire.of !== 'part-d') } };
-    expect(() => checkLayout(ids.filter((id) => id !== 'part-d'), noWires)).toThrow('website/src/workshop/map.ts stacks a copy behind the part "part-d", which plan/parts.json does not have.');
+    expect(() => checkLayout(plan(ids.filter((id) => id !== 'part-d')), noWires)).toThrow('website/src/workshop/map-example.ts stacks a copy behind the part "part-d", which plan/parts.json does not have.');
+  });
+
+  describe('what a wire or a zone rests on', () => {
+    const LOOK = 'Fix: look at the wire, then name what it rests on now.';
+    // The example with the first wire, "uses", resting on `rests`; the build's own path, so its message.
+    const uses = (rests: string[] | undefined): MapLayout => ({ ...EXAMPLE_MAP, wires: { ...EXAMPLE_MAP.wires, full: EXAMPLE_MAP.wires.full.map((wire, index) => (index === 0 ? { ...wire, rests } : wire)) } });
+    const build = (layout: MapLayout, options?: Parameters<typeof planFiles>[0]) => () => buildDataFrom(planFiles(options), { map: layout });
+
+    it('keeps what each thing rests on out of the page\'s data', () => {
+      expect(JSON.stringify(buildData().map)).not.toContain('rests');
+      expect(buildData().map).not.toHaveProperty('file');
+      expect(pageLayout(NO_MAP)).toBe(NO_MAP);
+    });
+
+    it('names in each message the file of the layout it checked', () => {
+      expect(build(uses(undefined))).toThrow('website/src/workshop/map-example.ts: the wire "uses" rests on nothing.');
+      const real = layoutPlanFrom(loadDir(join(REPOSITORY, 'plan')));
+      const silo = { ...SILO_MAP, zones: SILO_MAP.zones.map((zone) => ({ ...zone, rests: [] })) };
+      expect(() => checkLayout(real, silo)).toThrow('website/src/workshop/map.ts: the zone "YOUR MAC" rests on nothing.');
+      const { file: _, ...unnamed } = uses(undefined);
+      expect(() => checkLayout(plan(), unnamed)).toThrow('the map\'s layout: the wire "uses" rests on nothing.');
+    });
+
+    it('passes a taken decision, a word of the list and a part, and asks nothing of the fold\'s wires', () => {
+      expect(EXAMPLE_MAP.wires.fold.every((wire) => wire.rests === undefined)).toBe(true);
+      expect(build(uses(['core-in-zig', 'part:part-a']))).not.toThrow();
+      expect(build(uses(['word:twin']), withLists())).not.toThrow();
+      // A replaced decision was taken; the one that replaced it is in force.
+      expect(build(uses(['signed-logs']))).not.toThrow();
+    });
+
+    it('stops on a wire of the full map that rests on nothing, named by its word or, with none, by its path', () => {
+      expect(build(uses(undefined))).toThrow('website/src/workshop/map-example.ts: the wire "uses" rests on nothing. Fix: give it `rests`: the decisions of the plan it draws, words as word:<id>, or part:<id> for what only a part\'s line says.');
+      expect(build(uses([]))).toThrow('the wire "uses" rests on nothing.');
+      const bare = { ...EXAMPLE_MAP, wires: { ...EXAMPLE_MAP.wires, full: EXAMPLE_MAP.wires.full.map((wire) => (wire.label ? wire : { ...wire, rests: undefined })) } };
+      expect(build(bare)).toThrow('website/src/workshop/map-example.ts: the wire with no word, drawn "M784 178H932" rests on nothing.');
+    });
+
+    it('stops on a zone that rests on nothing', () => {
+      const zones = EXAMPLE_MAP.zones.map((zone, index) => (index === 1 ? { ...zone, rests: [] } : zone));
+      expect(build({ ...EXAMPLE_MAP, zones })).toThrow('website/src/workshop/map-example.ts: the zone "ZONE TWO" rests on nothing.');
+    });
+
+    it('stops on an id that is no decision of the plan, a feature\'s included', () => {
+      expect(build(uses(['no-such-decision']))).toThrow(`website/src/workshop/map-example.ts: the wire "uses" rests on "no-such-decision", which is no decision of the plan. ${LOOK}`);
+      expect(build(uses(['core']))).toThrow(`the wire "uses" rests on "core", which is no decision of the plan. ${LOOK}`);
+    });
+
+    it('stops on a decision that is not decided: open, or answered and not taken', () => {
+      expect(build(uses(['one-host']))).toThrow(`website/src/workshop/map-example.ts: the wire "uses" rests on the decision "one-host", which is open: nobody has answered it. ${LOOK}`);
+      expect(build(uses(['one-way']))).toThrow(`website/src/workshop/map-example.ts: the wire "uses" rests on the decision "one-way", which is answered and not taken. ${LOOK}`);
+    });
+
+    it('stops on a dropped decision, and on a replaced one with the decision that replaced it', () => {
+      expect(build(uses(['old-format']))).toThrow(`website/src/workshop/map-example.ts: the wire "uses" rests on the decision "old-format", which was dropped. ${LOOK}`);
+      expect(build(uses(['plain-logs']))).toThrow(`website/src/workshop/map-example.ts: the wire "uses" rests on the decision "plain-logs", which was replaced by "signed-logs". ${LOOK}`);
+    });
+
+    it('stops on a word that is not in the list, and on a part that does not exist', () => {
+      expect(build(uses(['word:twin']))).toThrow(`website/src/workshop/map-example.ts: the wire "uses" rests on the word "word:twin", which plan/words.json does not have. ${LOOK}`);
+      expect(build(uses(['part:billing']))).toThrow(`website/src/workshop/map-example.ts: the wire "uses" rests on the part "part:billing", which plan/parts.json does not have. ${LOOK}`);
+    });
+
+    it('reads the rests of a zone, a place, a text and a copy when they have some, and names each problem once', () => {
+      const layout: MapLayout = {
+        ...EXAMPLE_MAP,
+        zones: EXAMPLE_MAP.zones.map((zone, index) => (index === 0 ? { ...zone, rests: ['one-host'] } : zone)),
+        places: { ...EXAMPLE_MAP.places, 'part-a': { ...EXAMPLE_MAP.places['part-a'], rests: ['old-format'] } },
+        notes: EXAMPLE_MAP.notes.map((note) => ({ ...note, rests: ['part:billing'] })),
+        ghosts: EXAMPLE_MAP.ghosts.map((ghost, index) => (index === 1 ? { ...ghost, rests: ['word:scrap'] } : ghost)),
+      };
+      let message = '';
+      try {
+        build(layout)();
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message.split('\n')).toEqual([
+        'website/src/workshop/map-example.ts: the zone "ZONE ONE" rests on the decision "one-host", which is open: nobody has answered it. Fix: look at the zone, then name what it rests on now.',
+        'website/src/workshop/map-example.ts: the place of the part "part-a" rests on the decision "old-format", which was dropped. Fix: look at the place, then name what it rests on now.',
+        'website/src/workshop/map-example.ts: the text "Outside" rests on the part "part:billing", which plan/parts.json does not have. Fix: look at the text, then name what it rests on now.',
+        'website/src/workshop/map-example.ts: copy 2 behind the part "part-d" rests on the word "word:scrap", which plan/words.json does not have. Fix: look at the copy, then name what it rests on now.',
+      ]);
+    });
+  });
+
+  describe('a title in its box', () => {
+    const titled = (title: string, id = 'part-c') => ({ parts: PARTS.map((part) => (part.id === id ? { ...part, title } : part)) });
+
+    it('stops on a title wider than its box, on the full map and on the fold, with the room it needs and the room it has', () => {
+      let message = '';
+      try {
+        buildDataFrom(planFiles(titled('A part with a title far too long for it')), { map: EXAMPLE_MAP });
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      const lines = message.split('\n');
+      expect(lines).toHaveLength(2);
+      const [full, fold] = lines.map((line) => /^website\/src\/workshop\/map-example\.ts: the title of the part "part-c", "A part with a title far too long for it", needs a box (\d+) map units wide on the (full|folded) map, and its box there is (\d+)\. Fix: widen its box in website\/src\/workshop\/map-example\.ts, or shorten the title in plan\/parts\.json\.$/.exec(line));
+      expect([full?.[2], full?.[3], fold?.[2], fold?.[3]]).toEqual(['full', '120', 'folded', '104']);
+      expect(Number(full?.[1])).toBeGreaterThan(120);
+      expect(Number(fold?.[1])).toBeGreaterThan(104);
+    });
+
+    it('passes a title that fits, and stops on one only the fold is too narrow for', () => {
+      expect(() => buildDataFrom(planFiles(titled('Part C, longer')), { map: EXAMPLE_MAP })).not.toThrow();
+      // Part D is 152 units wide on the full map and 120 on the fold, where its title is set smaller: this one fits only the first.
+      let message = '';
+      try {
+        buildDataFrom(planFiles(titled('Part D, a bit longer', 'part-d')), { map: EXAMPLE_MAP });
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toBe('website/src/workshop/map-example.ts: the title of the part "part-d", "Part D, a bit longer", needs a box 122 map units wide on the folded map, and its box there is 120. Fix: widen its box in website/src/workshop/map-example.ts, or shorten the title in plan/parts.json.');
+    });
+
+    it('stops on a character the width table lacks, naming it and the command that prints its width', () => {
+      expect(() => buildDataFrom(planFiles(titled('Café')), { map: EXAMPLE_MAP })).toThrow('The title of the part "part-c", "Café", has "é", which the width table of website/src/workshop/map-fit.ts lacks, so the build cannot tell whether it fits its box. Fix: run `node website/scripts/font-widths.mjs website/public/fonts/ibm-plex-serif-400-normal.woff2 \'é\'` and add the width it prints for each to SERIF_WIDTHS, or use another character in plan/parts.json.');
+      // The command, as the message gives it, prints that width; a character the font has no glyph for is named, and fails.
+      const printed = JSON.parse(execFileSync('node', ['website/scripts/font-widths.mjs', TITLE_FACE.file, 'é'], { cwd: REPOSITORY, encoding: 'utf8' }));
+      expect(printed['é']).toBe(536);
+      expect(() => execFileSync('node', ['website/scripts/font-widths.mjs', TITLE_FACE.file, '漢'], { cwd: REPOSITORY, stdio: 'pipe' })).toThrow('has no glyph for "漢"');
+    });
+
+    it('stops on a part named like a property every object has, with no place, as on any part with no place', () => {
+      const files = planFiles({ parts: [...PARTS, { id: 'constructor', title: 'Constructor', line: 'A part named like a property of every object.' }] });
+      expect(() => buildDataFrom(files, { map: EXAMPLE_MAP })).toThrow('The map has no place for the part "constructor" of plan/parts.json. Add it to website/src/workshop/map-example.ts.');
+      for (const id of ['toString', '__proto__', 'hasOwnProperty']) {
+        expect(() => checkLayout({ ...plan(), parts: [...plan().parts, { id, title: id }] }, EXAMPLE_MAP)).toThrow(`The map has no place for the part "${id}" of plan/parts.json.`);
+      }
+    });
+
+    it('measures a title as the page shows it: a run of white space as one space, none at the ends', () => {
+      const spaced = `The${' '.repeat(25)}engine`;
+      expect(shownTitle(`  ${spaced}\t\n`)).toBe('The engine');
+      expect(titleEms(spaced)).toBe(titleEms('The engine'));
+      // Part D's fold is 120 units wide: 25 spaces more, measured, would need about 72 more.
+      expect(() => buildDataFrom(planFiles(titled(spaced, 'part-d')), { map: EXAMPLE_MAP })).not.toThrow();
+      // A no-break space is not white space the page collapses.
+      expect(shownTitle('The\u00a0\u00a0engine')).toBe('The\u00a0\u00a0engine');
+    });
+
+    it('stops on a title that fits its box but runs under the part drawn inside it, on the fold', () => {
+      const real = layoutPlanFrom(loadDir(join(REPOSITORY, 'plan')));
+      expect(() => checkLayout(real, SILO_MAP)).not.toThrow();
+      const renamed = { ...real, parts: real.parts.map((part) => (part.id === 'computers' ? { ...part, title: 'Virtual computers' } : part)) };
+      let message = '';
+      try {
+        checkLayout(renamed, SILO_MAP);
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      // Computers is 216 units wide on the fold, and Agent programs begins 84 units in, across the title's line.
+      expect(message).toMatch(/^website\/src\/workshop\/map\.ts: the title of the part "computers", "Virtual computers", runs under the part "agent-programs", drawn inside its box on the folded map: the title needs (\d+) map units from the box's left edge, and "agent-programs" begins 84 units in\. Fix: move "agent-programs" right or off the title's line in website\/src\/workshop\/map\.ts, or shorten the title in plan\/parts\.json\.$/);
+      expect(Number(/needs (\d+)/.exec(message)?.[1])).toBeGreaterThan(84);
+    });
+
+    it('has every character of the real plan\'s titles in its width table, and the table is the font file\'s', async () => {
+      const titles = (JSON.parse(readFileSync(join(REPOSITORY, 'plan/parts.json'), 'utf8')) as { title: string }[]).map((part) => part.title);
+      expect(titles.flatMap((title) => unknownCharacters(title).map((char) => `${title}: ${char}`))).toEqual([]);
+      const { advanceWidths } = await import('../../scripts/font-widths.mjs');
+      const font = advanceWidths(readFileSync(join(REPOSITORY, 'website/public/fonts/ibm-plex-serif-400-normal.woff2')));
+      expect(Object.fromEntries(Object.keys(SERIF_WIDTHS).map((char) => [char, font[char]]))).toEqual(SERIF_WIDTHS);
+      const mono = advanceWidths(readFileSync(join(REPOSITORY, 'website/public/fonts/ibm-plex-mono-400-normal.woff2')));
+      expect(new Set(Object.entries(mono).filter(([char]) => char >= ' ' && char <= '~').map(([, width]) => width))).toEqual(new Set([MONO_ADVANCE]));
+    });
+
+    it('fits the longest state line under every title of Silo\'s map, for two-digit counts, at both ends of the map\'s widths', () => {
+      const counts = (built: number, planned: number): Counts => ({ built, planned, undecided: 0, dropped: 0 });
+      const lines = (['done', 'next', 'planned', 'open'] as PartState[]).flatMap((state) => [counts(99, 0), counts(0, 99), counts(10, 89)].map((c) => stateWords({ state, counts: c })));
+      const longest = lines.reduce((a, b) => (b.length > a.length ? b : a));
+      expect(longest).toBe('99/99 built');
+      const short = Object.entries(SILO_MAP.places).flatMap(([id, place]) => Object.values(MAP_PIXELS).map((px) => [id, px, stateNeeds(longest, place, px), place.full[2]] as const).filter(([, , need, has]) => need > has));
+      expect(short).toEqual([]);
+    });
   });
 
   for (const [name, layout] of [['Silo\'s map', SILO_MAP], ['the example', EXAMPLE_MAP]] as const) {
@@ -319,6 +507,23 @@ describe('the map layout', () => {
         // The full map's bottom edge leaves room for the focus ring, which is drawn 4 px outside the box.
         expect([id, x + w <= 1136 && y + h <= MAP_HEIGHT - 5 && cx + cw <= 1136 && cy + ch <= 180]).toEqual([id, true]);
       }
+    });
+
+    it(`moves no part of ${name} across another, or across the text that is not a part, while it folds`, () => {
+      // Every box moves from its full place to its folded one in the same time with the same easing: at each step t
+      // of the move it sits at full + t * (fold - full). A part inside another overlaps that one by design.
+      const at = (from: Box, to: Box, t: number) => from.map((value, index) => value + t * (to[index] - value)) as Box;
+      const hit = (a: Box, b: Box) => a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3];
+      const boxes = [
+        ...Object.entries(layout.places).filter(([, place]) => !place.inner).map(([id, place]) => [id, place.full, place.fold] as const),
+        ...layout.notes.map((note) => [`the text ${note.title}`, note.full, note.fold] as const),
+      ];
+      const crossings = new Set<string>();
+      for (let step = 0; step <= 100; step += 1) {
+        const t = step / 100;
+        boxes.forEach(([a, af, ac], index) => boxes.slice(index + 1).forEach(([b, bf, bc]) => { if (hit(at(af, ac, t), at(bf, bc, t))) crossings.add(`${a} and ${b}`); }));
+      }
+      expect([...crossings]).toEqual([]);
     });
 
     it(`keeps the parts of ${name} clear of each other, of the text that is not a part and of the zones' labels, full and folded`, () => {
@@ -337,6 +542,44 @@ describe('the map layout', () => {
       }
     });
   }
+
+  describe('what the stylesheet holds that the map\'s checks rely on', () => {
+    const here = dirname(new URL(import.meta.url).pathname);
+    const workshop = readFileSync(join(here, 'workshop.css'), 'utf8');
+    // The declarations of the last one-line rule for `selector`, by property.
+    const rule = (selector: string): Record<string, string> => {
+      const line = workshop.split('\n').filter((text) => text.startsWith(`${selector} {`)).at(-1) ?? '';
+      const body = line.slice(line.indexOf('{') + 1, line.lastIndexOf('}'));
+      return Object.fromEntries(body.split(';').map((declaration) => declaration.trim()).filter(Boolean).map((declaration) => [declaration.slice(0, declaration.indexOf(':')).trim(), declaration.slice(declaration.indexOf(':') + 1).trim()]));
+    };
+    const size = (value: number) => `max(${TITLE_STYLE.floorPx}px, calc(${value} * var(--u)))`;
+
+    it('sets the titles in the face the width table was made from', () => {
+      const site = readFileSync(join(here, '../site.css'), 'utf8');
+      expect(/--serif:\s*"([^"]+)"/.exec(site)?.[1]).toBe(TITLE_FACE.family);
+      const fonts = readFileSync(join(REPOSITORY, 'website/public/fonts/fonts.css'), 'utf8');
+      const faces = fonts.split('@font-face').filter((face) => face.includes(`'${TITLE_FACE.family}'`) && /font-style:\s*normal/.test(face) && /font-weight:\s*400/.test(face));
+      expect(faces.map((face) => /url\(\.\/([^)]+)\)/.exec(face)?.[1])).toEqual([TITLE_FACE.file.split('/').at(-1)]);
+      // The title's rule sets weight and style back to normal, and no letter spacing.
+      expect(rule('.ws-p-ttl').font).toBe(`${size(TITLE_STYLE.full.size)}/${TITLE_STYLE.lineHeight} var(--serif)`);
+      expect(Object.keys(rule('.ws-p-ttl'))).not.toContain('letter-spacing');
+    });
+
+    it('gives the titles the offsets, sizes and tops the width check uses, full and folded', () => {
+      expect(rule('.ws-p-ttl')).toMatchObject({ left: `calc(${TITLE_STYLE.full.left} * var(--u))`, top: `calc(var(--ty, ${TITLE_STYLE.top}) * var(--u))` });
+      expect(rule('.ws-part.inner .ws-p-ttl')).toEqual({ left: `calc(${TITLE_STYLE.inner.left} * var(--u))`, 'font-size': size(TITLE_STYLE.inner.size) });
+      expect(rule('.ws-stage.fold .ws-p-ttl')).toMatchObject({ left: `calc(${TITLE_STYLE.fold.left} * var(--u))`, top: `calc((var(--ch) * var(--u) - 2px - ${TITLE_STYLE.lineHeight}em) / 2)`, 'font-size': size(TITLE_STYLE.fold.size) });
+      expect(rule('.ws-stage.fold .ws-part.inner .ws-p-ttl')).toEqual({ left: `calc(${TITLE_STYLE.foldInner.left} * var(--u))`, 'font-size': size(TITLE_STYLE.foldInner.size) });
+      expect(rule('.ws-stage.fold .ws-part.tall .ws-p-ttl')).toMatchObject({ top: `calc(${TITLE_STYLE.foldTallTop} * var(--u))` });
+    });
+
+    it('keeps a part drawn inside another above it, the other focused or not, and its own focus ring above its neighbours', () => {
+      const z = (selector: string) => Number(rule(selector)['z-index']);
+      expect(z('.ws .ws-part')).toBeLessThan(z('.ws .ws-part:focus-visible'));
+      expect(z('.ws .ws-part.inner')).toBeGreaterThan(z('.ws .ws-part:focus-visible'));
+      expect(z('.ws .ws-part.inner:focus-visible')).toBeGreaterThan(z('.ws .ws-part.inner'));
+    });
+  });
 
   it('gives the stage in the stylesheet the height of the full map, which clips what goes past it', () => {
     const css = readFileSync(join(dirname(new URL(import.meta.url).pathname), 'workshop.css'), 'utf8');

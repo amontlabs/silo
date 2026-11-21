@@ -127,13 +127,17 @@ the first place with rows the plain view must never be painted and the place
 must be in the first frame after the takeover; and on a
 second visit, the state remembered, nothing under the title row may move by
 half a pixel or more when the script takes over, at 1440 × 900 and 390 × 844.
-A plan with no part is checked at the places it has, and passes.
+A plan with no part builds only from a folder named in `WORKSHOP_PLAN`, which
+draws no map, since Silo's map stops the build when `plan/` lacks a part it
+places. Built that way, it is checked at the places it has, and passes.
 `npm test` does not run it.
 
 To see the page's moves frame by frame, with the same server running,
 `npm --prefix website run motion-sheet` (a URL, `--out <dir>` and flow names
 after `--`). For each move, such as the plain view to a part and back at
-1440 × 900 and 390 × 844, it writes to `website/.motion/` a contact sheet of
+1440 × 900 and 390 × 844, or on the map at 1440 × 900 the map to a part and
+back, a scrolled map to a part and back, and Map to Order and back (the flows
+named `map-*`), it writes to `website/.motion/` a contact sheet of
 the frames at fixed times after the action and a text file with each change
 of the scroll and of each element's box and opacity, the animations that ran
 and the layout shifts. It exits with an error when a move between the plain view and
@@ -179,14 +183,44 @@ and `entryHistory` of `tools/plan/history` on the repository, once per build:
 that is the history of each entry (see "History" below). A part with no feature is fine.
 A part whose id is `product`, `left`, `suggested` or `latest` stops the build:
 those are the page's own addresses, and the message names the part and the fix.
-`map.ts` holds the drawing (`SILO_MAP`): where each part sits on the full map
-and on the folded one, the zones, the text that is not a part, and the wires.
-`SILO_MAP` is empty: with no place in it there is no map, any plan passes, and
-the page shows the parts as tiles only, without the Map and Order control. Once
-the drawing places one part, it must place every part of `plan/parts.json` and
-nothing else, or the build stops. `map-example.ts` is a made-up layout of five
-parts that shows every kind of thing a layout can hold; the tests draw their
-fixture plan (`fixtures.ts`) with it, and the page never shows it.
+`map.ts` holds the drawing, `SILO_MAP`. It places every part of
+`plan/parts.json` on the full map and on the folded one, inside two zones: your
+Mac, and the virtual machines in it. The model providers are text outside the
+Mac, not a part. Nine wires join the parts, each with one word, such as "facts"
+from the boundary to the record.
+
+Each wire of the full map and each zone says in `rests` what in the plan it
+draws. An entry of `rests` is the id of a decision, `word:<id>` for a word of
+`plan/words.json`, or `part:<id>` for what only a part's line says. The wire
+"facts" rests on `how-silo-knows`. A place, a text or a copy behind a part may
+have `rests` too. The wires of the folded map have none, since they draw the
+same relations again. The page's data leaves `rests` out.
+
+The build checks the drawing against the plan. It stops, with the problem and
+the fix, when:
+
+- a part of `plan/parts.json` has no place, or the drawing names a part the
+  plan does not have;
+- a wire of the full map or a zone has no `rests`;
+- an id in `rests` names no decision, or a decision that is open, answered and
+  not taken, dropped or replaced (the message names the one that replaced it),
+  or a word or a part that does not exist;
+- a part's title is wider than its box, on the full map or on the folded one,
+  at a 1200 px window or at the widest the map gets.
+
+The width of a title is computed from the advance widths of its face, IBM Plex
+Serif 400, kept as a table in `map-fit.ts`. `scripts/font-widths.mjs` reads
+them from the font file in `public/fonts/`, and a test holds the table equal to
+the file. A title with a character the table lacks stops the build too. The
+state line under a title is not checked by the build, since its words come from
+the code: a test checks that every box holds the longest one, "99/99 built".
+
+A layout with no place in it (`NO_MAP`) draws no map: any plan passes, and the
+page shows the parts as tiles only, without the Map and Order control. A plan
+read from another folder (`WORKSHOP_PLAN`) is built with it. `map-example.ts`
+is a made-up layout of five parts that shows every kind of thing a layout can
+hold; the tests draw their fixture plan (`fixtures.ts`) with it, and the page
+never shows it.
 
 The page has no way to take or drop an entry and the server has no verdict route:
 decisions and features are taken or dropped with `plan take` and `plan drop`.

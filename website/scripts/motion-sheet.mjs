@@ -12,7 +12,9 @@
 // - a move between two places runs any `::view-transition-*` animation;
 // - Notes opening changes the panel's height in fewer than four steps;
 // - a comment's height or the comment box's top changes when the comment is confirmed.
-// On a page with a map, the moves run in Order, where the tiles are.
+// On a page with a map, the moves on the tiles run in Order, where the tiles are; the flows named map-* run on the map, at
+// 1440 x 900: the map to a part and back, a scrolled map to a part and back from a scrolled part, Map to Order and back.
+// Each flow sets the view it needs, whatever view the url names.
 // It drives Playwright's own browser: `npx playwright-core install chromium-headless-shell` once.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -21,7 +23,7 @@ import { chromium } from 'playwright-core';
 
 const wait = (ms) => new Promise((done) => setTimeout(done, ms));
 /** The times after the action that the contact sheet shows, in ms. */
-const TIMES = [0, 33, 66, 100, 130, 166, 200, 250, 300, 350, 400, 500, 650, 900, 1400];
+const TIMES = [0, 33, 66, 100, 130, 166, 200, 250, 300, 350, 400, 450, 500, 650, 900, 1400];
 const PHONE = [390, 844];
 const DESK = [1440, 900];
 
@@ -185,21 +187,26 @@ async function capture(out, page, name, action, { selectors = ROWS, kind = null,
 }
 
 const ROWS = { title: '#ws-part-title', back: '.ws-back', board: '.ws-board', detail: '.ws-detail', under: '.ws-under', row1: '.ws-item:nth-of-type(1)', row2: '.ws-item:nth-of-type(2)' };
+/** What the map's moves read: the stage, the part opened, a part inside another, a wire's word, the back control and the detail. */
+const MAP_ROWS = { stage: '.ws-stage', opened: '.ws-part.on', inner: '.ws-part.inner', views: '.ws-part[data-part="views"]', word: '.ws-wl', back: '.ws-back', detail: '.ws-detail', under: '.ws-under' };
 const click = (selector) => async (page) => { await page.locator(selector).first().click({ noWaitAfter: true }); };
 const tileOf = (part) => `.ws-tile[data-part="${part}"] .ws-tile-hit`;
 
 /** What the moves need from the page's data: its parts in order, those with rows, an entry with notes. */
 async function siteOf(browser, url) {
-  const context = await browser.newContext();
+  const context = await browser.newContext({ viewport: { width: DESK[0], height: DESK[1] } });
   const page = await context.newPage();
-  await page.goto(url);
+  // Whatever view the url names: a page has a map when the map shows in its own default view, on a desk.
+  const plain = new URL(url);
+  plain.searchParams.delete('view');
+  await page.goto(plain.href);
   await page.waitForFunction(() => window.__workshopData, null, { timeout: 15000 });
   const data = await page.evaluate(() => {
     const { parts, entries } = window.__workshopData;
     return { parts: parts.map((part) => part.id), entries: entries.map((entry) => ({ id: entry.id, part: entry.part, notes: entry.notes })) };
   });
   await page.waitForSelector('#workshop-root:not([data-prerendered]) .ws', { timeout: 15000 });
-  const mapped = (await page.locator('.ws-stage').count()) > 0;
+  const mapped = await page.locator('.ws-stage').first().isVisible();
   await context.close();
   const withRows = data.parts.filter((part) => data.entries.some((entry) => entry.part === part));
   const noted = data.entries.find((entry) => entry.notes && entry.part);
@@ -215,8 +222,43 @@ async function openAndBack(s, size, prefix) {
   return [...problems, ...await capture(s.out, page, `${prefix}back-part`, click('.ws-back'), { kind: 'blind' })];
 }
 
+/** The part a map flow opens: the first with rows, by its box on the map. */
+const mapPartOf = (s) => `.ws-part[data-part="${s.site.withRows[0] ?? s.site.parts[0]}"]`;
+// Near its top left corner, on its title: a part drawn inside another covers the middle of that one.
+const TITLE = { position: { x: 12, y: 12 } };
+const press = (selector) => async (page) => { await page.locator(selector).first().click({ ...TITLE, noWaitAfter: true }); };
+
 /** The flows; each opens its pages through `s.open` and returns its problems. */
 const FLOWS = {
+  // The map to a part, which folds it, and back.
+  'map-open-and-back': async (s) => {
+    if (!s.site.mapped) return [];
+    const page = await s.open({ map: true });
+    await page.locator(mapPartOf(s)).hover(TITLE);
+    await wait(300);
+    const problems = await capture(s.out, page, 'map-open-part', press(mapPartOf(s)), { selectors: MAP_ROWS });
+    return [...problems, ...await capture(s.out, page, 'map-back-part', click('.ws-back'), { selectors: MAP_ROWS })];
+  },
+  // The map scrolled down, then a part: the map lifts as it folds; that part scrolled down, then Escape.
+  'map-scrolled': async (s) => {
+    if (!s.site.mapped) return [];
+    const page = await s.open({ map: true });
+    await page.evaluate(() => scrollTo({ top: 300, behavior: 'instant' }));
+    await wait(200);
+    const problems = await capture(s.out, page, 'map-scrolled-open', press(mapPartOf(s)), { selectors: MAP_ROWS });
+    await page.evaluate(() => scrollTo({ top: 500, behavior: 'instant' }));
+    await wait(200);
+    return [...problems, ...await capture(s.out, page, 'map-scrolled-back', async (p) => { await p.keyboard.press('Escape'); }, { selectors: MAP_ROWS })];
+  },
+  // Map to Order and back, on the plain view.
+  'map-order': async (s) => {
+    if (!s.site.mapped) return [];
+    const page = await s.open({ map: true });
+    const order = '.ws-seg button:has-text("Order")';
+    const problems = await capture(s.out, page, 'map-to-order', click(order), { selectors: { ...MAP_ROWS, tile: '.ws-tile' } });
+    await wait(300);
+    return [...problems, ...await capture(s.out, page, 'order-to-map', click('.ws-seg button:has-text("Map")'), { selectors: { ...MAP_ROWS, tile: '.ws-tile' } })];
+  },
   // The plain view to a part and back, on a desk and on a phone.
   'open-and-back': (s) => openAndBack(s, DESK, ''),
   'phone-open-and-back': (s) => openAndBack(s, PHONE, 'phone-'),
@@ -296,13 +338,15 @@ async function main() {
     const site = await siteOf(browser, options.url);
     if (!site.parts.length) throw new Error('the page has no part');
     const contexts = [];
-    // A page at an address with its state loaded; in Order on a page with a map.
-    const open = async ({ size = DESK, hash = '', signIn = false }) => {
+    // A page at an address with its state loaded, in the view the flow needs whatever the url names: on the map for the
+    // map's flows, in Order for the others on a page with a map.
+    const open = async ({ size = DESK, hash = '', signIn = false, map = false }) => {
       const context = await browser.newContext({ viewport: { width: size[0], height: size[1] }, deviceScaleFactor: 1 });
       contexts.push(context);
       const page = await context.newPage();
       const url = new URL(options.url);
-      if (site.mapped) url.searchParams.set('view', 'order');
+      if (site.mapped && !map) url.searchParams.set('view', 'order');
+      else url.searchParams.delete('view');
       if (signIn) {
         await page.goto(url.href, { waitUntil: 'networkidle' });
         await page.locator('#workshop-account a.button').click();
@@ -314,6 +358,7 @@ async function main() {
       url.hash = hash;
       await page.goto(url.href, { waitUntil: 'networkidle' });
       await page.waitForSelector('#workshop-root:not([data-prerendered]) .ws[data-live="answered"]', { timeout: 15000 });
+      if (map && !(await page.locator('.ws-stage').first().isVisible())) throw new Error('the map does not show');
       await wait(400);
       return page;
     };

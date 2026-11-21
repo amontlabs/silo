@@ -1,13 +1,13 @@
-// The Workshop while the plan holds no part, as the real build draws it: no map.
+// The Workshop while the plan holds no part, drawn with a layout that places nothing: no map.
 import { act, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { buildDataFrom } from './data';
 import { emptyPlanFiles, issue, liveState } from './fixtures';
-import { SILO_MAP } from './map';
+import { NO_MAP } from './map';
 import { mockApi, ok, posts, renderApp, visitor } from './test-support';
 
-const empty = () => buildDataFrom(emptyPlanFiles());
+const empty = () => buildDataFrom(emptyPlanFiles(), { map: NO_MAP });
 
 // Issues of features the plan no longer holds, as sync leaves them: closed, with their label.
 const withGoneEntries = () => liveState({
@@ -15,9 +15,9 @@ const withGoneEntries = () => liveState({
 });
 
 describe('the Workshop with an empty plan', () => {
-  it('is drawn with Silo\'s own map, which holds no part', () => {
-    expect(empty().map).toBe(SILO_MAP);
-    expect(Object.keys(SILO_MAP.places)).toEqual([]);
+  it('is drawn with a layout that holds no part', () => {
+    expect(empty().map).toBe(NO_MAP);
+    expect(Object.keys(NO_MAP.places)).toEqual([]);
   });
 
   it('is the normal page with nothing in it: the title row, the tiles without a map, sign-in, the lists, and the live reading', async () => {

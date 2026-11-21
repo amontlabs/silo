@@ -4,12 +4,12 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkFiles, formatProblem } from '../../../tools/plan/check/index.js';
-import { listKind, wordId } from '../../../tools/plan/model/index.js';
+import { entryStatus, listKind, replacedBy, wordId } from '../../../tools/plan/model/index.js';
 import { repoAddress } from '../../../tools/workshop/model/index.js';
 import { entryHistory, readSteps } from '../../../tools/plan/history/index.js';
 import { loadDir, parsePlan } from '../../../tools/plan/read/index.js';
-import { checkLayout, LayoutError, SILO_MAP } from './map.ts';
-import type { MapLayout } from './map.ts';
+import { checkLayout, LayoutError, NO_MAP, pageLayout, SILO_MAP } from './map.ts';
+import type { LayoutPlan, MapLayout } from './map.ts';
 import { RESERVED_ADDRESSES } from './routes.ts';
 import type { BuildData, Change, Entry, EntryFacts, Facts, Histories, Notes, Statement, Verdict } from './plan.ts';
 
@@ -177,7 +177,7 @@ export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null }: B
     parts: plan.parts.map((part) => ({ id: part.id, title: part.title, line: part.line })),
     stages: plan.stages.map((stage) => ({ id: stage.id, title: stage.title, line: stage.line })),
     entries,
-    map,
+    map: pageLayout(map),
     shallow: history?.shallow === true,
   };
 }
@@ -204,16 +204,33 @@ export function factsFrom(files: Map<string, string>): Facts {
   return toFacts(checkedPlan(files));
 }
 
+/** What the map's check reads of a plan: its parts, the status of each decision, and its words. */
+function layoutPlanOf(plan: RawPlan): LayoutPlan {
+  // The plan tool's model reads the entries as the files give them, which the check has already passed.
+  const entries = plan.entries as unknown as Record<string, Parameters<typeof entryStatus>[0]>;
+  const decisions: LayoutPlan['decisions'] = {};
+  for (const [id, entry] of Object.entries(entries)) {
+    if (entry.kind === 'decision') decisions[id] = { status: entryStatus(entry, entries) as LayoutPlan['decisions'][string]['status'], replacedBy: replacedBy(entry) };
+  }
+  return { parts: plan.parts, decisions, words: plan.words.flatMap((word) => (word.id ? [word.id] : [])) };
+}
+
+/** Checks the files of a plan and gives what the map's check reads of it, or throws with every problem. */
+export function layoutPlanFrom(files: Map<string, string>): LayoutPlan {
+  return layoutPlanOf(checkedPlan(files));
+}
+
 /** Checks the files of a plan and gives the page's data, or throws with every problem. */
 export function buildDataFrom(files: Map<string, string>, options: BuildOptions = {}, exists?: (path: string) => boolean): BuildData {
-  const data = toBuildData(checkedPlan(files, exists), options);
+  const plan = checkedPlan(files, exists);
+  const data = toBuildData(plan, options);
   for (const part of data.parts) {
     if ((RESERVED_ADDRESSES as readonly string[]).includes(part.id)) {
       throw new PlanFileError(`plan/parts.json: the part "${part.id}" takes an address the Workshop keeps for its own page (#${part.id}). Fix: give the part another id; the Workshop keeps ${RESERVED_ADDRESSES.join(', ')}.`);
     }
   }
   try {
-    checkLayout(data.parts.map((part) => part.id), data.map);
+    checkLayout(layoutPlanOf(plan), options.map ?? SILO_MAP);
   } catch (error) {
     if (error instanceof LayoutError) throw new PlanFileError(error.message);
     throw error;
@@ -292,8 +309,8 @@ export function readHistory(repository: string): HistorySource | null {
   return source;
 }
 
-/** Reads the plan of `repository` and returns the page's data for the real build. */
-export function readBuildData(repository: string, map: MapLayout = SILO_MAP): BuildData {
+/** Reads the plan of `repository` and returns the page's data for the real build. Silo's map draws plan/; another plan has none. */
+export function readBuildData(repository: string, map: MapLayout = planDir(repository) === join(repository, PLAN_DIR) ? SILO_MAP : NO_MAP): BuildData {
   return buildDataFrom(planFilesIn(planDir(repository)), { map, history: readHistory(repository) }, (path) => existsSync(join(repository, path)));
 }
 

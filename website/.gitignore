@@ -6,3 +6,4 @@ dist/
 .vercel/
 .vercel
 .env*
+.map-draft/

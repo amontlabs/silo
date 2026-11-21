@@ -8,6 +8,7 @@ import { Boundary } from './Boundary';
 import { buildDataFrom } from './data';
 import { loadDir } from '../../../tools/plan/read/index.js';
 import { buildData, emptyPlanFiles } from './fixtures';
+import { NO_MAP } from './map';
 import { inject, prerender } from './prerender';
 import { NOSCRIPT_LINE } from './NoScript';
 import { takeOver } from './takeover';
@@ -80,9 +81,9 @@ function take(root: HTMLElement, slot: Element | null, node: ReactNode) {
 describe('the prerendered Workshop', () => {
   it.each([
     ['a plan with parts', buildData],
-    ['a plan with no part', () => buildDataFrom(emptyPlanFiles())],
-    // The real build's shape: parts without a map, no verdicts.
-    ['the plan tool\'s sample, as the real build reads it', () => buildDataFrom(loadDir(SAMPLE))],
+    ['a plan with no part', () => buildDataFrom(emptyPlanFiles(), { map: NO_MAP })],
+    // A plan read from another folder, as the real build reads it: parts without a map, no verdicts.
+    ['the plan tool\'s sample, as the real build reads it', () => buildDataFrom(loadDir(SAMPLE), { map: NO_MAP })],
   ])('is what the script renders first on a first visit without a session at the plain address, for %s', (_, plan) => {
     mockApi({ state: () => new Promise(() => {}) });
     const data = plan();
@@ -175,7 +176,7 @@ describe('the Workshop without JavaScript', () => {
   });
 
   it('lists the decisions of the whole product, and keeps them on a plan with no part', () => {
-    for (const [data, ids] of [[buildData(), ['security-properly', 'one-host', 'plain-logs']], [buildDataFrom(emptyPlanFiles()), ['security-properly', 'one-host']]] as const) {
+    for (const [data, ids] of [[buildData(), ['security-properly', 'one-host', 'plain-logs']], [buildDataFrom(emptyPlanFiles(), { map: NO_MAP }), ['security-properly', 'one-host']]] as const) {
       const product = noscript(data).querySelector('section[data-part="product"]');
       expect(product?.querySelector('h2')?.textContent).toBe('The whole product');
       expect(rowsOf(product)?.map((row) => row?.split(' ')[0])).toEqual(ids);
