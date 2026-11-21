@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Looks for seams in the films' soft shapes (shadows and glows) on the built site, in the browsers' own engines.
+// Looks for seams in the films' soft shapes (shadows and glows) on the site at an address, in the browsers' own engines. It reads no `dist/` of its own: a site it reads is one that serves it.
 //   node scripts/film-seams.mjs [url] [--browsers webkit,chromium,firefox] [--films id,id] [--quick]
 // The url defaults to the `workshop:dev --fake` server (`npm run build` first, then `npm run workshop:dev -- --fake`).
 // A soft shape is nine gradient tiles (films/player/kit.js, `soft`). Where two tiles meet, an engine can draw a faint or

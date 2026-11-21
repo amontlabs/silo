@@ -1,13 +1,13 @@
 // The seam reading on made-up pictures, and what the player's soft shapes must keep doing. The reading itself, in
-// the three engines, is `npm run film-seams`, which needs a built site and their browsers.
+// the three engines, is `npm run film-seams`, which needs a site to read and their browsers.
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { test } from 'node:test';
+import { tmpdir } from 'node:os';
+import { after, test } from 'node:test';
 import { chromium, firefox, webkit } from 'playwright-core';
+import { writeFilms } from './films.mjs';
 import { LIMIT, seamStrengths } from './film-seams.mjs';
 
 const W = 60;
@@ -39,22 +39,35 @@ test('a line only part of the way along a shape is read by what most of it does,
   assert.deepEqual(seamStrengths(picture(null), W, H, { xs: [2, W - 2], ys: [1] }), []);
 });
 
-const DIST = fileURLToPath(new URL('../dist', import.meta.url));
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.mp3': 'audio/mpeg' };
 
-/** The built site's files on a port of their own. */
-async function serve() {
-  const server = createServer(async (req, res) => {
-    const path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
-    const file = join(DIST, path.endsWith('/') ? `${path}index.html` : path);
-    if (!file.startsWith(DIST)) { res.writeHead(403).end(); return; }
-    const body = await readFile(file).catch(() => null);
-    if (!body) { res.writeHead(404).end(); return; }
-    res.writeHead(200, { 'content-type': TYPES[extname(file)] || 'application/octet-stream' }).end(body);
-  });
-  await new Promise((done) => server.listen(0, '127.0.0.1', done));
-  return { server, base: `http://127.0.0.1:${server.address().port}` };
+/**
+ * The films' pages, written by the step the site's build uses into a folder of their own, and served from this process:
+ * the player is the one of the tree the test runs in, whatever was built before. One site for all the tests.
+ */
+let site = null;
+function serve() {
+  site ||= (async () => {
+    const dist = await mkdtemp(join(tmpdir(), 'film-seams-'));
+    await writeFilms(dist);
+    const server = createServer(async (req, res) => {
+      const path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+      const file = join(dist, path.endsWith('/') ? `${path}index.html` : path);
+      const body = file.startsWith(dist) ? await readFile(file).catch(() => null) : null;
+      if (!body) { res.writeHead(404).end(); return; }
+      res.writeHead(200, { 'content-type': TYPES[extname(file)] || 'application/octet-stream' }).end(body);
+    });
+    await new Promise((done) => server.listen(0, '127.0.0.1', done));
+    return { server, dist, base: `http://127.0.0.1:${server.address().port}` };
+  })();
+  return site;
 }
+after(async () => {
+  if (!site) return;
+  const { server, dist } = await site;
+  server.close();
+  await rm(dist, { recursive: true, force: true });
+});
 
 /** Runs in the page of a film: where the lines each soft shape's tiles meet along fall, in device pixels of the stage's grid. */
 const LINES = `() => {
@@ -68,10 +81,9 @@ const apart = (v) => Math.abs(v - Math.round(v));
 
 // The reading in the three engines is `npm run film-seams`. This is the part of it that does not need their pixels: the
 // player puts the lines of every soft shape on whole device pixels when the film is at rest, in each engine that is
-// installed. It needs the built site (`npm run build`) and Playwright's browsers, and is skipped without them.
-const built = existsSync(join(DIST, 'films', 'engine-one-call', 'index.html'));
+// installed (skipped for one Playwright does not have). It reads no build of the site: it writes the pages itself.
 for (const [name, engine] of Object.entries({ chromium, webkit, firefox })) {
-  test(`${name}: at rest, the lines the tiles of a soft shape meet along are on whole device pixels`, { skip: !built && 'the site is not built' }, async (t) => {
+  test(`${name}: at rest, the lines the tiles of a soft shape meet along are on whole device pixels`, async (t) => {
     let browser;
     try {
       browser = await engine.launch();
@@ -79,7 +91,7 @@ for (const [name, engine] of Object.entries({ chromium, webkit, firefox })) {
       t.skip(`${name} is not installed`);
       return;
     }
-    const { server, base } = await serve();
+    const { base } = await serve();
     try {
       for (const scale of [1, 2, 3]) {
         const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: scale });
@@ -105,7 +117,6 @@ for (const [name, engine] of Object.entries({ chromium, webkit, firefox })) {
       }
     } finally {
       await browser.close();
-      server.close();
     }
   });
 }
