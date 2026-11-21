@@ -270,16 +270,17 @@ as part ids in the order of the map (`places` of the layout), then the parts the
 map does not place.
 
 On the full map, while the pointer is on a part or the keyboard's focus is, the
-parts it depends on are marked with a second, inner outline in the ink (`marked`),
-a difference in shape and weight that needs no colour, and every other part fades
-to 40 % (`faint`). Nothing is shown for the parts that depend on it. A part stays
+parts it depends on are lit (`marked`): they take the ground and the ink of a part
+under the pointer and keep their own outline, dashed or solid, so their state still
+reads. Every other part fades to 40 % (`faint`), which is what tells them apart
+without colour. Nothing is shown for the parts that depend on it. A part stays
 marked while the pointer is on it or the keyboard's focus is; when they are on
 different parts, the pointer's part wins, and the marks go when neither is on a
 part. The colours of the states and the ring of the open part stay as they are,
 and the wires and their words do not change. The fade covers the whole part, the
 accent of one that is next or being built included, since it lasts only while the
 pointer or the focus is on another part. The map's key gains a line, a sample of
-the ring and "it depends on", only while some part is marked. What a screen reader
+a lit part and "it depends on", only while some part is marked. What a screen reader
 hears for a part on the map gains "Depends on A, B." in the order of the map, since
 it cannot see the marks; a part that depends on none gets no sentence. In the folded
 strip nothing is marked or faded. The tip of a part, on the map and in the strip, is

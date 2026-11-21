@@ -64,7 +64,7 @@ function Key({ at: [x, y], marked }: { at: [number, number]; marked: boolean }) 
     <div className="ws-mapkey" aria-hidden="true" style={style({ '--lx': x, '--ly': y })}>
       <span>{line(false)}decided</span>
       <span>{line(true)}not decided</span>
-      {marked ? <span><i className="ws-ringkey" />it depends on</span> : null}
+      {marked ? <span><i className="ws-litkey" />it depends on</span> : null}
     </div>
   );
 }

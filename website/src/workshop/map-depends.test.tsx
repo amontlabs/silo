@@ -136,13 +136,13 @@ describe('the map with the pointer on a part', () => {
 });
 
 describe('the key of the map', () => {
-  it('gains the line "it depends on", with a sample of the ring, only while a part is marked', async () => {
+  it('gains the line "it depends on", with a sample of a lit part, only while a part is marked', async () => {
     const map = draw(withNeeds());
     expect(keyLines(map)).toEqual(['decided', 'not decided']);
-    expect(map.querySelector('.ws-ringkey')).toBeNull();
+    expect(map.querySelector('.ws-litkey')).toBeNull();
     await userEvent.hover(part(map, 'part-e'));
     expect(keyLines(map)).toEqual(['decided', 'not decided', 'it depends on']);
-    expect(map.querySelectorAll('.ws-ringkey')).toHaveLength(1);
+    expect(map.querySelectorAll('.ws-litkey')).toHaveLength(1);
     await userEvent.unhover(part(map, 'part-e'));
     expect(keyLines(map)).toEqual(['decided', 'not decided']);
   });
