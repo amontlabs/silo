@@ -142,14 +142,34 @@ test('a call GitHub does not answer within the limit fails as a timeout', async 
   const t = await setup();
   let release;
   const gate = new Promise((resolve) => { release = resolve; });
+  const realTimeout = AbortSignal.timeout;
   try {
     await t.client().signIn('visitor-fake');
     const user = [...t.fake.state.tokens].find(([, entry]) => entry.kind === 'user')[0];
-    // Held at GitHub until the test lets go, so only the limit can end it.
-    t.fake.state.hook = (r) => (r.path === '/user' ? { until: gate } : null);
+    // The limit is an `AbortSignal.timeout(ms)`; here the test holds that signal and fires it itself, so no clock decides.
+    const limits = [];
+    AbortSignal.timeout = (ms) => {
+      const abort = new AbortController();
+      limits.push({ ms, abort });
+      return abort.signal;
+    };
+    let reached;
+    const arrived = new Promise((resolve) => { reached = resolve; });
+    t.fake.state.hook = (r) => {
+      if (r.path !== '/user') return null;
+      reached();
+      return { until: gate };
+    };
     const github = createGitHub({ apiBase: t.fake.url, timeoutMs: 100 });
-    await assert.rejects(github.request('GET', '/user', { token: user, as: 'user' }), (error) => error instanceof GitHubError && error.timeout === true && error.network === true);
-  } finally { t.fake.state.hook = null; release(); await t.close(); }
+    const call = github.request('GET', '/user', { token: user, as: 'user' }).then(() => 'answered', (error) => error);
+    // The limit is fired only once GitHub holds the request, or the timeout could be reported for a call never made.
+    const first = await Promise.race([arrived.then(() => 'held'), call.then((outcome) => `ended first: ${outcome instanceof Error ? outcome.message : outcome}`)]);
+    assert.equal(first, 'held');
+    assert.deepEqual(limits.map((limit) => limit.ms), [100], 'the call carries the limit it was given');
+    limits[0].abort.abort(new DOMException('The operation timed out.', 'TimeoutError'));
+    const error = await call;
+    assert.ok(error instanceof GitHubError && error.timeout === true && error.network === true, String(error));
+  } finally { AbortSignal.timeout = realTimeout; t.fake.state.hook = null; release(); await t.close(); }
 });
 
 test('a 401 on the installation token is a 502 and drops the token; a 401 on the person\'s token signs them out', async () => {
