@@ -1,0 +1,11 @@
+{
+  "asks": "What does the record keep of an extension's use of a tool?",
+  "answer": "Which extension used which tool, and what the use did: the path or the record it read, what it showed, the request it denied or held, or the computer it paused. Silo defined the tool, so none of this is inferred.",
+  "needs": [
+    "extension-tool-use-is-a-fact"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It is the owner's lean of 21 November 2026, written the way denied-attempts says what the record keeps of a denied attempt."
+  }
+}
