@@ -5,22 +5,22 @@
 // Two builds of the plan in plan/ are made, A and B, into a directory of their own. A names its chunks apart (as a
 // deployment whose chunks changed does: the site then serves only B's), and each build has its own id. A is served
 // with the API against a fake GitHub (scripts/workshop-dev.mjs) and opened, signed in as owner-fake, at a part that
-// has a feature with facts, notes and history (F) and a feature with no facts (X). A comment is typed on X and a
-// suggestion drafted. Then:
+// has a feature with facts, notes and history (F) and a feature with no facts (X). A comment is typed on X. Then:
 // - B replaces A. F's facts, Notes and History each say "The Workshop has changed since this page opened." with
-//   Reload. After Reload the page is B, X and F are open, both drafts are back in their boxes, and F's facts, notes
-//   and history load. Nothing offers Reload any more.
+//   Reload. The first press does not reload, since the comment is not sent: it says "Text you typed is not sent yet."
+//   with "Reload anyway". The second press reloads: the page is B, F is open, and F's facts (a label only B's facts
+//   chunk gives), notes and history load. Nothing offers Reload any more.
 // - On B, with the network cut, the same parts say they could not load, with the same Reload; with the network back,
-//   Reload gives the same page as above.
+//   the two presses give the same page as above.
 // It exits non-zero when a check fails. It drives Playwright's own browser: `npx playwright-core install
 // chromium-headless-shell` once.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
 import { buildSite, workshopOf } from './workshop-builds.mjs';
 import { startDev } from './workshop-dev.mjs';
@@ -28,8 +28,7 @@ import { startDev } from './workshop-dev.mjs';
 const website = fileURLToPath(new URL('..', import.meta.url));
 const plan = join(website, '..', 'plan');
 const COMMENT = 'Half a thought, typed before the deployment.';
-const TITLE = 'Pause a computer';
-const WHY = 'To come back to it later.';
+const UNSENT = 'Text you typed is not sent yet.';
 const CHANGED = 'The Workshop has changed since this page opened.';
 
 const dir = await mkdtemp(join(tmpdir(), 'silo-reload-check-'));
@@ -100,14 +99,11 @@ async function signIn() {
   await page.close();
 }
 
-/** Opens the page in a new tab, drafts a suggestion, then types a comment on X, whose row stays open. */
+/** Opens the page in a new tab at X and types a comment on it, not sent. */
 async function draft(entries) {
   const page = await context.newPage();
-  await page.goto(`${dev.origin}/workshop#suggested`);
+  await page.goto(`${dev.origin}/workshop#${entries.part}/${entries.x}`);
   await page.waitForSelector('.ws[data-live="answered"]');
-  await page.getByRole('textbox', { name: 'Title' }).fill(TITLE);
-  await page.getByRole('textbox', { name: 'Why' }).fill(WHY);
-  await page.evaluate((hash) => { location.hash = hash; }, `#${entries.part}/${entries.x}`);
   await assertOpen(page, entries.x);
   await item(page, entries.x).getByRole('textbox', { name: 'Comment' }).fill(COMMENT);
   return page;
@@ -130,25 +126,43 @@ async function failingParts(page, entries, words) {
   assert.deepEqual(texts.map((text) => text.replace(/\s*Reload$/, '')), words);
 }
 
-/** After Reload: the page is B, X and F are open, the drafts are back, F's parts load, and nothing offers Reload. */
+/** Presses Reload with the comment not sent: the first press says so and stays; the second reloads. */
+async function reloadAnyway(page, entries) {
+  const f = item(page, entries.f);
+  const loads = [];
+  page.on('load', () => loads.push(Date.now()));
+  await f.getByRole('button', { name: 'Reload' }).first().click();
+  await f.getByText(UNSENT).waitFor();
+  assert.equal(await f.getByRole('button', { name: 'Reload anyway' }).count(), 1);
+  assert.equal(await item(page, entries.x).getByRole('textbox', { name: 'Comment' }).inputValue(), COMMENT, 'the comment is still in its box');
+  assert.equal(loads.length, 0, 'the first press does not reload');
+  await Promise.all([page.waitForEvent('load'), f.getByRole('button', { name: 'Reload anyway' }).click()]);
+}
+
+/** A label of F's open view that only B's facts chunk gives: read from that chunk. */
+async function factLabel(entries) {
+  const name = (await readdir(join(dir, 'b', 'assets'))).find((file) => /workshop-facts.*\.js$/.test(file));
+  assert.ok(name, "build B's facts chunk");
+  const { default: facts } = await import(pathToFileURL(join(dir, 'b', 'assets', name)).href);
+  const own = facts.entries[entries.f];
+  if (own?.keeps?.length) return 'Must keep';
+  if (own?.surfaces) return 'Where it shows';
+  if (own?.suggest) return `Recommended: ${own.suggest.verdict}`;
+  assert.fail(`the facts of ${entries.f} have no label to look for`);
+}
+
+/** After the reload: the page is B, F is open, F's parts load, and nothing offers Reload. */
 async function afterReload(page, entries) {
   await page.waitForSelector('.ws[data-live="answered"]');
   assert.equal(await buildOfPage(page), B.id, 'the page is build B');
   await assertOpen(page, entries.f);
-  await assertOpen(page, entries.x);
-  assert.equal(await item(page, entries.x).getByRole('textbox', { name: 'Comment' }).inputValue(), COMMENT);
   const f = item(page, entries.f);
-  await f.locator('.ws-fact-label').first().waitFor();
+  await f.locator('.ws-fact-label', { hasText: await factLabel(entries) }).first().waitFor();
   await f.getByRole('button', { name: 'Notes', exact: true }).click();
   await f.locator('.ws-md').waitFor();
   await f.getByRole('button', { name: /^History/ }).click();
   await f.locator('.ws-h').first().waitFor();
-  assert.equal(await page.getByRole('button', { name: 'Reload' }).count(), 0, 'nothing offers Reload again');
-  await page.evaluate(() => { location.hash = '#suggested'; });
-  const title = page.getByRole('textbox', { name: 'Title' });
-  await title.waitFor();
-  assert.equal(await title.inputValue(), TITLE);
-  assert.equal(await page.getByRole('textbox', { name: 'Why' }).inputValue(), WHY);
+  assert.equal(await page.getByRole('button', { name: /^Reload/ }).count(), 0, 'nothing offers Reload again');
 }
 
 await signIn();
@@ -161,23 +175,23 @@ const entries = await (async () => {
   return chosen;
 })();
 
-test('a page left open across a deployment says so, and its Reload brings back what was typed', async () => {
+test('a page left open across a deployment says so, and Reload asks twice while a comment is not sent', async () => {
   const page = await draft(entries);
   assert.equal(await buildOfPage(page), A.id, 'the page opened is build A');
   await deploy('b');
   await failingParts(page, entries, [CHANGED, CHANGED, CHANGED]);
-  await Promise.all([page.waitForEvent('load'), item(page, entries.f).getByRole('button', { name: 'Reload' }).first().click()]);
+  await reloadAnyway(page, entries);
   await afterReload(page, entries);
   await page.close();
 });
 
-test('a page whose network was cut says its parts could not load, and the same Reload brings it back', async () => {
+test('a page whose network was cut says its parts could not load, and the same Reload brings it back once it is', async () => {
   const page = await draft(entries);
   assert.equal(await buildOfPage(page), B.id);
   await context.setOffline(true);
   await failingParts(page, entries, ['Details could not load.', 'Notes could not load.', 'History could not load.']);
   await context.setOffline(false);
-  await Promise.all([page.waitForEvent('load'), item(page, entries.f).getByRole('button', { name: 'Reload' }).first().click()]);
+  await reloadAnyway(page, entries);
   await afterReload(page, entries);
   await page.close();
 });

@@ -181,14 +181,16 @@ in `plan/` twice into a directory of its own: build A names its chunks apart,
 as a deployment whose chunks changed does, and build B replaces it. It serves
 A with the API against the fake GitHub and opens it as `owner-fake`, at a part
 that has a feature with facts, notes and history (F) and a feature with none
-of the facts (X). It drafts a suggestion and types a comment on X. Then B
+of the facts (X). It types a comment on X and does not send it. Then B
 replaces A, and F's facts, Notes and History must each say "The Workshop has
-changed since this page opened." with Reload. After Reload the page must be
-build B, X and F open, both drafts back in their boxes, F's facts, notes and
-history loaded, and no Reload left. The same case is run again with the
-network cut in place of a new build: the parts must say "Details could not
-load.", "Notes could not load." and "History could not load.", with the same
-Reload, which works once the network is back. `npm test` does not run it.
+changed since this page opened." with Reload. The first press must not
+reload, and must say "Text you typed is not sent yet." with "Reload anyway".
+After the second press the page must be build B, with F open, its facts (a
+label read from B's facts chunk), notes and history loaded, and no Reload
+left. The same case is run again with the network cut in place of a new
+build: the parts must say "Details could not load.", "Notes could not load."
+and "History could not load.", with the same Reload, which works once the
+network is back. `npm test` does not run it.
 
 To build and check the page on another plan than `plan/` (the real plan may be
 in the middle of a change), name its folder in `WORKSHOP_PLAN` for the build
@@ -536,7 +538,7 @@ What a person sees:
   was made. The person's own vote on an opened row and their votes on its comments
   come from one `GET vote`, asked only once `me` has answered on this visit, so a session found gone
   on page load says nothing; a row with no thread yet asks nothing. The suggest form shows whenever the person is shown signed in and
-  keeps its draft, across a reload too (see the chunks below); it sends only while a state is shown.
+  keeps its draft; it sends only while a state is shown.
 - What the page shows first: the plan is in the bundle. The live state (votes,
   comments, suggestions) and who is signed in come from
   `GET state` and `GET me`, and the page remembers both in local storage
@@ -655,18 +657,12 @@ What a person sees:
   only passes over leaves it as it is, so nothing flickers under it
   (`useChunk` in `useWorkshop.ts`). A browser may keep a failed chunk failed
   for the life of the page, so Reload is what recovery rests on.
-- Reload keeps what the person typed. The comment being written on each row
-  and the suggestion's draft are kept for the tab in session storage as they
-  are typed (`memory.ts`, by the key of the row), and go nowhere else. A sent
-  one leaves its box and what is kept; one whose sending fails comes back to
-  both. After a reload they are back in their boxes: after any reload of the
-  tab. After the page's own Reload, the rows that were open and those with a
-  draft open again too, where the place the address names holds them; the
-  next load opens only what its address names. Reload waits for a write being
-  sent (a comment, a suggestion, a vote) to finish or fail, so a failed comment
-  is back in its box, and kept, before the page leaves. Without session
-  storage, or with it full, typing works the same and a reload loses the
-  drafts.
+- Reload is an ordinary reload: the page opens what its address names. When
+  the page holds text not sent (a comment's box or the suggestion's form not
+  empty) or a write being sent, the first press does not reload: the part says
+  "Text you typed is not sent yet." and the button reads "Reload anyway". A
+  second press reloads. With nothing typed and nothing being sent, Reload
+  reloads at once.
 - An open row, a decision, a feature or a suggestion, shows its thread and a box
   to add a comment. A comment of the Workshop's App is an ordinary
   comment. While the thread loads, each comment the live state counts holds
@@ -818,7 +814,7 @@ Back and Forward move between places; opening a row replaces the address.
 | `PartView.tsx`, `Suggest.tsx` | An opened part, Product's decisions and a film's place; the suggestions. |
 | `Entry.tsx` | A suggestion's row, and what any row shows open (`Panel`): the text, what the entry says of the plan's lists, its id and the button that copies it, the state, notes, history, and the thread with the votes on its comments. |
 | `routes.ts`, `plan.ts`, `map.ts`, `data.ts` | Addresses; the rows, statuses, films, parts' counts and states on top of the plan's model; the drawing; the build-time reader, the films' order and when a film is behind. |
-| `api.ts`, `writes.ts`, `memory.ts`, `RichText.tsx`, `Markdown.tsx`, `Boundary.tsx` | The API client, the page's own writes (a list of values set, kept a day; its comments six minutes), the remembered answer, person, view and order and the tab's drafts, text from GitHub, notes, the fallback list. |
+| `api.ts`, `writes.ts`, `memory.ts`, `RichText.tsx`, `Markdown.tsx`, `Boundary.tsx` | The API client, the page's own writes (a list of values set, kept a day; its comments six minutes), the remembered answer, person, view and order, text from GitHub, notes, the fallback list. |
 | `chunks.ts` | A chunk that fails: whether the site now serves another build. |
 | `prerender.tsx`, `NoScript.tsx`, `takeover.ts` | The markup the build writes into the page, the list for a reader without JavaScript, and the script's takeover. |
 

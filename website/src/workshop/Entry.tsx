@@ -11,6 +11,7 @@ import { changeLine, changePhrase, isDecided, relativeTime, shortDate } from './
 import type { Change, EntryFacts, Facts, Row, Statement } from './plan';
 import { formatHash, placeOf } from './routes';
 import type { Comment } from './api';
+import { pageConfig } from './useWorkshop';
 import type { Detail, Workshop } from './useWorkshop';
 
 /** How long a panel takes to open, to close and to follow what it holds (workshop.css: `.ws-more`). */
@@ -535,13 +536,20 @@ function HistoryList({ row, ctx }: { row: Row; ctx: EntryContext }) {
 
 /**
  * What shows in place of a chunk that did not load: that the site has changed since the page opened, or that it could
- * not load, and Reload, which always reaches it. Reload waits for a write being sent (useWorkshop `reload`).
+ * not load, and Reload, which always reaches it. While the page holds text not sent or a write being sent, the first
+ * press only says so, and a second press reloads.
  */
 function ChunkFailed({ what, state, w }: { what: string; state: 'error' | 'changed'; w: Workshop }) {
+  const [warned, setWarned] = useState(false);
+  const words = warned ? 'Text you typed is not sent yet.' : state === 'changed' ? 'The Workshop has changed since this page opened.' : `${what} could not load.`;
+  const press = () => {
+    if (!warned && w.unsent) setWarned(true);
+    else pageConfig.reload();
+  };
   return (
     <p className="ws-quiet">
-      {state === 'changed' ? 'The Workshop has changed since this page opened.' : `${what} could not load.`}{' '}
-      <button type="button" className={`ws-link${w.reloading ? ' ws-pending' : ''}`} aria-busy={w.reloading || undefined} onClick={w.reload}>Reload</button>
+      {words}{' '}
+      <button type="button" className="ws-link" onClick={press}>{warned ? 'Reload anyway' : 'Reload'}</button>
     </p>
   );
 }
