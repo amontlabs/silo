@@ -43,12 +43,12 @@ show what was sent to it, or its size (`record-shows-what-was-sent`).
   `actions-that-never-wait`.
 - What a computer can reach, to decide: `device-out-of-reach`, `reach-of-a-computer`,
   `paths-out-are-shown`, `who-chooses-the-rules`, `guarantees-outside-the-computer`,
-  `rule-states-its-worst-case`, `safe-fresh-install`, `channel-list`.
+  `safe-fresh-install`, `channel-list`.
 - Secrets, to decide: `secret-values`, `secret-placeholder`, `secret-entry`, `secret-limits`,
   `secret-and-prompt-cache`.
 - The network, to decide: `network-modes`, `network-rules-from-inside`, `main-network-rules`,
   `package-age-rule`, `package-age-at-the-boundary`, `fork-with-network-closed`, `outside-actions-listed`, `ask-each-time`,
   `no-read-freely-preset`.
 - Open: `hold-limit-length`, `how-a-hold-ends`, `reason-in-a-refusal`,
-  `agent-asks-about-its-request`.
+  `agent-asks-about-its-request`, `registry-traffic-read`.
 - Later: the feature `reach-on-your-mac-today`.

@@ -7,6 +7,7 @@
     "package-age-at-the-boundary",
     "rules-inside-are-no-boundary",
     "rule-carries-its-data",
-    "allow-hold-or-deny"
+    "allow-hold-or-deny",
+    "registry-traffic-read"
   ]
 }

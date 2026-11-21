@@ -1,4 +1,4 @@
 {
   "asks": "Is there a rule on the age of packages?",
-  "answer": "A rule on the age of packages is enforced at the boundary, because agents get around the same rule set inside a tool."
+  "answer": "Yes. A rule denies a package younger than a set age."
 }
