@@ -19,7 +19,8 @@
 // - a comment's height or the comment box's top changes when the comment is confirmed;
 // - a row's opening or closing covers more than 16% of its way in its first frame;
 // - in All, a row that opens or closes, or a row above it, moves on the page (`still`);
-// - a box a move expects (`expect`, by default its `still` boxes) is not found in a sample: the problem names it.
+// - a box a move expects (`expect`, by default its `still` boxes) is not found in a sample: the problem names it;
+// - a move collected no frame of the screen, or no sample after its action.
 // On a page with a map, the moves on the tiles run under 1200 px, where the tiles stand in the map's place; the flows
 // named map-* run on the map, at 1440 x 900: the map to a part and back, a scrolled map to a part and back from a
 // scrolled part. Each flow runs on the map's side, whatever view the url names.
@@ -152,6 +153,21 @@ function dropsOf(rows, t0, keys) {
   return found;
 }
 
+/**
+ * What a move failed to see: no frame of the screen at all, no sample after the action, or a box the move expects
+ * (`expect`) missing from a sample, named. A move that saw nothing proves nothing, so it fails.
+ */
+export function unseen({ frames, rows, t0, selectors, expect }) {
+  const problems = [];
+  if (!frames) problems.push('no frame of the screen was collected');
+  if (!rows.some((row) => row.t >= t0)) problems.push('no sample was taken after the action');
+  for (const key of expect) {
+    const missing = rows.filter((row) => !row[key]).length;
+    if (missing || !rows.length) problems.push(`${key} (${typeof selectors[key] === 'string' ? selectors[key] : selectors[key]?.selector}) is not found in ${rows.length ? missing : 0} of ${rows.length} samples`);
+  }
+  return problems;
+}
+
 /** The problems of a move, from what was sampled around the action; `meant` names, per check, the boxes it skips. */
 function problemsOf(kind, rows, t0, keys, meant = {}) {
   const after = rows.filter((row) => row.t >= t0);
@@ -234,12 +250,7 @@ async function capture(out, page, name, action, { selectors = ROWS, kind = null,
   });
   await client.detach().catch(() => {});
 
-  const problems = problemsOf(kind, data.rows, t0, Object.keys(selectors), meant);
-  // Boxes the move expects: each is found in every sample, or the move fails with its name.
-  for (const key of expect) {
-    const missing = data.rows.filter((row) => !row[key]).length;
-    if (missing) problems.push(`${key} (${typeof selectors[key] === 'string' ? selectors[key] : selectors[key]?.selector}) is not found in ${missing} of ${data.rows.length} samples`);
-  }
+  const problems = [...unseen({ frames: frames.length, rows: data.rows, t0, selectors, expect }), ...problemsOf(kind, data.rows, t0, Object.keys(selectors), meant)];
   // Boxes that must not move at all: their top on the page stays within half a pixel.
   for (const key of still) {
     const tops = data.rows.filter((row) => row[key]).map((row) => row[key][1] + row.y);
@@ -485,4 +496,5 @@ async function main() {
   process.exitCode = failed.length ? 1 : 0;
 }
 
-await main();
+// Run as a script; imported by its test, it only gives its checks.
+if (import.meta.main) await main();
