@@ -52,5 +52,6 @@ Decisions (rule 2b):
 
 Building, only a feature the owner took:
 1. `plan show <id>`: every entry it needs is done.
-2. Build it by the rules above. Each property it adds gets a check, and the property's `at` names that check's file.
-3. Write `built` with today's date in the feature's file, in the last branch, when every part is merged and proven. `plan check` refuses it until the feature's needs are done and each property it adds has its `at`. Push.
+2. Write `started` with today's date in the feature's file, commit it straight to `main` and push, before the first worker starts: the Workshop then shows the feature as being built. `plan check` refuses it until the feature is taken and its needs are done.
+3. Build it by the rules above. Each property it adds gets a check, and the property's `at` names that check's file.
+4. Write `built` with today's date in the feature's file, in the last branch, when every part is merged and proven. `plan check` refuses it until the feature's needs are done and each property it adds has its `at`. Push.
