@@ -11,6 +11,7 @@ import { changeLine, changePhrase, isDecided, relativeTime, shortDate } from './
 import type { Change, EntryFacts, Facts, Row, Statement } from './plan';
 import { formatHash, placeOf } from './routes';
 import type { Comment } from './api';
+import { pageConfig } from './useWorkshop';
 import type { Detail, Workshop } from './useWorkshop';
 
 /** How long a panel takes to open, to close and to follow what it holds (workshop.css: `.ws-more`). */
@@ -121,7 +122,7 @@ export function Panel({ row, open, ctx, id, lead, vote = false }: PanelProps) {
   const { wantFacts } = w;
   // A row with something to show from the facts asks for them as it opens, if no pointer or focus did before.
   useEffect(() => {
-    if (open && row.more) wantFacts();
+    if (open && row.more) wantFacts(true);
   }, [open, row.more, wantFacts]);
 
   // Comments that arrive while the panel is opening wait, on their placeholders, until the opening has ended.
@@ -524,12 +525,32 @@ function HistoryList({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const repo = w.live.state?.repo ?? DEFAULT_REPO;
   const shallow = w.plan.shallow ? <p className="ws-quiet">Earlier changes are not available in this build.</p> : null;
   if (changes) return <>{changes.map((change) => <HistoryLine key={change.commit} change={change} row={row} ctx={ctx} repo={repo} />)}{shallow}</>;
-  if (w.histories === 'error') return <p className="ws-quiet">History could not load.</p>;
+  if (w.histories === 'error' || w.histories === 'changed') return <ChunkFailed what="History" state={w.histories} w={w} />;
   return (
     <div aria-busy="true">
       {Array.from({ length: Math.min(row.history?.count ?? 1, HISTORY_GHOSTS) }, (_, i) => <div className="ws-h-ghost" key={i} aria-hidden="true" />)}
       {w.plan.shallow ? <div className="ws-h-ghost" aria-hidden="true" /> : null}
     </div>
+  );
+}
+
+/**
+ * What shows in place of a chunk that did not load: that the site has changed since the page opened, or that it could
+ * not load, and Reload, which always reaches it. While the page holds text not sent or a write being sent, the first
+ * press only says so, and a second press reloads.
+ */
+function ChunkFailed({ what, state, w }: { what: string; state: 'error' | 'changed'; w: Workshop }) {
+  const [warned, setWarned] = useState(false);
+  const words = warned ? 'Text you typed is not sent yet.' : state === 'changed' ? 'The Workshop has changed since this page opened.' : `${what} could not load.`;
+  const press = () => {
+    if (!warned && w.unsent) setWarned(true);
+    else pageConfig.reload();
+  };
+  return (
+    <p className="ws-quiet">
+      {words}{' '}
+      <button type="button" className="ws-link" onClick={press}>{warned ? 'Reload anyway' : 'Reload'}</button>
+    </p>
   );
 }
 
@@ -554,21 +575,21 @@ function Extras({ row, ctx, onMove }: { row: Row; ctx: EntryContext; onMove: () 
         {row.notes ? (
           <button
             type="button" className="ws-disc" aria-expanded={shown} aria-controls={`${row.key}-notes`}
-            onPointerEnter={w.wantNotes} onPointerDown={w.wantNotes} onTouchStart={w.wantNotes} onFocus={w.wantNotes}
-            onClick={() => { w.wantNotes(); setShown((current) => !current); onMove(); }}
+            onPointerEnter={() => w.wantNotes()} onPointerDown={() => w.wantNotes()} onTouchStart={() => w.wantNotes()} onFocus={() => w.wantNotes()}
+            onClick={() => { w.wantNotes(!shown); setShown((current) => !current); onMove(); }}
           >Notes</button>
         ) : null}
         {row.history ? (
           <button
             type="button" className="ws-disc ws-disc-history" aria-expanded={history} aria-controls={`${row.key}-history`}
-            onPointerEnter={w.wantHistory} onPointerDown={w.wantHistory} onTouchStart={w.wantHistory} onFocus={w.wantHistory}
-            onClick={() => { w.wantHistory(); setHistory((current) => !current); onMove(); }}
+            onPointerEnter={() => w.wantHistory()} onPointerDown={() => w.wantHistory()} onTouchStart={() => w.wantHistory()} onFocus={() => w.wantHistory()}
+            onClick={() => { w.wantHistory(!history); setHistory((current) => !current); onMove(); }}
           >History<span> · {historySummary(row)}</span></button>
         ) : null}
       </div>
       {row.notes && shown ? (
         <div className="ws-extras-in" id={`${row.key}-notes`}>
-          {notes ? <Markdown text={notes} /> : w.notes === 'error' ? <p className="ws-quiet">Notes could not load.</p> : typeof w.notes === 'object' ? null : (
+          {notes ? <Markdown text={notes} /> : w.notes === 'error' || w.notes === 'changed' ? <ChunkFailed what="Notes" state={w.notes} w={w} /> : typeof w.notes === 'object' ? null : (
             <div className="ws-ph-notes" aria-busy="true">
               <i className="ws-ph" aria-hidden="true" /><i className="ws-ph" aria-hidden="true" /><i className="ws-ph" aria-hidden="true" />
             </div>
@@ -660,7 +681,8 @@ function OpenFacts({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const id = planId(row);
   const facts = typeof w.facts === 'object' ? w.facts : null;
   const own = facts && id !== null ? facts.entries[id] : undefined;
-  const waiting = row.more && !facts && w.facts !== 'error';
+  const failed = row.more && (w.facts === 'error' || w.facts === 'changed') ? w.facts : null;
+  const waiting = row.more && !facts && !failed;
   const open = row.verdict === null;
   const taken = row.verdict === 'take';
   const adds = taken && own?.adds ? own.adds.map((statementId) => facts?.statements[statementId]).filter((statement): statement is Statement => statement !== undefined) : [];
@@ -673,6 +695,7 @@ function OpenFacts({ row, ctx }: { row: Row; ctx: EntryContext }) {
           </div>
         </div>
       ) : null}
+      {failed ? <div className="ws-fact"><ChunkFailed what="Details" state={failed} w={w} /></div> : null}
       {open && own?.suggest ? (
         <Fact label={`Recommended: ${own.suggest.verdict}`}>
           {own.suggest.why ? <p className="ws-fact-text">{own.suggest.why}</p> : null}

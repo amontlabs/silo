@@ -90,3 +90,4 @@ export function recallHabit(): Habit | null {
 export function rememberHabit(habit: Habit) {
   write(VIEW, habit);
 }
+

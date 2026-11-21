@@ -33,7 +33,7 @@ export interface AppProps {
   loadNotes?: () => Promise<Notes>;
   /** Loads the statements in force and what the entries say of them, a chunk apart: the first time a row with something to show is reached. */
   loadFacts?: () => Promise<Facts>;
-  /** Loads the changes of every entry, a chunk apart: the first time a person opens a History, or reaches Latest. */
+  /** Loads the changes of every entry, a chunk apart: the first time a pointer, a press or focus reaches a History. */
   loadHistory?: () => Promise<Histories>;
   /**
    * The element in the site header that holds sign-in and the signed-in login; without one, they are drawn inline.

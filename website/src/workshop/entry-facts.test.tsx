@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildData, DECISIONS, fixtureFacts, FEATURES, LIST_DECISIONS, LIST_FEATURES, LISTS, withLists } from './fixtures';
 import type { Facts } from './plan';
+import { SiteChanged } from './chunks';
 import { itemOf, mockApi, owner, renderApp, rowButton, wait } from './test-support';
 
 const data = () => buildData(withLists());
@@ -248,12 +249,30 @@ describe('the chunk', () => {
     expect(item.querySelector('.ws-ph-notes')).toBeNull();
   });
 
-  it('shows nothing, and no new word, when it cannot load', async () => {
+  it('says it could not load, in the place of the parts, with Reload', async () => {
     const item = await openFrom('#part-b/name-a-snapshot', SNAPSHOT, data(), () => Promise.reject(new Error('offline')));
-    await wait(30);
+    const said = await within(item).findByText(/^Details could not load\./);
+    expect(within(said).getByRole('button', { name: 'Reload' })).toBeInTheDocument();
     expect(item.querySelector('.ws-ph-notes')).toBeNull();
     expect(within(item).queryByText(/^A yes would/)).not.toBeInTheDocument();
-    expect(item).toHaveTextContent('Not decided.');
+    inOrder(item, ['Details could not load.', 'Not decided.']);
+  });
+
+  it('says the Workshop has changed, with Reload, when the site was deployed again, and asks no more', async () => {
+    const load = vi.fn(() => Promise.reject(new SiteChanged()));
+    const item = await openFrom('#part-b/name-a-snapshot', SNAPSHOT, data(), load);
+    const said = await within(item).findByText(/^The Workshop has changed since this page opened\./);
+    expect(within(said).getByRole('button', { name: 'Reload' })).toBeInTheDocument();
+    await userEvent.click(rowButton(SNAPSHOT));
+    await userEvent.click(rowButton(SNAPSHOT));
+    await wait(10);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('says nothing of a failure on a row with nothing to show', async () => {
+    const item = await openFrom('#part-a/core', 'The engine runs on its own', data(), () => Promise.reject(new Error('offline')));
+    await wait(30);
+    expect(within(item).queryByText(/could not load/)).not.toBeInTheDocument();
   });
 
   it('draws what it holds as text, never as HTML', async () => {

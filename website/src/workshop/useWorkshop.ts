@@ -9,6 +9,43 @@ import { applyKept, keep, keepCommentUp, keptComments, newerAnswer } from './wri
 import type { Write } from './writes';
 import { allRows, buildPlan } from './plan';
 import type { BuildData, Facts, Histories, LiveIssue, LiveState, Notes, Row } from './plan';
+import { SiteChanged } from './chunks';
+
+/** A chunk of the page as it loads: not asked for yet, under way, in, failed, or gone with a newer deployment. */
+export type ChunkState<T> = T | 'loading' | 'error' | 'changed' | undefined;
+
+/**
+ * A chunk loaded once, and what asks for it. A failed load is tried again only when `again` is set: an opening asks
+ * again, while a pointer passing over does not, so the failure stays as it is under it. A browser may keep a failed
+ * import failed for the life of the page, so that retry may never succeed: what a failure offers is a reload. A chunk
+ * gone with a newer deployment is never asked for again.
+ */
+function useChunk<T extends object>(load: () => Promise<T>): [ChunkState<T>, (again?: boolean) => void] {
+  const [value, setValue] = useState<ChunkState<T>>(undefined);
+  const current = useRef(value);
+  current.current = value;
+  const want = useCallback((again = false) => {
+    const now = current.current;
+    if (now === 'loading' || now === 'changed' || typeof now === 'object' || (now === 'error' && !again)) return;
+    current.current = 'loading';
+    setValue('loading');
+    load().then((loaded) => setValue(loaded), (error: unknown) => setValue(error instanceof SiteChanged ? 'changed' : 'error'));
+  }, [load]);
+  return [value, want];
+}
+
+/**
+ * The text of a send that failed, put back in its box without discarding anything: as it was typed when the box is
+ * empty, else above what the person typed meanwhile, with a blank line between.
+ */
+export function putBack(failed: string, now: string): string {
+  if (now === '') return failed;
+  if (failed === '') return now;
+  return `${failed}\n\n${now}`;
+}
+
+/** How the page reloads itself; tests replace it. */
+export const pageConfig = { reload: () => location.reload() };
 
 const NOTICE_MS = 8000;
 /** A fetch of an issue's comments this recent serves an opening. */
@@ -86,17 +123,8 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   const waiting = !liveOk && live.load === 'pending' && !offline;
   const liveRefOk = useRef(liveOk);
   liveRefOk.current = liveOk;
-  // The changes of the entries: loaded once, the first time a History is opened or Latest is reached; a failed load is
-  // tried again at the next.
-  const [histories, setHistories] = useState<Histories | 'loading' | 'error' | undefined>(undefined);
-  const historiesRef = useRef(histories);
-  historiesRef.current = histories;
-  const wantHistory = useCallback(() => {
-    if (historiesRef.current === 'loading' || typeof historiesRef.current === 'object') return;
-    historiesRef.current = 'loading';
-    setHistories('loading');
-    loadHistory().then((loaded) => setHistories(loaded), () => setHistories('error'));
-  }, [loadHistory]);
+  // The changes of the entries: loaded once, the first time a pointer, a press or focus reaches a History.
+  const [histories, wantHistory] = useChunk(loadHistory);
   const plan = useMemo(() => buildPlan(data, live.state, closedKeys), [data, live.state, closedKeys]);
   const rows = useMemo(() => allRows(plan), [plan]);
   const rowByKey = useMemo(() => new Map(rows.map((row) => [row.key, row])), [rows]);
@@ -191,33 +219,16 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
       () => setDetails((current) => (typeof current[n] === 'object' ? current : { ...current, [n]: 'error' })),
     ).finally(() => fetching.current.delete(n));
   }, []);
-  /** Early fetch for a row the person is about to open. */
-  // The features' notes: loaded once, the first time a person's pointer, press or focus reaches a "Notes"; a
-  // failed load is tried again at the next.
-  const [notes, setNotes] = useState<Notes | 'loading' | 'error' | undefined>(undefined);
-  const notesRef = useRef(notes);
-  notesRef.current = notes;
-  const wantNotes = useCallback(() => {
-    if (notesRef.current === 'loading' || typeof notesRef.current === 'object') return;
-    notesRef.current = 'loading';
-    setNotes('loading');
-    loadNotes().then((loaded) => setNotes(loaded), () => setNotes('error'));
-  }, [loadNotes]);
+  // The features' notes: loaded once, the first time a person's pointer, press or focus reaches a "Notes".
+  const [notes, wantNotes] = useChunk(loadNotes);
 
   // What the entries say of the statements: loaded once, the first time a row with something to show is reached or
-  // opened; a failed load is tried again at the next.
-  const [facts, setFacts] = useState<Facts | 'loading' | 'error' | undefined>(undefined);
-  const factsRef = useRef(facts);
-  factsRef.current = facts;
-  const wantFacts = useCallback(() => {
-    if (factsRef.current === 'loading' || typeof factsRef.current === 'object') return;
-    factsRef.current = 'loading';
-    setFacts('loading');
-    loadFacts().then((loaded) => setFacts(loaded), () => setFacts('error'));
-  }, [loadFacts]);
+  // opened.
+  const [facts, wantFacts] = useChunk(loadFacts);
 
+  /** Early fetch for a row the person is about to open. */
   const prefetch = useCallback((row: Row) => {
-    if (row.more) wantFacts();
+    if (row.more) wantFacts(false);
     if (liveRefOk.current && row.issue !== null && row.issue > 0 && !openKeys.has(row.key)) loadDetail(row.issue);
   }, [loadDetail, openKeys, wantFacts]);
   /** The fetch of a row being opened, asked for in the same event so the row never shows a stale error first. */
@@ -361,7 +372,8 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   const sendComment = async (row: Row, event: FormEvent) => {
     event.preventDefault();
     const target = targetOf(row);
-    const text = (drafts[row.key] ?? '').trim();
+    const typed = drafts[row.key] ?? '';
+    const text = typed.trim();
     const own = ownComment(text);
     if (!target || !text || !own) return;
     const sent = sending$();
@@ -376,7 +388,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
       confirmComment(row, n, confirmed);
       remember({ n, ...opened(row, n), set: { comments: count(answered?.comments, (shownRef.current?.issues[n]?.comments ?? 0) + 1) } }, sent, confirmed);
     } catch (error) {
-      setDrafts((current) => ({ ...current, [row.key]: current[row.key] ? current[row.key] : text }));
+      setDrafts((current) => ({ ...current, [row.key]: putBack(typed, current[row.key] ?? '') }));
       if (!refusedClosed(row, error, sent)) failed('Comment', error);
     } finally {
       stopSending(row.key, own);
@@ -474,10 +486,18 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     }
   };
 
+  /**
+   * Whether a reload would lose something: text typed in a comment's box or the suggestion's form and not sent, or a
+   * write still being sent. Reload then asks for a second press (Entry.tsx `ChunkFailed`).
+   */
+  const unsent = Object.values(drafts).some((draft) => draft !== '') || suggestDraft.title !== '' || suggestDraft.text !== ''
+    || Object.values(sending).some((list) => list.length > 0) || suggestionsSending.length > 0 || votePending.size > 0 || commentVotePending.size > 0;
+
   const sendSuggestion = async (event: FormEvent) => {
     event.preventDefault();
-    const title = suggestDraft.title.trim();
-    const text = suggestDraft.text.trim();
+    const typed = suggestDraft;
+    const title = typed.title.trim();
+    const text = typed.text.trim();
     if (!title || !me || !live.state) return;
     const id = Date.now() + Math.random();
     const sent = sending$();
@@ -491,7 +511,11 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
       setDetails((current) => ({ ...current, [number]: { number, title, body: text, url: '', up: 0, comments: [] } }));
       remember({ n: number, set: issue }, sent);
     } catch (error) {
-      setSuggestDraft({ title, text });
+      // The title goes back to its field when that is empty; otherwise it goes above the text, which a title field
+      // cannot hold in more than one line.
+      setSuggestDraft((current) => (current.title === ''
+        ? { title: typed.title, text: putBack(typed.text, current.text) }
+        : { title: current.title, text: putBack(putBack(typed.title, typed.text), current.text) }));
       failed('Suggestion', error);
     } finally {
       setSuggestionsSending((current) => current.filter((item) => item.id !== id));
@@ -515,7 +539,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     live, liveOk, waiting, offline, settled, me, retry, plan, rowByKey, details, prefetch, notes, wantNotes, facts, wantFacts, histories, wantHistory, fetchNow, sending, votePending, voteOwn,
     votes, commentVotes, commentVotePending, toggleCommentVote, suggestionsSending, notice, drafts, setDrafts, suggestDraft,
     setSuggestDraft, announce, setAnnounce, signinFailed, sendComment, toggleVote,
-    sendSuggestion, signOut,
+    sendSuggestion, signOut, unsent,
   };
 }
 

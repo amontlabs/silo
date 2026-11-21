@@ -174,6 +174,24 @@ is confirmed, or when a row's opening or closing covers more than 16% of its way
 in its first frame; the full list is at the top of `scripts/motion-sheet.mjs`.
 `npm test` does not run it either.
 
+To check that a Workshop page left open across a deployment recovers, run
+`npm --prefix website run reload-check` (no server and no build needed; it
+needs Playwright's own Chromium, as the load check does). It builds the plan
+in `plan/` twice into a directory of its own: build A names its chunks apart,
+as a deployment whose chunks changed does, and build B replaces it. It serves
+A with the API against the fake GitHub and opens it as `owner-fake`, at a part
+that has a feature with facts, notes and history (F) and a feature with none
+of the facts (X). It types a comment on X and does not send it. Then B
+replaces A, and F's facts, Notes and History must each say "The Workshop has
+changed since this page opened." with Reload. The first press must not
+reload, and must say "Text you typed is not sent yet." with "Reload anyway".
+After the second press the page must be build B, with F open, its facts (a
+label read from B's facts chunk), notes and history loaded, and no Reload
+left. The same case is run again with the network cut in place of a new
+build: the parts must say "Details could not load.", "Notes could not load."
+and "History could not load.", with the same Reload, which works once the
+network is back. `npm test` does not run it.
+
 To build and check the page on another plan than `plan/` (the real plan may be
 in the middle of a change), name its folder in `WORKSHOP_PLAN` for the build
 and for the runner:
@@ -581,7 +599,8 @@ What a person sees:
   its own (`virtual:workshop-facts`, `Facts`), loaded the first time a pointer,
   a press or focus reaches a row that has something in it (`Row.more`, known
   from the page's data) or such a row opens, with three placeholder lines in
-  the place of its parts meanwhile; if it cannot load, the parts are left out.
+  the place of its parts meanwhile; if it cannot load, "Details could not
+  load." takes their place (see below).
   Then "Notes" (its `<id>.md`) and "History", side by side, each closed by
   default and opened in place. Notes: headings, paragraphs, lists, http and https
   links (an address may hold one level of brackets), inline code and code
@@ -619,7 +638,34 @@ What a person sees:
   texts are a chunk of their own (`virtual:workshop-history`, `Histories`),
   loaded the first time a pointer, a press or focus reaches a History, with one
   placeholder line per change meanwhile; if it cannot load,
-  the list says so and the next time tries again.
+  the list says so (see below).
+- A chunk that failed (facts, notes, history) says so in the place its content
+  would be, with a Reload button: "Details could not load.", "Notes could not
+  load." or "History could not load.". Nothing is left out silently. Each
+  chunk's name is made from its content, and the site serves only the newest
+  build's files. So a page opened before a deployment finds gone each chunk
+  whose content that deployment changed (new notes, a new history line); a
+  chunk whose content did not change keeps its name and still loads.
+  The build writes one id into the page (`<meta name="workshop-build">`) and
+  into its script (`vite.config.ts`, `workshopBuild`). When a chunk fails, the
+  page fetches its own address again, its query included, with no cache and
+  without following a redirect, and compares the id of that page with its own
+  exactly as written (`chunks.ts`). Another id means the site has changed:
+  the part says "The Workshop has changed since this page opened." instead,
+  and that chunk is not asked for again. The same id, an answer that is not
+  the Workshop's page (a redirect, a sign-in or gateway page), a page with no id, or no
+  answer within 8 seconds is an ordinary failure. The dev server writes no id,
+  so there nothing is ever called changed. An ordinary failure is tried again
+  when its row, Notes or History opens again; a pointer, press or focus that
+  only passes over leaves it as it is, so nothing flickers under it
+  (`useChunk` in `useWorkshop.ts`). A browser may keep a failed chunk failed
+  for the life of the page, so Reload is what recovery rests on.
+- Reload is an ordinary reload: the page opens what its address names. When
+  the page holds text not sent (a comment's box or the suggestion's form not
+  empty) or a write being sent, the first press does not reload: the part says
+  "Text you typed is not sent yet." and the button reads "Reload anyway". A
+  second press reloads. With nothing typed and nothing being sent, Reload
+  reloads at once.
 - An open row, a decision, a feature or a suggestion, shows its thread and a box
   to add a comment. A comment of the Workshop's App is an ordinary
   comment. While the thread loads, each comment the live state counts holds
@@ -669,6 +715,10 @@ What a person sees:
   the count shown, so a newer `state` moves the count under it. The count the server answers replaces it.
 - A refusal takes back the page's own change, one up or one down from the count shown by then, and says
   "Vote: not saved." with the server's words. A thread found closed (403 `closed`) takes it back too.
+- A comment or a suggestion whose sending fails never discards what the person typed. Its text goes back into
+  its box as it was typed, spaces included, when the box is empty. When the person typed more meanwhile, the
+  failed text goes back above it, with a blank line between. A suggestion's title goes back to its field when that
+  is empty; otherwise it goes above the text, with the failed text.
 - The title row links to the places that are not parts, before the switch:
   "Product" (`#product`: the decisions of `plan/decisions/`, with their own
   counts) and the small button "Suggest a feature" (`#suggested`), with Search
@@ -772,6 +822,7 @@ Back and Forward move between places; opening a row replaces the address.
 | `Entry.tsx` | A suggestion's row, and what any row shows open (`Panel`): the text, what the entry says of the plan's lists, its id and the button that copies it, the state, notes, history, and the thread with the votes on its comments. |
 | `routes.ts`, `plan.ts`, `map.ts`, `data.ts` | Addresses; the rows, statuses, films, parts' counts and states on top of the plan's model; the drawing; the build-time reader, the films' order and when a film is behind. |
 | `api.ts`, `writes.ts`, `memory.ts`, `RichText.tsx`, `Markdown.tsx`, `Boundary.tsx` | The API client, the page's own writes (a list of values set, kept a day; its comments six minutes), the remembered answer, person, view and order, text from GitHub, notes, the fallback list. |
+| `chunks.ts` | A chunk that fails: whether the site now serves another build. |
 | `prerender.tsx`, `NoScript.tsx`, `takeover.ts` | The markup the build writes into the page, the list for a reader without JavaScript, and the script's takeover. |
 
 ## Storage

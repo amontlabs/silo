@@ -3,15 +3,18 @@ import data from 'virtual:workshop-data';
 import { App } from './App';
 import { Boundary } from './Boundary';
 import { takeOver } from './takeover';
+import { chunk } from './chunks';
 import './workshop.css';
 
 // The plan as the page holds it, for scripts/load-check.mjs, which reads from it what the page must show (its parts,
 // the whole product's rows). It is the public plan, already in this script.
 (window as Window & { __workshopData?: unknown }).__workshopData = data;
 
-const loadNotes = () => import('virtual:workshop-notes').then((module) => module.default);
-const loadFacts = () => import('virtual:workshop-facts').then((module) => module.default);
-const loadHistory = () => import('virtual:workshop-history').then((module) => module.default);
+// A chunk that fails asks the site whether it now serves another build than this one (chunks.ts).
+const build = __WORKSHOP_BUILD__;
+const loadNotes = chunk(() => import('virtual:workshop-notes').then((module) => module.default), build);
+const loadFacts = chunk(() => import('virtual:workshop-facts').then((module) => module.default), build);
+const loadHistory = chunk(() => import('virtual:workshop-history').then((module) => module.default), build);
 
 function mount() {
   const root = document.getElementById('workshop-root');

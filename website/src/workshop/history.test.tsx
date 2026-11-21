@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from './App';
+import { SiteChanged } from './chunks';
 import { buildDataFrom } from './data';
 import type { HistorySource } from './data';
 import { buildData, planFiles } from './fixtures';
@@ -230,18 +231,51 @@ describe('the chunk of changes', () => {
     expect(panel.querySelector('[aria-busy]')).toBeNull();
   });
 
-  it('says it could not load, and loads again at the next opening', async () => {
+  // The loader here may succeed when asked again. In a browser a failed import may stay failed for the life of the
+  // page, so what the failure offers is Reload; asking again at the next opening is only a chance.
+  it('says it could not load with Reload, and asks the loader again at the next opening', async () => {
     const load = vi.fn()
       .mockRejectedValueOnce(new Error('offline'))
       .mockResolvedValue({ core: only.changes.get('core') as Change[] });
     const { item } = await open('#part-a/core', CORE, only, load);
     // A click alone, with no pointer reaching the button first.
     fireEvent.click(historyButton(item));
-    expect(await within(item).findByText('History could not load.')).toBeInTheDocument();
+    expect(await within(item).findByText(/^History could not load\./)).toBeInTheDocument();
+    expect(within(item).getByRole('button', { name: 'Reload' })).toBeInTheDocument();
     fireEvent.click(historyButton(item));
     fireEvent.click(historyButton(item));
     await waitFor(() => expect(lines(item)).toHaveLength(2));
     expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a failure as it is under a pointer passing over, and asks again only at an opening', async () => {
+    const load = vi.fn().mockRejectedValue(new Error('offline'));
+    const { item } = await open('#part-a/core', CORE, only, load);
+    fireEvent.click(historyButton(item));
+    expect(await within(item).findByText(/^History could not load\./)).toBeInTheDocument();
+    for (const fire of [fireEvent.pointerEnter, fireEvent.pointerDown, fireEvent.touchStart, fireEvent.focus]) fire(historyButton(item));
+    // Closing is no opening either.
+    fireEvent.click(historyButton(item));
+    expect(historyButton(item)).toHaveAttribute('aria-expanded', 'false');
+    await wait(10);
+    expect(load).toHaveBeenCalledTimes(1);
+    fireEvent.click(historyButton(item));
+    expect(historyButton(item)).toHaveAttribute('aria-expanded', 'true');
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+    expect(await within(item).findByText(/^History could not load\./)).toBeInTheDocument();
+  });
+
+  it('says the Workshop has changed when the site was deployed again, offers to reload, and never asks again', async () => {
+    const load = vi.fn().mockRejectedValue(new SiteChanged());
+    const { item } = await open('#part-a/core', CORE, only, load);
+    fireEvent.click(historyButton(item));
+    expect(await within(item).findByText(/The Workshop has changed since this page opened/)).toBeInTheDocument();
+    expect(within(item).getByRole('button', { name: 'Reload' })).toBeInTheDocument();
+    fireEvent.click(historyButton(item));
+    fireEvent.click(historyButton(item));
+    await wait(10);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(within(item).getByText(/The Workshop has changed since this page opened/)).toBeInTheDocument();
   });
 });
 
