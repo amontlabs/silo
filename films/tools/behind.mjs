@@ -6,12 +6,14 @@
 // at the film's last commit that is not a merge. The two ends are compared, so a change made and undone since does not
 // count. An entry is found by its id (its file's name) wherever its file is. A take alone changes nothing printed.
 //
-//   node tools/behind.mjs [<id>…]     run from films/: each film named, or every film
+//   node tools/behind.mjs [<id>…]                run from films/: each film named, or every film
+//   node tools/behind.mjs <id> --holds "<why>"   a film that is behind and still holds: the check goes in its checked.md
 //
 // It prints, for each film, each entry it is behind on and what changed in it, or that it is up to date.
-// Exit status: 0 when every film named is up to date, 1 when one is behind or cannot be read, 2 on wrong use.
+// Exit status: 0 when every film named is up to date (or the check was written), 1 when one is behind, cannot be read,
+// or is not behind for --holds, 2 on wrong use.
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { wordId } from '../../tools/plan/model/index.js';
@@ -347,16 +349,52 @@ export function readFilms(repository, shallow, lastCommit, atCommit, now) {
   return films.sort((a, b) => rank(a.id) - rank(b.id) || a.id.localeCompare(b.id));
 }
 
-/** The command: prints, for each film named (or every film), the entries it is behind on and what changed in each. */
-function main(args) {
-  if (args.some((arg) => arg.startsWith('-'))) {
-    console.error('usage: node tools/behind.mjs [<film id>…]   (run from films/)');
+const USAGE = 'usage: node tools/behind.mjs [<film id>…]\n       node tools/behind.mjs <film id> --holds "<why the film still holds>"\n(run from films/)';
+
+/**
+ * The entry a check appends to a film's checked.md: the date, the entries the film is behind on, and why it still holds.
+ * @param {string} date `YYYY-MM-DD`
+ * @param {string[]} ids
+ * @param {string} why
+ */
+export function checkEntry(date, ids, why) {
+  return `## ${date}\n\nBehind on: ${ids.map((id) => `\`${id}\``).join(', ')}.\n\n${why.trim()}\n`;
+}
+
+/** The head of a new checked.md. @param {string} name */
+const checkedHead = (name) => `# Checks of ${name}\n\nEach time this film was behind the plan and was found to still hold: the date, the entries of the plan it\nwas behind on, and why what the film says is still right. Written by \`node tools/behind.mjs ${name} --holds\`.\n`;
+
+/** Today, `YYYY-MM-DD`, in local time. */
+function today() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * The command. Prints, for each film named (or every film), the entries it is behind on and what changed in each.
+ * With `--holds "<why>"` and one film that is behind, appends a check to that film's checked.md (it commits nothing):
+ * the commit that adds it touches the film's folder, so the film is up to date from that commit on.
+ * @param {string[]} args
+ * @param {string} [repository]
+ * @param {string} [date]
+ * @returns {number}
+ */
+export function main(args, repository = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..'), date = today()) {
+  const at = args.indexOf('--holds');
+  const holds = at !== -1;
+  const why = holds ? args[at + 1] : undefined;
+  const names = holds ? args.filter((_, i) => i !== at && i !== at + 1) : args;
+  if (names.some((arg) => arg.startsWith('-')) || (holds && names.length !== 1)) {
+    console.error(USAGE);
     return 2;
   }
-  const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  if (holds && (typeof why !== 'string' || why.startsWith('--') || why.trim() === '')) {
+    console.error(`${names[0]}: --holds needs the reason the film still holds, quoting what the film says.\n${USAGE}`);
+    return 2;
+  }
   const dir = join(repository, 'films');
   const known = filmFolders(dir);
-  for (const name of args) {
+  for (const name of names) {
     if (!known.includes(name)) {
       console.error(`${name}: not a film: a film is a real folder directly under films/ that holds a film.json (${known.join(', ')}).`);
       return 2;
@@ -364,7 +402,7 @@ function main(args) {
   }
   let shallow = false;
   try {
-    shallow = execFileSync('git', ['-C', repository, 'rev-parse', '--is-shallow-repository'], { encoding: 'utf8' }).trim() === 'true';
+    shallow = execFileSync('git', ['-C', repository, 'rev-parse', '--is-shallow-repository'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() === 'true';
   } catch {
     console.error('git cannot read this repository.');
     return 1;
@@ -373,9 +411,9 @@ function main(args) {
     console.error('This clone is shallow: a film\'s commit may be missing. Fetch the whole history (git fetch --unshallow) first.');
     return 1;
   }
-  const names = args.length ? args : readFilms(repository, true).map((film) => film.id);
+  const films = names.length ? names : readFilms(repository, true).map((film) => film.id);
   let status = 0;
-  for (const name of names) {
+  for (const name of films) {
     const shows = list(JSON.parse(readFileSync(join(dir, name, 'film.json'), 'utf8')).shows);
     const told = filmBehind(repository, name, shows);
     if (!told) {
@@ -383,13 +421,24 @@ function main(args) {
       status = 1;
       continue;
     }
-    const at = told.commit.slice(0, 10);
+    const since = told.commit.slice(0, 10);
+    if (holds) {
+      if (!told.behind.length) {
+        console.error(`${name}: up to date since ${since}: there is nothing to check, so nothing was written.`);
+        return 1;
+      }
+      const file = join(dir, name, 'checked.md');
+      const before = existsSync(file) ? readFileSync(file, 'utf8').replace(/\n*$/, '\n') : checkedHead(name);
+      writeFileSync(file, `${before}\n${checkEntry(date, told.behind.map((item) => item.id), why ?? '')}`);
+      console.log(`${name}: the check is in films/${name}/checked.md. Commit it: the film is up to date from that commit on.`);
+      return 0;
+    }
     if (!told.behind.length) {
-      console.log(`${name}: up to date: none of the ${shows.length} entries and statements it shows changed in what the Workshop prints since ${at}.`);
+      console.log(`${name}: up to date: none of the ${shows.length} entries and statements it shows changed in what the Workshop prints since ${since}.`);
       continue;
     }
     status = 1;
-    console.log(`${name}: behind the plan since ${at}, on ${told.behind.length} of the ${shows.length} it shows:`);
+    console.log(`${name}: behind the plan since ${since}, on ${told.behind.length} of the ${shows.length} it shows:`);
     for (const { id, changes } of told.behind) {
       console.log(`  ${id}`);
       for (const change of changes) console.log(`    ${change}`);

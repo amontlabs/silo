@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { canonicalText } from '../../../tools/plan/model/index.js';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { main as behindCommand } from '../../../films/tools/behind.mjs';
 import { loadDir } from '../../../tools/plan/read/index.js';
 import { buildDataFrom, factsFrom, filmOrder, historiesFrom, historyFromGit, layoutPlanFrom, notesFrom, planDir, readBuildData, readFilms, readHistories, readHistory, printedChanged, printedChanges, unshallow } from './data';
 import type { Git } from './data';
@@ -831,6 +832,57 @@ describe('the films', () => {
       else if (/^  [a-z0-9-]+$/.test(line)) told.get(film)!.push(line.trim());
     }
     expect(Object.fromEntries(told)).toEqual(Object.fromEntries(readFilms(REPOSITORY, false).map((info) => [info.id, info.behind])));
+  });
+
+  it('take a check that a film still holds into its checked.md, only while it is behind and only with a reason, and are up to date once it is committed', () => {
+    const root = mkdtempSync(join(tmpdir(), 'workshop-films-'));
+    const git = (args: string[]) => execFileSync('git', ['-C', root, ...args], { env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }, stdio: 'ignore' });
+    const write = (path: string, text: string) => {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), text);
+    };
+    const checked = join(root, 'films/one/checked.md');
+    const quiet = [vi.spyOn(console, 'log').mockImplementation(() => {}), vi.spyOn(console, 'error').mockImplementation(() => {})];
+    try {
+      git(['init', '-q', '-b', 'main']);
+      write('plan/p/decisions/word-a.json', entry({ asks: 'A?', answer: 'Old.' }));
+      write('plan/p/decisions/word-b.json', entry({ asks: 'B?', answer: 'Same.' }));
+      write('films/one/film.json', JSON.stringify({ id: 'one', title: 'One', line: 'L.', shows: ['word-a', 'word-b'] }));
+      write('films/two/film.json', JSON.stringify({ id: 'two', title: 'Two', line: 'L.', shows: ['word-b'] }));
+      git(['add', '.']);
+      git(['commit', '-q', '-m', 'the films']);
+      // Not behind: nothing to check, nothing written.
+      expect(behindCommand(['one', '--holds', 'It still holds.'], root, '2026-11-21')).toBe(1);
+      expect(existsSync(checked)).toBe(false);
+      write('plan/p/decisions/word-a.json', entry({ asks: 'A?', answer: 'New.' }));
+      git(['commit', '-q', '-am', 'redefined']);
+      expect(behindCommand(['one'], root)).toBe(1);
+      // No reason, an empty one, or more than one film: wrong use, nothing written.
+      expect(behindCommand(['one', '--holds'], root)).toBe(2);
+      expect(behindCommand(['one', '--holds', '  '], root)).toBe(2);
+      expect(behindCommand(['one', 'two', '--holds', 'Why.'], root)).toBe(2);
+      expect(behindCommand(['--holds', 'Why.'], root)).toBe(2);
+      expect(existsSync(checked)).toBe(false);
+      expect(behindCommand(['one', '--holds', 'It says "old" nowhere.'], root, '2026-11-21')).toBe(0);
+      const text = readFileSync(checked, 'utf8');
+      expect(text).toMatch(/^# Checks of one\n/);
+      expect(text).toContain('## 2026-11-21\n\nBehind on: `word-a`.\n\nIt says "old" nowhere.\n');
+      // Written, not committed: the film is behind until the commit that records the check.
+      expect(readFilms(root, false).find((film) => film.id === 'one')?.behind).toEqual(['word-a']);
+      git(['add', 'films/one/checked.md']);
+      git(['commit', '-q', '-m', 'checked']);
+      expect(readFilms(root, false).map((film) => film.behind)).toEqual([[], []]);
+      expect(behindCommand([], root)).toBe(0);
+      // A second check appends after the first.
+      write('plan/p/decisions/word-a.json', entry({ asks: 'A?', answer: 'Newer.' }));
+      write('plan/p/decisions/word-b.json', entry({ asks: 'B?', answer: 'Changed.' }));
+      git(['commit', '-q', '-am', 'again']);
+      expect(behindCommand(['one', '--holds', 'Still.'], root, '2026-11-22')).toBe(0);
+      expect(readFileSync(checked, 'utf8')).toBe(`${text}\n## 2026-11-22\n\nBehind on: \`word-a\`, \`word-b\`.\n\nStill.\n`);
+    } finally {
+      for (const spy of quiet) spy.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('compare the texts of an entry\'s statements wherever they live at each end: in its sets before a take, in the lists after', () => {

@@ -13,7 +13,7 @@ what a decision sets. A visitor watches one to understand a part.
   wherever its file is. One rule says it, in `tools/behind.mjs`; the Workshop marks a film behind
   with the same code. `node tools/behind.mjs <id>`, run from `films/`, prints for that film each
   entry it is behind on and what changed in it, or that it is up to date; with no id, every film.
-  A film stays behind until a commit touches its folder.
+  A film stays behind until a commit touches its folder (see [Changing a film](#changing-a-film)).
 
 Each film ends as one HTML file: the film with its voice and subtitles, the entries it shows as
 `plan/` holds them, and the questions the owner answers under the film. That page is a tool of the
@@ -58,6 +58,7 @@ tools/
   explainer.js       the film
   voice.json, voice/ made by voice.py (voice/ is the sentence cache: keep it, it is costly to make again)
   pending.md         what the owner settled that the film does not carry yet, when there is any
+  checked.md         each time the film was behind and found to still hold: the date, the entries, why; when there is any
   out/               made by build.py, check.sh and shot.sh, not tracked: index.html, sheet.png, stills/, shots/, check.log
 ```
 
@@ -257,6 +258,14 @@ A film changes when it is behind (`node tools/behind.mjs <id>`), when its `pendi
 when the owner asks. Change the script first, then go through the steps above from the one each
 change touches: `narration.json` and the voice for a sentence, `explainer.js` for the picture,
 then the check and the stills.
+
+A film that is behind is either changed, or checked and found to hold; both are recorded in its
+folder, and the commit that records either ends the film's being behind, by the same rule. When
+nothing the film says or shows is made untrue by what changed, run
+`node tools/behind.mjs <id> --holds "<why>"`: it appends to the film's `checked.md` the date, the
+entries the film is behind on now, and the reason, which says in one or two sentences why the film
+still holds, quoting what it says. It refuses a film that is not behind and an empty reason, and
+commits nothing: commit `checked.md`. The file says what was compared; it is not a mark.
 
 - A film is changed for a statement only once that statement is in force in `plan/`, or when the
   owner asks for it.
