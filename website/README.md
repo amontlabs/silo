@@ -1194,12 +1194,17 @@ into `dist/films/`:
 
 The pages name every file by its absolute path under `/films/`, so a film's
 address works with or without its closing slash. A folder directly under
-`films/` that holds a `film.json` is a film; any other folder is left out. A
-film whose files are not complete stops the build with the film, the file and
-the fix, the way the plan's errors read: a `film.json` whose `id` is not the
-folder's, no title, no `explainer.js`, no `voice.json`, or a clip that is
-missing or is not named `voice/<name>.mp3`. A film's folder that is a link
-is refused too.
+`films/` that holds a `film.json`, an `explainer.js` or a `voice.json` (as a
+file or as a link) is a film; any other folder is left out. A film must be
+complete, so none can vanish from the site without an error: one whose files
+are not complete stops the build with the film, the file and the fix, the way
+the plan's errors read. That is a missing `film.json`, `explainer.js` or
+`voice.json`, a `film.json` whose `id` is not the folder's or with no title, a
+voice without a scene or without a field the player reads
+(`films/player/voice.js`: the voice's `id` and `label`, each scene's `total`
+and `sentences`, each sentence's `text`, `start`, `length` and `file`), or a
+clip that is missing or is not named `voice/<name>.mp3`. A link in place of a
+film's folder or of any of its files stops the build too.
 
 The build follows no link. For each file it reads or copies (a shared file,
 the page template `films/player/page.html`, a film's file or clip), every

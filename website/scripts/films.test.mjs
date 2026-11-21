@@ -147,20 +147,73 @@ test('a shared file missing from the fixed list stops the build: a licence text 
   }
 });
 
-test('a folder that is not a film is refused, and left out of the films', () => {
+test('a folder that holds none of a film\'s files is not a film; a link to a film stops the build', () => {
   const { root, films, put } = made();
   try {
-    assert.throws(() => readFilm(films, 'tools'), (error) => error instanceof FilmError && error.message === 'films/tools/film.json: (file): is missing: the folder is not a film. Fix: write film.json as films/README.md says, or move the folder out of films/');
+    assert.deepEqual(filmIds(films), ['tiny']);
+    assert.throws(() => readFilm(films, 'tools'), (error) => error instanceof FilmError && error.message === 'films/tools/film.json: (file): is missing. Fix: write film.json as films/README.md says, or move the folder out of films/');
     assert.throws(() => readFilm(films, 'nowhere'), /^Error: films\/nowhere: \(folder\): does not exist/);
-    // A link to a film is not a film directly under films/.
+    // A link in place of a film's folder: the film would vanish from the site, so the build stops.
     symlinkSync(join(films, 'tiny'), join(films, 'linked'));
-    assert.throws(() => readFilm(films, 'linked'), /films\/linked: \(folder\): is not a folder/);
+    const linked = 'films/linked: (folder): is a link to a film. Fix: make the film a plain folder directly under films/: the site publishes nothing a link leads to';
+    assert.throws(() => filmIds(films), (error) => error instanceof FilmError && error.message === linked);
+    assert.throws(() => readFilm(films, 'linked'), (error) => error instanceof FilmError && error.message === linked);
+    unlinkSync(join(films, 'linked'));
+    // A link to a folder that holds no film's file is not a film.
+    symlinkSync(join(films, 'tools'), join(films, 'other'));
     assert.deepEqual(filmIds(films), ['tiny']);
     // The shared player's folder cannot be a film's address.
     put('player/film.json', JSON.stringify({ id: 'player', title: 'Player' }));
     assert.throws(() => filmFiles(films), /films\/player: \(folder\): "player" cannot be a film's address/);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a folder with any one of film.json, explainer.js or voice.json is a film, and an incomplete one stops the build', async () => {
+  for (const [held, missing] of [['film.json', 'explainer.js'], ['explainer.js', 'film.json'], ['voice.json', 'film.json']]) {
+    const { root, films, put } = made();
+    try {
+      put(`half/${held}`, held === 'explainer.js' ? '' : JSON.stringify({ id: 'half', title: 'Half', voices: [] }));
+      assert.deepEqual(filmIds(films), ['half', 'tiny'], held);
+      await assert.rejects(writeFilms(join(root, 'dist'), films), (error) => {
+        assert.ok(error instanceof FilmError);
+        assert.match(error.message, new RegExp(`^films/half/${missing.replace('.', '\\.')}: \\(file\\): is missing\\.`), held);
+        return true;
+      });
+      // A film's file that is a link counts: the folder is a film, and the link stops the build.
+      rmSync(join(films, 'half'), { recursive: true });
+      mkdirSync(join(films, 'half'));
+      symlinkSync(join(films, 'tiny', held), join(films, 'half', held));
+      assert.deepEqual(filmIds(films), ['half', 'tiny'], `${held} as a link`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('every voice has, for each scene, the fields the player reads: one missing names the film, the voice and the field', () => {
+  const cases = [
+    [(v) => { v.scenes = []; }, 'voices[0].scenes: holds no scene (voice "af_heart")'],
+    [(v) => { delete v.scenes; }, 'voices[0].scenes: holds no scene (voice "af_heart")'],
+    [(v) => { delete v.id; }, 'voices[0].id: is missing or wrong'],
+    [(v) => { delete v.label; }, 'voices[0].label: is missing or wrong (voice "af_heart")'],
+    [(v) => { delete v.scenes[1].total; }, 'voices[0].scenes[1].total: is missing or wrong (voice "af_heart")'],
+    [(v) => { delete v.scenes[1].sentences; }, 'voices[0].scenes[1].sentences: is missing or wrong (voice "af_heart")'],
+    [(v) => { delete v.scenes[0].sentences[0].text; }, 'voices[0].scenes[0].sentences[0].text: is missing or wrong (voice "af_heart")'],
+    [(v) => { v.scenes[0].sentences[0].start = '0.4'; }, 'voices[0].scenes[0].sentences[0].start: is missing or wrong (voice "af_heart")'],
+    [(v) => { delete v.scenes[1].sentences[0].length; }, 'voices[0].scenes[1].sentences[0].length: is missing or wrong (voice "af_heart")'],
+  ];
+  for (const [change, expected] of cases) {
+    const { root, films } = made();
+    try {
+      const voice = JSON.parse(readFileSync(join(films, 'tiny', 'voice.json'), 'utf8'));
+      change(voice.voices[0]);
+      writeFileSync(join(films, 'tiny', 'voice.json'), JSON.stringify(voice));
+      assert.throws(() => readFilm(films, 'tiny'), (error) => error instanceof FilmError && error.message === `films/tiny/voice.json: ${expected}. Fix: run tools/voice.py tiny from films/`, expected);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 

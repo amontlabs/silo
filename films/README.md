@@ -288,7 +288,8 @@ the kit's `player.css`, vendor scripts and fonts, and the licence texts `kit/lic
 and `kit/licences/lucide.txt`, and of each film `film.json`, `explainer.js`, `voice.json` and the
 clips it names, each `voice/<name>.mp3`. These are loaded as files, not inlined. The build stops on
 a film whose files are not complete, with the film, the file and the fix: a clip missing from
-`voice/` is fixed by `tools/voice.py <id>`. It follows no link: a folder or a file of `films/` that
+`voice/` is fixed by `tools/voice.py <id>`. A folder that holds a `film.json`, an `explainer.js` or a
+`voice.json` is a film to the site, and must hold all three. It follows no link: a folder or a file of `films/` that
 is a link, on the way to a file it reads, stops it too.
 
 So after a film changes, nothing in `films/` is to be built for the site: commit the film's files

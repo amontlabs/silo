@@ -6,8 +6,8 @@
 // source pointing at the film's voice/ folder. Everything comes from tracked files of the repository: no
 // Python, no network. Vite's build calls `writeFilms` (vite.config.ts); the dev server serves `filmFiles`.
 //
-// A folder directly under films/ that holds a film.json is a film. A film with a missing or broken file
-// stops the build, with the file, the field and the fix, the way the plan's errors read.
+// A folder directly under films/ that holds a film.json, an explainer.js or a voice.json is a film, and a film
+// is complete: one with a missing or broken file stops the build, with the file, the field and the fix, the way the plan's errors read.
 //
 // What the build reads or copies is a fixed set of files under films/, each reached through plain folders
 // only: a link anywhere on the way, or a real path outside films/, stops the build. So no file outside
@@ -84,7 +84,25 @@ function requiredFile(filmsDir, rel, fix) {
   return path;
 }
 
-/** The films of `filmsDir`: each real folder directly under it that holds a film.json, by name. No folder, no film. */
+// A folder directly under films/ that holds one of these, as a file or as a link, is a film, and must be complete.
+const FILM_FILES = ['film.json', 'explainer.js', 'voice.json'];
+
+/** Whether the entry at `path` holds one of FILM_FILES. */
+function holdsFilm(path) {
+  return FILM_FILES.some((name) => {
+    try {
+      return Boolean(lstatSync(join(path, name), { throwIfNoEntry: false }));
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
+ * The films of `filmsDir`, by name: each folder directly under it that holds a film.json, an explainer.js or a
+ * voice.json. A link in place of such a folder stops the build, so a film cannot drop out of the site unseen.
+ * No folder, no film.
+ */
 export function filmIds(filmsDir = defaultFilmsDir()) {
   let stat;
   try {
@@ -93,10 +111,13 @@ export function filmIds(filmsDir = defaultFilmsDir()) {
     return [];
   }
   if (!stat.isDirectory()) return [];
-  return readdirSync(filmsDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && lstatSync(join(filmsDir, entry.name, 'film.json'), { throwIfNoEntry: false })?.isFile())
-    .map((entry) => entry.name)
-    .sort();
+  const ids = [];
+  for (const entry of readdirSync(filmsDir, { withFileTypes: true })) {
+    if (!(entry.isDirectory() || entry.isSymbolicLink()) || !holdsFilm(join(filmsDir, entry.name))) continue;
+    if (entry.isSymbolicLink()) throw problem(`films/${entry.name}`, '(folder)', 'is a link to a film', 'make the film a plain folder directly under films/: the site publishes nothing a link leads to');
+    ids.push(entry.name);
+  }
+  return ids.sort();
 }
 
 function readJson(filmsDir, rel) {
@@ -112,8 +133,8 @@ function readJson(filmsDir, rel) {
 
 /**
  * One film, checked: its title, its voice with each clip's source on the site, and the files its page needs.
- * Refuses a folder that is not a film directly under `filmsDir` (a link leading elsewhere included), and a
- * film with a missing or broken file.
+ * Refuses a folder that is not a film directly under `filmsDir` (a link to one included), and a film with a
+ * missing or broken file, or a voice without a field the player reads.
  */
 export function readFilm(filmsDir, id) {
   const shown = `films/${id}`;
@@ -123,10 +144,11 @@ export function readFilm(filmsDir, id) {
   } catch {
     throw problem(shown, '(folder)', 'does not exist', `make the film's folder directly under films/, or leave ${id} out`);
   }
-  if (!stat.isDirectory()) throw problem(shown, '(folder)', 'is not a folder (a link leading elsewhere is refused)', 'keep each film as a real folder directly under films/');
+  if (stat.isSymbolicLink()) throw problem(shown, '(folder)', 'is a link to a film', 'make the film a plain folder directly under films/: the site publishes nothing a link leads to');
+  if (!stat.isDirectory()) throw problem(shown, '(folder)', 'is not a folder', 'keep each film as a plain folder directly under films/');
   if (!ID.test(id) || id === PLAYER) throw problem(shown, '(folder)', `"${id}" cannot be a film's address`, `name the folder with lowercase letters, digits and dashes, and not "${PLAYER}"`);
   const film = readJson(filmsDir, `${id}/film.json`);
-  if (film.missing) throw problem(`${shown}/film.json`, '(file)', 'is missing: the folder is not a film', 'write film.json as films/README.md says, or move the folder out of films/');
+  if (film.missing) throw problem(`${shown}/film.json`, '(file)', 'is missing', 'write film.json as films/README.md says, or move the folder out of films/');
   if (film.value?.id !== id) throw problem(`${shown}/film.json`, 'id', `is ${JSON.stringify(film.value?.id)}, not the folder's name`, `set "id": "${id}"`);
   const title = film.value.title;
   if (typeof title !== 'string' || !title.trim()) throw problem(`${shown}/film.json`, 'title', 'is missing', "give the film's title, the script's title");
@@ -137,23 +159,41 @@ export function readFilm(filmsDir, id) {
   const data = voice.value;
   if (!Array.isArray(data?.voices) || !data.voices.length) throw problem(`${shown}/voice.json`, 'voices', 'holds no voice', `run tools/voice.py ${id} from films/`);
   const clips = new Map();
-  const voices = data.voices.map((v, vi) => ({
-    ...v,
-    scenes: (Array.isArray(v.scenes) ? v.scenes : []).map((scene, s) => ({
-      ...scene,
-      sentences: (Array.isArray(scene.sentences) ? scene.sentences : []).map((sentence, j) => {
-        const field = `voices[${vi}].scenes[${s}].sentences[${j}].file`;
+  // The fields the player reads (films/player/voice.js), for every voice and every scene of it.
+  const needs = (value, field, what, voiceId) => {
+    if (!what(value)) throw problem(`${shown}/voice.json`, field, `is missing or wrong${voiceId === undefined ? '' : ` (voice ${JSON.stringify(voiceId)})`}`, `run tools/voice.py ${id} from films/`);
+  };
+  const text = (value) => typeof value === 'string' && value !== '';
+  const number = (value) => typeof value === 'number' && Number.isFinite(value);
+  const voices = data.voices.map((v, vi) => {
+    needs(v, `voices[${vi}]`, (value) => value !== null && typeof value === 'object');
+    needs(v.id, `voices[${vi}].id`, text);
+    needs(v.label, `voices[${vi}].label`, text, v.id);
+    if (!Array.isArray(v.scenes) || !v.scenes.length) throw problem(`${shown}/voice.json`, `voices[${vi}].scenes`, `holds no scene (voice ${JSON.stringify(v.id)})`, `run tools/voice.py ${id} from films/`);
+    const scenes = v.scenes.map((scene, s) => {
+      const at = `voices[${vi}].scenes[${s}]`;
+      needs(scene, at, (value) => value !== null && typeof value === 'object', v.id);
+      needs(scene.total, `${at}.total`, number, v.id);
+      needs(scene.sentences, `${at}.sentences`, Array.isArray, v.id);
+      const sentences = scene.sentences.map((sentence, j) => {
+        const where = `${at}.sentences[${j}]`;
+        needs(sentence, where, (value) => value !== null && typeof value === 'object', v.id);
+        needs(sentence.text, `${where}.text`, (value) => typeof value === 'string', v.id);
+        needs(sentence.start, `${where}.start`, number, v.id);
+        needs(sentence.length, `${where}.length`, number, v.id);
         const file = sentence.file;
         if (typeof file !== 'string' || !CLIP.test(file)) {
-          throw problem(`${shown}/voice.json`, field, `${JSON.stringify(file)} is not a clip of the film's voice/ (voice/<name>.mp3)`, `run tools/voice.py ${id} from films/`);
+          throw problem(`${shown}/voice.json`, `${where}.file`, `${JSON.stringify(file)} is not a clip of the film's voice/ (voice/<name>.mp3)`, `run tools/voice.py ${id} from films/`);
         }
         const from = plainFile(filmsDir, `${id}/${file}`);
-        if (!from) throw problem(`${shown}/${file}`, '(file)', `is missing (voice.json names it at ${field})`, `run tools/voice.py ${id} from films/, which speaks the missing sentences again`);
+        if (!from) throw problem(`${shown}/${file}`, '(file)', `is missing (voice.json names it at ${where}.file)`, `run tools/voice.py ${id} from films/, which speaks the missing sentences again`);
         clips.set(file, from);
         return { ...sentence, src: `${FILMS_URL}${id}/${file}` };
-      }),
-    })),
-  }));
+      });
+      return { ...scene, sentences };
+    });
+    return { ...v, scenes };
+  });
   if (!voices.some((v) => v.scenes.some((scene) => scene.sentences.length))) throw problem(`${shown}/voice.json`, 'voices', 'holds no sentence', `run tools/voice.py ${id} from films/`);
   return { id, title, explainer, voice: { ...data, voices }, clips: new Map([...clips].sort(([a], [b]) => (a < b ? -1 : 1))) };
 }
