@@ -11,7 +11,7 @@
       "says": "An alert is one more action, never a decision at the boundary.",
       "kind": "safety",
       "check": [
-        "model"
+        "bounded exhaustive test"
       ]
     }
   ]

@@ -32,7 +32,7 @@
     "kind": "safety",
     "from": "less-sure-less-power",
     "check": [
-      "model"
+      "bounded exhaustive test"
     ]
   }
 ]

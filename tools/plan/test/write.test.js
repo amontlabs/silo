@@ -141,7 +141,7 @@ test('replacing a statement moves its id out of the earlier entry\'s adds', () =
 test('a sets item with the id of a statement of another list of its kind moves it there, and the result passes the check', () => {
   const files = sample();
   const entry = parse(files, 'record/decisions/losses-show.json');
-  entry.sets[0] = { in: 'engine/properties', id: 'classifier-never-acts', says: 'A classifier never acts on the engine.', kind: 'safety', from: 'less-sure-less-power', check: ['model'] };
+  entry.sets[0] = { in: 'engine/properties', id: 'classifier-never-acts', says: 'A classifier never acts on the engine.', kind: 'safety', from: 'less-sure-less-power', check: ['bounded exhaustive test'] };
   files.set('record/decisions/losses-show.json', canonicalText(canonicalDecision(entry)));
   assert.deepEqual(checkFiles(files).errors, []);
   const outcome = take(files, 'losses-show');

@@ -105,8 +105,8 @@ In this order. A key in brackets is optional: it is absent, never empty.
 - `known_as`: the principle's standard name.
 - `kind`: `safety` (it never happens), `liveness` (it always ends up happening) or `measured` (a
   number we commit to).
-- `check`: a list of one or more of `types`, `model`, `simulator`, `hostile test`, `live check`,
-  `benchmark`, `test`, `assertion`. `at`: the files of those checks.
+- `check`: a list of one or more of `types`, `bounded exhaustive test`, `simulator`, `hostile test`,
+  `live check`, `benchmark`, `test`, `assertion`. `at`: the files of those checks.
 - `suggest`: `{ "verdict", "why" }`, what is recommended to the owner. A recommended answer to a
   decision goes in `answer`.
 - `suggested_in`: the number of the visitor's suggestion the entry came from.

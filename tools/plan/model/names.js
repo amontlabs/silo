@@ -22,7 +22,7 @@ export const VERDICTS = Object.freeze(['take', 'drop']);
 export const PROPERTY_KINDS = Object.freeze(['safety', 'liveness', 'measured']);
 
 /** A property's `check`: what proves it. A property lists one or more, each once. */
-export const CHECKS = Object.freeze(['types', 'model', 'simulator', 'hostile test', 'live check', 'benchmark', 'test', 'assertion']);
+export const CHECKS = Object.freeze(['types', 'bounded exhaustive test', 'simulator', 'hostile test', 'live check', 'benchmark', 'test', 'assertion']);
 
 /** Key orders of the canonical form. */
 export const WORD_KEYS = Object.freeze(['word', 'means', 'not']);

@@ -1,7 +1,7 @@
 # Which tool checks the model of access
 
 The model is small: who holds what, the calls that change it, and the properties whose `check` is
-`model`. The tool tries the sequences of calls among a few computers, secrets and hosts, and shows
+`bounded exhaustive test`. The tool tries the sequences of calls among a few computers, secrets and hosts, and shows
 the shortest one that breaks a property.
 
 ## Found so far
