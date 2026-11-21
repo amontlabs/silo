@@ -1,6 +1,6 @@
 // Shared by the page's tests: a fake API on fetch, and ways to find what a person sees.
 import { act, render, screen, waitFor } from '@testing-library/react';
-import { expect, vi } from 'vitest';
+import { expect, onTestFinished, vi } from 'vitest';
 import { App } from './App';
 import type { IssueDetail, Me } from './api';
 import type { BuildData } from './plan';
@@ -85,25 +85,37 @@ export function clock() {
 
 /**
  * Keeps the page's timers of exactly `ms` from firing on their own: the test fires them when it chooses, so a busy
- * machine cannot make one go off before a step the test takes. A timer the page clears is cleared as usual.
+ * machine cannot make one go off before a step the test takes. Nothing real is scheduled for a withheld timer, and
+ * one the page clears is cleared as usual. `fire(count)` fails unless exactly `count` (one by default) are withheld,
+ * runs them in the order they were set, and skips one an earlier one cleared. At the end of the test, a withheld
+ * timer that was neither fired nor cleared fails it, unless the test says it `leaves` it.
  */
-export function withheldTimers(ms: number) {
+export function withheldTimers(ms: number, { leaves = false }: { leaves?: boolean } = {}) {
   const realSet = globalThis.setTimeout;
   const realClear = globalThis.clearTimeout;
   const held = new Map<unknown, () => void>();
+  let ids = 2 ** 40;
   vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, delay?: number, ...args: unknown[]) => {
     if (delay !== ms) return realSet(fn, delay, ...args);
-    // The id the page holds is a real timer that does nothing, so clearing it works as usual.
-    const id = realSet(() => {}, 2 ** 30);
-    held.set(id, fn);
-    return id;
+    ids += 1;
+    held.set(ids, fn);
+    return ids;
   }) as typeof setTimeout);
   vi.spyOn(globalThis, 'clearTimeout').mockImplementation(((id?: Parameters<typeof clearTimeout>[0]) => {
-    held.delete(id);
-    return realClear(id);
+    if (held.delete(id)) return;
+    realClear(id);
   }) as typeof clearTimeout);
+  onTestFinished(() => {
+    if (!leaves && held.size > 0) throw new Error(`${held.size} timer(s) of ${ms} ms were withheld and neither fired nor cleared`);
+  });
   return {
-    fire: () => act(async () => { [...held.values()].forEach((fn) => fn()); held.clear(); }),
+    fire: (count = 1) => act(async () => {
+      if (held.size !== count) throw new Error(`${held.size} timer(s) of ${ms} ms are withheld, the test expects ${count}`);
+      for (const [id, fn] of [...held]) {
+        if (!held.delete(id)) continue;
+        fn();
+      }
+    }),
   };
 }
 
