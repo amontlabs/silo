@@ -1,4 +1,5 @@
 {
   "asks": "Where does each way of checking fit in Silo?",
-  "answer": "Assertions everywhere in the core. The simulator always: the real Zig core against fake drivers, on random sequences of calls. Where a property depends on the order of calls, a test also runs the real core on every possible sequence of a few calls. Proof for at most one small function, later."
+  "answer": "Assertions everywhere in the core. The simulator always: the real Zig core against fake drivers, on random sequences of calls. Where a property depends on the order of calls, a test also runs the real core on every possible sequence of a few calls. Proof for at most one small function, later.",
+  "verdict": "take"
 }
