@@ -480,6 +480,21 @@ describe('the map layout', () => {
       expect(map.notes[0]).not.toHaveProperty('undecided');
     });
 
+    it('drops a mark carried into a layout through a variable, which the type checker lets pass', () => {
+      // Built apart, then put in a layout: no excess-property check sees `undecided` here, so this type-checks.
+      const wire = { ...EXAMPLE_MAP.wires[0], undecided: true };
+      const zone = { ...EXAMPLE_MAP.zones[0], undecided: true };
+      const note = { ...EXAMPLE_MAP.notes[0], undecided: true };
+      const layout: MapLayout = { ...EXAMPLE_MAP, wires: [wire, ...EXAMPLE_MAP.wires.slice(1)], zones: [zone, EXAMPLE_MAP.zones[1]], notes: [note, EXAMPLE_MAP.notes[1]] };
+      // Each rests only on what is in force: a part.
+      expect([wire.rests, zone.rests, note.rests]).toEqual([['part:part-b'], ['part:part-a'], ['part:part-b']]);
+      const map = pageLayout(layout, plan());
+      expect(map.wires[0]).not.toHaveProperty('undecided');
+      expect(map.zones[0]).not.toHaveProperty('undecided');
+      expect(map.notes[0]).not.toHaveProperty('undecided');
+      expect(map.wires[0]).toEqual(pageLayout(EXAMPLE_MAP, plan()).wires[0]);
+    });
+
     it('draws a thing as not decided when at least one id it rests on is proposed', () => {
       expect(drawn(uses(['core-in-zig', 'one-way', 'part:part-a'])).wires[0].undecided).toBe(true);
       expect(drawn(uses(['core-in-zig', 'part:part-a'])).wires[0]).not.toHaveProperty('undecided');
@@ -532,6 +547,20 @@ describe('the map layout', () => {
       // Your phone, and the wire with no word that reaches it from What you see, rest on features with no verdict.
       expect(note('Your phone').undecided).toBe(true);
       expect(map.wires.filter((one) => one.of === 'views' && !one.label).map((one) => one.undecided)).toEqual([undefined, true]);
+      // That wire ends at the phone's text: its last arrow points into the text's box, at most 8 units before its left
+      // edge and within its height. Neither has a folded place: both leave the folded map.
+      const phone = note('Your phone');
+      const toPhone = map.wires.filter((one) => one.of === 'views' && !one.label)[1];
+      const [left, top, , height] = phone.full;
+      const [x, y, dir] = toPhone.arrows!.at(-1)!;
+      expect(dir).toBe('r');
+      expect(x).toBeLessThanOrEqual(left);
+      expect(x).toBeGreaterThanOrEqual(left - 8);
+      expect(y).toBeGreaterThanOrEqual(top);
+      expect(y).toBeLessThanOrEqual(top + height);
+      expect(toPhone.d.endsWith(`H${x - 7}`)).toBe(true);
+      expect(toPhone).not.toHaveProperty('fold');
+      expect(phone).not.toHaveProperty('fold');
     });
   });
 

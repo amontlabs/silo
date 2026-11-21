@@ -258,9 +258,10 @@ A layout as written (`MapLayout`: `SILO_MAP`, the example, `NO_MAP`) has `rests`
 and no mark of not decided. The page gets the layout from `pageLayout`
 (`PageLayout`): no `rests`, never the layout's `file`, and `undecided: true` on
 a wire, a zone or a text that is not decided. `pageLayout` is the only place
-that sets the mark; the two types make the type checker refuse one written by
-hand, and a mark that gets past them is dropped, so nothing stays dashed once
-the owner takes what it rests on.
+that sets the mark. The two types make the type checker refuse a mark written
+in place in a layout; `pageLayout` drops any other, such as one carried in
+through a variable, so nothing stays dashed once the owner takes what it rests
+on.
 
 A wire's word is in the second ink, never the faint one (2.53:1 on the light
 ground), whatever its part's state and whether the wire is decided: the line
