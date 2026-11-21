@@ -51,6 +51,7 @@
 .ws-noscript section { margin-top: 24px; }
 .ws-noscript h2 { font: 18px/1.3 var(--serif); }
 .ws-noscript section > p { color: var(--muted); margin-top: 4px; }
+.ws-noscript h3 { font: 12px/14px var(--mono); letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); margin-top: 14px; }
 .ws-noscript-rows { list-style: none; margin: 10px 0 0; padding: 0; }
 .ws-noscript-rows li { padding: 4px 0; }
 .ws-noscript-rows code { font: 12px var(--mono); color: var(--faint); margin-right: 6px; }
@@ -380,6 +381,7 @@
 /* the error boundary's plain list */
 .ws-plain section { padding: 0 24px 18px; }
 .ws-plain h2 { font: 20px var(--serif); margin: 14px 0 6px; }
+.ws-plain h3 { font: 12px/14px var(--mono); letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); margin: 10px 0 4px; }
 
 @keyframes ws-rise { from { opacity: .2; transform: translateY(8px); } }
 @keyframes ws-show { from { opacity: .2; } }

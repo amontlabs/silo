@@ -279,6 +279,11 @@ export interface Plan {
 /** How many stages make the first band of the sheet. */
 export const STARTER_STAGES = 5;
 
+/** A list's features and its decisions, each in the order the list had. A list shows them in that order: features first. */
+export function splitRows(rows: Row[]): { features: Row[]; decisions: Row[] } {
+  return { features: rows.filter((row) => row.of === 'feature'), decisions: rows.filter((row) => row.of === 'decision') };
+}
+
 /** Whether a row stands as decided: a replaced decision does not, whatever it once was. */
 export function isDecided(row: Row): boolean {
   return row.status !== 'undecided' && row.status !== 'replaced';

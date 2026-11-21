@@ -309,8 +309,8 @@ signed in, the load pending) and writes it into `dist/workshop/index.html`: the
 title row with its places, the map when there is one and the tiles in
 `#workshop-root`, "Sign in with GitHub" in the header's account slot (with its
 tooltip), and, in the page's `<noscript>`, the line
-that says what needs JavaScript followed by every part with its decisions and
-features and then the decisions of Product, as a plain list (id,
+that says what needs JavaScript followed by every part with its features and
+then its decisions, and then the decisions of Product, as a plain list (id,
 name, state, and "Replaced by" for a replaced decision; `NoScript.tsx`). The root and the slot carry `data-prerendered`
 until the script takes over. A
 prerender that throws fails the build; the dev server does not prerender.
@@ -335,7 +335,7 @@ its script arrives:
   taken over after 4 s, or the page fails to render and shows the plain list),
   `ws-bare` goes on `<html>`: everything the build drew shows, and the drawn
   "Sign in with GitHub" replaces the placeholder, marker or not. The plain list
-  (`Boundary.tsx`) gives each part's decisions and features with their state,
+  (`Boundary.tsx`) gives each part's features and then its decisions with their state,
   then the decisions of Product.
 - Without JavaScript the tiles show and, under them, the line that says what
   needs JavaScript and the plain list of every part's rows and Product's. The list is inside `<noscript>`, so a browser that runs the script
@@ -377,8 +377,12 @@ What a person sees:
   the next one starts from there; Back, Forward and any other move end it at
   once. With
   reduced motion, none of these moves animates.
-- A part's rows are its decisions and features, in the order of `order.json`,
-  drawn by the same row. The page says how far an entry is in one set of
+- A part's rows are its features, under the heading "Features", then its
+  decisions, under "Decisions"; each group keeps the order of `order.json`, and
+  the same row draws both. A group with no row shows nothing, its heading
+  included. "Left out", the page without JavaScript and the plain list shown
+  when the page fails group their rows the same way; Product holds decisions
+  only and has no heading. The page says how far an entry is in one set of
   words: not decided, decided, being built, built (`plan/README.md`, "States").
   A feature is decided (taken, ready or not), being built (its file says
   `started`), built (its file says `built`), dropped, or not decided. A row not

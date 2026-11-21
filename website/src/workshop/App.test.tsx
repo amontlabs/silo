@@ -297,7 +297,7 @@ describe('the places of the title row', () => {
     await renderApp();
     await userEvent.click(screen.getByRole('link', { name: 'Left out · 3' }));
     expect(location.hash).toBe('#left');
-    expect([...document.querySelectorAll('.ws-detail .ws-name')].map((name) => name.textContent)).toEqual(['Which format does an export use?', 'A hosted reviewer', 'An earlier desktop stack']);
+    expect([...document.querySelectorAll('.ws-detail .ws-name')].map((name) => name.textContent)).toEqual(['A hosted reviewer', 'An earlier desktop stack', 'Which format does an export use?']);
     expect(within(itemOf('A hosted reviewer')).getByText('dropped')).toBeInTheDocument();
     expect(within(itemOf('Which format does an export use?')).getByText('dropped')).toBeInTheDocument();
     expect([...document.querySelectorAll('.ws-detail .ws-tally')].map((tally) => tally.textContent?.replace(/\u00a0/g, ' '))).toEqual(['2 dropped', 'Decisions: 1 dropped']);
