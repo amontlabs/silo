@@ -4,6 +4,7 @@ import { createPublicKey, createPrivateKey, generateKeyPairSync, randomBytes, ve
 import { cp, lstat, mkdir, mkdtemp, readFile, readlink, readdir, rm, writeFile } from 'node:fs/promises';
 import { connect as netConnect, createServer } from 'node:net';
 import { createRequire } from 'node:module';
+import { get as httpGet } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -715,6 +716,23 @@ test('Build Output layout: static site, one Node.js function at every endpoint, 
       { handle: 'hit' },
       { src: '^/(assets/.*|fonts/.*\\.woff2)$', headers: { 'Cache-Control': 'public, max-age=31536000, immutable' }, continue: true },
     ] });
+    // The headers each path gets, as Vercel applies the routes before `filesystem` in order: a route's src
+    // matches without regard to case unless caseSensitive is set, and a later route's header replaces an earlier one's.
+    const headersOf = (path) => {
+      const headers = {};
+      for (const route of config.routes.slice(0, config.routes.findIndex((r) => r.handle))) {
+        if (route.headers && new RegExp(route.src, route.caseSensitive ? '' : 'i').test(path)) Object.assign(headers, route.headers);
+      }
+      return headers;
+    };
+    const strict = { 'Content-Security-Policy': "frame-ancestors 'none'", 'X-Frame-Options': 'DENY' };
+    const loose = { 'Content-Security-Policy': "frame-ancestors 'self'", 'X-Frame-Options': 'SAMEORIGIN' };
+    for (const path of ['/', '/workshop/', '/films', '/FILMS/a/', '/Films/a/index.html', '/x/films/a/', '/api/workshop/state']) assert.deepEqual(headersOf(path), strict, path);
+    for (const path of ['/films/a/', '/films/a', '/films/a/index.html', '/films/player/kit.js']) assert.deepEqual(headersOf(path), loose, path);
+    assert.deepEqual(config.routes.map((route) => [route.src ?? route.handle, route.caseSensitive === true]), [
+      ['^/(?!films/).*$', true], ['^/films/.*$', true], ['^/workshop/?$', false], ['^/films/([a-z0-9][a-z0-9-]*)/?$', true],
+      ['filesystem', false], ['hit', false], ['^/(assets/.*|fonts/.*\\.woff2)$', false],
+    ]);
     // No page may be framed but a film's, and that one only by a page of the site.
     for (const path of ['/', '/workshop', '/assets/x.js', '/api/workshop/state', '/films', '/x/films/a/']) assert.match(path, new RegExp(config.routes[0].src));
     for (const path of ['/films/a/', '/films/a/index.html', '/films/player/kit.js']) assert.doesNotMatch(path, new RegExp(config.routes[0].src));
@@ -1221,6 +1239,55 @@ test('the local server survives //, an aborted POST body and /api/workshop/const
     assert.equal(page.status, 200);
     assert.equal(page.headers.get('content-security-policy'), "frame-ancestors 'none'");
     assert.equal((await fetch(dev.origin + '/api/workshop/state')).headers.get('x-frame-options'), 'DENY');
+  } finally {
+    await dev.close();
+    await rm(site, { recursive: true, force: true });
+  }
+});
+
+test('the local server lets only a file it really serves from dist/films/ be framed, whatever the address as typed', async () => {
+  const site = await fixtureSite(undefined, { plan: true });
+  await mkdir(join(site, 'dist', 'films', 'tiny', 'voice'), { recursive: true });
+  await writeFile(join(site, 'dist', 'films', 'tiny', 'index.html'), '<!doctype html><title>Tiny</title>');
+  await writeFile(join(site, 'dist', 'films', 'tiny', 'voice', 'a.mp3'), 'clip');
+  const dev = await startDev({ fake: true, port: await freePort(), distDir: join(site, 'dist'), planDir: join(site, 'plan'), log: () => {} });
+  const LOOSE = ["frame-ancestors 'self'", 'SAMEORIGIN'];
+  const STRICT = ["frame-ancestors 'none'", 'DENY'];
+  // fetch() would normalise some of these addresses itself: node:http sends the path as written.
+  const get = (path) => new Promise((resolve, reject) => {
+    httpGet({ host: '127.0.0.1', port: Number(new URL(dev.origin).port), path }, (response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => { body += chunk; });
+      response.on('end', () => resolve({ status: response.statusCode, frame: [response.headers['content-security-policy'], response.headers['x-frame-options']], body }));
+    }).on('error', reject);
+  });
+  try {
+    for (const [path, status, frame, body] of [
+      ['/films/tiny/', 200, LOOSE, '<!doctype html><title>Tiny</title>'],
+      ['/films/tiny', 200, LOOSE, '<!doctype html><title>Tiny</title>'],
+      ['/films/tiny/voice/a.mp3', 200, LOOSE, 'clip'],
+      // Encoded forms that lead to a film's file get the film's headers.
+      ['/films/tiny%2Findex.html', 200, LOOSE, '<!doctype html><title>Tiny</title>'],
+      ['/%66ilms/tiny/', 200, LOOSE, '<!doctype html><title>Tiny</title>'],
+      ['/', 200, STRICT, '<!doctype html><title>Silo</title>'],
+      ['/workshop/', 200, STRICT, '<!doctype html><title>Workshop</title>'],
+      // The home page, reached through /films/: what is served decides, not the address.
+      ['/films/..%2findex.html', 200, STRICT, '<!doctype html><title>Silo</title>'],
+      ['/films/..%2F..%2Fpackage.json', 404, STRICT, 'Not found'],
+      ['/films/missing/', 404, STRICT, 'Not found'],
+      ['/films/%E0%A4%A/', 404, STRICT, 'Not found'],
+    ]) {
+      const response = await get(path);
+      assert.deepEqual([response.status, response.frame, response.body], [status, frame, body], path);
+    }
+    // On a file system that ignores case /FILMS/ finds the film, and on one that does not it is a 404: strict either way.
+    const upper = await get('/FILMS/tiny/');
+    assert.ok([200, 404].includes(upper.status));
+    assert.deepEqual(upper.frame, STRICT, '/FILMS/tiny/');
+    const post = await fetch(`${dev.origin}/films/tiny/`, { method: 'POST' });
+    assert.equal(post.status, 405);
+    assert.equal(post.headers.get('x-frame-options'), 'DENY');
   } finally {
     await dev.close();
     await rm(site, { recursive: true, force: true });

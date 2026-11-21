@@ -86,16 +86,22 @@ const FILM_TYPES: Record<string, string> = {
   '.mp3': 'audio/mpeg', '.otf': 'font/otf', '.ttf': 'font/ttf', '.txt': 'text/plain; charset=utf-8',
 };
 
-/** The films of films/ at /films/<id>/ (scripts/films.mjs): written beside the built site, and served as they are while developing. */
+/**
+ * The films of films/ at /films/<id>/ (scripts/films.mjs): written beside the built site, and served as they
+ * are while developing. films/ is the one beside the site's root (website/), so a test can point the hook at
+ * a made-up one.
+ */
 function films(): Plugin {
   let outDir = '';
+  let filmsDir = '';
   return {
     name: 'films',
     configResolved(config) {
       outDir = resolve(config.root, config.build.outDir);
+      filmsDir = resolve(config.root, '..', 'films');
     },
     async writeBundle() {
-      const ids = await writeFilms(outDir);
+      const ids = await writeFilms(outDir, filmsDir);
       this.info(`wrote ${ids.length} films into ${outDir}/films`);
     },
     configureServer(server) {
@@ -109,7 +115,7 @@ function films(): Plugin {
           response.statusCode = 400;
           return response.end();
         }
-        const file = filmFileFor(filmFiles().files, decoded);
+        const file = filmFileFor(filmFiles(filmsDir).files, decoded);
         if (!file) return next();
         const type = 'text' in file ? FILM_TYPES['.html'] : FILM_TYPES[extname(file.from)] ?? 'application/octet-stream';
         response.setHeader('Content-Type', type);
@@ -121,6 +127,8 @@ function films(): Plugin {
 }
 
 export default defineConfig({
+  // website/, wherever Vite is started from: films/ is found beside it.
+  root: fileURLToPath(new URL('.', import.meta.url)),
   plugins: [react(), workshopData(), workshopNotes(), workshopFacts(), workshopHistory(), planWatch(), films()],
   // The page imports the plan's model from tools/plan/model, outside website/.
   server: { fs: { allow: [repository] } },

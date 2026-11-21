@@ -4,37 +4,7 @@ import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defaultFilmsDir, FilmError, filmFileFor, filmFiles, filmIds, readFilm, writeFilms } from './films.mjs';
-
-const VENDOR = ['gsap.min.js', 'MotionPathPlugin.min.js', 'DrawSVGPlugin.min.js', 'MorphSVGPlugin.min.js', 'CustomEase.min.js', 'icons.js'];
-
-/** A films/ folder with the real page.html, stand-ins for the player and the kit, one small film and a folder that is not a film. */
-function made() {
-  const root = mkdtempSync(join(tmpdir(), 'films-'));
-  const films = join(root, 'films');
-  const put = (path, text) => { mkdirSync(join(films, path, '..'), { recursive: true }); writeFileSync(join(films, path), text); };
-  mkdirSync(join(films, 'player'), { recursive: true });
-  copyFileSync(join(defaultFilmsDir(), 'player', 'page.html'), join(films, 'player', 'page.html'));
-  for (const name of ['voice.js', 'kit.js', 'page.css', 'page.js']) put(`player/${name}`, `/* ${name} */`);
-  put('kit/kit/player.css', '/* player.css */');
-  for (const name of VENDOR) put(`kit/kit/vendor/${name}`, `/* ${name} */`);
-  for (const name of ['geist-regular.otf', 'geist-medium.otf', 'geist-mono.ttf']) put(`kit/kit/fonts/${name}`, name);
-  put('kit/licences/geist.txt', 'OFL');
-  put('kit/licences/lucide.txt', 'ISC');
-  put('tools/build.py', '# not a film');
-  put('tiny/film.json', JSON.stringify({ id: 'tiny', kind: 'teaches', title: 'A <tiny> film', line: 'Line.', shows: ['core'] }));
-  put('tiny/explainer.js', 'window.TINY = "</script>";');
-  put('tiny/narration.json', '{}');
-  put('tiny/voice/a.mp3', 'clip a');
-  put('tiny/voice/b.mp3', 'clip b');
-  put('tiny/voice/unused.mp3', 'a clip voice.json no longer names');
-  put('tiny/voice.json', JSON.stringify({
-    engine: 'kokoro', voices: [{ id: 'af_heart', label: 'Heart', scenes: [
-      { sentences: [{ text: 'One </script> two.', file: 'voice/a.mp3', start: 0.4, length: 1 }], total: 2 },
-      { sentences: [{ text: 'Three.', file: 'voice/b.mp3', start: 0.4, length: 1 }], total: 2 },
-    ] }],
-  }));
-  return { root, films, put };
-}
+import { made, VENDOR } from './films-test-support.mjs';
 
 const files = (dir) => readdirSync(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => join(e.parentPath, e.name).slice(dir.length + 1)).sort();
 
@@ -262,4 +232,37 @@ test('every film of films/ makes a page', () => {
     const page = published.get(`${id}/index.html`).text;
     assert.equal(page.match(/<!--/g).length, 1, `${id}: only the licences' comment is left`);
   }
+});
+
+test('the hook the Vite configuration registers writes the films\' pages, and a film with a missing clip makes it fail', async () => {
+  const config = (await import('../vite.config.ts')).default;
+  const hook = config.plugins.flat().find((plugin) => plugin?.name === 'films');
+  assert.ok(hook, 'vite.config.ts registers the films plugin');
+  const { root, films } = made();
+  try {
+    const website = join(root, 'website');
+    hook.configResolved({ root: website, build: { outDir: 'dist' } });
+    const logged = [];
+    await hook.writeBundle.call({ info: (text) => logged.push(text) });
+    assert.deepEqual(readdirSync(join(website, 'dist', 'films')).sort(), ['player', 'tiny']);
+    assert.match(readFileSync(join(website, 'dist', 'films', 'tiny', 'index.html'), 'utf8'), /<title>A &lt;tiny&gt; film<\/title>/);
+    assert.deepEqual(logged, [`wrote 1 films into ${join(website, 'dist')}/films`]);
+    unlinkSync(join(films, 'tiny', 'voice', 'b.mp3'));
+    await assert.rejects(hook.writeBundle.call({ info() {} }), /^Error: films\/tiny\/voice\/b\.mp3: \(file\): is missing/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the fixed list of shared files is what a real film\'s page and the player\'s style ask for', () => {
+  const { ids, files: published } = filmFiles();
+  const shared = [...published.keys()].filter((path) => path.startsWith('player/')).map((path) => `/films/${path}`).sort();
+  const page = published.get(`${ids[0]}/index.html`).text;
+  const asked = new Set([...page.matchAll(/(?:src|href)="(\/films\/player\/[^"]+)"/g)].map((m) => m[1]));
+  // The licence texts, named in the comment at the end of the page.
+  for (const m of page.matchAll(/\/films\/player\/licences\/[a-z0-9.-]+\.txt/g)) asked.add(m[0]);
+  // The fonts, which the kit's player.css asks for beside it.
+  const css = readFileSync(published.get('player/player.css').from, 'utf8');
+  for (const m of css.matchAll(/url\("([^"]+)"\)/g)) asked.add(new URL(m[1], 'http://site/films/player/player.css').pathname);
+  assert.deepEqual([...asked].sort(), shared);
 });

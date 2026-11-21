@@ -1146,7 +1146,8 @@ snapshots catch up when the hour resets.
 | `website/api/workshop.cjs` | Vercel's entry point. |
 | `website/scripts/prepare-vercel.mjs` | Writes the Build Output (static site, function, routes). |
 | `website/scripts/films.mjs` | Makes each film's page and the player they share, into `dist/films/` (see [Films](#films)). |
-| `website/scripts/films.test.mjs` | The films' pages on a small made-up film: what is written, and the films and folders refused. |
+| `website/scripts/films.test.mjs` | The films' pages on a small made-up film: what is written, the films, folders and links refused, the hook `vite.config.ts` registers, and the shared files equal to what a real page asks for. |
+| `website/scripts/films-test-support.mjs` | The made-up `films/` folder of those tests and of `src/workshop/data.test.ts`. |
 | `website/scripts/plan-entries.mjs` | Makes the list of the plan's entries from `plan/`, for `prepare-vercel.mjs` and the local server. |
 | `website/scripts/workshop-dev.mjs` | Local server for the site and the API. |
 | `website/scripts/fake-github.mjs` | Fake GitHub used by the tests and by `--fake`. |
