@@ -330,7 +330,24 @@ describe('the two pictures', () => {
     show('visible');
     see(stage(), 0);
     vi.advanceTimersByTime(10000);
-    expect(new Set(turnsOver(60000)).size).toBe(NAMES.length);
+    // A minute of turns, looked at every 100 ms: every card takes one, and none stays beyond the time its card says
+    // (`--dur`, its picture and the moment it lingers) by more than one look.
+    const cards = new Set<string>();
+    let started = 0;
+    let late = 0;
+    let before: string | undefined;
+    for (let passed = 0; passed <= 60000; passed += 100) {
+      const name = playing()[0];
+      if (name) {
+        cards.add(name);
+        if (name !== before) started = Date.now();
+        late = Math.max(late, Date.now() - started - parseFloat(card(name).style.getPropertyValue('--dur')));
+      }
+      before = name;
+      vi.advanceTimersByTime(100);
+    }
+    expect(cards.size).toBe(NAMES.length);
+    expect(late).toBeLessThanOrEqual(100);
   });
 
   it('pause at the end of the step that was playing, and go on with the next step', () => {
