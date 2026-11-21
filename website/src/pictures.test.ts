@@ -303,6 +303,27 @@ describe('the two pictures', () => {
 
   it('never leave a card playing for longer than its picture lasts', () => {
     mountPictures();
+    // How long each card plays, on the fake clock, taken at the moments it starts and stops (the page adds and removes
+    // `playing`) and never by looking now and then. `--dur` is what its picture and its linger last; a stay may not pass it.
+    let overstay = -Infinity;
+    const startedAt = new Map<string, { at: number; dur: number }>();
+    for (const name of NAMES) {
+      const list = card(name).classList;
+      const add = list.add.bind(list);
+      const remove = list.remove.bind(list);
+      list.add = (...tokens: string[]) => {
+        if (tokens.includes('playing') && !list.contains('playing')) startedAt.set(name, { at: Date.now(), dur: parseFloat(card(name).style.getPropertyValue('--dur')) });
+        add(...tokens);
+      };
+      list.remove = (...tokens: string[]) => {
+        const start = startedAt.get(name);
+        if (tokens.includes('playing') && start && list.contains('playing')) {
+          overstay = Math.max(overstay, Date.now() - start.at - start.dur);
+          startedAt.delete(name);
+        }
+        remove(...tokens);
+      };
+    }
     for (const name of NAMES) see(card(name), 1);
     // A visitor's hand in every order, between turns: whatever happened, a minute later the cards still take turns.
     const hands = [
@@ -330,24 +351,13 @@ describe('the two pictures', () => {
     show('visible');
     see(stage(), 0);
     vi.advanceTimersByTime(10000);
-    // A minute of turns, looked at every 100 ms: every card takes one, and none stays beyond the time its card says
-    // (`--dur`, its picture and the moment it lingers) by more than one look.
-    const cards = new Set<string>();
-    let started = 0;
-    let late = 0;
-    let before: string | undefined;
-    for (let passed = 0; passed <= 60000; passed += 100) {
-      const name = playing()[0];
-      if (name) {
-        cards.add(name);
-        if (name !== before) started = Date.now();
-        late = Math.max(late, Date.now() - started - parseFloat(card(name).style.getPropertyValue('--dur')));
-      }
-      before = name;
-      vi.advanceTimersByTime(100);
-    }
-    expect(cards.size).toBe(NAMES.length);
-    expect(late).toBeLessThanOrEqual(100);
+    // A minute of turns: every card takes one.
+    expect(new Set(turnsOver(60000)).size).toBe(NAMES.length);
+    // No stay passed its card's time, by not even a millisecond; one still going is measured up to now.
+    for (const [, start] of startedAt) overstay = Math.max(overstay, Date.now() - start.at - start.dur);
+    expect(overstay).toBeLessThanOrEqual(0);
+    // The test saw stays end, so the check above was made on something.
+    expect(overstay).toBeGreaterThan(-Infinity);
   });
 
   it('pause at the end of the step that was playing, and go on with the next step', () => {
