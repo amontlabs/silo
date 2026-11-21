@@ -15,8 +15,8 @@ Length: short and clear, with no hard limit. A scene takes the time its idea nee
 ## What he should understand at the end
 
 That Silo knows things in three ways (it saw them, it was told them, or something thinks them),
-what each is called, why the weaker never passes as the stronger, and that the record says what it
-does not know.
+what each is called, why the weaker never passes as the stronger, and that Silo never fills a
+hole.
 
 ## Title and answer line
 
@@ -32,16 +32,14 @@ does not know.
 ## Words introduced (shown under the statements)
 
 - fact: one thing Silo saw itself, from outside the computer. Written once.
-- report: one thing a program inside the computer told Silo. Written once, as told.
+- report: one thing a program inside the computer told Silo. Written once, unverified.
 - process: one running program.
 - probe: Silo's own small program inside a computer. What it tells Silo is a report.
 - agent program: Claude Code, Codex and the like.
 - main: the long-lived computer where your agents work.
 - record: everything Silo has written down about a computer: its facts and its reports, in the order they came, never changed afterwards. Engineers call this an append-only log. Facts and reports do not pass through the engine's queue: the parts that see them write them directly. The engine's own events are kept as facts too.
 - opinion: what a classifier, or you, think about the record. It can be wrong. A classifier's opinion is computed again when the classifier improves. One you gave is kept as you gave it.
-- classifier: whatever gives an opinion. It never acts.
-- unattributed: said of a change Silo saw and that no report accounts for.
-- gap: a moment when Silo lost sight of something. A gap is itself written in the record.
+- classifier: whatever gives an opinion.
 
 ## How things look, in this film and the three after it
 
@@ -49,7 +47,7 @@ does not know.
 - An opinion is never drawn inside the record. It sits beside a row, in another colour and shape, with whose it is under it.
 - The computer's edge is thick and clearly drawn, the same as in the three films after this one.
 - The marks on the rows can be read in a held frame, and no text that has to be read is smaller than 14 pixels.
-- A red cut is used for one thing only: a deny at the boundary. Something that cannot happen at all (a classifier acting, an opinion becoming a fact) is drawn as a grey, struck-through chip that never leaves its card.
+- A red cut is used for one thing only: a deny at the boundary. Something that cannot happen at all (an opinion becoming a fact) is drawn as a grey, struck-through chip that never leaves its card.
 
 ## Scenes
 
@@ -120,29 +118,28 @@ a build?". No link comes from the record: the record does not ask. You answer ye
 under it. The picture shows no new row in the record list: what matters here is your opinion,
 which sits with the other opinions, outside the record. Hero moment: the opinion changing while the record holds still.
 
-### Scene 5. Caption: "A classifier gives opinions. It never acts."  Source: statement 6
+### Scene 5. Caption: "A classifier gives opinions."  Source: statement 6
 
 Narration:
 1. "What gives an opinion is called a classifier: a pattern, a function, a small model, or an agent."
-2. "A classifier gives opinions. It never acts. What an opinion can lead to comes in the film on rules and precautions."
+2. "A classifier gives opinions. What an opinion can lead to comes in the film on rules and precautions."
 
 Picture: four small cards in a row, each a classifier, and one opinion beside each: a pattern
 `*.pem` with `credential-like`; a function `files v2` with `build output`; "small model" with
-`risky`; "agent", with the small line "another agent", with `needs you`. On the "small model" card a chip `act on main` sits grey and
-struck through, with the words "no way to act". It never leaves the card. Hero moment: the four
-cards, each with its opinion, and the struck-through chip.
+`risky`; "agent", with the small line "another agent", with `needs you`. Hero moment: the four
+cards, each with its opinion.
 
 ### Scene 6. Caption: "As sure as its least sure ingredient."  Source: statement 7
 
 Narration:
 1. "Something computed is as sure as its least sure ingredient."
-2. "A count of facts is as good as a fact. Mix in a report, and the result is as told: no surer than the report. Add a judgement, and it is an opinion."
+2. "A count of facts is as good as a fact. Mix in a report, and the result is unverified: no surer than the report. Add a judgement, and it is an opinion."
 3. "And a report or an opinion is never stored as a fact."
 
 Picture: three short lines. They stand faint from the start of the scene, each lights as the voice
 says it, and all three stay on screen:
 `fact + fact  →  as good as a fact`, with the example "spend of main: $4.20";
-`fact + report  →  as told`, with the example "written by cargo build: 48 MB";
+`fact + report  →  unverified`, with the example "written by cargo build: 48 MB";
 `anything + a judgement  →  an opinion`, with the example "build output".
 Then, and only then, the record list appears beside them, small. The opinion `build output` sits next to it as a grey,
 struck-through chip with the words "never a row". On the row `written by  cargo build`, a
@@ -150,19 +147,16 @@ struck-through `fact` stands beside the mark `report`, large enough to read, wit
 a fact" under it.
 Hero moment: the three lines, with the two things that cannot happen.
 
-### Scene 7. Caption: "What Silo did not see, it says."  Source: statement 9
+### Scene 7. Caption: "Silo never fills a hole."  Source: the decision `holes`
 
 Narration:
-1. "All the reports together account for 48 megabytes, written by the build. From outside, Silo saw 61 megabytes change."
-2. "Silo corrects neither. The 13 megabytes left over are shown as unattributed, and are never spread over the rest."
-3. "And where Silo lost sight for a moment, it records a gap. The record says what it does not know."
+1. "Silo never fills a hole."
 
-Picture: two bars, one above the other. The upper bar: "seen from outside: 61 MB", marked
-`fact · disk`. The lower bar has two parts: "reported: cargo build 48 MB", marked
-`report · inside`, and a part in a neutral colour, "unattributed 13 MB". Then, beside the two
-bars, which stay on screen, the record list shows two more rows: `file  tmp/out  +13 MB`,
-marked `fact · disk`, to which no report points, and `gap  inside  02:14 to 02:15`, marked
-`fact · engine`. Hero moment: the unattributed part of the bar.
+Picture: the record list of scene 6, alone and larger, with its three rows. A fourth row lands one
+place lower: `own account  3 model calls`, marked `report · inside`. The place between them holds
+nothing. As the voice says "a hole", a dashed outline appears around that place, with the words
+"a hole" beside it and "never filled" under them. Nothing is drawn inside it. Hero moment: the
+empty place.
 
 ## Kind of chapter: decides
 
@@ -178,9 +172,7 @@ deletes a folder, and starts the probe again. What does the record hold about it
 
 Answer: The deletion is there, as a fact: Silo sees the disk from outside, and the agent cannot
 reach that part. How finely in time Silo sees the disk is still to find out. What is missing is which process did it, because the reports stopped for a
-minute. That hole is itself in the record, as a gap. So the record shows a change that no report
-accounts for, and says that it lost sight of the inside. It does not fill the hole with an
-opinion.
+minute. That is a hole. Silo does not fill it with an opinion.
 
 ## A choice
 

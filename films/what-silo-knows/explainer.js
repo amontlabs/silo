@@ -5,17 +5,17 @@ explainer({
     { caption: "A fact: Silo saw it.",
       source: "A fact is one thing Silo saw itself, from outside the computer. It is written once and never changed." },
     { caption: "A report: Silo was told it.",
-      source: "A report is one thing a program inside the computer told Silo. It is written once, as told, and the agent can interfere with it." },
+      source: "A report is one thing a program inside the computer told Silo. It is written once, unverified, and the agent can interfere with it." },
     { caption: "The record: facts and reports, in order.",
       source: "Facts and reports, in the order they came, are the record. Nothing in it is changed afterwards." },
     { caption: "An opinion: something thinks it.",
       source: "An opinion is what a classifier, or you, think about the record. It is kept apart from the record, it can be wrong, and it says whose it is. A classifier's opinion is computed from the record, and computed again when the classifier improves." },
-    { caption: "A classifier gives opinions. It never acts.",
-      source: "A classifier is whatever gives an opinion: a pattern, a function, a small model, an agent. It never acts." },
+    { caption: "A classifier gives opinions.",
+      source: "A classifier is whatever gives an opinion: a pattern, a function, a small model, an agent." },
     { caption: "As sure as its least sure ingredient.",
-      source: "Something computed is as sure as its least sure ingredient. A count of facts is as good as a fact, a count of reports is still as told, and it becomes an opinion only when a judgement enters." },
-    { caption: "What Silo did not see, it says.",
-      source: "What the inside reports is set against what Silo saw. What is left over is shown as \"unattributed\" and is never spread over the rest. Where Silo lost sight, it records a gap." },
+      source: "Something computed is as sure as its least sure ingredient. A count of facts is as good as a fact, a count of reports is still unverified, and it becomes an opinion only when a judgement enters." },
+    { caption: "Silo never fills a hole.",
+      source: "Silo never fills a hole." },
   ],
   build(K, tl, scene, V) {
     const NS = "http://www.w3.org/2000/svg";
@@ -168,8 +168,7 @@ explainer({
     K.appear([oYou, oYouWho], { from: "below", at: V.word(3, 7, "your opinion") });
     K.pulse(oYou, { tone: "accent", at: V.word(3, 8, "as you gave it") });
 
-    // 5. Four classifiers, each with its opinion under it. The small model's "act on main" is grey and struck through and
-    //    never leaves its card. Hero: the four cards with their opinions, and that chip.
+    // 5. Four classifiers, each with its opinion under it. Hero: the four cards with their opinions.
     scene(4);
     const clsY = 350, opY = 446;
     const cPat = K.card(205, clsY, "*.pem", { sub: "a pattern", icon: "search" });
@@ -178,18 +177,13 @@ explainer({
     const cAg = K.card(1075, clsY, "agent", { sub: "another agent", icon: "agent" });
     const ops = [[205, "credential-like"], [495, "build output"], [785, "risky"], [1075, "needs you"]]
       .map(([x, w]) => K.chip(x, opY, w, { tone: "accent", size: 15 }));
-    const act = K.chip(785, clsY - 30 - 10 - 17, "act on main", { tone: "muted", size: 15 });
-    strike(act);
-    const noWay = K.text(785, clsY - 98, "no way to act", { size: 15, color: "muted" });
     K.hide([record, reads, files, oCode, oCodeWho, oBuild, oBuildWho, oYou, oYouWho, you, askCard, yes], { at: 0 });
-    K.camera([cPat, cFun, cMod, cAg, ...ops, act, noWay], { pad: 70, at: 0 });
+    K.camera([cPat, cFun, cMod, cAg, ...ops], { pad: 70, at: 0 });
     K.appear(cPat, { from: "below", at: V.word(4, 0, "a pattern") });
     K.appear(cFun, { from: "below", at: V.word(4, 0, "a function") });
     K.appear(cMod, { from: "below", at: V.word(4, 0, "a small model") });
     K.appear(cAg, { from: "below", at: V.word(4, 0, "an agent") });
     K.appear(ops, { from: "above", stagger: 0.2, at: V.at(4, 1) });
-    K.appear(act, { from: "pop", at: V.word(4, 2, "never acts") });
-    K.appear(noWay, { from: "fade", at: "<0.3" });
 
     // 6. How sure something computed is. Three lines stand faint from the start, each lights as the voice says it, and they stay. Then, with the last
     //    sentence only, the record, small, beside them. Hero: the three lines with the two things that cannot happen: an
@@ -198,22 +192,24 @@ explainer({
     const LX = 90;
     const lines = [
       [200, "fact + fact  →  as good as a fact", "spend of main: $4.20"],
-      [330, "fact + report  →  as told", "written by cargo build: 48 MB"],
+      [330, "fact + report  →  unverified", "written by cargo build: 48 MB"],
       [460, "anything + a judgement  →  an opinion", "build output"],
     ].map(([y, rule, ex]) => [K.text(LX, y, rule, { size: 20, mono: true, anchor: "start" }), K.text(LX, y + 32, ex, { size: 16, color: "muted", anchor: "start" })]);
     const small = K.window(870, 320, "The record", { w: 460, icon: "list" });
     const sConn = small.row("connection  crates.io", { mono: true, icon: "lock", meta: "fact · network" });
     const sFile = small.row("file  target/app  +48 MB", { mono: true, icon: "lock", meta: "fact · disk" });
     const sWrote = small.row("written by  cargo build", { mono: true, icon: "lock", muted: true, meta: "report · inside" });
-    const sTmp = small.row("file  tmp/out  +13 MB", { mono: true, icon: "lock", meta: "fact · disk" });
-    const sGap = small.row("gap  inside  02:14 to 02:15", { mono: true, icon: "lock", meta: "fact · engine" });
+    // A hole: a place of the list that holds nothing, outlined in dashes. The row after it lands in the last scene.
+    const sHole = small.row("");
+    for (const [k, v] of [["stroke", K.tone("muted")], ["stroke-width", 1.5], ["stroke-dasharray", "6 5"]]) sHole.band.setAttribute(k, v);
+    const sOwn = small.row("own account  3 model calls", { mono: true, icon: "lock", muted: true, meta: "report · inside" });
     const notFact = K.chip(small.at("right").x + 50, sWrote.at("left").y, "fact", { tone: "muted", size: 15 });
     strike(notFact, 1.2);
     const notFactSays = K.text(small.at("right").x + 50, sWrote.at("left").y + 32, "never a fact", { size: 15, color: "muted" });
     const notRow = K.chip(870, small.at("bottom").y + 58, "build output", { tone: "muted", size: 15 });
     strike(notRow);
     const notRowSays = K.text(870, small.at("bottom").y + 96, "never a row", { size: 15, color: "muted" });
-    K.hide([cPat, cFun, cMod, cAg, ...ops, act, noWay], { at: 0 });
+    K.hide([cPat, cFun, cMod, cAg, ...ops], { at: 0 });
     K.camera(null, { at: 0 });
     // Faint: the words inside each piece stand at a third of their strength until the voice says their line.
     tl.set(lines.flat().map(p => p.text), { opacity: 0.33 }, T(5, 0));
@@ -224,36 +220,17 @@ explainer({
     K.appear([notFact, notFactSays], { from: "pop", stagger: 0.2, at: V.word(5, 4, "a report") });
     K.appear([notRow, notRowSays], { from: "pop", stagger: 0.2, at: V.word(5, 4, "an opinion") });
 
-    // 7. What Silo saw against what it was told. Two bars to scale: 61 MB seen, 48 MB reported, and the 13 MB left over in
-    //    a neutral grey, never spread over the rest. Then the record shows the 13 MB as a fact to which no report points,
-    //    and the gap. Hero: the unattributed part.
+    // 7. The record alone, larger. Its fourth row lands one place lower, and the place between holds nothing. Hero: that
+    //    place, outlined as the voice says "a hole", with nothing inside.
     scene(6);
-    const BX = 90, BW = 520, MB = BW / 61, BH = 40, UY = 262, LY = 378;
-    const bars = svg("g", { opacity: 0 }, K.world);
-    const seenBar = svg("rect", { x: BX, y: UY - BH / 2, width: BW, height: BH, rx: 8, fill: K.tone("ink"), "fill-opacity": 0.42 }, bars);
-    const toldBar = svg("rect", { x: BX, y: LY - BH / 2, width: 48 * MB, height: BH, rx: 8, fill: K.tone("ink"), "fill-opacity": 0.17 }, bars);
-    const leftBar = svg("rect", { x: BX + 48 * MB + 3, y: LY - BH / 2, width: 13 * MB - 3, height: BH, rx: 8, fill: K.tone("faint"), "fill-opacity": 0.28,
-                                  stroke: K.tone("muted"), "stroke-width": 1.5, "stroke-dasharray": "5 4" }, bars);
-    const seenSays = K.text(BX, UY - 40, "seen from outside: 61 MB", { size: 18, anchor: "start" });
-    const seenMark = K.text(BX + BW, UY - 40, "fact · disk", { size: 14, mono: true, color: "muted", anchor: "end" });
-    const toldSays = K.text(BX, LY + 44, "reported: cargo build 48 MB", { size: 18, anchor: "start" });
-    const toldMark = K.text(BX + 48 * MB, LY + 44, "report · inside", { size: 14, mono: true, color: "muted", anchor: "end" });
-    const leftSays = K.text(BX + BW, LY - 44, "unattributed 13 MB", { size: 18, anchor: "end" });
+    const holeX = small.at("right").x + 26, holeY = sHole.at("left").y;
+    const holeSays = K.text(holeX, holeY - 11, "a hole", { size: 18, anchor: "start" });
+    const holeStays = K.text(holeX, holeY + 13, "never filled", { size: 15, color: "muted", anchor: "start" });
     K.hide([...lines.flat(), notFact, notFactSays, notRow, notRowSays], { at: 0 });
-    K.camera([seenSays, toldSays, leftSays, small], { pad: 60, at: 0.2 });
-    tl.set(bars, { opacity: 1 }, T(6, 0));
-    tl.fromTo(toldBar, { scaleX: 0, transformOrigin: "0% 50%" }, { scaleX: 1, duration: 0.8, ease: "power2.out" }, T(6, V.word(6, 0, "48 megabytes") - 0.3));
-    K.appear([toldSays, toldMark], { from: "fade", stagger: 0.2, at: V.word(6, 0, "48 megabytes") });
-    tl.fromTo(seenBar, { scaleX: 0, transformOrigin: "0% 50%" }, { scaleX: 1, duration: 0.9, ease: "power2.out" }, T(6, V.word(6, 1, "61 megabytes") - 0.3));
-    K.appear([seenSays, seenMark], { from: "fade", stagger: 0.2, at: V.word(6, 1, "61 megabytes") });
-    tl.fromTo(leftBar, { opacity: 0 }, { opacity: 1, duration: 0.6, ease: "power2.out" }, T(6, V.word(6, 3, "13 megabytes") - 0.2));
-    K.appear(leftSays, { from: "fade", at: V.word(6, 3, "unattributed") - 0.3 });
-    tl.to(leftBar, { attr: { "stroke-width": 3 }, stroke: K.tone("ink"), duration: 0.5, ease: "power2.out" }, T(6, V.word(6, 3, "unattributed")));
-    K.appear(sTmp, { from: "fade", at: V.word(6, 3, "never spread") });
-    markPulse(sTmp, T(6, V.word(6, 3, "never spread") + 0.4));
-    K.appear(sGap, { from: "fade", at: V.word(6, 4, "records a gap") - 0.2 });
-    K.pulse(sGap, { tone: "ink", at: ">" });
-    markPulse(sGap, T(6, V.word(6, 4, "records a gap") + 0.4));
-    K.pulse(leftSays, { tone: "ink", at: V.word(6, 5, "does not know") });
+    K.camera([small, holeSays, holeStays], { pad: 60, at: 0.2 });
+    K.appear(sOwn, { from: "fade", at: V.at(6, 0) });
+    K.appear(sHole, { from: "fade", at: V.word(6, 0, "a hole") - 0.2 });
+    K.appear([holeSays, holeStays], { from: "fade", stagger: 0.2, at: "<0.2" });
+    K.pulse(sHole, { tone: "ink", at: V.end(6, 0) });
   },
 });
