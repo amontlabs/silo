@@ -213,7 +213,7 @@ those are the page's own addresses, and the message names the part and the fix.
 `plan/parts.json` on the full map and on the folded one, inside two zones: your
 Mac, and the virtual machines in it. Text that is not a part stands for what
 is not Silo: outside the Mac, the internet, the model providers, and a server
-or a cloud where computers also run later; inside it, your own terminal and
+or a cloud where computers also run; inside it, your own terminal and
 editor; under the boundary, its channels. Wires join them, most with one word,
 such as "facts" from the boundary to the record or "requests" from the
 boundary to the internet. A wire that the folded map draws again carries that
