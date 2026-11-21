@@ -1,4 +1,4 @@
-atelier = "0.2.1"
+atelier = "0.2.3"
 integration_branch = "main"
 promotion_wait_seconds = 300
 
