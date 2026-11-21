@@ -1,0 +1,23 @@
+{
+  "name": "An extension that reads and alerts",
+  "what": "An extension's computer wakes on a time or on a new line in the record, reads the paths and the records of computers it was granted, and alerts you or puts a question to you in the app: for example, every minute it reads /work on main. Reading a computer's record gives its facts and reports, as a stream and by query, the opinions about them, and whether it is running, paused or stopped. Each alert opens on the lines of the record that led to it, and each use of a tool is a fact in the record that says which extension used which tool and what it read or showed.",
+  "needs": [
+    "importing-an-extension",
+    "what-wakes-an-extension",
+    "extension-tools",
+    "read-grant-names-its-part",
+    "what-reading-the-record-gives",
+    "extension-points-at-the-record",
+    "extension-tool-use-is-a-fact",
+    "what-the-record-keeps-of-a-tool-use",
+    "extension-says-done",
+    "record-of-a-computer",
+    "opinions-beside-the-record",
+    "questions-from-the-app",
+    "alerts-on-a-change"
+  ],
+  "keeps": [
+    "extension-uses-only-named-tools",
+    "no-tool-grants-or-destroys"
+  ]
+}

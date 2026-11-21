@@ -1,0 +1,15 @@
+{
+  "name": "Silo's own extensions",
+  "what": "The extensions that ship with Silo come with the same manifest as an extension you add, and Silo holds them to it as it holds yours. Anyone can read their files.",
+  "needs": [
+    "importing-an-extension",
+    "what-ships-with-silo",
+    "shipped-extensions-use-the-manifest",
+    "shipped-as-readable-files",
+    "extension-manifest",
+    "manifest-is-enforced"
+  ],
+  "keeps": [
+    "extension-computer-is-shown"
+  ]
+}

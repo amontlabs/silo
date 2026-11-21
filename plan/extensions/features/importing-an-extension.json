@@ -1,0 +1,34 @@
+{
+  "name": "Importing and installing an extension",
+  "what": "You import an extension, and before anything changes you see the rules it adds, the computer it would make, what wakes that computer, and the tools it may use with the paths they add: from which computer data can reach which host. Installing it switches all of that on at once, on the computers you choose, and makes its computer from the recipe its manifest names, with the secrets that recipe asks you for. Silo holds the extension to its manifest, you can always see its computer and what wakes it, and what that computer spends is your choice, metered like any computer.",
+  "needs": [
+    "why-added-pieces",
+    "extension-manifest",
+    "extended-from-outside",
+    "import-then-install",
+    "extension-registration",
+    "extension-ships-a-computer",
+    "extension-tools",
+    "what-an-extension-never-does",
+    "what-wakes-an-extension",
+    "extension-secrets",
+    "recipe-names-its-needs",
+    "extension-spend",
+    "manifest-is-enforced",
+    "grant-shows-its-paths",
+    "extension-bound-checked-once",
+    "made-from-a-recipe",
+    "allow-hold-or-deny",
+    "secrets-held-outside",
+    "ways-out-shown",
+    "spend-per-conversation"
+  ],
+  "keeps": [
+    "importing-changes-nothing",
+    "extension-uses-only-named-tools",
+    "extension-code-in-its-own-computer",
+    "extension-computer-is-shown",
+    "what-wakes-an-extension-is-shown",
+    "no-tool-grants-or-destroys"
+  ]
+}

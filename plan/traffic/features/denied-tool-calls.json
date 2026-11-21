@@ -1,6 +1,6 @@
 {
   "name": "Denied tool calls",
-  "what": "A rule can deny a tool call by its exact text, and it says as its worst case that the same action written another way does not match. The model's reply is changed at the boundary before the agent program reads it, the call is replaced by a refusal the model reads with the next request, and the record keeps the original and the replacement as facts. The agent's next call is judged on its own.",
+  "what": "A rule can deny a tool call by its exact text, and it says as its worst case that the same action written another way does not match. The model sees its own call, unchanged, with an error that says it was denied, and the record keeps every change Silo made to the traffic. The agent's next call is judged on its own.",
   "needs": [
     "model-calls-in-the-record",
     "rule-on-a-tool-calls-text",

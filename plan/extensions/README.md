@@ -15,9 +15,8 @@ grant or destroy anything, and the rules it adds are shown before they are switc
 - **No tool it can use grants or destroys** (`no-tool-grants-or-destroys`).
 - **Importing it changes nothing** (`importing-changes-nothing`). Installing it switches on what
   it showed.
-
-Put forward and not in force yet: which tools it may use (`extension-tools`), that it may protect
-by itself (`extension-may-protect`), and what wakes it (`what-wakes-an-extension`).
+- **Which tools it may use, that it may protect by itself, and what wakes it** are decided too
+  (`extension-tools`, `extension-may-protect`, `what-wakes-an-extension`).
 
 ## Three examples
 

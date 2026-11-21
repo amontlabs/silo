@@ -8,7 +8,8 @@
     "own-account-matches",
     "account-mismatch-precaution",
     "hook-is-a-report",
-    "precautions-you-set"
+    "precautions-you-set",
+    "report-matched"
   ],
   "keeps": [
     "precaution-grants-nothing",

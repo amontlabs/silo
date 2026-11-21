@@ -1,0 +1,15 @@
+{
+  "name": "Panels from an extension",
+  "what": "An extension can create a panel in the app through a tool, as it sends an alert. The panel is data that the app draws with its own components, so no code of the extension runs in the app. A click in the panel wakes the extension's computer.",
+  "needs": [
+    "extension-that-reads-and-alerts",
+    "panels-are-data",
+    "extension-tools",
+    "what-wakes-an-extension",
+    "extended-from-outside",
+    "mac-app-language"
+  ],
+  "keeps": [
+    "extension-uses-only-named-tools"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "name": "An extension that protects",
+  "what": "Installing an extension with a tool that protects a computer sets a precaution on that computer, which rests on the extension: it may deny or hold the computer's requests, or pause the computer. While a request of that computer waits at the boundary, Silo asks the extension, which answers: let it go on, deny it, or hold it for you, and letting it go on leaves the request to the rules. If it does not answer in time, Silo ends the wait as its manifest says, and an extension without such a tool never makes a request wait.",
+  "needs": [
+    "importing-an-extension",
+    "extension-may-protect",
+    "opinion-acts-through-a-precaution",
+    "request-waits-only-by-precaution",
+    "what-wakes-an-extension",
+    "what-makes-a-classifier",
+    "extension-tools",
+    "extension-points-at-the-record",
+    "what-the-record-keeps-of-a-tool-use",
+    "classifier-wait-limit",
+    "precaution-on-unsure",
+    "precautions-you-set",
+    "held-requests-and-asks",
+    "refusals-that-say-so",
+    "computers-stopped-and-paused"
+  ],
+  "keeps": [
+    "no-tool-grants-or-destroys",
+    "precaution-grants-nothing",
+    "deny-beats-hold-beats-allow",
+    "allow-hold-deny-only-synchronous"
+  ]
+}

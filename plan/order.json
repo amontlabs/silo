@@ -516,7 +516,6 @@
         "processes-in-the-record",
         "what-each-run-wrote",
         "gaps-in-the-record",
-        "reports-matched-to-facts",
         "size-limit-on-the-record",
         "flood-keeps-the-past",
         "simulated-record-faults",
@@ -563,10 +562,9 @@
         "proposed-rules",
         "worst-case-and-rule-sets",
         "opinions-beside-the-record",
+        "reports-matched-to-facts",
         "precautions-you-set",
         "program-account-checked",
-        "precaution-on-a-waiting-call",
-        "engine-never-held-up",
         "how-each-run-is-going",
         "which-run-did-it",
         "putting-back-one-run",
@@ -591,10 +589,13 @@
         "alerts-on-a-change",
         "patterns-of-work",
         "app-as-text",
-        "grant-to-read",
-        "classifier-of-your-own",
-        "shipped-as-declared-plugins",
-        "panels-from-a-plugin"
+        "importing-an-extension",
+        "extension-that-reads-and-alerts",
+        "panels-from-an-extension",
+        "extension-that-protects",
+        "precaution-on-a-waiting-call",
+        "engine-never-held-up",
+        "silos-own-extensions"
       ]
     },
     {

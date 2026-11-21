@@ -1,11 +1,13 @@
 {
   "name": "Reports matched to facts",
-  "what": "A report that the facts agree with is marked \"matched\", and one they disagree with \"mismatch\".",
+  "what": "Silo compares a report with the facts about the same thing, and gives it the opinion \"matched\" when they agree, or \"mismatch\" when they disagree. A matched report is still unverified, and a report with nothing to compare it with is simply unverified.",
   "needs": [
     "file-changes-in-the-record",
     "processes-in-the-record",
     "report-matched",
     "as-sure-as-least-sure",
-    "matching-reports-to-facts"
+    "matching-reports-to-facts",
+    "word-unverified",
+    "opinions-beside-the-record"
   ]
 }
