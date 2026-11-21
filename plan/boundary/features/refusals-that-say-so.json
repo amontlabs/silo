@@ -1,0 +1,12 @@
+{
+  "name": "Refusals",
+  "what": "When Silo refuses a request, what comes back to the computer says so: denied, or not answered. Only a refusal carries words, and they come from the classifier or precaution that refused. The computer sees nothing else of what watches it.",
+  "needs": [
+    "refusal-says-so",
+    "words-of-a-refusal",
+    "reason-in-a-refusal",
+    "what-comes-back-to-an-agent",
+    "where-precautions-live",
+    "allow-hold-or-deny"
+  ]
+}

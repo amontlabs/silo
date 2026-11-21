@@ -1,0 +1,18 @@
+{
+  "name": "Model calls in the record",
+  "what": "Each model call is in the record as a fact: the model that really answered, the tool calls in its reply, and their results in the next request, grouped into turns and conversations. The model's hidden reasoning is never opened; the record says that it passed, and its size. For a program whose traffic cannot be read, the record still has the hosts, sizes and timing.",
+  "needs": [
+    "model-traffic-read",
+    "tool-calls-from-traffic",
+    "what-traffic-gives",
+    "recognising-a-conversation",
+    "hidden-reasoning-stays-closed",
+    "program-that-cannot-be-read",
+    "hooks-for-tool-calls",
+    "hook-is-a-report",
+    "record-of-a-computer"
+  ],
+  "keeps": [
+    "report-never-stored-as-fact"
+  ]
+}

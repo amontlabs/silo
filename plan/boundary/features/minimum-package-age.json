@@ -1,0 +1,12 @@
+{
+  "name": "A minimum age for packages",
+  "what": "A rule can deny a package younger than an age you set. It is enforced at the boundary, because agents get around the same rule set inside a tool, for example by fetching the package by hand.",
+  "needs": [
+    "open-limited-or-closed",
+    "package-age-rule",
+    "package-age-at-the-boundary",
+    "rules-inside-are-no-boundary",
+    "rule-carries-its-data",
+    "allow-hold-or-deny"
+  ]
+}

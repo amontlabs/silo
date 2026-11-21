@@ -1,0 +1,24 @@
+{
+  "name": "Silo's own classifiers, declared",
+  "what": "The classifiers that ship with Silo come installed as plugins, each with a declaration: what it wakes on, what it is given, where it runs, which of Silo's calls it uses and what it gives back. Their files can be read by anyone, and Silo holds each of them to its declaration.",
+  "needs": [
+    "what-ships-with-silo",
+    "shipped-plugins-declare",
+    "shipped-as-readable-files",
+    "plugin-declaration",
+    "declaration-is-enforced",
+    "plugin-wakes-on",
+    "plugin-calls",
+    "plugin-registration",
+    "plugin-says-done",
+    "where-a-classifier-runs",
+    "how-each-run-is-going",
+    "which-run-did-it",
+    "how-a-path-comes-back",
+    "kind-of-each-call"
+  ],
+  "keeps": [
+    "where-a-classifier-runs-is-shown",
+    "classifier-never-acts"
+  ]
+}

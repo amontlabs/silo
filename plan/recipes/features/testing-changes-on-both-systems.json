@@ -1,0 +1,15 @@
+{
+  "name": "Testing your changes on macOS and Linux",
+  "what": "While you work, Silo makes a Linux computer and a macOS computer from the repository's recipes, hands each one commit that holds your current changes, uncommitted work included, and runs the tests in each. The engine runs the checks on a machine the agent never touched, and the results come back as receipts, side by side. The limit of two macOS computers on a Mac applies.",
+  "needs": [
+    "recipes-kept-in-a-repository",
+    "tasks-with-a-receipt",
+    "tasks-test-your-changes",
+    "task-gets-one-commit",
+    "engine-runs-task-checks",
+    "task-results-side-by-side",
+    "task-macos-limit",
+    "main-on-macos-first",
+    "computers-linux-beside-main"
+  ]
+}

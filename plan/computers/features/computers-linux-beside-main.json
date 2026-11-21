@@ -1,0 +1,21 @@
+{
+  "name": "A Linux computer beside main",
+  "what": "Beside a macOS main, Silo makes a Linux computer from a recipe, never as a copy of main, and your code reaches it as a commit. On a Mac it runs arm64 Linux from one Ubuntu image, downloaded once.",
+  "needs": [
+    "computers-main-on-a-mac",
+    "linux-beside-a-macos-main",
+    "main-on-macos-first",
+    "computer-image",
+    "x86-linux-computers",
+    "containers-on-macos",
+    "blank-computer",
+    "one-kind-of-computer",
+    "macos-and-linux-consistent",
+    "neutral-core",
+    "linux-vm-engine",
+    "work-on-top-of-libkrun",
+    "libkrun-patches",
+    "network-stack",
+    "made-from-a-recipe"
+  ]
+}

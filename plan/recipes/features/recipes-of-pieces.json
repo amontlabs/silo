@@ -1,0 +1,13 @@
+{
+  "name": "Recipes made of pieces",
+  "what": "A recipe is made of pieces that combine, and a piece is a small recipe that a recipe can include. You write a recipe by picking pieces in a short list. A piece that places instructions or skills is written once for every agent program, because each program's data file says where that program keeps them.",
+  "needs": [
+    "made-from-a-recipe",
+    "recipe-pieces",
+    "nix-under-recipes",
+    "recipe-format",
+    "piece-for-every-agent-program",
+    "agent-program-data-file",
+    "agent-programs-run-unmodified"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "What the app shows, as text",
+  "what": "Everything the app shows can be read with the `silo` command, as plain text that a program can parse. An agent can then answer \"what did that run do\" from the record and not by guessing.",
+  "needs": [
+    "silo-command-reads-the-app",
+    "computer-reads-its-record",
+    "where-precautions-live",
+    "what-needs-you",
+    "now-in-the-app",
+    "receipts-of-work",
+    "timeline-in-the-app",
+    "disk-in-the-app",
+    "network-in-the-app",
+    "patterns-of-work",
+    "engine-program-and-clients"
+  ]
+}

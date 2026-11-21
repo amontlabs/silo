@@ -1,0 +1,11 @@
+{
+  "name": "The record's faults in the simulator",
+  "what": "The simulator adds three fakes for the record: a source that drops facts, repeats them and delivers them late, an inside that lies about which process did something, and a computer that floods.",
+  "needs": [
+    "simulated-core-histories",
+    "record-fakes",
+    "record-of-a-computer",
+    "gaps-in-the-record",
+    "flood-keeps-the-past"
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "name": "The engine and the programs that follow it",
+  "what": "Silo's engine runs as a program of its own on your Mac. The app and the command line both talk to it through one client and follow its events, so they show the same state, and never a state the engine never had. A call that is sent twice is carried out once.",
+  "needs": [
+    "engine-language",
+    "engine-design",
+    "engine-own-program",
+    "engine-client",
+    "engine-shape",
+    "engine-inputs",
+    "engine-state",
+    "engine-limits",
+    "deterministic-core",
+    "core-dependencies",
+    "core-knows-no-agents",
+    "numbered-events",
+    "call-ids",
+    "engine-states-and-failures",
+    "how-the-engine-is-built",
+    "core-simulator"
+  ]
+}

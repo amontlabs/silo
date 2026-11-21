@@ -1,0 +1,32 @@
+{
+  "name": "Rules that allow, hold or deny a request",
+  "what": "You set rules on a computer by picking among choices, or as text on the command line. The engine applies them outside the computer to each request waiting at the boundary: it is allowed, held or denied, deny beats hold, hold beats allow, and a request no rule allows is denied. Each decision is in the record with the version of the rule.",
+  "needs": [
+    "what-a-rule-may-do",
+    "law-of-triggers",
+    "how-a-rule-is-enforced",
+    "rules-out-of-reach",
+    "which-rule-wins",
+    "synchronous-or-asynchronous",
+    "rule-carries-its-data",
+    "rule-holds-when-known",
+    "rules-are-data",
+    "kinds-of-action",
+    "where-limits-are-set",
+    "promise-holds-when-known",
+    "word-request",
+    "network-stack",
+    "where-rules-run",
+    "rule-versions",
+    "record-of-a-computer",
+    "computers-main-on-a-mac"
+  ],
+  "keeps": [
+    "rule-reads-only-facts",
+    "deny-beats-hold-beats-allow",
+    "rule-order-never-matters",
+    "rule-decisions-are-recorded",
+    "allow-hold-deny-only-synchronous",
+    "every-action-has-a-kind"
+  ]
+}

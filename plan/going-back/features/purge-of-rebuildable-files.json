@@ -1,0 +1,14 @@
+{
+  "name": "Purge",
+  "what": "Silo offers to purge what a rebuild would bring back, such as dependencies, build output and package caches, biggest first. It never offers to purge what is only here.",
+  "needs": [
+    "only-here-list",
+    "purge-offer",
+    "what-would-bring-it-back",
+    "ecosystem-data",
+    "kinds-of-other-actions"
+  ],
+  "keeps": [
+    "grant-needs-a-fact-or-you"
+  ]
+}

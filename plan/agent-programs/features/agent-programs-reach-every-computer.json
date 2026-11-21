@@ -1,0 +1,11 @@
+{
+  "name": "Every computer reached by name",
+  "what": "Silo keeps one file of SSH entries, one named entry per computer with its key, and your Mac's SSH settings include that file once, with your yes. Every program on your Mac then reaches every computer by name with no prompt, including one made a moment ago. You work in a computer yourself the same way: a terminal over SSH, your editor opened on a folder, or T3 Code connecting in.",
+  "needs": [
+    "agent-programs-run-unmodified",
+    "computer-reached-over-ssh",
+    "reaching-a-computer",
+    "you-visit-a-computer",
+    "computers-main-on-a-mac"
+  ]
+}

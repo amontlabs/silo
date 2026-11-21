@@ -1,0 +1,10 @@
+{
+  "name": "A computer that stops by itself",
+  "what": "When a computer stops by itself, the engine starts it again and alerts you. After a few failures in a row, it stops trying and alerts you.",
+  "needs": [
+    "computers-main-on-a-mac",
+    "computer-stops-by-itself",
+    "engine-reconciles",
+    "engine-matches-wanted"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "Checkpoints taken on their own",
+  "what": "While agents work, Silo takes checkpoints of their computer by itself, at intervals and at moments the engine sees, such as each ask. A checkpoint is a snapshot of the disk on Linux and a clone of the disk on macOS, so it holds the agents' conversations too, and it is stored where nothing inside the computer can reach it. It never changes once saved.",
+  "needs": [
+    "automatic-checkpoints",
+    "whole-computer-grain",
+    "checkpoint-per-system",
+    "checkpoint-storage",
+    "git-words",
+    "meanings-for-computers",
+    "speed-budgets",
+    "computers-main-on-a-mac"
+  ]
+}

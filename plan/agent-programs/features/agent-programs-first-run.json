@@ -1,0 +1,13 @@
+{
+  "name": "The first run",
+  "what": "Silo needs no account, no sign-up and no key, and works with no setting touched. The first run sets up only what will work, and asks you where it would otherwise guess. While macOS downloads and installs, it shows something worth looking at.",
+  "needs": [
+    "agent-programs-run-unmodified",
+    "nothing-to-set-up",
+    "first-run-failure",
+    "first-run-wait",
+    "first-run-time-macos",
+    "computer-image",
+    "computers-main-on-a-mac"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "Patterns of work",
+  "what": "Repeated calls, repeated writes and reads, and the shape of agents' work show as lists ranked by what they cost in time, money and disk, not as graphs of agents. A map shows which paths every run touches and who is writing what now.",
+  "needs": [
+    "patterns-in-the-record",
+    "patterns-ranked-by-cost",
+    "hot-files",
+    "heat-is-built-in",
+    "what-each-run-wrote",
+    "mac-app-language",
+    "how-each-run-is-going",
+    "which-run-did-it"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "Recipes kept in a repository",
+  "what": "A repository can hold its own recipes, one for macOS computers and one for Linux computers, in the repository itself or in the app. A recipe's source in a repository describes the machine and nothing else, and Silo stores the recipe it built from it. Rules are never a file in a repository.",
+  "needs": [
+    "made-from-a-recipe",
+    "repository-holds-recipes",
+    "recipe-source-in-repository",
+    "recipe-stored-by-silo",
+    "no-project-folder"
+  ]
+}

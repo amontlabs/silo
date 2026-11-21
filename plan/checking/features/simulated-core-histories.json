@@ -1,0 +1,17 @@
+{
+  "name": "The core under a simulator",
+  "what": "A simulator drives the core with millions of random sequences of inputs, crashes included, and checks every property after every step. Its fake drivers misbehave on purpose by a written fault model, and on a failure it removes inputs until the smallest failing sequence is left. It also compares the core with the checked model of access.",
+  "needs": [
+    "access-model-checked",
+    "core-simulator",
+    "simulator-faults",
+    "four-ways-to-check",
+    "model-of-access-first",
+    "liveness-has-a-number",
+    "deterministic-core",
+    "engine-shape",
+    "assertions-stay-on",
+    "properties-are-checked",
+    "engine-program-and-clients"
+  ]
+}

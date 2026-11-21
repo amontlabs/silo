@@ -1,0 +1,10 @@
+{
+  "name": "A new classifier checked against your answers",
+  "what": "Before a new version of a classifier replaces the old one, it is run on the record and its opinions are compared with your answers. Your answers are its test cases.",
+  "needs": [
+    "questions-from-the-app",
+    "scoring-a-classifier",
+    "opinions-computed-again",
+    "checked-or-scored"
+  ]
+}

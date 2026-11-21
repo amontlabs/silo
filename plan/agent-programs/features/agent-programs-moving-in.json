@@ -1,0 +1,12 @@
+{
+  "name": "Moving in from your Mac",
+  "what": "The first run reads what is on your Mac (agent programs, their settings, skills and repositories) and offers to bring each inside. With main on macOS, what you bring in keeps the same system, paths and tools.",
+  "needs": [
+    "agent-programs-first-run",
+    "first-run-offers-to-bring-in",
+    "moving-in",
+    "moving-in-on-macos",
+    "main-from-the-mac-or-a-recipe",
+    "main-on-macos-first"
+  ]
+}

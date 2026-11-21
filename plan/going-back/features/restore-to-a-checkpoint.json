@@ -1,0 +1,17 @@
+{
+  "name": "Restore",
+  "what": "You put a computer back to one of its checkpoints, and Silo first saves where you were. The disk and the agents' conversations go back to the same moment, so an agent program can take its conversation up again there. Main can be restored too, and everyone in it goes back.",
+  "needs": [
+    "checkpoints-taken-on-their-own",
+    "restore-saves-first",
+    "restore-main",
+    "whole-computer-grain",
+    "conversation-taken-up-again",
+    "why-destructive",
+    "meanings-for-computers",
+    "computers-stopped-and-paused"
+  ],
+  "keeps": [
+    "grant-needs-a-fact-or-you"
+  ]
+}

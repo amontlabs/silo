@@ -1,0 +1,11 @@
+{
+  "name": "When memory or disk runs low",
+  "what": "When your Mac or a computer runs low on memory or disk, what Silo does is a rule, because the meters are facts. When memory runs low, Silo pauses and alerts you.",
+  "needs": [
+    "computers-stopped-and-paused",
+    "low-memory-or-disk",
+    "low-memory",
+    "low-disk",
+    "rule-actions-on-the-computer"
+  ]
+}

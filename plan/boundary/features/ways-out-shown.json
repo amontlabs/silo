@@ -1,0 +1,15 @@
+{
+  "name": "The ways out of a computer",
+  "what": "For each computer, Silo lists its channels, such as the network, ports, files, secrets, the screen, the clipboard and repository access, and what each lets through in which direction. Every path by which data can leave the computer is among the paths shown. What the computer can reach is never more than what you, or a rule you set, grant.",
+  "needs": [
+    "open-limited-or-closed",
+    "channel-list",
+    "paths-out-are-shown",
+    "reach-of-a-computer",
+    "who-chooses-the-rules",
+    "security-framing",
+    "channel-question",
+    "grant-shows-its-paths",
+    "files-through-a-channel"
+  ]
+}

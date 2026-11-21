@@ -1,0 +1,12 @@
+{
+  "name": "Your agent programs in a computer",
+  "what": "Any agent program runs in a computer unmodified, including one Silo does not offer to install. Silo works with a program only through its documented surfaces, and disguises nothing. The programs Silo offers, and what it knows of each (its name, where it keeps its sessions, how it takes a conversation up again), are data.",
+  "needs": [
+    "unmodified-agent-programs",
+    "documented-surfaces",
+    "disguising",
+    "agent-program-data-file",
+    "offered-programs-list",
+    "computers-main-on-a-mac"
+  ]
+}

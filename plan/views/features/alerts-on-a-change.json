@@ -1,0 +1,14 @@
+{
+  "name": "Alerts",
+  "what": "Silo alerts you only on a change that needs a person, never with a stream of every event. An alert opens on the Timeline, on what triggered it, and on the turn that led to it when there is one.",
+  "needs": [
+    "alert-only-on-a-change",
+    "where-an-alert-opens",
+    "meanings-for-what-silo-does",
+    "the-chain",
+    "what-needs-you",
+    "timeline-in-the-app",
+    "rule-actions-on-the-computer",
+    "precautions-you-set"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "Checkpoints at each turn",
+  "what": "When Silo can read a computer's model traffic, each turn of an agent is a moment for a checkpoint. A restore around a tool call uses the moment before the call, because a moment in the middle of it can repeat an action outside the computer.",
+  "needs": [
+    "checkpoints-taken-on-their-own",
+    "restore-to-a-checkpoint",
+    "checkpoint-at-each-turn",
+    "restore-point-before-a-call",
+    "what-traffic-gives",
+    "model-calls-in-the-record"
+  ]
+}

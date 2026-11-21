@@ -1,0 +1,18 @@
+{
+  "name": "What a drop would lose",
+  "what": "Before a fork is dropped, Silo shows what is only in it, and you bring chosen files back to its parent or push its commits through Git. When nothing is only there, Silo says, as its opinion, that the drop loses nothing. Nothing of the fork's machine state is merged into its parent.",
+  "needs": [
+    "dropping-into-the-bin",
+    "only-here-list",
+    "before-a-drop",
+    "keeping-from-a-fork",
+    "code-leaves-through-git",
+    "no-merge-of-machine-state",
+    "how-a-fork-ends",
+    "kinds-of-other-actions"
+  ],
+  "keeps": [
+    "never-shown-as-a-fact",
+    "grant-needs-a-fact-or-you"
+  ]
+}

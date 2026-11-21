@@ -1,0 +1,15 @@
+{
+  "name": "An engine the record and classifiers never hold up",
+  "what": "Facts and reports reach the record on a path of their own, so a build that changes tens of thousands of files does not slow the engine. When a precaution makes a request wait for a classifier's opinion, only that request waits, and a classifier that crashes or runs long does not stop the engine.",
+  "needs": [
+    "engine-program-and-clients",
+    "two-paths",
+    "core-never-waits",
+    "classifier-never-stops-core",
+    "synchronous-precaution-path",
+    "recorder-process",
+    "processes",
+    "record-of-a-computer",
+    "precaution-on-a-waiting-call"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "The conversation carried into a fork",
+  "what": "A fork is a copy of the whole computer, so it carries the agent's conversation with it. The agent program takes the conversation up again in the fork.",
+  "needs": [
+    "agent-programs-run-unmodified",
+    "fork-carries-the-conversation",
+    "conversation-resumes-in-a-copy",
+    "conversation-taken-up-again",
+    "forking-a-computer"
+  ]
+}

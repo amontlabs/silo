@@ -1,0 +1,10 @@
+{
+  "name": "A fork run with its network closed",
+  "what": "A fork can run with its network closed, for a check or a benchmark, and its record shows that the network stayed closed.",
+  "needs": [
+    "open-limited-or-closed",
+    "fork-with-network-closed",
+    "record-of-a-computer",
+    "forking-a-computer"
+  ]
+}

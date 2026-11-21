@@ -1,0 +1,25 @@
+{
+  "name": "Main on your Mac",
+  "what": "Silo runs main on your Mac: one long-lived macOS computer where your agents live. Several agents work in it at once, across several repositories. Nothing from your Mac is shared into it, and files go in or out only through a channel you grant.",
+  "needs": [
+    "main-and-its-agents",
+    "main-on-macos-first",
+    "one-main-or-several",
+    "several-agents-in-main",
+    "main-repositories",
+    "device-not-shared",
+    "files-through-a-channel",
+    "computer-image",
+    "first-run-time-macos",
+    "macos-and-linux-consistent",
+    "one-kind-of-computer",
+    "neutral-core",
+    "macos-vm-driver",
+    "network-stack",
+    "engine-program-and-clients",
+    "engine-matches-wanted"
+  ],
+  "keeps": [
+    "nothing-shared-from-your-device"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "What needs you",
+  "what": "The app opens on a short list of what waits on you across all your computers, ranked by importance. Each line is answered in place, or opens one of the places Now, Disk, Network and Timeline. When you answer an ask, the record keeps what was asked, your answer, what was done and the result.",
+  "needs": [
+    "first-screen",
+    "one-queue",
+    "answered-asks-are-control-facts",
+    "asks-are-native",
+    "what-an-ask-shows",
+    "kinds-look-different",
+    "mac-app-language",
+    "now-in-the-app",
+    "timeline-in-the-app",
+    "disk-in-the-app",
+    "network-in-the-app",
+    "held-requests-and-asks"
+  ],
+  "keeps": [
+    "never-shown-as-a-fact"
+  ]
+}

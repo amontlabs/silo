@@ -1,0 +1,12 @@
+{
+  "name": "Computers that outlive the engine",
+  "what": "If the engine stops, running computers keep running under the rules they had, because each is held by a helper process of its own. Changes you ask for wait until the engine is back.",
+  "needs": [
+    "engine-program-and-clients",
+    "processes",
+    "when-the-engine-stops",
+    "which-process-holds-the-boundary",
+    "where-rules-run",
+    "computers-main-on-a-mac"
+  ]
+}

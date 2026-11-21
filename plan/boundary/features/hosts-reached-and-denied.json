@@ -1,0 +1,20 @@
+{
+  "name": "Hosts reached and denied, in the record",
+  "what": "A host a computer reaches for the first time raises an alert. When a connection is denied, the record keeps the host and the time as facts and the process as a report. For an allowed host, the record shows how much was sent, and for the model traffic Silo reads, what was sent.",
+  "needs": [
+    "open-limited-or-closed",
+    "first-seen-host",
+    "denied-attempts",
+    "what-was-sent-to-a-host",
+    "where-rules-run",
+    "alert-only-on-a-change",
+    "record-of-a-computer",
+    "processes-in-the-record",
+    "rule-actions-on-the-computer"
+  ],
+  "keeps": [
+    "new-host-raises-an-alert",
+    "denied-attempts-are-recorded",
+    "record-shows-what-was-sent"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Agents on the screen of a macOS computer",
+  "what": "An agent can drive the screen of a macOS computer. Windows and apps it opens stay inside the computer, and never take the focus or the screen of your Mac unless you open them.",
+  "needs": [
+    "computers-main-on-a-mac",
+    "agents-drive-the-screen",
+    "windows-stay-inside",
+    "macos-vm-driver"
+  ]
+}

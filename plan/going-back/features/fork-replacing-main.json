@@ -1,0 +1,11 @@
+{
+  "name": "A fork becomes main",
+  "what": "A fork can end by becoming main. The old main is kept aside, and if main changed since the fork was made, Silo first shows what is only in the old main.",
+  "needs": [
+    "forking-a-computer",
+    "only-here-list",
+    "fork-becomes-main",
+    "old-main-kept-aside",
+    "how-a-fork-ends"
+  ]
+}

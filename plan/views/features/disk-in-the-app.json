@@ -1,0 +1,17 @@
+{
+  "name": "Disk",
+  "what": "The place Disk shows what takes space and who put it there, what changed, and what was produced.",
+  "needs": [
+    "disk-place",
+    "kinds-look-different",
+    "mac-app-language",
+    "file-changes-in-the-record",
+    "what-each-run-wrote",
+    "which-run-did-it",
+    "how-a-path-comes-back"
+  ],
+  "keeps": [
+    "never-shown-as-a-fact",
+    "books-balance"
+  ]
+}

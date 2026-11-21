@@ -1,0 +1,16 @@
+{
+  "name": "Network",
+  "what": "The place Network shows where a computer connected, what it sent, what it installed and what it spent.",
+  "needs": [
+    "network-place",
+    "kinds-look-different",
+    "mac-app-language",
+    "how-spend-is-shown",
+    "what-traffic-gives",
+    "hosts-reached-and-denied",
+    "spend-per-conversation"
+  ],
+  "keeps": [
+    "never-shown-as-a-fact"
+  ]
+}

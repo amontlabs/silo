@@ -1,0 +1,16 @@
+{
+  "name": "Old checkpoints thinned",
+  "what": "Old automatic checkpoints are thinned by a rule on their age and their number, and removing them frees the disk space they took. An opinion never decides what a checkpoint keeps.",
+  "needs": [
+    "checkpoints-taken-on-their-own",
+    "thinning-checkpoints",
+    "light-checkpoints",
+    "opinion-never-chooses-what-is-kept",
+    "kinds-of-other-actions"
+  ],
+  "keeps": [
+    "rule-reads-only-facts",
+    "precaution-grants-nothing",
+    "grant-needs-a-fact-or-you"
+  ]
+}

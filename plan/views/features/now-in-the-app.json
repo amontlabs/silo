@@ -1,0 +1,19 @@
+{
+  "name": "Now",
+  "what": "The place Now shows each run on one line: what it runs, since when, whether it is working, waiting or stuck, and what it has spent. The line comes from the record, and its state is shown as the opinion of a classifier that ships with Silo. Subagents show as a tree.",
+  "needs": [
+    "now-place",
+    "subagents-as-a-tree",
+    "kinds-look-different",
+    "mac-app-language",
+    "processes-in-the-record",
+    "how-spend-is-shown",
+    "engine-program-and-clients",
+    "computers-main-on-a-mac",
+    "how-each-run-is-going",
+    "spend-per-conversation"
+  ],
+  "keeps": [
+    "never-shown-as-a-fact"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "Questions to you",
+  "what": "The app can ask you what you think, such as \"is this a build?\", and your answer is your opinion. It is kept as a path pattern and a kind, so it applies to the past as well as the future, and the record says that you answered. Silo keeps it as you gave it until you change it, and it is still an opinion: it can be wrong.",
+  "needs": [
+    "opinions-beside-the-record",
+    "questions-to-you",
+    "how-your-answer-is-kept",
+    "your-opinion-stays-an-opinion",
+    "kinds-of-lines",
+    "what-needs-you"
+  ],
+  "keeps": [
+    "your-opinion-kept-as-given",
+    "opinion-stored-apart"
+  ]
+}

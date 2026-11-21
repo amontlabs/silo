@@ -1,0 +1,11 @@
+{
+  "name": "Spend",
+  "what": "Silo shows what each conversation and each computer spent, in dollars or as a share of a plan, never as raw tokens.",
+  "needs": [
+    "model-calls-in-the-record",
+    "how-spend-is-shown",
+    "what-traffic-gives",
+    "recognising-a-conversation",
+    "network-place"
+  ]
+}

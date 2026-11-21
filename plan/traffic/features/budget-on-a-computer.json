@@ -1,0 +1,21 @@
+{
+  "name": "Budgets on a computer or a conversation",
+  "what": "You set a budget on a computer or on a conversation, and it is enforced where model traffic leaves the computer. Once it is reached, no further metered request leaves: it is denied or held.",
+  "needs": [
+    "spend-per-conversation",
+    "budget-rule-or-precaution",
+    "what-a-budget-promises",
+    "where-a-budget-is-enforced",
+    "budget-denies-or-holds",
+    "budget-as-a-rate",
+    "recognising-a-conversation",
+    "word-budget",
+    "where-rules-run",
+    "allow-hold-or-deny",
+    "held-requests-and-asks"
+  ],
+  "keeps": [
+    "rule-reads-only-facts",
+    "deny-beats-hold-beats-allow"
+  ]
+}

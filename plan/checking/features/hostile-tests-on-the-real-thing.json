@@ -1,0 +1,11 @@
+{
+  "name": "Hostile tests on the real thing",
+  "what": "The real drivers and the real boundary, the virtual machine engine and the network stack among them, are checked by hostile tests and live checks on the real thing. Each test tries to break a property's sentence, the same sentence the user is told and the simulator checks.",
+  "needs": [
+    "checks-on-the-real-thing",
+    "property-serves-three-times",
+    "how-results-are-said",
+    "computers-main-on-a-mac",
+    "open-limited-or-closed"
+  ]
+}

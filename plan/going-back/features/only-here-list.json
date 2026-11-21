@@ -1,0 +1,16 @@
+{
+  "name": "What is only here",
+  "what": "Silo lists what is only here on a computer: what nothing would bring back if it vanished, neither a pull nor a rebuild, and anything it cannot place. A package installed by hand and absent from the computer's recipe is on that list, and Silo offers to add it to the recipe.",
+  "needs": [
+    "what-would-bring-it-back",
+    "hand-installed-package",
+    "state-and-steps",
+    "ecosystem-data",
+    "meanings-for-computers",
+    "how-a-path-comes-back",
+    "made-from-a-recipe"
+  ],
+  "keeps": [
+    "never-shown-as-a-fact"
+  ]
+}

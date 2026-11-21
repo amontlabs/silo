@@ -1,0 +1,14 @@
+{
+  "name": "Tasks",
+  "what": "A task is a command run in a fork or in a fresh computer until it ends, and it ends with a receipt. A task started from outside starts from a recipe or a checkpoint, so it has no setup to wait for.",
+  "needs": [
+    "made-from-a-recipe",
+    "tasks-start-ready",
+    "task-receipt",
+    "meanings-for-recipes",
+    "what-a-receipt-is",
+    "forking-a-computer",
+    "checkpoints-taken-on-their-own",
+    "receipts-of-work"
+  ]
+}

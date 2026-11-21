@@ -1,0 +1,10 @@
+{
+  "name": "Computers brought to what you asked",
+  "what": "For each computer, the engine keeps what you asked for and what it last saw. While the two differ, it acts to make them match, or says what it is waiting for. A computer that died by itself, or a Mac that rebooted, is seen as it is, not as the engine last saved it.",
+  "needs": [
+    "engine-program-and-clients",
+    "engine-reconciles",
+    "how-effects-work",
+    "engine-state"
+  ]
+}

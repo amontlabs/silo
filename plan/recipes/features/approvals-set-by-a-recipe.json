@@ -1,0 +1,12 @@
+{
+  "name": "Computer use with no approval by hand",
+  "what": "A computer made from a recipe asks for no approval by hand for what the recipe installs, such as the permissions computer use needs. On macOS, Silo grants those permissions itself, as a step that Nix cannot describe.",
+  "needs": [
+    "made-from-a-recipe",
+    "recipes-of-pieces",
+    "no-approval-by-hand",
+    "computer-use-approvals",
+    "steps-nix-cannot-describe",
+    "computers-macos-screen"
+  ]
+}

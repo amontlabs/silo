@@ -1,0 +1,10 @@
+{
+  "name": "Promises with passing checks",
+  "what": "Silo promises in public only the properties whose check has run and passed. Each result says what was checked and how, such as \"checked on every sequence of up to N calls\", and never \"proven\".",
+  "needs": [
+    "public-promises",
+    "how-results-are-said",
+    "property-serves-three-times",
+    "properties-are-checked"
+  ]
+}

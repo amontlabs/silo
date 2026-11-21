@@ -1,0 +1,15 @@
+{
+  "name": "The engine after a crash",
+  "what": "When the engine finds one of its own assumptions broken, it stops and starts again from its saved state. After a crash, every operation that was under way is finished or rolled back, and every call the engine had accepted is carried out or fails with a reason.",
+  "needs": [
+    "engine-matches-wanted",
+    "engine-outlived-by-computers",
+    "assertions-stay-on",
+    "when-the-engine-stops",
+    "engine-saved-state",
+    "core-state-stays-small",
+    "multi-step-operations",
+    "engine-under-failure",
+    "engine-takes-back-helpers"
+  ]
+}

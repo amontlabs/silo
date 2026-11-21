@@ -1,0 +1,12 @@
+{
+  "name": "From a run to its conversation",
+  "what": "From a run in Silo's window, one action opens a terminal in the right computer, in the right conversation. Silo's window shows all the work, whichever agent program did it, and the agent program's own app stays where you talk to one agent in one computer.",
+  "needs": [
+    "agent-programs-reach-every-computer",
+    "terminal-from-a-run",
+    "following-the-work",
+    "recognising-a-conversation",
+    "now-in-the-app",
+    "model-calls-in-the-record"
+  ]
+}

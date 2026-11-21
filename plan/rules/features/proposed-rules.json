@@ -1,0 +1,14 @@
+{
+  "name": "Rules proposed from the record",
+  "what": "Silo proposes rules from what the record holds, such as the list of hosts a computer actually used after it ran open for a while. A proposal changes nothing until you accept it.",
+  "needs": [
+    "allow-hold-or-deny",
+    "silo-proposes-rules",
+    "network-rules-from-use",
+    "record-of-a-computer",
+    "hosts-reached-and-denied"
+  ],
+  "keeps": [
+    "proposed-rule-changes-nothing"
+  ]
+}

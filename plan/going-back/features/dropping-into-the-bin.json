@@ -1,0 +1,17 @@
+{
+  "name": "Drop and the bin",
+  "what": "You drop a fork or a fresh computer, and it waits in the bin. You can bring it back until its time in the bin ends. After that, nothing of it remains except its record.",
+  "needs": [
+    "forking-a-computer",
+    "how-a-fork-ends",
+    "drop-and-bin",
+    "time-in-the-bin",
+    "why-destructive",
+    "kinds-of-other-actions",
+    "meanings-for-computers",
+    "computers-stopped-and-paused"
+  ],
+  "keeps": [
+    "grant-needs-a-fact-or-you"
+  ]
+}

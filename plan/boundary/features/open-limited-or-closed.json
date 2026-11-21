@@ -1,0 +1,23 @@
+{
+  "name": "A computer's network: open, limited or closed",
+  "what": "Each computer's network is open, limited to a list of hosts, or closed, and you open or close it in one step. Even when it is open, a computer cannot reach your Mac, your local network, your VPN or cloud metadata. Nothing done inside the computer changes these settings.",
+  "needs": [
+    "network-modes",
+    "network-policy-by-the-user",
+    "network-rules-from-inside",
+    "main-network-rules",
+    "device-out-of-reach",
+    "reach-of-a-computer",
+    "safe-fresh-install",
+    "guarantees-outside-the-computer",
+    "actions-that-never-wait",
+    "full-access-inside",
+    "rules-inside-are-no-boundary",
+    "security-framing",
+    "where-limits-are-set",
+    "network-stack",
+    "which-process-holds-the-boundary",
+    "computers-main-on-a-mac",
+    "allow-hold-or-deny"
+  ]
+}

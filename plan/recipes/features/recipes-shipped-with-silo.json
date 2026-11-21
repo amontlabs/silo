@@ -1,0 +1,12 @@
+{
+  "name": "Recipes that ship with Silo",
+  "what": "Silo ships recipes, audits them and updates them often: their versions are pinned, a new version waits before it is taken, and Silo reads what changed between two versions of a machine. A recipe fetches Claude Code from Anthropic on your Mac, and Silo ships no copy of it. You can also write and share your own recipes.",
+  "needs": [
+    "recipes-of-pieces",
+    "silo-ships-recipes",
+    "recipe-audit",
+    "claude-code-fetched-by-recipe",
+    "recipe-under-preinstall-rule",
+    "agent-programs-run-unmodified"
+  ]
+}

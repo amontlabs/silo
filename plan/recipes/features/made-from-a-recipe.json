@@ -1,0 +1,18 @@
+{
+  "name": "A computer made from a recipe",
+  "what": "A computer starts blank, as a bare macOS or Linux machine, and its recipe says what goes in it. Silo makes the whole working computer from the recipe: a pinned base system, then a layer built by Nix, with an ordinary distribution as the base on Linux so that what agents download runs. Silo keeps the recipe as a property of the computer, not as a folder in one of your repositories.",
+  "needs": [
+    "blank-computer",
+    "what-a-recipe-sets-up",
+    "recipe-stored-by-silo",
+    "no-project-folder",
+    "nix-under-recipes",
+    "recipe-shape",
+    "steps-nix-cannot-describe",
+    "recipe-format",
+    "nix-store-shared",
+    "meanings-for-recipes",
+    "computer-image",
+    "computers-main-on-a-mac"
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "name": "Opinions beside the record",
+  "what": "A classifier's opinions about a computer are kept apart from its record, and each says which classifier and which version gave it. An opinion is a value from a short list, such as safe, not safe or unsure, with an optional explanation that the app shows as untrusted text. The app shows an opinion as an opinion, and when a classifier improves, its opinions are computed again.",
+  "needs": [
+    "record-of-a-computer",
+    "what-an-opinion-is",
+    "what-a-classifier-is",
+    "classifier-is-a-role",
+    "opinion-is-a-value",
+    "who-fixes-the-values",
+    "how-an-opinion-is-shown",
+    "opinions-computed-again",
+    "classifier-mechanics",
+    "opinions-stored-apart"
+  ],
+  "keeps": [
+    "opinion-stored-apart",
+    "classifier-never-acts",
+    "report-never-stored-as-fact",
+    "never-shown-as-a-fact"
+  ]
+}

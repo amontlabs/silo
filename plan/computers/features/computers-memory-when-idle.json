@@ -1,0 +1,17 @@
+{
+  "name": "Memory given back when idle",
+  "what": "A computer that is idle gives memory back to your Mac, and how much it gives back is measured. Memory decides how many running computers fit, and Silo says plainly that a Mac holds a few, not fifty.",
+  "needs": [
+    "computers-main-on-a-mac",
+    "idle-memory",
+    "memory-given-back",
+    "memory-handling-measured",
+    "computers-per-mac",
+    "sizing-target",
+    "macos-vm-driver",
+    "linux-vm-engine"
+  ],
+  "keeps": [
+    "idle-computer-gives-memory-back"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "An agent program's own account, checked",
+  "what": "As an option, Silo collects an agent program's own account of its model requests beside what the boundary saw. A request the boundary saw that the program did not report, or reported with other numbers, raises an alert. The mismatch is handled by a precaution, so it takes only protective actions.",
+  "needs": [
+    "model-calls-in-the-record",
+    "own-account-as-a-check",
+    "own-account-check-optional",
+    "own-account-matches",
+    "account-mismatch-precaution",
+    "hook-is-a-report",
+    "precautions-you-set"
+  ],
+  "keeps": [
+    "precaution-grants-nothing",
+    "report-never-stored-as-fact"
+  ]
+}

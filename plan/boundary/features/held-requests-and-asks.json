@@ -1,0 +1,22 @@
+{
+  "name": "Held requests and asks",
+  "what": "When a rule holds a request, only that request waits, and the computer keeps running. You get an ask in the Silo app that shows, in Silo's words, exactly what your yes would let pass, and your yes lets it pass. A hold has a limit that Silo keeps itself, and when it ends without your answer the request is refused as held and not answered.",
+  "needs": [
+    "refusals-that-say-so",
+    "asks-are-native",
+    "what-an-ask-shows",
+    "what-an-ask-holds",
+    "yes-to-an-ask",
+    "ask-reaches-you",
+    "hold-limit",
+    "hold-limit-length",
+    "hold-sentence",
+    "how-a-hold-ends",
+    "program-gives-up-first",
+    "no-best-effort-wait",
+    "meanings-for-the-boundary",
+    "word-request",
+    "answered-asks-are-control-facts",
+    "allow-hold-or-deny"
+  ]
+}

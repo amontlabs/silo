@@ -1,0 +1,9 @@
+{
+  "name": "Published measurements",
+  "what": "Silo publishes a measurement once it holds, dated and taken on a named machine.",
+  "needs": [
+    "speed-against-budgets",
+    "publishing-measurements",
+    "how-speed-is-measured"
+  ]
+}

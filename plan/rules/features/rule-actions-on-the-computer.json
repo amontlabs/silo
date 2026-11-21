@@ -1,0 +1,20 @@
+{
+  "name": "Rules that act on the computer",
+  "what": "A rule can also act on the computer itself and alert you. For example, if a fake secret that no honest task uses ever leaves, the rule denies it, stops the computer and alerts you. An alert alone decides nothing at the boundary: the other rules still allow, hold or deny the request.",
+  "needs": [
+    "allow-hold-or-deny",
+    "rule-acts-on-the-computer",
+    "actions-a-rule-offers",
+    "rule-that-only-alerts",
+    "why-destructive",
+    "synchronous-or-asynchronous",
+    "kinds-of-action",
+    "alert-only-on-a-change",
+    "computers-stopped-and-paused"
+  ],
+  "keeps": [
+    "grant-needs-a-fact-or-you",
+    "deny-beats-hold-beats-allow",
+    "every-action-has-a-kind"
+  ]
+}

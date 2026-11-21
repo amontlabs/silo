@@ -1,0 +1,14 @@
+{
+  "name": "What a rule allows, shown when it is set",
+  "what": "When you set a rule, it states its worst case in plain words, such as: allowing this host means anything this computer can read can be sent there. A named set of rules is switched on a computer in one step, and Silo shows what the set grants before it is switched on.",
+  "needs": [
+    "allow-hold-or-deny",
+    "rule-worst-case",
+    "rule-states-its-worst-case",
+    "rule-sets",
+    "rule-set-shows-grants",
+    "no-read-freely-preset",
+    "who-chooses-the-rules",
+    "word-grant"
+  ]
+}

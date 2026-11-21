@@ -1,0 +1,15 @@
+{
+  "name": "A budget on a run",
+  "what": "You can set a budget on a run. Which run a model call belongs to is an opinion, so this budget is a precaution: when it is reached, it takes only protective actions, such as pausing the computer and alerting you.",
+  "needs": [
+    "budget-on-a-computer",
+    "budget-rule-or-precaution",
+    "word-budget",
+    "what-each-run-wrote",
+    "precautions-you-set",
+    "which-run-did-it"
+  ],
+  "keeps": [
+    "precaution-grants-nothing"
+  ]
+}

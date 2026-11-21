@@ -1,0 +1,18 @@
+{
+  "name": "Timeline",
+  "what": "The place Timeline shows one line of time for each computer, with its checkpoints, turns, commands, asks and recordings. A routine stretch collapses into one line with a count, and decisions and thrashing stay visible.",
+  "needs": [
+    "timeline-place",
+    "routine-stretch-collapses",
+    "the-chain",
+    "automatic-checkpoints",
+    "kinds-look-different",
+    "mac-app-language",
+    "processes-in-the-record",
+    "checkpoints-taken-on-their-own",
+    "how-each-run-is-going"
+  ],
+  "keeps": [
+    "never-shown-as-a-fact"
+  ]
+}

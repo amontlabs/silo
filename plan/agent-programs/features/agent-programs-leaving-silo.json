@@ -1,0 +1,10 @@
+{
+  "name": "Leaving Silo",
+  "what": "When you leave Silo, you take each computer as a standard disk image, and each recipe and rule as text.",
+  "needs": [
+    "leaving-silo",
+    "computers-main-on-a-mac",
+    "made-from-a-recipe",
+    "allow-hold-or-deny"
+  ]
+}

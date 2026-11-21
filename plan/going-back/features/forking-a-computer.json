@@ -1,0 +1,22 @@
+{
+  "name": "Forks",
+  "what": "You fork a computer, or one of its checkpoints, and the fork lives its own life with its own display, while the computer it came from loses nothing. The fork gets a new identity, with its scheduled jobs and named services off, so it never repeats what its source does. It gets no secrets and read-only access to repositories unless you, or a rule you set, give it more, and never more than its parent has.",
+  "needs": [
+    "checkpoints-taken-on-their-own",
+    "fork-from-the-moment",
+    "when-a-fork-is-made",
+    "fork-to-try-a-tool",
+    "fork-per-system",
+    "fork-shares-disk-blocks",
+    "fork-identity",
+    "what-a-fork-is-given",
+    "fork-display",
+    "whole-computer-grain",
+    "meanings-for-computers",
+    "speed-budgets",
+    "computers-main-on-a-mac"
+  ],
+  "keeps": [
+    "grant-needs-a-fact-or-you"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "A precaution on a tool call that waits",
+  "what": "A precaution can act on a classifier's opinion of a tool call that is still waiting at the boundary: it lets the call go on as the rules decide, denies it, or holds it for you. When it holds the call, the ask shows the classifier's opinion as an opinion. The wait for the opinion has a limit, and Silo ends it itself.",
+  "needs": [
+    "precautions-you-set",
+    "classifier-asked-synchronously",
+    "precaution-on-unsure",
+    "classifier-wait-limit",
+    "opinion-on-an-ask",
+    "core-never-waits",
+    "synchronous-precaution-path",
+    "request-waits-only-by-precaution",
+    "model-calls-in-the-record",
+    "denied-tool-calls",
+    "held-requests-and-asks"
+  ],
+  "keeps": [
+    "precaution-grants-nothing",
+    "allow-hold-deny-only-synchronous"
+  ]
+}

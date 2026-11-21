@@ -1,0 +1,19 @@
+{
+  "name": "Putting back one run's work",
+  "what": "In a main shared by several agents, Silo lists what one run changed, as its opinion. The paths nobody touched since go back in one step, and the others are shown to you. Inside a repository, Silo says which commits came from which run, as its opinion, and Git is the tool to put them back.",
+  "needs": [
+    "what-each-run-wrote",
+    "one-run-grain",
+    "putting-back-a-runs-paths",
+    "run-commits-in-a-repository",
+    "rewinding-a-conversation",
+    "no-automatic-undo",
+    "several-agents-in-main",
+    "kinds-of-other-actions",
+    "which-run-did-it"
+  ],
+  "keeps": [
+    "never-shown-as-a-fact",
+    "grant-needs-a-fact-or-you"
+  ]
+}

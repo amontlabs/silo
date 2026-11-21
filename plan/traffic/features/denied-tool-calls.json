@@ -1,0 +1,22 @@
+{
+  "name": "Denied tool calls",
+  "what": "A rule can deny a tool call by its exact text, and it says as its worst case that the same action written another way does not match. The model's reply is changed at the boundary before the agent program reads it, the call is replaced by a refusal the model reads with the next request, and the record keeps the original and the replacement as facts. The agent's next call is judged on its own.",
+  "needs": [
+    "model-calls-in-the-record",
+    "rule-on-a-tool-calls-text",
+    "denied-call-in-the-reply",
+    "denied-tool-call",
+    "denied-tool-call-mechanism",
+    "each-call-on-its-own",
+    "no-hook-for-a-denial",
+    "changed-reply-per-program",
+    "terms-on-changing-a-reply",
+    "change-when-record-cannot-be-written",
+    "what-silo-changes-in-traffic",
+    "allow-hold-or-deny"
+  ],
+  "keeps": [
+    "no-silent-change-to-traffic",
+    "rule-decisions-are-recorded"
+  ]
+}
