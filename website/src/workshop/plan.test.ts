@@ -86,7 +86,7 @@ describe('the plan by part', () => {
   });
 
   it('takes an entry\'s thread from the state\'s `threads` alone, never from an issue that merely names the entry', () => {
-    const plan = buildPlan(buildData(), liveState({ 50: issue({ entry: 'exec', title: 'Run a command, again', up: 9 }) }, [], { core: 10, create: 12 }));
+    const plan = buildPlan(buildData(), liveState({ 50: issue({ entry: 'exec', title: 'Run a command, again', up: 9 }) }, { core: 10, create: 12 }));
     const row = (id: string) => allRows(plan).find((r) => r.key === `entry-${id}`)!;
     expect([row('core').issue, row('core').up]).toEqual([10, 8]);
     expect([row('create').issue, row('create').up, row('create').comments]).toEqual([12, 12, 2]);
@@ -97,7 +97,7 @@ describe('the plan by part', () => {
   });
 
   it('shows a feature written from a suggestion once, as the feature, with that issue as its thread', () => {
-    const state = liveState({}, [], { core: 10, fork: 31 });
+    const state = liveState({}, { core: 10, fork: 31 });
     const plan = buildPlan(buildData(), state);
     expect(names(plan.suggestions)).toEqual(['Start a task from Slack']);
     const fork = allRows(plan).find((r) => r.key === 'entry-fork')!;

@@ -98,6 +98,16 @@ describe('the first frame', () => {
     expect(localStorage.getItem(PERSON)).toBeNull();
   });
 
+  it('reads a state an older page stored with its list of the latest comments, and does not keep that list', () => {
+    const answer = held<{ status: number; body: unknown }>();
+    mockApi({ state: () => answer.promise });
+    history.replaceState(null, '', '/workshop#part-b');
+    localStorage.setItem(STATE, JSON.stringify({ ...liveState(), latest: [{ n: 12, entry: 'create', author: 'mara-k', bot: false, createdAt: at(Date.now()), text: 'Hello' }] }));
+    render(<App data={buildData()} />);
+    expect(votes('Create and delete a computer')).toBe('👍12');
+    expect(document.querySelector('.wa-ph-side')).toBeNull();
+  });
+
   it('ignores a remembered state over seven days old or of another shape', () => {
     const answer = held<{ status: number; body: unknown }>();
     mockApi({ state: () => answer.promise });

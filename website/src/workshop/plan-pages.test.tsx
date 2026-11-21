@@ -4,7 +4,6 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { buildData, FEATURES, issue, liveState } from './fixtures';
-import type { LiveLatest } from './plan';
 import { itemOf, mockApi, notesButton, ok, openCore, owner, refused, renderApp, rowButton, shownNotes } from './test-support';
 
 const NOW = Date.parse('2026-11-17T12:00:00Z');

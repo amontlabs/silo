@@ -36,7 +36,7 @@
 // until a refresh's own list shows its number or a lower issue for its entry,
 // and at most an hour.
 import { GitHubError, nextLink } from './github.mjs';
-import { clean, commentIssue, commentOf, cut, kindOf, LABELS, readBody, reasonOf } from './issues.mjs';
+import { clean, commentIssue, commentOf, kindOf, LABELS, readBody, reasonOf } from './issues.mjs';
 import { issuesByEntry } from '../../tools/workshop/model/index.js';
 
 export const SNAPSHOT = {
@@ -51,8 +51,6 @@ export const SNAPSHOT = {
   fullReloadEvery: 10 * 60_000,
   overlap: 60_000,
   retryAfter: 60_000,
-  latest: 30,
-  latestText: 140,
   issues: 2000,
   issuePages: 20,
   fullCommentPages: 15,
@@ -90,12 +88,6 @@ function reduceIssue(issue) {
   };
 }
 
-// The first line of a comment, cut, for the list of what happened lately.
-function firstLine(text) {
-  const line = text.split('\n').map((part) => part.trim()).find(Boolean) ?? '';
-  return cut(line, SNAPSHOT.latestText);
-}
-
 // The entry issues held, by the entry their marker names, lowest number first.
 function entryIssuesOf(snapshot) {
   const named = [];
@@ -112,23 +104,6 @@ function threadsOf(snapshot, entries) {
     if (entry.suggestedIn && snapshot.issues.get(entry.suggestedIn)?.summary.kind === 'suggestion') threads.set(entry.id, entry.suggestedIn);
   }
   return threads;
-}
-
-// The newest comments across the threads of the plan's entries, newest first.
-function latestOf(snapshot, threads) {
-  const all = [];
-  for (const [id, number] of threads) {
-    for (const comment of snapshot.issues.get(number).comments.values()) all.push([number, id, comment]);
-  }
-  all.sort((a, b) => byAge(b[2], a[2]));
-  return all.slice(0, SNAPSHOT.latest).map(([number, id, comment]) => ({
-    n: number,
-    entry: id,
-    author: comment.author,
-    bot: comment.bot,
-    createdAt: comment.createdAt,
-    text: firstLine(comment.text),
-  }));
 }
 
 // `request(method, path, options)` calls GitHub with the installation token and
@@ -484,7 +459,7 @@ export function createSnapshot({
       const issues = {};
       for (const [number, entry] of snapshot.issues) issues[number] = entry.summary;
       const threads = threadsOf(snapshot, entries);
-      snapshot.stateAnswer = { version: snapshot.version, body: { repo, fetchedAt: new Date(snapshot.at).toISOString(), issues, threads: Object.fromEntries(threads), latest: latestOf(snapshot, threads) } };
+      snapshot.stateAnswer = { version: snapshot.version, body: { repo, fetchedAt: new Date(snapshot.at).toISOString(), issues, threads: Object.fromEntries(threads) } };
     }
     return snapshot.stateAnswer.body;
   }

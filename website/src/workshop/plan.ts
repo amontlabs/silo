@@ -174,23 +174,12 @@ export interface LiveIssue {
   closedAt: string | null;
 }
 
-/** One of the newest comments across the entries. */
-export interface LiveLatest {
-  n: number;
-  entry: string;
-  author: string;
-  bot: boolean;
-  createdAt: string;
-  text?: string;
-}
-
 export interface LiveState {
   repo: string;
   fetchedAt: string;
   issues: Record<string, LiveIssue>;
   /** The issue number of each entry's thread, by entry id; an entry with no comment or vote yet has none. */
   threads?: Record<string, number>;
-  latest?: LiveLatest[];
   /** Set when the snapshot is older than the server's freshness bound, or a cache served it stale. */
   old?: boolean;
 }

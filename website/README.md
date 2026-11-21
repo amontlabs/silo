@@ -540,7 +540,8 @@ What a person sees:
   there, and forgotten on sign-out, on a 401 and when `me` answers signed out; a
   state over 7 days old or of another shape is ignored (a state with no `threads`, as an
   older page stored it, is another shape), and so is a field that
-  an older page stored and this one does not read. Without the cookie the
+  an older page stored and this one does not read (the list of the latest comments
+  a state once held, for one). Without the cookie the
   visitor is signed out from the first frame ("Sign in with GitHub", "Sign in to
   comment", "Sign in to suggest").
 - The load: `state` is asked once. Its answer is shown unless the state shown
@@ -827,7 +828,7 @@ JSON.
 
 | Endpoint | Who | What |
 | --- | --- | --- |
-| `GET state`, `GET state?fresh=1` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, 👍 count, comment count, author, dates. `reason` is `not_planned` for a closed issue that was closed as not planned (a dropped suggestion), `completed` for one closed as completed (a built suggestion), and null otherwise. `threads`: the issue number of each entry's thread, by entry id, for the entries of the plan that have one. `latest`: the newest 30 comments held on entries' threads, newest first, each `{ n, entry, author, bot, createdAt, text }`, `text` its first line cut to 140 characters. `"old": true` when the snapshot it was answered from was over 30 seconds old; the field is absent otherwise. `fresh=1` (that exact value) waits for fresh numbers first, as described under the snapshot below. |
+| `GET state`, `GET state?fresh=1` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, 👍 count, comment count, author, dates. `reason` is `not_planned` for a closed issue that was closed as not planned (a dropped suggestion), `completed` for one closed as completed (a built suggestion), and null otherwise. `threads`: the issue number of each entry's thread, by entry id, for the entries of the plan that have one. `"old": true` when the snapshot it was answered from was over 30 seconds old; the field is absent otherwise. `fresh=1` (that exact value) waits for fresh numbers first, as described under the snapshot below. |
 | `GET me` | signed in | `{ login, avatar }`, read from the session cookie alone: it calls nothing on GitHub. 401, with the `workshop-hint` cookie cleared, only when there is no valid session. |
 | `GET issue?n=` | anyone | Body text (first 20,000 characters), 👍 count from the issue's reaction summary, and the latest 100 comments held, oldest first, as plain text; `more: true` when GitHub counts more. Each comment has `up`, its 👍 count, from the reaction summary GitHub returns with the comment. The same public answer for everyone. |
 | `GET vote?n=` | signed in | `{ on, comments }`. `on` says whether the person has given the issue a 👍. `comments` lists the ids of the issue's latest 100 comments the person has given a 👍. Both are read with the person's own token: the 👍 on comments in one GraphQL query. Only the newest 100 comments are looked at: they are the comments `GET issue` gives and the page shows. |

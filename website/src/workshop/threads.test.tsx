@@ -185,7 +185,6 @@ describe('a row with no thread yet', () => {
 describe('a feature written from a suggestion', () => {
   const state = () => ok(liveState(
     { 31: issue({ kind: 'suggestion', title: 'Share a base computer', up: 14, comments: 1, author: 'mara-k', bot: false }) },
-    [],
     { fork: 31 },
   ));
 
@@ -377,7 +376,7 @@ describe('votes on comments', () => {
 describe('Latest', () => {
   it('is an order of All, there whatever the state', async () => {
     history.replaceState(null, '', '/workshop');
-    mockApi({ state: () => ok(liveState({}, [], {})) });
+    mockApi({ state: () => ok(liveState({}, {})) });
     await renderApp();
     await userEvent.click(screen.getByRole('button', { name: 'All' }));
     await userEvent.click(screen.getByRole('button', { name: 'Latest' }));
@@ -512,7 +511,7 @@ describe('writes to a decision or a feature', () => {
 describe('an address that names a suggestion that became a feature', () => {
   it('opens the feature, where it lives, and rewrites the address', async () => {
     mockApi({
-      state: () => ok(liveState({ 31: issue({ kind: 'suggestion', title: 'Share a base computer', up: 14, author: 'mara-k', bot: false }) }, [], { fork: 31 })),
+      state: () => ok(liveState({ 31: issue({ kind: 'suggestion', title: 'Share a base computer', up: 14, author: 'mara-k', bot: false }) }, { fork: 31 })),
     });
     history.replaceState(null, '', '/workshop#suggested/issue-31');
     await renderApp();

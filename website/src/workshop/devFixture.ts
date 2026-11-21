@@ -4,7 +4,7 @@
 import { api } from './api';
 import { memoryConfig } from './memory';
 import type { Comment } from './api';
-import type { BuildData, LiveIssue, LiveLatest, LiveState } from './plan';
+import type { BuildData, LiveIssue, LiveState } from './plan';
 
 const hash = (text: string) => [...text].reduce((x, ch) => (x * 31 + ch.charCodeAt(0)) >>> 0, 7);
 
@@ -33,7 +33,6 @@ export function fixtureState(data: BuildData): { state: LiveState; comments: Map
   const issues: Record<string, LiveIssue> = {};
   const comments = new Map<number, Comment[]>();
   const byFeature = threads(data);
-  const latest: LiveLatest[] = [];
   const threadOf: Record<string, number> = {};
   data.entries.forEach((feature, index) => {
     // Every fifth entry has no thread yet.
@@ -46,12 +45,10 @@ export function fixtureState(data: BuildData): { state: LiveState; comments: Map
       comments: thread.length,
     });
     comments.set(n, thread);
-    for (const comment of thread) latest.push({ n, entry: feature.id, author: comment.author, bot: comment.bot, createdAt: comment.createdAt, text: comment.text });
   });
   issues[9001] = entryIssue({ kind: 'suggestion', title: 'Start a task from a Slack message', author: 'mara-k', bot: false, up: 14 });
   issues[9002] = entryIssue({ kind: 'suggestion', title: 'Share one base computer across a team', author: 'devin-oss', bot: false, up: 9 });
-  latest.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return { state: { repo: 'amontlabs/silo', fetchedAt: new Date().toISOString(), issues, threads: threadOf, latest: latest.slice(0, 30) }, comments };
+  return { state: { repo: 'amontlabs/silo', fetchedAt: new Date().toISOString(), issues, threads: threadOf }, comments };
 }
 
 export function installFixture(data: BuildData, params: URLSearchParams): void {
