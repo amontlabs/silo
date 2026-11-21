@@ -324,13 +324,13 @@ describe('Back, Forward and Escape', () => {
     await elapse(1);
     expect(shownView()).toBe('order');
     expect(document.activeElement).toBe(tile('part-b'));
-    // A tile with no part on the map: the title takes the focus.
-    act(() => tile('suggested').focus());
+    // The focus outside the panel that is hidden stays where it is: a link of the title row, the Order button.
+    const latest = screen.getByRole('link', { name: 'Latest' });
+    act(() => latest.focus());
     act(() => history.back());
     await elapse(1);
     expect(shownView()).toBe('map');
-    expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Workshop' }));
-    // The focus outside the panel that is hidden stays where it is.
+    expect(document.activeElement).toBe(latest);
     const order = screen.getByRole('button', { name: 'Order' });
     act(() => order.focus());
     act(() => history.forward());
@@ -339,10 +339,9 @@ describe('Back, Forward and Escape', () => {
     expect(document.activeElement).toBe(order);
   });
 
-  it('gives the title the focus of a link under the map that Back or Forward hides or takes away', async () => {
+  it('keeps the focus on a link of the title row that Back or Forward leaves on the page', async () => {
     screenOf({ motion: false, wide: true, mode: 'absent' });
     await mount();
-    const title = () => screen.getByRole('heading', { level: 1, name: 'Workshop' });
     // The full map in Map, a part in Order, then the full map again in Order.
     act(() => { fireEvent.click(part('part-b')); });
     act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
@@ -350,27 +349,28 @@ describe('Back, Forward and Escape', () => {
     await elapse(1);
     expect(location.hash).toBe('');
     expect(shownView()).toBe('order');
-    // Back to the full map in Map, then Forward to the full map in Order: Order hides "Suggest a feature".
+    // Back to the full map in Map, then Forward to the full map in Order: "Suggest a feature" shows in both.
     act(() => history.go(-2));
     await elapse(1);
     expect(shownView()).toBe('map');
-    act(() => screen.getByRole('link', { name: 'Suggest a feature' }).focus());
+    const suggest = screen.getByRole('link', { name: 'Suggest a feature' });
+    act(() => suggest.focus());
     act(() => history.go(2));
     await elapse(1);
     expect(location.hash).toBe('');
     expect(shownView()).toBe('order');
-    expect(document.activeElement).toBe(title());
-    // Back to the full map in Map with the focus on Latest; Forward to the part takes the links under the map off the
-    // page.
+    expect(document.activeElement).toBe(suggest);
+    // Back to the full map in Map with the focus on Latest; Forward to the part keeps the row on the page.
     act(() => history.go(-2));
     await elapse(1);
     expect(location.hash).toBe('');
     expect(shownView()).toBe('map');
-    act(() => screen.getByRole('link', { name: 'Latest' }).focus());
+    const latest = screen.getByRole('link', { name: 'Latest' });
+    act(() => latest.focus());
     act(() => history.forward());
     await elapse(1);
     expect(location.hash).toBe('#part-b');
-    expect(document.activeElement).toBe(title());
+    expect(document.activeElement).toBe(latest);
   });
 
   it('drops a going-back when Back leads to an address that is not known yet', async () => {
@@ -631,7 +631,7 @@ describe('going back from a place reached by its address', () => {
     document.documentElement.classList.remove('vt-open', 'vt-back');
   });
 
-  it.each([['#latest', 'Latest'], ['#product', 'The whole product'], ['#left', /^Left out/]] as const)('from %s gives the focus to the link under the tiles that leads there, brought into view at once', async (hash, name) => {
+  it.each([['#latest', 'Latest'], ['#product', 'Product'], ['#left', /^Left out/], ['#suggested', 'Suggest a feature']] as const)('from %s gives the focus to the link of the title row that leads there, brought into view at once', async (hash, name) => {
     narrow();
     let update: () => void = () => {};
     (document as unknown as { startViewTransition: unknown }).startViewTransition = (run: () => void) => {
@@ -646,7 +646,7 @@ describe('going back from a place reached by its address', () => {
     Object.defineProperty(window, 'scrollY', { value: 0, configurable: true });
     const plain = HTMLElement.prototype.getBoundingClientRect;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      if (this.matches('a.ws-fold-link')) return { x: 0, y: 1200, top: 1200, left: 0, right: 80, bottom: 1220, width: 80, height: 20, toJSON() {} } as DOMRect;
+      if (this.matches('.ws-places a')) return { x: 0, y: 1200, top: 1200, left: 0, right: 80, bottom: 1220, width: 80, height: 20, toJSON() {} } as DOMRect;
       return plain.call(this);
     });
     await userEvent.click(document.querySelector<HTMLElement>('.ws-back')!);
@@ -669,7 +669,7 @@ describe('going back from a place reached by its address', () => {
     await userEvent.click(document.querySelector<HTMLElement>('.ws-back')!);
     // The plain view the update draws has no link to Latest.
     const find = document.querySelector.bind(document);
-    vi.spyOn(document, 'querySelector').mockImplementation(((selector: string) => (selector === 'a.ws-fold-link[href="#latest"]' ? null : find(selector))) as typeof document.querySelector);
+    vi.spyOn(document, 'querySelector').mockImplementation(((selector: string) => (selector === '.ws-places a[href="#latest"]' ? null : find(selector))) as typeof document.querySelector);
     act(() => update());
     expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Workshop' }));
   });
@@ -697,7 +697,7 @@ describe('going back off the map without a view transition', () => {
     const plain = HTMLElement.prototype.getBoundingClientRect;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       if (this.matches('.ws-tile[data-part="part-b"]')) return { x: 0, y: -200, top: -200, left: 0, right: 200, bottom: -120, width: 200, height: 80, toJSON() {} } as DOMRect;
-      if (this.matches('a.ws-fold-link[href="#latest"]')) return { x: 0, y: 1200, top: 1200, left: 0, right: 80, bottom: 1218, width: 80, height: 18, toJSON() {} } as DOMRect;
+      if (this.matches('.ws-places a[href="#latest"]')) return { x: 0, y: 1200, top: 1200, left: 0, right: 80, bottom: 1218, width: 80, height: 18, toJSON() {} } as DOMRect;
       return plain.call(this);
     });
     await userEvent.click(tile('part-b'));
@@ -707,7 +707,7 @@ describe('going back off the map without a view transition', () => {
     expect(shownPart()).toBe('');
     expect(document.activeElement).toBe(tile('part-b'));
     expect(scrolls).toEqual([{ top: 300, behavior: 'instant' }]);
-    // A place reached by its address: the link under the tiles that leads to it.
+    // A place reached by its address: the link of the title row that leads to it.
     history.replaceState(null, '', '/workshop#latest');
     act(() => { dispatchEvent(new PopStateEvent('popstate')); });
     expect(shownPart()).not.toBe('');

@@ -54,19 +54,30 @@ describe('the map', () => {
     expect(location.search).toBe('?view=order');
     const order = [...document.querySelectorAll<HTMLElement>('.ws-tile')].map((t) => t.dataset.part);
     expect(order.slice(0, 4)).toEqual(['part-a', 'part-b', 'part-c', 'part-d']);
-    expect(order.at(-1)).toBe('suggested');
+    expect(order).not.toContain('suggested');
     expect(screen.getByText('After that')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Map' }));
     expect(location.search).toBe('');
   });
 
-  it('links to what is left out, the whole product, the latest and the suggestions, in that order', async () => {
+  it('links to Product, Latest, what is left out and the suggestions in the title row, before Map and Order, on every place', async () => {
     mockApi();
     await renderApp();
-    expect(screen.getByRole('link', { name: '2 suggested' })).toHaveAttribute('href', '#suggested');
-    expect(screen.getByRole('link', { name: 'Left out · 3' })).toHaveAttribute('href', '#left');
-    expect(screen.getByRole('link', { name: 'The whole product' })).toHaveAttribute('href', '#product');
-    expect([...document.querySelectorAll('.ws-fold-link')].map((a) => a.textContent)).toEqual(['Left out · 3', 'The whole product', 'Latest', '2 suggested']);
+    const row = () => screen.getByRole('navigation', { name: 'Places' });
+    const links = () => within(row()).getAllByRole('link').map((a) => [a.textContent, a.getAttribute('href'), a.getAttribute('aria-current')]);
+    expect(links()).toEqual([['Product', '#product', null], ['Latest', '#latest', null], ['Left out · 3', '#left', null], ['Suggest a feature', '#suggested', null]]);
+    expect(row().closest('.ws-tools')?.lastElementChild).toHaveAttribute('aria-label', 'Arrangement');
+    // The line and the tile they replace are gone.
+    expect(document.querySelector('.ws-under, .ws-tile[data-part="suggested"]')).toBeNull();
+    await userEvent.click(part('part-b'));
+    expect(links().map(([name]) => name)).toEqual(['Product', 'Latest', 'Left out · 3', 'Suggest a feature']);
+    await userEvent.click(screen.getByRole('link', { name: 'Latest' }));
+    expect(location.hash).toBe('#latest');
+    expect(links()).toEqual([['Product', '#product', null], ['Latest', '#latest', 'true'], ['Left out · 3', '#left', null], ['Suggest a feature', '#suggested', null]]);
+    // The open one, pressed again, goes back to the plain view.
+    await userEvent.click(screen.getByRole('link', { name: 'Latest' }));
+    await waitFor(() => expect(location.hash).toBe(''));
+    expect(screen.getByRole('link', { name: 'Latest' })).not.toHaveAttribute('aria-current');
   });
 });
 
@@ -204,7 +215,7 @@ describe('addresses', () => {
     act(() => { location.hash = '#entry-one-host'; });
     await waitFor(() => expect(rowButton('Which host runs Silo first?')).toHaveAttribute('aria-expanded', 'true'));
     expect(location.hash).toBe('#product/one-host');
-    expect(screen.getByRole('heading', { level: 2, name: 'The whole product' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Product' })).toBeInTheDocument();
   });
 
   it('open a suggestion once the live state arrives', async () => {
@@ -255,7 +266,7 @@ describe('addresses', () => {
   });
 });
 
-describe('the bottom strip', () => {
+describe('the places of the title row', () => {
   it('lists every dropped entry of the parts, decisions and features', async () => {
     mockApi();
     await renderApp();
@@ -272,9 +283,9 @@ describe('the bottom strip', () => {
   it('opens the decisions of the whole product, with their tally', async () => {
     mockApi();
     await renderApp();
-    await userEvent.click(screen.getByRole('link', { name: 'The whole product' }));
+    await userEvent.click(screen.getByRole('link', { name: 'Product' }));
     expect(location.hash).toBe('#product');
-    expect(screen.getByRole('heading', { level: 2, name: 'The whole product' })).toHaveFocus();
+    expect(screen.getByRole('heading', { level: 2, name: 'Product' })).toHaveFocus();
     expect([...document.querySelectorAll('.ws-detail .ws-name')].map((name) => name.textContent)).toEqual(['How is security built?', 'Which host runs Silo first?', 'Which logs does Silo keep?']);
     expect(document.querySelector('.ws-detail .ws-tally')).toHaveTextContent('Decisions: 1 decided · 1 not decided · 1 replaced');
   });
@@ -282,17 +293,17 @@ describe('the bottom strip', () => {
   it('opens the suggestions by votes, with a way to sign in for a visitor', async () => {
     mockApi();
     await renderApp();
-    await userEvent.click(screen.getByRole('link', { name: '2 suggested' }));
+    await userEvent.click(screen.getByRole('link', { name: 'Suggest a feature' }));
     expect(location.hash).toBe('#suggested');
     const group = screen.getByRole('region', { name: 'Suggested by people' });
     expect(within(group).getAllByRole('button', { name: /^(Share|Start)/ }).map((b) => b.textContent)).toEqual(['Share a base computer', 'Start a task from Slack']);
     expect(screen.getByRole('link', { name: 'Sign in to suggest' })).toHaveAttribute('href', '/api/workshop/login?return=%2Fworkshop%23suggested');
   });
 
-  it('returns to the link that opened the left-out list, the whole product, the latest or the suggestions', async () => {
+  it('returns to the link that opened the left-out list, Product, Latest or the suggestions', async () => {
     mockApi({ me: owner });
     await renderApp();
-    for (const [name, title] of [['Left out · 3', 'Left out'], ['The whole product', 'The whole product'], ['Latest', 'Latest'], ['2 suggested', 'Suggest a feature']]) {
+    for (const [name, title] of [['Left out · 3', 'Left out'], ['Product', 'Product'], ['Latest', 'Latest'], ['Suggest a feature', 'Suggest a feature']]) {
       await userEvent.click(screen.getByRole('link', { name }));
       expect(screen.getByRole('heading', { level: 2, name: title })).toHaveFocus();
       fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' });
@@ -329,7 +340,8 @@ describe('when the API is missing or slow', () => {
     it(`shows the whole plan without live parts when ${label}`, async () => {
       mockApi({ state, me: owner });
       await renderApp();
-      expect(screen.getAllByText('Votes and comments are offline.').length).toBeGreaterThan(0);
+      // On the plain view, on the line under the title.
+      expect(screen.getByText('Votes and comments are offline.').closest('.ws-status')).not.toBeNull();
       expect(part('part-a')).toHaveClass('s-next');
       // Who is signed in does not depend on the live state.
       expect(screen.getByText('polarzero')).toBeInTheDocument();

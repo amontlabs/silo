@@ -1,5 +1,5 @@
 // An opened part: its title, line, one dot per feature and the counts on the left, its decisions and features on the
-// right. The same layout holds the whole product's decisions, the suggestions, the dropped entries and the latest changes.
+// right. The same layout holds the decisions of Product, the suggestions, the dropped entries and the latest changes.
 import type { ReactNode } from 'react';
 import { Entry, pipClass } from './Entry';
 import type { EntryContext } from './Entry';
@@ -93,11 +93,11 @@ export function PartPlace({ group, ctx, onBack, notes }: { group: PartGroup; ctx
   );
 }
 
-/** The decisions of the whole product: plan/decisions/. */
+/** Product: the decisions that are not about one part, from plan/decisions/. */
 export function ProductPlace({ rows, ctx, onBack, notes }: { rows: Row[]; ctx: EntryContext; onBack: () => void; notes?: ReactNode }) {
   return (
     <Block
-      title="The whole product" line="The decisions that are not about one part." onBack={onBack} notes={notes}
+      title="Product" line="The decisions that are not about one part." onBack={onBack} notes={notes}
       list={<Rows rows={rows} ctx={ctx} />}
     >
       <Tallies rows={rows} />

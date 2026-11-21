@@ -18,6 +18,6 @@ describe('the error boundary', () => {
     expect(part('Part B')).toHaveTextContent('Create and delete a computer (feature, not decided)');
     expect(part('Part A')).toHaveTextContent('Which language is the core written in? (decision, decided)The engine runs on its own (feature, planned)');
     expect(part('Part E')).toHaveTextContent('Which format does an export use? (decision, dropped)');
-    expect(part('The whole product')).toHaveTextContent('How is security built? (decision, decided)Which host runs Silo first? (decision, not decided)Which logs does Silo keep? (decision, replaced) Replaced by How are logs kept honest?');
+    expect(part('Product')).toHaveTextContent('How is security built? (decision, decided)Which host runs Silo first? (decision, not decided)Which logs does Silo keep? (decision, replaced) Replaced by How are logs kept honest?');
   });
 });

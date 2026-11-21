@@ -1,5 +1,5 @@
 // What a reader without JavaScript gets under the plan: every part with its decisions and features, and the
-// decisions of the whole product, as a plain list (id, name, state), after the line that says what needs JavaScript.
+// decisions of Product, as a plain list (id, name, state), after the line that says what needs JavaScript.
 // It goes inside the page's <noscript>, so a browser that runs the script never draws it.
 import { stateText } from './Entry';
 import { allRows, buildPlan } from './plan';
@@ -38,7 +38,7 @@ export function NoScript({ data }: { data: BuildData }) {
       ))}
       {plan.product.length ? (
         <section data-part="product">
-          <h2>The whole product</h2>
+          <h2>Product</h2>
           <Rows rows={plan.product} all={all} />
         </section>
       ) : null}

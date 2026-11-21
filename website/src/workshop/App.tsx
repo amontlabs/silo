@@ -1,6 +1,8 @@
 // The Workshop: the drawing of Silo (tiles on narrow screens), an opened part under it, and its entries
-// opening in place. Addresses follow routes.ts; the live state and every write live in useWorkshop.ts.
+// opening in place. The places that are not parts (Product, Latest, Left out, the suggestions) are a row of links in
+// the title row. Addresses follow routes.ts; the live state and every write live in useWorkshop.ts.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { loginUrl } from './api';
 import type { Me } from './api';
@@ -82,8 +84,6 @@ function selectorOf(node: Element | null): string | null {
   const href = node.getAttribute('href');
   const name = [...node.classList][0];
   if (href && name) return `a.${name}[href="${href}"]`;
-  const tile = node.closest<HTMLElement>('.ws-tile');
-  if (tile?.dataset.part) return `.ws-tile[data-part="${tile.dataset.part}"] .ws-tile-hit`;
   return null;
 }
 
@@ -129,10 +129,13 @@ function KeyItem({ mark, label, boot }: { mark: string; label: string; boot: boo
   return <li className={fade ? 'ws-in' : undefined}><i className={mark} />{label}</li>;
 }
 
-/** The line under the title; a line that appears or changes after the first frames fades in. */
-function Status({ text, boot }: { text: string; boot: boolean }) {
+/**
+ * The line under the title; a line that appears or changes after the first frames fades in. On the plain view it also
+ * holds the notes (offline, sign-in failed), after the text.
+ */
+function Status({ text, boot, children }: { text: string; boot: boolean; children?: ReactNode }) {
   const [fade] = useState(!boot);
-  return <p className={fade ? 'ws-status ws-in' : 'ws-status'}>{text}</p>;
+  return <p className={fade ? 'ws-status ws-in' : 'ws-status'}>{text}{children}</p>;
 }
 
 const SignInLabel = () => <span>Sign in{' '}<span className="ws-wide">with GitHub</span></span>;
@@ -200,7 +203,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   const wantedHash = useRef<string | null>(null);
   /** A row named by the address while the live state loads; it opens once the state is there. */
   const heldOpen = useRef<string | null>(null);
-  /** The control that opened the suggestions, the left-out list or the decisions, to return focus to. */
+  /** The link of the title row that opened a place that is not a part, to return focus to. */
   const opener = useRef<string | null>(null);
   const foldedAt = useRef(0);
   /** The scroll driven by the fold, from a scrolled full map. */
@@ -213,9 +216,6 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   const goingBack = useRef(-1);
   /** The control to focus once Back or Forward has shown the other view, when the focus was in the one hidden. */
   const viewFocus = useRef<string | null>(null);
-  // A link under the map that held the focus when Back or Forward moved: if the move takes it off the page, the title
-  // takes the focus.
-  const underFocus = useRef<Element | null>(null);
   /** The move whose view transition set the mark on `<html>` (`vt-open`, `vt-back`); -1 when none is set. */
   const markOwner = useRef(-1);
   /** True while a view transition's update runs: what it scrolls is set at once, before the new view is captured. */
@@ -408,11 +408,11 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   function back() {
     // A going-back under way lands at its time: a second one (the button pressed twice, Escape again) changes nothing.
     if (isHome || backUnderWay()) return;
-    // A place reached by its address has no opener: the link under the tiles that leads to it takes the focus, or the
+    // A place reached by its address has no opener: the link of the title row that leads to it takes the focus, or the
     // page's title when there is none.
     // Off the map, with a view transition or without one, it is brought into view; the map has its own going-back.
     const bring = !onMap();
-    const focus: Focus = shown.kind === 'part' ? { kind: 'part', part: shown.part, bring } : opener.current ? { kind: 'selector', selector: opener.current, bring } : shown.kind === 'suggested' ? { kind: 'part', part: 'suggested', bring } : { kind: 'selector', selector: `a.ws-fold-link[href="${formatHash(shown)}"]`, bring };
+    const focus: Focus = shown.kind === 'part' ? { kind: 'part', part: shown.part, bring } : { kind: 'selector', selector: opener.current ?? `.ws-places a[href="${formatHash(shown)}"]`, bring };
     const finish = () => go(HOME, null, { push: true, focus, announce: '' });
     if (still()) {
       finish();
@@ -515,14 +515,11 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
       swapTimers.current = [];
       setSwap(null);
       const next = initialView();
-      // On a wide screen the other view's panel is taken out of sight, and Order also hides "Suggest a feature" under
-      // the map: the focus on what gets hidden goes to the same part in the view now shown, else to the title, rather
-      // than to the page itself.
+      // On a wide screen the other view's panel is taken out of sight: the focus in it goes to the same part in the view
+      // now shown, else to the title, rather than to the page itself.
       const hidden = document.querySelector(`.ws-swap-${viewRef.current}`);
       const focused = document.activeElement;
-      const hides = !!focused && (!!hidden?.contains(focused) || (next === 'order' && focused.matches('.ws-under .ws-suggest')));
-      underFocus.current = focused?.closest('.ws-under') ? focused : null;
-      if (next !== viewRef.current && wide() && focused && hides) {
+      if (next !== viewRef.current && wide() && focused && hidden?.contains(focused)) {
         const part = focused.closest<HTMLElement>('[data-part]');
         const id = part?.dataset.part;
         viewFocus.current = !id ? '' : next === 'map' ? `.ws-part[data-part="${id}"]` : `.ws-tile[data-part="${id}"] .ws-tile-hit`;
@@ -561,12 +558,8 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     openKeyRef.current = key;
     focusNext.current = { kind: 'reveal', key };
   }, [holding, rowByKey]);
-  // After Back or Forward showed the other view, the focus that was in the hidden one lands in the one shown; a link
-  // under the map that the move took off the page hands the focus to the title.
+  // After Back or Forward showed the other view, the focus that was in the hidden one lands in the one shown.
   useLayoutEffect(() => {
-    const under = underFocus.current;
-    underFocus.current = null;
-    if (under && !under.isConnected && viewFocus.current === null) viewFocus.current = '';
     const selector = viewFocus.current;
     if (selector === null) return;
     viewFocus.current = null;
@@ -600,7 +593,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     } else {
       let selector: string;
       if (target.kind === 'selector') selector = target.selector;
-      else selector = onMap() && target.part !== 'suggested' ? `.ws-part[data-part="${target.part}"]` : `.ws-tile[data-part="${target.part}"] .ws-tile-hit`;
+      else selector = onMap() ? `.ws-part[data-part="${target.part}"]` : `.ws-tile[data-part="${target.part}"] .ws-tile-hit`;
       const node = document.querySelector<HTMLElement>(selector) ?? (target.kind === 'selector' ? document.querySelector<HTMLElement>('.ws-top h1') : null);
       if (node && !node.hasAttribute('tabindex') && node.tagName === 'H1') node.setAttribute('tabindex', '-1');
       node?.focus({ preventScroll: true });
@@ -671,23 +664,33 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   };
   const account = <Account me={w.me} signIn={signIn} onSignOut={() => void w.signOut()} />;
 
-  const notes = (
-    <>
-      {w.offline ? (
-        <p className="ws-quiet ws-note ws-offline">
-          <span>Votes and comments are offline.</span>
-          <button type="button" className="ws-link ws-retry" disabled={live.load === 'pending'} onClick={w.retry}>Try again</button>
-        </p>
-      ) : null}
-      {w.signinFailed ? <p className="ws-quiet ws-note">Sign-in did not complete.</p> : null}
-    </>
-  );
+  // Offline, with a way to try again, and sign-in failed: in a place, under its counts; on the plain view, on the line
+  // under the title (`inline`), where they are spans of the paragraph.
+  const notesOf = (inline: boolean) => {
+    const Note = inline ? 'span' : 'p';
+    return (
+      <>
+        {w.offline ? (
+          <Note className="ws-quiet ws-note ws-offline">
+            <span>Votes and comments are offline.</span>
+            <button type="button" className="ws-link ws-retry" disabled={live.load === 'pending'} onClick={w.retry}>Try again</button>
+          </Note>
+        ) : null}
+        {w.signinFailed ? <Note className="ws-quiet ws-note">Sign-in did not complete.</Note> : null}
+      </>
+    );
+  };
+  const notes = notesOf(false);
   const present = new Set(plan.parts.map((group) => group.state));
-  const suggested = plan.suggestions.filter((row) => row.status !== 'dropped').length;
-  const current = shown.kind === 'part' ? shown.part : shown.kind === 'suggested' ? 'suggested' : null;
+  const current = shown.kind === 'part' ? shown.part : null;
   const link = (target: Place) => (event: { preventDefault: () => void }) => {
     event.preventDefault();
     openPlace(target);
+  };
+  /** A link of the title row: marked while its place is open, where pressing it again goes back. */
+  const placeLink = (target: Place, label: string, className = 'ws-place') => {
+    const on = samePlace(target, shown);
+    return <a className={on ? `${className} on` : className} href={formatHash(target)} aria-current={on ? 'true' : undefined} onClick={link(target)}>{label}</a>;
   };
 
   let detail = null;
@@ -713,10 +716,16 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
         <section className="ws-top joint">
           <div className="ws-head">
             <h1>Workshop</h1>
-            <Status key={statusLine(plan.parts)} text={statusLine(plan.parts)} boot={boot} />
+            <Status key={statusLine(plan.parts)} text={statusLine(plan.parts)} boot={boot}>{isHome ? notesOf(true) : null}</Status>
           </div>
           <div className="ws-top-side">
             <div className="ws-tools">
+              <nav className="ws-places" aria-label="Places">
+                {plan.product.length ? placeLink({ kind: 'product' }, 'Product') : null}
+                {placeLink({ kind: 'latest' }, 'Latest')}
+                {plan.left.length ? placeLink({ kind: 'left' }, `Left out · ${plan.left.length}`) : null}
+                {placeLink({ kind: 'suggested' }, 'Suggest a feature', 'ws-btn ws-suggest')}
+              </nav>
               {mapped ? (
                 <div className="ws-seg" role="group" aria-label="Arrangement">
                   <button type="button" aria-pressed={view === 'map'} onClick={() => setView('map')}>Map</button>
@@ -735,20 +744,9 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
           </div>
         ) : null}
         <div className="ws-swap ws-swap-order">
-          <Tiles groups={plan.parts} current={current} suggested={suggested} onOpen={(part) => openPlace({ kind: 'part', part })} onSuggest={() => openPlace({ kind: 'suggested' })} />
+          <Tiles groups={plan.parts} current={current} onOpen={(part) => openPlace({ kind: 'part', part })} />
         </div>
-        {isHome ? (
-          <div className="ws-under">
-            <div className="ws-under-left">
-              {plan.left.length ? <a className="ws-fold-link" href="#left" onClick={link({ kind: 'left' })}>Left out · {plan.left.length}</a> : null}
-              {plan.product.length ? <a className="ws-fold-link" href="#product" onClick={link({ kind: 'product' })}>The whole product</a> : null}
-              <a className="ws-fold-link" href="#latest" onClick={link({ kind: 'latest' })}>Latest</a>
-              {suggested ? <a className="ws-fold-link ws-late-s" href="#suggested" onClick={link({ kind: 'suggested' })}>{suggested} suggested</a> : null}
-              {notes}
-            </div>
-            <a className="ws-btn ws-suggest" href="#suggested" onClick={link({ kind: 'suggested' })}>Suggest a feature</a>
-          </div>
-        ) : (
+        {isHome ? null : (
           <section className={formatHash(shown) === firstPlace.current ? 'ws-detail ws-still' : 'ws-detail'} key={formatHash(shown)} aria-labelledby="ws-part-title">{detail}</section>
         )}
         <p className="sr-only" aria-live="polite">{w.announce}</p>

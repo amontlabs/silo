@@ -29,21 +29,21 @@ describe('the Workshop with an empty plan', () => {
     expect(screen.queryByRole('button', { name: 'Order' })).toBeNull();
     expect(document.querySelector('.ws-swap-map, .ws-stage')).toBeNull();
     expect(document.querySelector('.ws')).toHaveClass('v-order');
-    expect([...document.querySelectorAll<HTMLElement>('.ws-tile')].map((tile) => tile.dataset.part)).toEqual(['suggested']);
+    // No part: no tile, and no board.
+    expect(document.querySelector('.ws-tile, .ws-board')).toBeNull();
     expect(screen.queryByText('After that')).toBeNull();
     expect(screen.getByRole('link', { name: 'Sign in with GitHub' })).toBeInTheDocument();
     expect(calls.some((call) => call.method === 'GET' && call.path === 'state')).toBe(true);
-    // The issue of a feature the plan no longer holds shows nowhere; people's suggestions still count.
+    // The issue of a feature the plan no longer holds shows nowhere.
     expect(screen.queryByText('Gone')).toBeNull();
-    expect(screen.getByRole('link', { name: '2 suggested' })).toHaveAttribute('href', '#suggested');
     // Latest is there whatever the plan holds.
     expect(screen.getByRole('link', { name: 'Latest' })).toHaveAttribute('href', '#latest');
     expect(screen.queryByRole('link', { name: /Left out/ })).toBeNull();
-    expect(screen.getByRole('link', { name: 'Suggest a feature' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Suggest a feature' })).toHaveAttribute('href', '#suggested');
 
-    await userEvent.click(screen.getByRole('link', { name: 'The whole product' }));
+    await userEvent.click(screen.getByRole('link', { name: 'Product' }));
     expect(location.hash).toBe('#product');
-    expect(screen.getByRole('heading', { level: 2, name: 'The whole product' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Product' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /← All parts/ })).toBeInTheDocument();
   });
 

@@ -3,7 +3,7 @@ import type { ErrorInfo, ReactNode } from 'react';
 import { allRows, buildPlan, statusLine } from './plan';
 import type { BuildData, Row } from './plan';
 
-/** If the Workshop fails to render, the plan stays readable from the data built into the page: each part's decisions and features with their state, then the whole product's decisions. */
+/** If the Workshop fails to render, the plan stays readable from the data built into the page: each part's decisions and features with their state, then the decisions of Product. */
 export class Boundary extends Component<{ data: BuildData; children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
 
@@ -58,7 +58,7 @@ function PlainPlan({ data }: { data: BuildData }) {
         </div>
       </div>
       {plan?.parts.map((group) => <PlainRows key={group.part.id} title={group.part.title} rows={group.rows} all={all} />)}
-      {plan?.product.length ? <PlainRows title="The whole product" rows={plan.product} all={all} /> : null}
+      {plan?.product.length ? <PlainRows title="Product" rows={plan.product} all={all} /> : null}
     </div>
   );
 }
