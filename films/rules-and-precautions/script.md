@@ -3,7 +3,7 @@
 This is the third of four films that replace `record-four-layers`. It comes after
 `what-silo-knows` and `actions-and-kinds`, and uses their words: fact, report, opinion, classifier,
 boundary, rule, allow, hold, deny, ask, alert, pause, stop, granting, destructive, reversible.
-The fourth is `added-classifiers`.
+The fourth is `extensions`.
 
 ## Who watches
 

@@ -21,3 +21,16 @@ Film 2, "What Silo knows":
   and the gap leave the film. The plan's part `record` keeps them (the property `books-balance` and the
   decision `losses-show`), and a later film on what
   happens inside a computer will show them.
+
+Since the design of extensions was taken, on 21 November 2026:
+
+- That a classifier never acts is no longer in force: the property `classifier-never-acts` is gone
+  from the plan, and it leaves `shows`. An extension may deny, hold or pause by itself
+  (`extension-may-protect`). This film does not say "extension": the word comes in the fifth film.
+- Scene 5. Its caption becomes "A classifier gives opinions." Its second sentence becomes: "A
+  classifier gives opinions. What an opinion can lead to comes in the film on rules and
+  precautions." Whatever in its picture says that a classifier cannot act goes.
+- The word "classifier" under the film reads: "whatever gives an opinion." The sentence "It never
+  acts." goes.
+- In "How things look", "a classifier acting" leaves the examples of what cannot happen at all.
+- The next films are named `actions-and-kinds`, `rules-and-precautions` and `extensions`.

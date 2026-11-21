@@ -1,7 +1,7 @@
 # Chapter script: actions and their kinds
 
 This is the second of four films that replace `record-four-layers`. It comes after
-`what-silo-knows` and before `rules-and-precautions` and `added-classifiers`.
+`what-silo-knows` and before `rules-and-precautions` and `extensions`.
 
 ## Who watches
 

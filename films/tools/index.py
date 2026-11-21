@@ -14,7 +14,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # The films, in the order they are watched.
-ORDER = ["engine-one-call", "what-silo-knows", "actions-and-kinds", "rules-and-precautions", "added-classifiers"]
+ORDER = ["engine-one-call", "what-silo-knows", "actions-and-kinds", "rules-and-precautions", "extensions"]
 # Films that belong to no stage of the order. They are listed apart.
 BACKGROUND = []
 

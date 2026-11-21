@@ -1,7 +1,7 @@
 # Chapter script: what Silo knows
 
 This is the first of four films that replace `record-four-layers`. The others are
-`actions-and-kinds`, `rules-and-precautions` and `added-classifiers`. Watch them in that order.
+`actions-and-kinds`, `rules-and-precautions` and `extensions`. Watch them in that order.
 
 ## Who watches
 
