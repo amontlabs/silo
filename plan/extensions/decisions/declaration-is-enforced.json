@@ -1,0 +1,18 @@
+{
+  "asks": "Does Silo enforce what an extension declares?",
+  "answer": "The declaration is what the user accepts at install and what Silo enforces afterwards.",
+  "needs": [
+    "extension-declaration"
+  ],
+  "sets": [
+    {
+      "in": "extensions/properties",
+      "id": "declaration-bounds-an-extension",
+      "says": "The declaration is what the user accepts at install and what Silo enforces afterwards.",
+      "kind": "safety",
+      "check": [
+        "hostile test"
+      ]
+    }
+  ]
+}

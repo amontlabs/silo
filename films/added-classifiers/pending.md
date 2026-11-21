@@ -4,37 +4,34 @@ What the owner settled and the film does not carry yet. Delete this file once th
 
 "Owner" marks what the owner said first. The rest the owner agreed to.
 
-Film 5, "What you can add":
+Film 5, "What you can add". The film needs a new script, about extensions. What it is made from
+is the part `extensions` of the plan, starting at `extension-declaration`, whose notes hold the
+picture as a whole.
 
-- The classifier is a core part of the design and stays in the films. Owner.
-- A classifier that judges tool calls is one example, not the whole feature. Owner. For any
-  classifier one defines when it runs, its input, its program (simple or complex, with
-  tools or without) and the shape of its output. It should be very customisable. It can be
-  as small as: the user's request and the tool call in, an opinion out.
-- What a classifier may read is a grant, and rules set in advance can give it, so nothing
-  is held while it works. Owner.
-- A classifier that is only data needs no computer. Code or tools means a computer. The
-  user can always see where it runs.
-- Three tiers of classifiers, a trial on the recorded past and how a plugin is installed
-  are features for the Workshop stage, later, and not ground work. Owner. They leave the
-  film, and no issue is created now.
-- Cut, because it says what was: "In the older film a plugin could pause or stop a computer
-  itself. Not any more: it is only the package."
-- Importing a plugin shows what it may use, and the rules and precautions it comes with, and
-  changes nothing. Installing it switches them on. Owner (`import-then-install`).
-- What a plugin may use is tools it declares: putting a question to the user and showing a panel
-  are tools, not outputs. Owner. Whether a tool it may use is said as a rule is not settled: the
-  owner finds that rules sit at a different layer (`plugin-calls`).
-- A plugin's output is a schema. A classifier is the case where it is a value from a fixed list:
-  one case of a plugin, not the name for all of them. Owner (`what-makes-a-classifier`).
-- A declaration uses the standard names: `on`, `inputs`, `outputs`, `runs`, `permissions`,
-  `precautions`. Owner. What goes under `runs` is not settled.
-- No tool of a plugin is named or shown. Owner. Only the areas they touch: the record, opinions,
-  the app, the user.
-- The owner asks for more work on the whole part before the script: whether "extension" is the
-  word, and why a plugin can never act on a computer (`what-a-plugin-never-does`).
-- The film needs a new script. It waits for these decisions of the plan: `plugin-declaration`,
-  `declaration-is-enforced`, `plugin-calls`, `import-then-install`, `what-a-plugin-never-does`,
-  `plugin-forwarding-call`, `plugin-says-done`, `what-makes-a-classifier`,
-  `shipped-plugins-declare`, `plugin-wakes-on`, `request-waits-only-by-precaution`,
-  `opinion-is-a-value`, `who-fixes-the-values` and `read-grant-names-its-part`.
+- The word is "extension". Owner. An extension holds a back end, a front end and rules, each
+  optional (`extension-declaration`).
+- The film shows these three examples. Owner:
+  - registry rules: no back end; it adds rules that allow `crates.io` on a computer;
+  - disk watch: wakes every minute, reads `/work` on main, shows a panel and notifies the user;
+  - request check: asked when a network request of main waits; it answers let it go on, deny it
+    or hold it.
+- What is executed runs in a computer of its own, and what Silo only reads runs nowhere
+  (`back-end-runs-in-a-computer`). An extension that calls a model is one extension among others:
+  the film says nothing special about models. Owner.
+- An extension can use only the tools it declares, and installing it grants them. Owner. A tool
+  reads, shows or protects (`extension-tools`). No tool is named beyond the examples, and no
+  interface is shown. Owner.
+- No tool an extension can use grants or destroys (`what-an-extension-never-does`).
+- Importing an extension changes nothing and shows what it needs. Installing it switches that on.
+  Owner (`import-then-install`).
+- An extension declares the secrets it needs, and uses Silo's mechanism for secrets. Owner
+  (`extension-secrets`).
+- A classifier is one case of an extension: it gives a value from a fixed list. Owner
+  (`what-makes-a-classifier`). The film does not present classifiers as the whole feature.
+- Examples of what an extension may use are generic and exact, such as a path. Owner.
+- Three tiers of classifiers, a trial on the recorded past and how an extension is installed are
+  features for the Workshop stage, later, and not ground work. Owner. They are not in the film,
+  and no issue is created now.
+
+Not ruled on by the owner yet: that an extension may deny, hold or pause by itself
+(`extension-may-protect`). The third example rests on it.

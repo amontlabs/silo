@@ -1,6 +1,6 @@
 # An opinion is a value
 
-Not said yet: whether Silo fixes the list or each plugin declares its own. That is
+Not said yet: whether Silo fixes the list or each extension declares its own. That is
 `who-fixes-the-values`.
 
 An agent's note, of 21 November 2026. The plan calls three shapes an opinion today:

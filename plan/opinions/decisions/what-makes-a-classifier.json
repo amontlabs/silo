@@ -1,15 +1,15 @@
 {
-  "asks": "What makes a plugin a classifier?",
-  "answer": "A classifier is a plugin whose output is a value from a fixed list. It is one case of a plugin, not the name for all of them.",
+  "asks": "What makes an extension a classifier?",
+  "answer": "A classifier is an extension that gives a value from a fixed list. It is one case of an extension, not the name for all of them.",
   "needs": [
-    "plugin-declaration",
-    "shipped-plugins-declare"
+    "extension-declaration",
+    "shipped-extensions-declare"
   ],
   "sets": [
     {
       "in": "words",
       "word": "classifier",
-      "means": "A plugin whose output is a value from a fixed list.",
+      "means": "An extension that gives a value from a fixed list.",
       "not": [
         "judge"
       ]

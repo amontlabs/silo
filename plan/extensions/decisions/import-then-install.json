@@ -1,0 +1,18 @@
+{
+  "asks": "What do importing and installing an extension do?",
+  "answer": "Importing an extension changes nothing: it shows the tools it may use, the rules it adds and the secrets it needs. Installing it switches them on.",
+  "needs": [
+    "extension-declaration"
+  ],
+  "sets": [
+    {
+      "in": "extensions/properties",
+      "id": "importing-changes-nothing",
+      "says": "Importing an extension changes nothing: it shows the tools it may use, the rules it adds and the secrets it needs.",
+      "kind": "safety",
+      "check": [
+        "model"
+      ]
+    }
+  ]
+}

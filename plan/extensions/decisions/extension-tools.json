@@ -1,0 +1,25 @@
+{
+  "asks": "Which tools may an extension use?",
+  "answer": "An extension can use only the tools it declares, and installing it grants them. Each tool names what it applies to: a path on a computer, the record of a computer, the requests of a computer, the app. A tool reads, shows or protects. Which tools Silo offers is settled when they are built.",
+  "needs": [
+    "extension-declaration"
+  ],
+  "replaces": [
+    "reading-is-a-grant"
+  ],
+  "sets": [
+    {
+      "in": "extensions/properties",
+      "id": "extension-uses-only-declared-tools",
+      "says": "An extension can use only the tools it declares, and installing it grants them.",
+      "kind": "safety",
+      "check": [
+        "hostile test"
+      ]
+    }
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The owner agreed to the first sentence on 21 November 2026."
+  }
+}

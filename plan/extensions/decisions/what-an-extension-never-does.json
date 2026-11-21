@@ -1,0 +1,29 @@
+{
+  "asks": "What can an extension never do?",
+  "answer": "No tool an extension can use grants or destroys.",
+  "needs": [
+    "extension-declaration"
+  ],
+  "replaces": [
+    "what-a-classifier-can-never-do"
+  ],
+  "sets": [
+    {
+      "in": "extensions/properties",
+      "id": "no-tool-grants-or-destroys",
+      "says": "No tool an extension can use grants or destroys.",
+      "kind": "safety",
+      "from": "less-sure-less-power",
+      "check": [
+        "types"
+      ]
+    }
+  ],
+  "removes": [
+    "added-classifier-cannot-act"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The owner called this sentence basically perfect on 21 November 2026."
+  }
+}

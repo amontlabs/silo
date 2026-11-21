@@ -1,0 +1,11 @@
+{
+  "asks": "Does a grant to read cover the whole record?",
+  "answer": "A grant to read says which part of the record it covers, such as the conversations only, or one request and its tool call.",
+  "needs": [
+    "extension-declaration"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The current state of the design recommends it and gives no further reason."
+  }
+}

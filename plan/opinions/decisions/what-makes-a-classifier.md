@@ -1,29 +1,23 @@
-# What makes a plugin a classifier
+# What makes an extension a classifier
 
 ## The owner's words
 
-- First, as a hunch: "classifier" may be only a name for a plugin whose output fits, not a strict
-  kind.
-- On 20 November 2026 an answer was put forward that called it a role. The owner first found it
-  very clear, then was no longer sure: "Do you think it's accurate?"
-- On 21 November 2026, on the answer above: "much better". The owner asks whether a more accurate
-  word exists for what produces an opinion, and wants to see every kind of output a plugin has
-  before the word is settled.
+- First, as a hunch: "classifier" may be only a name for an added program whose output fits, not
+  a strict kind.
+- On 21 November 2026: "classifier" is the correct word, and the reason is that it produces a
+  value from a fixed list, more than that it produces an opinion. It is one specific case, not a
+  generic category. The owner wondered why the design fixated on it.
 
 ## An agent's notes
 
-- "Role" was too vague: it did not say what makes something a classifier. The declaration does.
-- It needs `shipped-plugins-declare`: if what ships with Silo had no declaration, a built-in
-  classifier would not be a plugin.
-- The plan used "classifier" for two things: the program someone adds, and what gives an opinion.
-  The first is now "plugin": `what-a-plugin-never-does` in the part `plugins`.
+- Why the design fixated on it: it started from one law, that what can be wrong may only lead to
+  protective actions. The law needed a name for what gives the value, and the whole part was named
+  after that one case.
+- Where the case shows: a request waits at the boundary, and the extension answers from a list
+  Silo fixes (`what-wakes-a-back-end` in the part `extensions`).
+- It needs `shipped-extensions-declare`: if what ships with Silo had no declaration, a built-in
+  classifier would not be an extension.
 - The word was compared with estimator, detector, monitor, evaluator, reviewer and labeler. None
-  is both standard and plainer. "Classifier" is exact for an opinion that is a kind from a fixed
-  list. For the other shapes the plan calls an opinion, see `opinion-is-a-value`.
-
-## The owner's answer (21 November 2026, later)
-
-"Classifier" is the correct word, and the reason is that it produces a value from a fixed list,
-more than that it produces an opinion. It is one specific case, not a generic category, and the
-owner wonders why the design fixates on it before the outputs of a plugin are known. The answer
-above is worded from this.
+  is both standard and plainer.
+- `what-a-classifier-is` still says a classifier is whatever gives an opinion. `opinion-is-a-value`
+  notes the three shapes the plan calls an opinion.

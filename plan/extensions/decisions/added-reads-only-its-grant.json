@@ -1,0 +1,15 @@
+{
+  "asks": "What may an added classifier read?",
+  "answer": "An added classifier reads only what its grant names.",
+  "sets": [
+    {
+      "in": "extensions/properties",
+      "id": "added-classifier-reads-only-its-grant",
+      "says": "An added classifier reads only what its grant names.",
+      "kind": "safety",
+      "check": [
+        "model"
+      ]
+    }
+  ]
+}
