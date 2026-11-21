@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { canonicalText } from '../../../tools/plan/model/index.js';
@@ -883,6 +883,68 @@ describe('the films', () => {
       for (const spy of quiet) spy.mockRestore();
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  /** A repository whose film `one` is behind on `word-a`, run with the console quiet; removed after. */
+  const behindRepository = (run: (root: string, write: (path: string, text: string) => void, git: (args: string[]) => void) => void) => {
+    const root = mkdtempSync(join(tmpdir(), 'workshop-films-'));
+    const git = (args: string[]) => execFileSync('git', ['-C', root, ...args], { env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }, stdio: 'ignore' });
+    const write = (path: string, text: string) => {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), text);
+    };
+    const quiet = [vi.spyOn(console, 'log').mockImplementation(() => {}), vi.spyOn(console, 'error').mockImplementation(() => {})];
+    try {
+      git(['init', '-q', '-b', 'main']);
+      write('plan/p/decisions/word-a.json', entry({ asks: 'A?', answer: 'Old.' }));
+      write('films/one/film.json', JSON.stringify({ id: 'one', title: 'One', line: 'L.', shows: ['word-a'] }));
+      git(['add', '.']);
+      git(['commit', '-q', '-m', 'the film']);
+      write('plan/p/decisions/word-a.json', entry({ asks: 'A?', answer: 'New.' }));
+      git(['commit', '-q', '-am', 'redefined']);
+      run(root, write, git);
+    } finally {
+      for (const spy of quiet) spy.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
+  };
+
+  it('write a check only into a plain checked.md of a plain film folder, never through a link', () => {
+    behindRepository((root, write) => {
+      const checked = join(root, 'films/one/checked.md');
+      const outside = join(root, 'plan/README.md');
+      write('plan/README.md', 'The plan.\n');
+      // A symbolic link to a file outside the film.
+      symlinkSync('../../plan/README.md', checked);
+      expect(behindCommand(['one', '--holds', 'Still.'], root)).toBe(1);
+      expect(readFileSync(outside, 'utf8')).toBe('The plan.\n');
+      expect(lstatSync(checked).isSymbolicLink()).toBe(true);
+      rmSync(checked);
+      // A symbolic link that leads nowhere: its target is not made.
+      symlinkSync('../../plan/made.md', checked);
+      expect(behindCommand(['one', '--holds', 'Still.'], root)).toBe(1);
+      expect(existsSync(join(root, 'plan/made.md'))).toBe(false);
+      rmSync(checked);
+      // A hard link: the other name's file is left as it is.
+      linkSync(outside, checked);
+      expect(behindCommand(['one', '--holds', 'Still.'], root)).toBe(1);
+      expect(readFileSync(outside, 'utf8')).toBe('The plan.\n');
+      rmSync(checked);
+      // Not a plain file.
+      mkdirSync(checked);
+      expect(behindCommand(['one', '--holds', 'Still.'], root)).toBe(1);
+      rmSync(checked, { recursive: true });
+      // A film folder that is a link, to a film elsewhere.
+      write('elsewhere/two/film.json', JSON.stringify({ id: 'two', title: 'Two', line: 'L.', shows: ['word-a'] }));
+      symlinkSync('../elsewhere/two', join(root, 'films/two'));
+      expect(behindCommand(['two', '--holds', 'Still.'], root)).toBe(2);
+      expect(existsSync(join(root, 'elsewhere/two/checked.md'))).toBe(false);
+      // A plain file is written, by a new file renamed into place, and nothing is left beside it.
+      write('films/one/checked.md', '# Checks of one\n');
+      expect(behindCommand(['one', '--holds', 'Still.'], root, '2026-11-21')).toBe(0);
+      expect(readFileSync(checked, 'utf8')).toBe('# Checks of one\n\n## 2026-11-21\n\nBehind on: `word-a`.\n\nStill.\n');
+      expect(execFileSync('ls', ['-a', join(root, 'films/one')], { encoding: 'utf8' }).split('\n').filter(Boolean)).toEqual(['.', '..', 'checked.md', 'film.json']);
+    });
   });
 
   it('compare the texts of an entry\'s statements wherever they live at each end: in its sets before a take, in the lists after', () => {

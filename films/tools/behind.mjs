@@ -13,7 +13,7 @@
 // Exit status: 0 when every film named is up to date (or the check was written), 1 when one is behind, cannot be read,
 // or is not behind for --holds, 2 on wrong use.
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { wordId } from '../../tools/plan/model/index.js';
@@ -364,6 +364,66 @@ export function checkEntry(date, ids, why) {
 /** The head of a new checked.md. @param {string} name */
 const checkedHead = (name) => `# Checks of ${name}\n\nEach time this film was behind the plan and was found to still hold: the date, the entries of the plan it\nwas behind on, and why what the film says is still right. Written by \`node tools/behind.mjs ${name} --holds\`.\n`;
 
+/**
+ * What a film's checked.md holds, '' when there is none, or why it is refused. Only a plain file directly in the film's
+ * plain folder is read: a folder that is a link, a checked.md that is a link of either kind (symbolic, or a hard link
+ * shared with another name) or anything but a plain file is refused, so the command never reads or writes through one.
+ * @param {string} dir films/
+ * @param {string} name
+ * @returns {string | { refused: string }}
+ */
+function readChecked(dir, name) {
+  const folder = join(dir, name);
+  const shown = `films/${name}/checked.md`;
+  const of = lstatSync(folder);
+  if (of.isSymbolicLink() || !of.isDirectory()) return { refused: `films/${name}: is not a plain folder, so ${shown} is not written. Fix: make the film a real folder directly under films/.` };
+  let fd;
+  try {
+    // O_NOFOLLOW: a symbolic link named checked.md is refused here, not followed.
+    fd = openSync(join(folder, 'checked.md'), constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    const code = /** @type {{ code?: string }} */ (error).code;
+    if (code === 'ENOENT') return '';
+    if (code === 'ELOOP' || code === 'EMLINK') return { refused: `${shown}: is a link, so it is not written. Fix: replace it with a plain file, or remove it.` };
+    return { refused: `${shown}: cannot be read (${code ?? String(error)}), so it is not written.` };
+  }
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) return { refused: `${shown}: is not a plain file, so it is not written. Fix: remove it.` };
+    if (stat.nlink > 1) return { refused: `${shown}: is a hard link, shared with another file, so it is not written. Fix: replace it with a copy of its own.` };
+    return readFileSync(fd, 'utf8');
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Writes a film's checked.md: a new file made beside it, then renamed into its place, so the old name's target is
+ * never written, whatever it is.
+ * @param {string} dir films/
+ * @param {string} name
+ * @param {string} text
+ */
+function writeChecked(dir, name, text) {
+  const folder = join(dir, name);
+  const temp = join(folder, `.checked.md.${process.pid}.tmp`);
+  try {
+    writeFileSync(temp, text, { flag: 'wx' });
+    renameSync(temp, join(folder, 'checked.md'));
+  } finally {
+    rmSync(temp, { force: true });
+  }
+}
+
+/** Whether a path is a symbolic link, one that leads nowhere included. @param {string} path */
+function isLink(path) {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
 /** Today, `YYYY-MM-DD`, in local time. */
 function today() {
   const now = new Date();
@@ -396,6 +456,10 @@ export function main(args, repository = resolve(dirname(fileURLToPath(import.met
   const known = filmFolders(dir);
   for (const name of names) {
     if (!known.includes(name)) {
+      if (isLink(join(dir, name))) {
+        console.error(`films/${name}: is a link, not a film, so nothing is read or written. Fix: make the film a real folder directly under films/.`);
+        return 2;
+      }
       console.error(`${name}: not a film: a film is a real folder directly under films/ that holds a film.json (${known.join(', ')}).`);
       return 2;
     }
@@ -427,9 +491,12 @@ export function main(args, repository = resolve(dirname(fileURLToPath(import.met
         console.error(`${name}: up to date since ${since}: there is nothing to check, so nothing was written.`);
         return 1;
       }
-      const file = join(dir, name, 'checked.md');
-      const before = existsSync(file) ? readFileSync(file, 'utf8').replace(/\n*$/, '\n') : checkedHead(name);
-      writeFileSync(file, `${before}\n${checkEntry(date, told.behind.map((item) => item.id), why ?? '')}`);
+      const before = readChecked(dir, name);
+      if (typeof before !== 'string') {
+        console.error(before.refused);
+        return 1;
+      }
+      writeChecked(dir, name, `${(before || checkedHead(name)).replace(/\n*$/, '\n')}\n${checkEntry(date, told.behind.map((item) => item.id), why ?? '')}`);
       console.log(`${name}: the check is in films/${name}/checked.md. Commit it: the film is up to date from that commit on.`);
       return 0;
     }
