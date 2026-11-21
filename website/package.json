@@ -12,7 +12,8 @@
     "build:vercel": "npm run build && node scripts/prepare-vercel.mjs",
     "workshop:dev": "node scripts/workshop-dev.mjs",
     "load-check": "node scripts/load-check.mjs",
-    "motion-sheet": "node scripts/motion-sheet.mjs"
+    "motion-sheet": "node scripts/motion-sheet.mjs",
+    "film-seams": "node scripts/film-seams.mjs"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",
