@@ -43,11 +43,15 @@ describe('which parts a part needs', () => {
     expect(buildData().parts.every((p: Part) => p.needs.length === 0 && p.neededBy.length === 0)).toBe(true);
   });
 
-  it('follows the order it is given, and puts a part the map does not place last, in the order of parts.json', () => {
-    const entries = [{ id: 'x', part: 'one', needs: ['y', 'z'] }, { id: 'y', part: 'two', needs: [] }, { id: 'z', part: 'three', needs: [] }];
-    const parts = [{ id: 'one' }, { id: 'two' }, { id: 'three' }];
-    expect(partNeeds(parts, entries, ['three', 'two', 'one']).get('one')?.needs).toEqual(['three', 'two']);
-    expect(partNeeds(parts, entries, ['two']).get('one')?.needs).toEqual(['two', 'three']);
+  it('follows the order it is given, and puts the parts the map does not place last, in the order of parts.json', () => {
+    const entries = [{ id: 'x', part: 'one', needs: ['y', 'z', 'w'] }, { id: 'y', part: 'two', needs: [] }, { id: 'z', part: 'three', needs: [] }, { id: 'w', part: 'four', needs: [] }];
+    const parts = [{ id: 'one' }, { id: 'two' }, { id: 'three' }, { id: 'four' }];
+    // `two` and `three` are placed, in that order or the other; `four` is not placed, so it comes last.
+    expect(partNeeds(parts, entries, ['three', 'two', 'one']).get('one')?.needs).toEqual(['three', 'two', 'four']);
+    expect(partNeeds(parts, entries, ['two', 'three']).get('one')?.needs).toEqual(['two', 'three', 'four']);
+    // Neither is placed: parts.json decides, and the order of `needs` in the entry decides nothing.
+    expect(partNeeds(parts, [{ ...entries[0], needs: ['w', 'z', 'y'] }, ...entries.slice(1)], []).get('one')?.needs).toEqual(['two', 'three', 'four']);
+    expect(partNeeds(parts, entries, ['one']).get('four')?.neededBy).toEqual(['one']);
   });
 });
 
@@ -116,18 +120,78 @@ describe('the map with the pointer on a part', () => {
     expect(tip()).toEqual(['Part D. A part with copies behind it.', 'Needs Part A, Part B', 'Needed by Part E']);
   });
 
-  it('keeps the tip inside the window, whatever its height', async () => {
+  describe('the place of the tip', () => {
+    /** Hovers Part A, whose box is at `top`..`bottom` in a window 1200 × 800, and gives where the tip is put. */
+    async function placed(top: number, bottom: number, left = 500) {
+      const map = draw(withNeeds());
+      const box = { left, right: left + 80, top, bottom, width: 80, height: bottom - top, x: left, y: top, toJSON: () => ({}) };
+      vi.spyOn(part(map, 'part-a'), 'getBoundingClientRect').mockReturnValue(box);
+      vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(270);
+      vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(120);
+      window.innerWidth = 1200;
+      window.innerHeight = 800;
+      await userEvent.hover(part(map, 'part-a'));
+      await shown();
+      return (document.querySelector('.ws-tip') as HTMLElement).style.transform;
+    }
+
+    it('goes below its part when it fits there, even for a tall part', async () => {
+      // A box 272 high from y = 60: 332 + 8 + 120 fits, so the tip does not cover the box.
+      expect(await placed(60, 332)).toBe('translate(405px, 340px)');
+    });
+
+    it('goes above its part when it fits only there', async () => {
+      // Below: 700 + 60 + 8 + 120 is past the window; above: 700 - 128 fits.
+      expect(await placed(640, 700)).toBe('translate(405px, 512px)');
+    });
+
+    it('is pulled inside the window when it fits in neither place, and 8 px in from the side', async () => {
+      // Above: 60 - 128 is out of the window; below: 780 + 8 + 120 is past it. It can only cover its part, at the window's top.
+      expect(await placed(60, 780, 1100)).toBe('translate(922px, 8px)');
+    });
+  });
+});
+
+describe('the pointer and the keyboard\'s focus on different parts', () => {
+  const focusable = () => vi.spyOn(HTMLElement.prototype, 'matches').mockImplementation(function (this: HTMLElement, selector: string) { return selector === ':focus-visible'; });
+
+  it('keeps a part marked while the keyboard\'s focus is on it after the pointer has been on it and left', async () => {
+    focusable();
     const map = draw(withNeeds());
-    const box = { left: 1100, right: 1180, top: 700, bottom: 760, width: 80, height: 60, x: 1100, y: 700, toJSON: () => ({}) };
-    vi.spyOn(part(map, 'part-a'), 'getBoundingClientRect').mockReturnValue(box);
-    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(270);
-    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(120);
-    window.innerWidth = 1200;
-    window.innerHeight = 800;
-    await userEvent.hover(part(map, 'part-a'));
-    await shown();
-    // Too low to fit under its part, so above it; too near the right edge, so pulled in to 8 px.
-    expect((document.querySelector('.ws-tip') as HTMLElement).style.transform).toBe('translate(922px, 572px)');
+    act(() => part(map, 'part-d').focus());
+    await userEvent.hover(part(map, 'part-d'));
+    await userEvent.unhover(part(map, 'part-d'));
+    expect(marked(map)).toEqual(['part-a', 'part-b']);
+    await waitFor(() => expect(tip()).toEqual(['A part with copies behind it.', 'Needs Part A, Part B', 'Needed by Part E']));
+    fireEvent.blur(part(map, 'part-d'));
+    expect(marked(map)).toEqual([]);
+    expect(faint(map)).toEqual([]);
+    expect(document.querySelector('.ws-tip')).toBeNull();
+  });
+
+  it('marks the pointer\'s part when the focus is on another, and the focus\'s part again once the pointer leaves', async () => {
+    focusable();
+    const map = draw(withNeeds());
+    act(() => part(map, 'part-d').focus());
+    await userEvent.hover(part(map, 'part-e'));
+    expect(marked(map)).toEqual(['part-a', 'part-d']);
+    await waitFor(() => expect(tip()[0]).toBe('A wide bar under the drawing.'));
+    await userEvent.unhover(part(map, 'part-e'));
+    expect(marked(map)).toEqual(['part-a', 'part-b']);
+    await waitFor(() => expect(tip()[0]).toBe('A part with copies behind it.'));
+  });
+
+  it('keeps the pointer\'s part marked when the focus arrives on another, and clears everything once both have left', async () => {
+    focusable();
+    const map = draw(withNeeds());
+    await userEvent.hover(part(map, 'part-e'));
+    act(() => part(map, 'part-d').focus());
+    expect(marked(map)).toEqual(['part-a', 'part-d']);
+    await userEvent.unhover(part(map, 'part-e'));
+    expect(marked(map)).toEqual(['part-a', 'part-b']);
+    fireEvent.blur(part(map, 'part-d'));
+    expect(marked(map)).toEqual([]);
+    expect(map.querySelector('.ws-stage')).not.toHaveClass('relating');
   });
 });
 

@@ -1,7 +1,7 @@
 // A list that holds features and decisions shows the features first, under their heading.
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Boundary } from './Boundary';
 import { buildData, DECISIONS, FEATURES } from './fixtures';
 import { mockApi, renderApp, rowButton } from './test-support';
@@ -17,6 +17,8 @@ const oneKind = () => buildData({
 });
 
 describe('a part with features and decisions', () => {
+  afterEach(() => { Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView'); });
+
   it('lists its features under "Features", then its decisions under "Decisions", each in the order of order.json', async () => {
     mockApi();
     history.replaceState(null, '', '/workshop#part-d');
@@ -36,20 +38,28 @@ describe('a part with features and decisions', () => {
     expect([...document.querySelectorAll('.ws-detail .ws-tally')].map((tally) => tally.textContent?.replace(/ /g, ' '))).toEqual(['7 not decided', 'Decisions: 2 not decided']);
   });
 
-  it('opens a row named by the address where it now stands, and opening or closing a row moves none', async () => {
+  it('opens a row named by the address where it now stands and scrolls to that row alone, and opening or closing a row moves none', async () => {
+    const scrolled: string[] = [];
+    // jsdom has no scrollIntoView; the page calls it on the row it brings into view.
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value(this: HTMLElement) { scrolled.push(this.id); } });
     mockApi();
     history.replaceState(null, '', '/workshop#part-a/core-in-zig');
     await renderApp();
     await waitFor(() => expect(rowButton('Which language is the core written in')).toHaveAttribute('aria-expanded', 'true'));
+    await waitFor(() => expect(scrolled).toEqual(['entry-core-in-zig']));
     expect(within(screen.getByRole('region', { name: 'Decisions' })).getByRole('button', { name: /^Which language/ })).toBeInTheDocument();
-    const before = names();
-    expect(before).toEqual(['The engine runs on its own', 'Every call defined once', 'Which language is the core written in?']);
+    const items = () => [...document.querySelectorAll('.ws-detail .ws-item')].map((item) => item.id);
+    // The row opened from the address and the two features above it, in their places.
+    const before = items();
+    expect(before).toEqual(['entry-core', 'entry-calls', 'entry-core-in-zig']);
+    expect(names()).toEqual(['The engine runs on its own', 'Every call defined once', 'Which language is the core written in?']);
     await userEvent.click(rowButton('The engine runs on its own'));
     expect(rowButton('The engine runs on its own')).toHaveAttribute('aria-expanded', 'true');
-    expect(names()).toEqual(before);
+    expect(items()).toEqual(before);
     await userEvent.click(rowButton('The engine runs on its own'));
     await userEvent.click(rowButton('Which language is the core written in'));
-    expect(names()).toEqual(before);
+    expect(items()).toEqual(before);
+    expect(names()).toEqual(['The engine runs on its own', 'Every call defined once', 'Which language is the core written in?']);
   });
 });
 

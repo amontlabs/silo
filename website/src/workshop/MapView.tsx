@@ -91,42 +91,47 @@ export function MapView({ layout, groups, folded, current, onOpen }: MapViewProp
   const states = new Map(groups.map((group) => [group.part.id, group.state]));
   const byId = new Map(groups.map((group) => [group.part.id, group]));
   const titles = new Map(groups.map((group) => [group.part.id, group.part.title]));
-  // The part under the pointer or holding the keyboard's focus: the parts it needs are marked, and those that neither it
-  // needs nor need it fade. Only on the full map; the strip marks and fades nothing.
-  const [active, setActive] = useState<string | null>(null);
+  // The part under the pointer and the one holding the keyboard's focus. While either is on a part, that part is the active one,
+  // the pointer's winning when they differ: the parts it needs are marked, and those that neither it needs nor need it fade.
+  // Only on the full map; the strip marks and fades nothing. The marks go when neither is on a part.
+  const [pointer, setPointer] = useState<string | null>(null);
+  const [focus, setFocus] = useState<string | null>(null);
+  const active = pointer ?? focus;
   const related = active && !folded ? byId.get(active)?.part : undefined;
-  const [tip, setTip] = useState<{ head: string; needs: string; neededBy: string; x: number; top: number; bottom: number; below: boolean } | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const [tip, setTip] = useState<{ head: string; needs: string; neededBy: string; x: number; top: number; bottom: number } | null>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);
-  // Centred on its part and kept 8 px inside the window, above or below its part by what fits; it is as tall as its lines.
+  // Centred on its part and kept 8 px inside the window. It never covers its part while it fits below it, or else above it;
+  // it is as tall as its lines, and is pulled inside the window only when it fits in neither place.
   useLayoutEffect(() => {
     const node = tipRef.current;
     if (!node || !tip) return;
     const { offsetWidth: width, offsetHeight: height } = node;
     const left = Math.max(8, Math.min(innerWidth - width - 8, tip.x - width / 2));
-    const below = tip.below && tip.bottom + 8 + height <= innerHeight - 8;
-    const top = Math.max(8, Math.min(innerHeight - height - 8, below ? tip.bottom + 8 : tip.top - height - 8));
+    const lowest = innerHeight - height - 8;
+    const below = tip.bottom + 8;
+    const above = tip.top - height - 8;
+    const top = below <= lowest ? below : above >= 8 ? above : Math.max(8, Math.min(lowest, above));
     node.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
   }, [tip]);
-  useEffect(() => () => clearTimeout(timer.current), []);
-
-  const showTip = (target: HTMLElement, group: PartGroup) => {
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
+  // The tip of the active part shows after 240 ms, and goes when the active part changes or none is left.
+  useEffect(() => {
+    setTip(null);
+    if (!active) return;
+    const timer = setTimeout(() => {
+      const group = byId.get(active);
+      const target = [...(stageRef.current?.querySelectorAll<HTMLElement>('.ws-part') ?? [])].find((node) => node.dataset.part === active);
+      if (!group || !target) return;
       const box = target.getBoundingClientRect();
       const head = folded ? `${group.part.title}. ${group.part.line}` : group.part.line;
-      setTip({ head, needs: titlesOf(group.part.needs, titles), neededBy: titlesOf(group.part.neededBy, titles), x: box.left + box.width / 2, top: box.top, bottom: box.bottom, below: box.height < 200 });
+      setTip({ head, needs: titlesOf(group.part.needs, titles), neededBy: titlesOf(group.part.neededBy, titles), x: box.left + box.width / 2, top: box.top, bottom: box.bottom });
     }, 240);
-  };
-  const hideTip = () => {
-    clearTimeout(timer.current);
-    setTip(null);
-    setActive(null);
-  };
+    return () => clearTimeout(timer);
+  }, [active, folded]);
 
   return (
     <section className="ws-mapsec" aria-label="Silo, part by part">
-      <div className={['ws-stage', folded ? 'fold' : '', related ? 'relating' : '', groups.length ? '' : 'ws-stage-empty'].filter(Boolean).join(' ')}>
+      <div ref={stageRef} className={['ws-stage', folded ? 'fold' : '', related ? 'relating' : '', groups.length ? '' : 'ws-stage-empty'].filter(Boolean).join(' ')}>
         {groups.length ? null : <p className="ws-quiet">No part yet.</p>}
         {layout.zones.map((zone) => (
           // A zone with no folded place stays where it is and fades out as the map folds.
@@ -163,9 +168,9 @@ export function MapView({ layout, groups, folded, current, onOpen }: MapViewProp
             <button
               type="button" key={id} data-part={id} className={classes} style={style(placeStyle(place.full, place.fold, place))}
               aria-label={spoken(group, titles)} aria-current={on ? 'true' : undefined}
-              onClick={() => { hideTip(); onOpen(id); }}
-              onMouseEnter={(event) => { setActive(id); showTip(event.currentTarget, group); }} onMouseLeave={hideTip}
-              onFocus={(event) => { if (focusVisible(event.currentTarget)) { setActive(id); showTip(event.currentTarget, group); } }} onBlur={hideTip}
+              onClick={() => { setPointer(null); setFocus(null); onOpen(id); }}
+              onMouseEnter={() => setPointer(id)} onMouseLeave={() => setPointer((now) => (now === id ? null : now))}
+              onFocus={(event) => { if (focusVisible(event.currentTarget)) setFocus(id); }} onBlur={() => setFocus((now) => (now === id ? null : now))}
             >
               <span className="ws-p-ttl">{group.part.title}</span>
               <span className="ws-p-st"><i className="ws-mk" /><span>{stateWords(group)}</span></span>
