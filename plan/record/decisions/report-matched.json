@@ -1,20 +1,13 @@
 {
   "asks": "Which word says that the facts agree with a report?",
   "answer": "\"Matched\" and \"mismatch\" for a report that the facts agree or disagree with.",
-  "sets": [
-    {
-      "in": "words",
-      "word": "matched",
-      "means": "An opinion about a report: the facts agree with it. The report stays unverified."
-    },
-    {
-      "in": "words",
-      "word": "mismatch",
-      "means": "An opinion about a report: the facts disagree with it."
-    }
+  "adds": [
+    "matched",
+    "mismatch"
   ],
   "suggest": {
     "verdict": "take",
     "why": "\"Verified\" would say the report is true, and Silo only knows that two accounts agree."
-  }
+  },
+  "verdict": "take"
 }
