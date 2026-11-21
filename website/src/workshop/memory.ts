@@ -1,4 +1,4 @@
-// What the browser remembers between visits, so the first frame already shows them: the last live state the page
+// What the browser remembers between visits, so the first frame already shows them: the view and the order used last, the last live state the page
 // showed (its own confirmed writes applied) and who was signed in. Without storage the page waits for the server.
 import { hasSessionHint } from './api';
 import type { Me } from './api';
@@ -19,16 +19,11 @@ function isIssue(value: unknown): boolean {
     && (value.entry === null || typeof value.entry === 'string');
 }
 
-function isLatest(value: unknown): boolean {
-  return isObject(value) && typeof value.n === 'number' && typeof value.entry === 'string' && typeof value.author === 'string' && typeof value.createdAt === 'string';
-}
-
 /** A state with the shape the page reads, whatever wrote it. One without `threads`, from before entries had them, is not shown. */
 export function isState(value: unknown): value is LiveState {
   return isObject(value) && typeof value.repo === 'string' && typeof value.fetchedAt === 'string' && Number.isFinite(Date.parse(value.fetchedAt))
     && isObject(value.issues) && Object.values(value.issues).every(isIssue)
-    && isObject(value.threads) && Object.values(value.threads).every((n) => typeof n === 'number' && Number.isSafeInteger(n))
-    && (value.latest === undefined || (Array.isArray(value.latest) && value.latest.every(isLatest)));
+    && isObject(value.threads) && Object.values(value.threads).every((n) => typeof n === 'number' && Number.isSafeInteger(n));
 }
 
 function read(key: string): unknown {
@@ -56,7 +51,8 @@ function write(key: string, value: unknown) {
 export function recallState(now: number): LiveState | null {
   const state = read(STATE);
   if (!isState(state) || now - Date.parse(state.fetchedAt) > MEMORY_MS) return null;
-  const { old: _old, ...rest } = state;
+  // A state an older page stored may hold the list of the latest comments, which this page does not read.
+  const { old: _old, latest: _latest, ...rest } = state as LiveState & { latest?: unknown };
   return rest;
 }
 
@@ -75,4 +71,22 @@ export function recallPerson(): Me | null {
 
 export function rememberPerson(person: Me | null) {
   write(PERSON, person ? { login: person.login, avatar: person.avatar } : null);
+}
+
+const VIEW = 'silo-workshop-view';
+
+/** The view and All's order a person used last, so a plain address shows them again. */
+export interface Habit {
+  view: 'map' | 'all';
+  order: 'build' | 'latest';
+}
+
+export function recallHabit(): Habit | null {
+  const habit = read(VIEW);
+  if (!isObject(habit) || (habit.view !== 'map' && habit.view !== 'all') || (habit.order !== 'build' && habit.order !== 'latest')) return null;
+  return { view: habit.view, order: habit.order };
+}
+
+export function rememberHabit(habit: Habit) {
+  write(VIEW, habit);
 }

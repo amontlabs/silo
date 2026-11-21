@@ -185,7 +185,6 @@ describe('a row with no thread yet', () => {
 describe('a feature written from a suggestion', () => {
   const state = () => ok(liveState(
     { 31: issue({ kind: 'suggestion', title: 'Share a base computer', up: 14, comments: 1, author: 'mara-k', bot: false }) },
-    [],
     { fork: 31 },
   ));
 
@@ -199,7 +198,7 @@ describe('a feature written from a suggestion', () => {
     history.replaceState(null, '', '/workshop#part-d');
     window.dispatchEvent(new HashChangeEvent('hashchange'));
     const row = await screen.findByRole('button', { name: /^Fork a computer/ });
-    expect(within(row.closest('.ws-item') as HTMLElement).getByRole('link', { name: /14 votes/ })).toBeInTheDocument();
+    expect((row.closest('.wa-item') as HTMLElement).querySelector('.wa-side')).toHaveTextContent('👍 14');
   });
 
   it('loads the comments of that issue when opened', async () => {
@@ -375,13 +374,14 @@ describe('votes on comments', () => {
 });
 
 describe('Latest', () => {
-  it('is always on the page, in the strip and as a place, whatever the state', async () => {
+  it('is an order of All, there whatever the state', async () => {
     history.replaceState(null, '', '/workshop');
-    mockApi({ state: () => ok(liveState({}, [], {})) });
+    mockApi({ state: () => ok(liveState({}, {})) });
     await renderApp();
-    const link = screen.getByRole('link', { name: 'Latest' });
-    await userEvent.click(link);
-    expect(await screen.findByRole('heading', { name: 'Latest' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'All' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Latest' }));
+    expect(screen.getByRole('button', { name: 'Latest' })).toHaveAttribute('aria-pressed', 'true');
+    expect(location.search).toBe('?view=all&order=latest');
   });
 });
 
@@ -394,7 +394,7 @@ describe('what an older page remembered', () => {
     mockApi();
     await renderApp();
     const row = itemOf('Create and delete a computer');
-    expect(within(row).getByRole('link', { name: /12 votes/ })).toBeInTheDocument();
+    expect(row.querySelector('.wa-side')).toHaveTextContent('👍 12');
     expect(JSON.parse(localStorage.getItem('silo-workshop-state') as string)).toHaveProperty('threads');
   });
 
@@ -403,7 +403,7 @@ describe('what an older page remembered', () => {
     history.replaceState(null, '', '/workshop#part-b');
     mockApi();
     await renderApp();
-    expect(within(itemOf('Create and delete a computer')).getByRole('link', { name: /30 votes/ })).toBeInTheDocument();
+    expect(itemOf('Create and delete a computer').querySelector('.wa-side')).toHaveTextContent('👍 30');
     void apiConfig;
     void visitor;
   });
@@ -511,7 +511,7 @@ describe('writes to a decision or a feature', () => {
 describe('an address that names a suggestion that became a feature', () => {
   it('opens the feature, where it lives, and rewrites the address', async () => {
     mockApi({
-      state: () => ok(liveState({ 31: issue({ kind: 'suggestion', title: 'Share a base computer', up: 14, author: 'mara-k', bot: false }) }, [], { fork: 31 })),
+      state: () => ok(liveState({ 31: issue({ kind: 'suggestion', title: 'Share a base computer', up: 14, author: 'mara-k', bot: false }) }, { fork: 31 })),
     });
     history.replaceState(null, '', '/workshop#suggested/issue-31');
     await renderApp();

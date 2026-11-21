@@ -53,8 +53,9 @@ export const visitor: Me = { login: 'mara-k', avatar: '' };
 export function rowButton(name: string) {
   return screen.getByRole('button', { name: new RegExp(`^${name}`) });
 }
+/** The item of a row: All's rows (`.wa-item`) and the suggestions' (`.ws-item`). */
 export function itemOf(name: string) {
-  return rowButton(name).closest('.ws-item') as HTMLElement;
+  return rowButton(name).closest('.wa-item, .ws-item') as HTMLElement;
 }
 export function part(id: string) {
   return document.querySelector<HTMLButtonElement>(`.ws-part[data-part="${id}"]`) as HTMLButtonElement;

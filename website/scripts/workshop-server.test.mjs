@@ -1040,9 +1040,6 @@ test('a comment a person writes through the Workshop is not the bot\'s, though G
     const comments = (await c.call('GET', 'issue?n=1')).json.comments;
     assert.equal(comments.find((x) => x.text === 'Written by a person.').bot, false);
     assert.equal(comments.find((x) => x.text === 'By the App.').bot, true);
-    const latest = (await c.call('GET', 'state')).json.latest;
-    assert.equal(latest.find((x) => x.text === 'Written by a person.')?.bot, false);
-    assert.equal(latest.find((x) => x.text === 'By the App.')?.bot, true);
   } finally { await t.close(); }
 });
 
@@ -1067,41 +1064,14 @@ test('a comment of the Workshop App is an ordinary comment: marked as the bot\'s
   } finally { await t.close(); }
 });
 
-test('state: latest is the newest 30 comments across entries, newest first, each with its first line', async () => {
-  // Here no entry of the plan was written from the suggestion #6, so its comments are not an entry's.
-  const t = await setup({ entries: PLAN_ENTRIES.filter((entry) => !entry.suggestedIn) });
+test('state: holds no list of the latest comments', async () => {
+  const t = await setup();
   try {
-    t.fake.addComment(6, 'visitor-fake', 'On a suggestion, not listed.', START + 500_000);
-    let at = START + 1000;
-    for (let i = 0; i < 12; i += 1) {
-      const target = 1 + (i % 3);
-      if (i % 2 === 0) t.fake.addComment(target, null, `Bot line ${i}`, at);
-      else t.fake.addComment(target, 'visitor-fake', `\n\nLine ${i} ${'y'.repeat(200)}\nsecond line`, at);
-      at += 1000;
-    }
-    for (let i = 0; i < 25; i += 1) { t.fake.addComment(2, 'visitor-fake', `Filler ${i}`, at); at += 1000; }
+    t.fake.addComment(1, 'visitor-fake', 'A comment.', START + 1000);
     const c = t.client();
     await settle(t, c);
     const state = (await c.call('GET', 'state')).json;
-    assert.equal(Object.hasOwn(state.issues[6], 'latest'), false);
-    assert.equal(state.latest.length, 30);
-    const times = state.latest.map((x) => x.createdAt);
-    assert.deepEqual(times, [...times].sort().reverse(), 'newest first');
-    assert.equal(state.latest[0].text, 'Filler 24');
-    assert.ok(state.latest.every((x) => ['engine-service', 'calls-and-events', 'vm-runtime'].includes(x.entry)), 'entries only');
-    assert.ok(state.latest.every((x) => [1, 2, 3].includes(x.n)));
-    assert.ok(state.latest.every((x) => typeof x.text === 'string' && !Object.hasOwn(x, 'change')), 'every line has its text and none a change');
-    const numbers = new Map([[1, 'engine-service'], [2, 'calls-and-events'], [3, 'vm-runtime']]);
-    assert.ok(state.latest.every((x) => x.entry === numbers.get(x.n)));
-    // Older ones fall off: the 30 newest are 25 fillers and the last 5 of the 12.
-    const rest = state.latest.slice(25);
-    assert.equal(rest.length, 5);
-    assert.ok(rest.some((x) => x.bot === true && x.text.startsWith('Bot line')), 'a comment of the App is listed as a comment');
-    const long = rest.find((x) => x.text?.startsWith('Line'));
-    assert.ok(long, 'a person comment shows its first non-empty line');
-    assert.equal(long.text.length <= 140, true);
-    assert.equal(long.bot, false);
-    assert.equal(long.author, 'visitor-fake');
+    assert.equal(Object.hasOwn(state, 'latest'), false);
   } finally { await t.close(); }
 });
 

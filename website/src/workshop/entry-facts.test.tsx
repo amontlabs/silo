@@ -137,39 +137,12 @@ describe('what a taken entry added', () => {
 });
 
 describe('what an entry needs', () => {
-  it('lists each need by its question or its name, as a link to where it lives, with its state word', async () => {
+  // Relations are drawn by the strip and the lit rows, never written in the opened row.
+  it('is not listed in the opened row, even when it needs entries of other parts', async () => {
     const item = await openFrom('#part-b/fork-keeps', 'Keep a fork apart');
-    const part = within(item).getByText('Needs').closest('.ws-fact') as HTMLElement;
-    const links = within(part).getAllByRole('link');
-    expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
-      ['How is security built?', '#product/security-properly'],
-      ['Which way do changes go?', '#part-d/one-way'],
-      ['The engine runs on its own', '#part-a/core'],
-    ]);
-    expect([...part.querySelectorAll('li')].map((li) => li.textContent)).toEqual([
-      'How is security built? decided',
-      'Which way do changes go? not decided',
-      'The engine runs on its own decided',
-    ]);
-  });
-
-  it('opens a need of another part where it lives', async () => {
-    const item = await openFrom('#part-b/fork-keeps', 'Keep a fork apart');
-    await userEvent.click(within(item).getByRole('link', { name: 'Which way do changes go?' }));
-    await waitFor(() => expect(location.hash).toBe('#part-d/one-way'));
-    expect(rowButton('Which way do changes go?')).toHaveAttribute('aria-expanded', 'true');
-  });
-
-  it('opens a need of the whole product where it lives', async () => {
-    const item = await openFrom('#part-b/fork-keeps', 'Keep a fork apart');
-    await userEvent.click(within(item).getByRole('link', { name: 'How is security built?' }));
-    await waitFor(() => expect(location.hash).toBe('#product/security-properly'));
-    expect(rowButton('How is security built?')).toHaveAttribute('aria-expanded', 'true');
-  });
-
-  it('shows no part for an entry that needs nothing', async () => {
-    const item = await openFrom('#part-b/create', 'Create and delete a computer');
+    await within(item).findByText('Must keep');
     expect(within(item).queryByText('Needs')).not.toBeInTheDocument();
+    expect(within(item).queryByRole('link', { name: 'Which way do changes go?' })).not.toBeInTheDocument();
   });
 });
 
@@ -212,10 +185,10 @@ describe('the order of the parts', () => {
     inOrder(item, labels);
   });
 
-  it('goes: the body, needs, what it must keep, where it shows, then the state', async () => {
+  it('goes: the body, what it must keep, where it shows, then the state', async () => {
     const item = await openFrom('#part-b/fork-keeps', 'Keep a fork apart');
     await within(item).findByText('Must keep');
-    const labels = ['A fork shares nothing', 'Needs', 'Must keep', 'Where it shows', 'Not decided.'];
+    const labels = ['A fork shares nothing', 'Must keep', 'Where it shows', 'Not decided.'];
     inOrder(item, labels);
   });
 

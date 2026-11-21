@@ -292,7 +292,6 @@ test('suggested_in: an entry written from a suggestion keeps the suggestion\'s i
     assert.equal(created(t).length, 0);
     const state = (await c.call('GET', 'state')).json;
     assert.equal(state.threads['share-link'], 6);
-    assert.deepEqual([state.latest[0].n, state.latest[0].entry], [6, 'share-link']);
     // An issue that is not a Workshop suggestion is no thread: the entry gets its own.
     const own = await c.call('POST', 'comment', { body: { entry: 'not-from-one', text: 'x' } });
     assert.notEqual(own.json.n, 7);
@@ -310,7 +309,6 @@ test('several issues for one id: the lowest number is the thread, and the others
     const c = await signedIn(t);
     const state = (await c.call('GET', 'state')).json;
     assert.equal(state.threads['fork-computers'], low);
-    assert.equal(state.latest.some((x) => x.n === high), false);
     const answer = await c.call('POST', 'comment', { body: { entry: 'fork-computers', text: 'Here.' } });
     assert.equal(answer.json.n, low);
     assert.equal(created(t).length, 0);

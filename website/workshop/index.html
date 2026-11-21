@@ -20,9 +20,9 @@
       setTimeout(() => document.documentElement.classList.remove('fonts-pending'), 1200);
     </script>
     <script>
-      // The built page holds the plain view's markup. At any other address (a part, Order, a sign-in that
-      // failed), what is under the title row stays hidden, its room kept, until the script draws that place, so
-      // no frame shows the plain map first. When a script fails to load, or the script has not taken over after
+      // The built page holds the plain view's markup. At any other address (a part, All, a sign-in that
+      // failed), and at the plain address when the person left the page on All (memory.ts), what is under the title
+      // row stays hidden, its room kept, until the script draws that place, so no frame shows the plain map first. When a script fails to load, or the script has not taken over after
       // 4 s, the page stays as the build drew it: everything shows (ws-bare), the drawn sign-in included.
       (() => {
         const root = document.documentElement;
@@ -31,7 +31,11 @@
           root.classList.remove('ws-hold');
           root.classList.add('ws-bare');
         };
-        if (location.hash.length > 1 || location.search) root.classList.add('ws-hold');
+        let recalled = false;
+        try {
+          recalled = JSON.parse(localStorage.getItem('silo-workshop-view') || 'null')?.view === 'all';
+        } catch { /* Storage is optional. */ }
+        if (location.hash.length > 1 || location.search || recalled) root.classList.add('ws-hold');
         setTimeout(bare, 4000);
         addEventListener('error', (event) => { if (event.target instanceof HTMLScriptElement) bare(); }, true);
       })();

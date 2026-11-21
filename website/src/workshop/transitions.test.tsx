@@ -1,4 +1,4 @@
-// Moves between places (opening a part or a tile, Map/Order, Full map, Escape, Back, an address followed), run in
+// Moves between places (opening a part or a tile, Map/All, Full map, Escape, Back, an address followed), run in
 // sequences on a clock that is faked, and taps during a view transition.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -10,7 +10,7 @@ import { partTitle, itemOf, mockApi, owner, part, posts, renderApp, rowButton, t
 type Mode = 'finishing' | 'failing' | 'absent';
 type Move =
   | { kind: 'open'; part: string }
-  | { kind: 'view'; to: 'map' | 'order' }
+  | { kind: 'view'; to: 'map' | 'all' }
   | { kind: 'full-map' }
   | { kind: 'escape' }
   | { kind: 'back' }
@@ -66,11 +66,13 @@ function shownPart(): string {
   if (!document.querySelector('.ws-detail')) return '';
   return document.querySelector('.ws-tile.on')?.getAttribute('data-part') ?? '?';
 }
-const shownView = () => (rootOf().classList.contains('v-order') ? 'order' : 'map');
-const addressView = () => (new URLSearchParams(location.search).get('view') === 'order' ? 'order' : 'map');
+const shownView = () => (rootOf().classList.contains('v-all') ? 'all' : 'map');
+const addressView = () => (new URLSearchParams(location.search).get('view') === 'all' ? 'all' : 'map');
 
 /** The app on a fresh page, with the clock faked from the start so that every timer it makes can be run. */
 async function mount() {
+  // A fresh page: nothing remembered from a run before, such as the view used last.
+  localStorage.clear();
   history.replaceState(null, '', '/workshop');
   vi.useFakeTimers();
   mockApi();
@@ -85,6 +87,7 @@ async function mount() {
  * Whatever else a settled page carries is a state that was left behind.
  */
 async function atRest(hash: string, search: string) {
+  localStorage.clear();
   history.replaceState(null, '', `/workshop${search}${hash}`);
   vi.useFakeTimers();
   mockApi();
@@ -129,7 +132,7 @@ describe('moves between places', () => {
       const after = pick(GAPS);
       const roll = rand();
       if (roll < 0.35) return { kind: 'open', part: pick(PARTS), after } as Step;
-      if (roll < 0.5) return { kind: 'view', to: pick(['map', 'order'] as const), after };
+      if (roll < 0.5) return { kind: 'view', to: pick(['map', 'all'] as const), after };
       if (roll < 0.62) return { kind: 'full-map', after };
       if (roll < 0.74) return { kind: 'escape', after };
       if (roll < 0.86) return { kind: 'back', after };
@@ -137,18 +140,18 @@ describe('moves between places', () => {
     });
   }
   const open = (part: string, after = 0): Step => ({ kind: 'open', part, after });
-  const view = (to: 'map' | 'order', after = 0): Step => ({ kind: 'view', to, after });
+  const view = (to: 'map' | 'all', after = 0): Step => ({ kind: 'view', to, after });
   const named: [string, Step[]][] = [
-    ['a part clicked while the view swaps', [view('order'), open('part-d')]],
-    ['a part, then another after the first has landed', [open('part-b', 600), open('part-d', 600), view('order', 600), view('map')]],
+    ['a part clicked while the view swaps', [view('all'), open('part-d')]],
+    ['a part, then another after the first has landed', [open('part-b', 600), open('part-d', 600), view('all', 600), view('map')]],
     ['the full map taken again and again', [open('part-b', 600), { kind: 'full-map', after: 600 }, open('part-d', 400), { kind: 'full-map', after: 0 }, open('part-a'), { kind: 'full-map', after: 0 }, open('part-e', 20)]],
     ['a second move while the first waits for its view transition', [open('part-a'), open('part-b', 10), { kind: 'escape', after: 10 }, open('part-d', 0)]],
     ['an address that is followed while a view transition waits', [open('part-a'), { kind: 'address', part: 'part-b', after: 5 }]],
-    ['Escape and Back after a view', [open('part-b', 600), view('order', 600), { kind: 'escape', after: 600 }, { kind: 'back', after: 600 }, view('map', 0), { kind: 'back', after: 0 }]],
-    ['Order and a tile while the map unfolds', [open('part-b', 600), { kind: 'full-map', after: 0 }, view('order', 135), open('part-d')]],
-    ['Back to an entry without the view', [open('part-b', 600), view('order', 600), { kind: 'back', after: 600 }]],
-    ['Back to an entry without the view, then Order', [open('part-b', 600), view('order', 600), { kind: 'back', after: 600 }, view('order', 600)]],
-    ['Back while the view swaps', [open('part-b', 600), view('order', 20), { kind: 'back', after: 600 }]],
+    ['Escape and Back after a view', [open('part-b', 600), view('all', 600), { kind: 'escape', after: 600 }, { kind: 'back', after: 600 }, view('map', 0), { kind: 'back', after: 0 }]],
+    ['All while the map unfolds, then a part', [open('part-b', 600), { kind: 'full-map', after: 0 }, view('all', 135), open('part-d')]],
+    ['Back to an entry without the view', [open('part-b', 600), view('all', 600), { kind: 'back', after: 600 }]],
+    ['Back to an entry without the view, then All', [open('part-b', 600), view('all', 600), { kind: 'back', after: 600 }, view('all', 600)]],
+    ['Back while the view swaps', [open('part-b', 600), view('all', 20), { kind: 'back', after: 600 }]],
     ['the part being left opened again while the map unfolds', [open('part-b', 600), { kind: 'full-map', after: 60 }, open('part-b', 600)]],
     ['the part being left opened again at once', [open('part-b', 600), { kind: 'escape', after: 10 }, open('part-b', 600)]],
     ['Escape again while the map unfolds', [open('part-b', 600), { kind: 'escape', after: 100 }, { kind: 'escape', after: 60 }]],
@@ -165,9 +168,8 @@ describe('moves between places', () => {
     // What a settled page's root carries, for each of the four kinds of address.
     const rest: Record<string, string[]> = {
       'full-map map': await atRest('', ''),
-      'full-map order': await atRest('', '?view=order'),
+      'full-map all': await atRest('', '?view=all'),
       'part map': await atRest('#part-b', ''),
-      'part order': await atRest('#part-b', '?view=order'),
     };
     const moving = new Set<string>();
     try {
@@ -181,7 +183,7 @@ describe('moves between places', () => {
           const push = vi.spyOn(history, 'pushState');
           // What the last move that took effect asks for; null where the address decides (after Back).
           let place: string | null = '';
-          let wanted: 'map' | 'order' | null = 'map';
+          let wanted: 'map' | 'all' | null = 'map';
           let depth = 0;
           let heldHeight = false;
           // When the going-back under way lands: as it started, never later. Null when none is under way.
@@ -193,7 +195,7 @@ describe('moves between places', () => {
           };
           // A new move lets go at once of the height a going-back kept, before anything has settled.
           const released = () => expect(rootOf().style.minHeight, `${where}: the page height is let go when a move starts`).toBe('');
-          const note = () => { for (const name of classesOf()) if (!rest['full-map map'].includes(name) && !rest['part order'].includes(name)) moving.add(name); };
+          const note = () => { for (const name of classesOf()) if (!rest['full-map map'].includes(name) && !rest['part map'].includes(name) && !rest['full-map all'].includes(name)) moving.add(name); };
           for (const step of steps) {
             landed();
             const here = shownPart();
@@ -211,9 +213,11 @@ describe('moves between places', () => {
             };
             // Read before the move, so that the entries it pushes at once are counted too.
             const before = push.mock.calls.length;
-            if (step.kind === 'open') {
-              const tiles = !config.wide || rootOf().classList.contains('v-order');
-              const button = tiles ? tile(step.part) : part(step.part);
+            const inAll = rootOf().classList.contains('v-all');
+            if (step.kind === 'open' && inAll) {
+              // All has no map and no tiles: there is no part to press.
+            } else if (step.kind === 'open') {
+              const button = !config.wide ? tile(step.part) : part(step.part);
               act(() => { fireEvent.click(button); });
               if (here !== step.part) {
                 place = step.part;
@@ -226,8 +230,19 @@ describe('moves between places', () => {
                 released();
               } else goBack();
             } else if (step.kind === 'view') {
-              act(() => { fireEvent.click(screen.getByRole('button', { name: step.to === 'order' ? 'Order' : 'Map' })); });
+              const was = shownView();
+              act(() => { fireEvent.click(screen.getByRole('button', { name: step.to === 'all' ? 'All' : /^Map/ })); });
+              // A press of the view shown, while no place is shown, changes nothing (a move waiting for its view transition
+              // still lands); any other shows that view on its plain view, and drops a move that waits.
+              if (!(step.to === was && here === '')) {
+                place = '';
+                landsAt = null;
+                released();
+              }
               wanted = step.to;
+            } else if ((step.kind === 'full-map' || step.kind === 'escape') && inAll) {
+              // All has no going-back: Escape there closes a menu, and there is no Full map.
+              if (step.kind === 'escape') act(() => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
             } else if (step.kind === 'full-map' || step.kind === 'escape') {
               const back = document.querySelector<HTMLButtonElement>('.ws-back');
               if (step.kind === 'full-map' && back) act(() => { fireEvent.click(back); });
@@ -248,7 +263,7 @@ describe('moves between places', () => {
             } else {
               act(() => { history.pushState(null, '', `/workshop${location.search}${hashOf(step.part)}`); dispatchEvent(new PopStateEvent('popstate')); });
               place = step.part;
-              // An address followed names its view, as on a fresh load.
+              // An address followed names its view, as on a fresh load; a part's place is on the map's side.
               wanted = addressView();
               landsAt = null;
               released();
@@ -275,17 +290,20 @@ describe('moves between places', () => {
           // The view shown is the one the address names, and the one last chosen unless Back decided it.
           expect(shownView(), `${where}: the view the address names`).toBe(addressView());
           if (wanted !== null) expect(shownView(), `${where}: the view last chosen`).toBe(wanted);
-          expect(screen.getByRole('button', { name: shownView() === 'order' ? 'Order' : 'Map' }), `${where}: the pressed button`).toHaveAttribute('aria-pressed', 'true');
+          expect(screen.getByRole('button', { name: shownView() === 'all' ? 'All' : /^Map/ }), `${where}: the pressed button`).toHaveAttribute('aria-pressed', 'true');
           // Nothing is left half done: no state class beyond those of a page at rest, no height kept, all in sight.
           expect(classesOf(), `${where}: the classes of a page at rest`).toEqual(rest[`${named ? 'part' : 'full-map'} ${shownView()}`]);
           expect(rootOf().style.minHeight, `${where}: no height kept`).toBe('');
           expect(rootOf().style.height, `${where}: no height set`).toBe('');
-          for (const node of [rootOf(), screen.getByRole('heading', { level: 1, name: 'Workshop' }), document.querySelector('.ws-swap-map'), document.querySelector('.ws-swap-order')]) {
-            expect(node, `${where}: the title and the map are there`).not.toBeNull();
-            expect(hiddenInline(node), `${where}: the title and the map are in sight`).toBe(false);
+          const shown = shownView() === 'all' ? [document.querySelector('.wa-list')] : [document.querySelector('.ws-swap-map'), document.querySelector('.ws-swap-order')];
+          for (const node of [rootOf(), screen.getByRole('heading', { level: 1, name: 'Workshop' }), ...shown]) {
+            expect(node, `${where}: the title and the view are there`).not.toBeNull();
+            expect(hiddenInline(node), `${where}: the title and the view are in sight`).toBe(false);
           }
-          expect(document.querySelectorAll('.ws-swap-map .ws-part').length, `${where}: the map has its parts`).toBeGreaterThan(0);
-          expect(document.querySelectorAll('.ws-swap-order .ws-tile').length, `${where}: the tiles are there`).toBeGreaterThan(0);
+          if (shownView() === 'map') {
+            expect(document.querySelectorAll('.ws-swap-map .ws-part').length, `${where}: the map has its parts`).toBeGreaterThan(0);
+            expect(document.querySelectorAll('.ws-swap-order .ws-tile').length, `${where}: the tiles are there`).toBeGreaterThan(0);
+          }
           // Later timers change nothing: the address stays what it was.
           await elapse(10_000);
           expect(location.href, `${where}: the address after the last move`).toBe(address);
@@ -310,67 +328,51 @@ describe('Back, Forward and Escape', () => {
     delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
   });
 
-  it('moves the focus out of the view that Back or Forward hides, to the same part in the one shown', async () => {
+  it('moves between a part and All with Back and Forward, the view the address names each time', async () => {
     screenOf({ motion: false, wide: true, mode: 'absent' });
     await mount();
     act(() => { fireEvent.click(part('part-b')); });
-    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
-    act(() => tile('part-b').focus());
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'All' })); });
+    expect(shownView()).toBe('all');
+    expect(location.search).toBe('?view=all');
     act(() => history.back());
     await elapse(1);
     expect(shownView()).toBe('map');
-    expect(document.activeElement).toBe(part('part-b'));
+    expect(location.hash).toBe('#part-b');
+    expect(shownPart()).toBe('part-b');
     act(() => history.forward());
     await elapse(1);
-    expect(shownView()).toBe('order');
-    expect(document.activeElement).toBe(tile('part-b'));
-    // The focus outside the panel that is hidden stays where it is: a link of the title row, the Order button.
-    const latest = screen.getByRole('link', { name: 'Latest' });
-    act(() => latest.focus());
-    act(() => history.back());
-    await elapse(1);
-    expect(shownView()).toBe('map');
-    expect(document.activeElement).toBe(latest);
-    const order = screen.getByRole('button', { name: 'Order' });
-    act(() => order.focus());
-    act(() => history.forward());
-    await elapse(1);
-    expect(shownView()).toBe('order');
-    expect(document.activeElement).toBe(order);
+    expect(shownView()).toBe('all');
+    expect(document.querySelector('.ws-detail')).toBeNull();
   });
 
   it('keeps the focus on a link of the title row that Back or Forward leaves on the page', async () => {
     screenOf({ motion: false, wide: true, mode: 'absent' });
     await mount();
-    // The full map in Map, a part in Order, then the full map again in Order.
+    // The full map, a part, then All.
     act(() => { fireEvent.click(part('part-b')); });
-    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
-    act(() => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'All' })); });
+    // Back to the part, then Forward to All: "Suggest a feature" shows in both.
+    act(() => history.back());
     await elapse(1);
-    expect(location.hash).toBe('');
-    expect(shownView()).toBe('order');
-    // Back to the full map in Map, then Forward to the full map in Order: "Suggest a feature" shows in both.
-    act(() => history.go(-2));
-    await elapse(1);
-    expect(shownView()).toBe('map');
+    expect(location.hash).toBe('#part-b');
     const suggest = screen.getByRole('link', { name: 'Suggest a feature' });
     act(() => suggest.focus());
-    act(() => history.go(2));
+    act(() => history.forward());
     await elapse(1);
-    expect(location.hash).toBe('');
-    expect(shownView()).toBe('order');
+    expect(shownView()).toBe('all');
     expect(document.activeElement).toBe(suggest);
-    // Back to the full map in Map with the focus on Latest; Forward to the part keeps the row on the page.
+    // Back to the full map with the focus on Product; Forward to the part keeps the link on the page.
     act(() => history.go(-2));
     await elapse(1);
     expect(location.hash).toBe('');
     expect(shownView()).toBe('map');
-    const latest = screen.getByRole('link', { name: 'Latest' });
-    act(() => latest.focus());
+    const product = screen.getByRole('link', { name: 'Product' });
+    act(() => product.focus());
     act(() => history.forward());
     await elapse(1);
     expect(location.hash).toBe('#part-b');
-    expect(document.activeElement).toBe(latest);
+    expect(document.activeElement).toBe(product);
   });
 
   it('drops a going-back when Back leads to an address that is not known yet', async () => {
@@ -427,6 +429,7 @@ describe('a tap during a view transition', () => {
     act(() => run());
     await userEvent.click(rowButton('Create and delete a computer'));
     expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'true');
+    await userEvent.click(rowButton('Run a command'));
     await userEvent.click(within(itemOf('Run a command')).getByRole('button', { name: /4 votes/ }));
     await waitFor(() => expect(posts(calls, 'vote')).toHaveLength(1));
     await wait(50);
@@ -631,7 +634,7 @@ describe('going back from a place reached by its address', () => {
     document.documentElement.classList.remove('vt-open', 'vt-back');
   });
 
-  it.each([['#latest', 'Latest'], ['#product', 'Product'], ['#left', /^Left out/], ['#suggested', 'Suggest a feature']] as const)('from %s gives the focus to the link of the title row that leads there, brought into view at once', async (hash, name) => {
+  it.each([['#product', 'Product'], ['#suggested', 'Suggest a feature']] as const)('from %s gives the focus to the link of the title row that leads there, brought into view at once', async (hash, name) => {
     narrow();
     let update: () => void = () => {};
     (document as unknown as { startViewTransition: unknown }).startViewTransition = (run: () => void) => {
@@ -664,12 +667,12 @@ describe('going back from a place reached by its address', () => {
       return { finished: new Promise(() => {}), ready: Promise.resolve(), skipTransition() {} };
     };
     mockApi();
-    history.replaceState(null, '', '/workshop#latest');
+    history.replaceState(null, '', '/workshop#product');
     await renderApp();
     await userEvent.click(document.querySelector<HTMLElement>('.ws-back')!);
-    // The plain view the update draws has no link to Latest.
+    // The plain view the update draws has no link to Product.
     const find = document.querySelector.bind(document);
-    vi.spyOn(document, 'querySelector').mockImplementation(((selector: string) => (selector === '.ws-places a[href="#latest"]' ? null : find(selector))) as typeof document.querySelector);
+    vi.spyOn(document, 'querySelector').mockImplementation(((selector: string) => (selector === '.ws-places a[href="#product"]' ? null : find(selector))) as typeof document.querySelector);
     act(() => update());
     expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Workshop' }));
   });
@@ -693,11 +696,11 @@ describe('going back off the map without a view transition', () => {
     vi.spyOn(window, 'scrollTo').mockImplementation(((options: unknown) => { scrolls.push(options); }) as typeof window.scrollTo);
     mockApi();
     await renderApp();
-    // The tile of the part left is 200 px above the window once back; the link to Latest is 450 px below it.
+    // The tile of the part left is 200 px above the window once back; the link to Product is 450 px below it.
     const plain = HTMLElement.prototype.getBoundingClientRect;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       if (this.matches('.ws-tile[data-part="part-b"]')) return { x: 0, y: -200, top: -200, left: 0, right: 200, bottom: -120, width: 200, height: 80, toJSON() {} } as DOMRect;
-      if (this.matches('.ws-places a[href="#latest"]')) return { x: 0, y: 1200, top: 1200, left: 0, right: 80, bottom: 1218, width: 80, height: 18, toJSON() {} } as DOMRect;
+      if (this.matches('.ws-places a[href="#product"]')) return { x: 0, y: 1200, top: 1200, left: 0, right: 80, bottom: 1218, width: 80, height: 18, toJSON() {} } as DOMRect;
       return plain.call(this);
     });
     await userEvent.click(tile('part-b'));
@@ -708,147 +711,14 @@ describe('going back off the map without a view transition', () => {
     expect(document.activeElement).toBe(tile('part-b'));
     expect(scrolls).toEqual([{ top: 300, behavior: 'instant' }]);
     // A place reached by its address: the link of the title row that leads to it.
-    history.replaceState(null, '', '/workshop#latest');
+    history.replaceState(null, '', '/workshop#product');
     act(() => { dispatchEvent(new PopStateEvent('popstate')); });
-    expect(shownPart()).not.toBe('');
+    expect(document.querySelector('.ws-detail')).not.toBeNull();
     scrolls.length = 0;
     await userEvent.click(document.querySelector<HTMLElement>('.ws-back')!);
-    expect(document.activeElement).toBe(screen.getByRole('link', { name: 'Latest' }));
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: 'Product' }));
     expect(scrolls).toEqual([{ top: 500 + 1218 - innerHeight, behavior: 'instant' }]);
     expect(started).toEqual([]);
-  });
-});
-
-describe('Map and Order with a place open', () => {
-  /** The slides the page starts, through the browser's `animate`, which jsdom lacks. */
-  type Slide = { node: HTMLElement; keyframes: Keyframe[]; cancel: ReturnType<typeof vi.fn>; commitStyles: ReturnType<typeof vi.fn> };
-  let slides: Slide[] = [];
-  function slideRecorder() {
-    slides = [];
-    Object.defineProperty(HTMLElement.prototype, 'animate', {
-      configurable: true,
-      value(this: HTMLElement, keyframes: Keyframe[]) {
-        const slide = { node: this, keyframes, cancel: vi.fn(), commitStyles: vi.fn(), finished: new Promise(() => {}) };
-        slides.push(slide);
-        return slide;
-      },
-    });
-  }
-  /** The folded map is 93 px taller than the strip of tiles: the place is that much lower in Map. */
-  function placeAt() {
-    const plain = HTMLElement.prototype.getBoundingClientRect;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      if (!this.matches('.ws-detail')) return plain.call(this);
-      const top = rootOf().classList.contains('v-map') ? 353 : 260;
-      return { x: 0, y: top, top, left: 0, right: 1000, bottom: top + 900, width: 1000, height: 900, toJSON() {} } as DOMRect;
-    });
-  }
-  const slideOf = (node: Element | null) => slides.filter((slide) => slide.node === node);
-  async function openPart() {
-    screenOf({ motion: true, wide: true, mode: 'absent' });
-    slideRecorder();
-    await mount();
-    act(() => { fireEvent.click(part('part-b')); });
-    await elapse(600);
-    placeAt();
-    return document.querySelector<HTMLElement>('.ws-detail')!;
-  }
-  afterEach(() => {
-    cleanup();
-    vi.useRealTimers();
-    vi.restoreAllMocks();
-    delete (HTMLElement.prototype as Partial<HTMLElement>).animate;
-  });
-
-  it('swaps the strip alone: the place stays in sight and slides from where it was to its new height', async () => {
-    const detail = await openPart();
-    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
-    // The strip fades out; the place is not part of the swap.
-    expect(classesOf()).toContain('strip-out');
-    expect(classesOf()).not.toContain('swap-out');
-    await elapse(130);
-    expect(shownView()).toBe('order');
-    expect(classesOf()).toContain('strip-in');
-    expect(document.querySelector('.ws-detail')).toBe(detail);
-    // It starts 93 px lower, where it was, and slides to its place.
-    expect(slideOf(detail).map((slide) => slide.keyframes)).toEqual([[{ translate: '0 93px' }, { translate: '0 0' }]]);
-    await elapse(300);
-    expect(classesOf()).not.toContain('strip-in');
-  });
-
-  it('slides without taking the place\'s own transitions: Escape meanwhile ends the slide and lets the place fade', async () => {
-    const detail = await openPart();
-    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
-    await elapse(130);
-    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Map' })); });
-    await elapse(130);
-    expect(shownView()).toBe('map');
-    expect(slideOf(detail)).toHaveLength(2);
-    // Under way: nothing is written over the stylesheet's transitions.
-    expect(detail.style.transition).toBe('');
-    act(() => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
-    expect(classesOf()).toContain('ws-leaving');
-    expect(slideOf(detail)[1].cancel).toHaveBeenCalled();
-    expect(detail.style.transition).toBe('');
-    expect(detail.style.translate).toBe('');
-  });
-
-  it('decides what swaps when it applies: a place opened meanwhile slides, a place closed meanwhile gets the whole swap', async () => {
-    screenOf({ motion: true, wide: true, mode: 'absent' });
-    slideRecorder();
-    await mount();
-    placeAt();
-    // On the plain view, Order pressed, then Product at once: the place is open when the swap applies.
-    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
-    expect(classesOf()).toContain('swap-out');
-    act(() => { fireEvent.click(screen.getByRole('link', { name: 'Product' })); });
-    expect(location.hash).toBe('#product');
-    expect(classesOf()).toContain('strip-out');
-    expect(classesOf()).not.toContain('swap-out');
-    await elapse(130);
-    expect(classesOf()).toContain('strip-in');
-    expect(slideOf(document.querySelector('.ws-detail'))).toHaveLength(1);
-    await elapse(400);
-    // With the place open, Map pressed, then the place closed at once: the plain view swaps whole, nothing slides.
-    slides = [];
-    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Map' })); });
-    expect(classesOf()).toContain('strip-out');
-    act(() => { fireEvent.click(screen.getByRole('link', { name: 'Product' })); });
-    await elapse(130);
-    expect(shownPart()).toBe('');
-    expect(classesOf()).toContain('swap-in');
-    expect(classesOf()).not.toContain('strip-in');
-    expect(slides).toEqual([]);
-  });
-
-  it('ends the slide at once on Back or Forward, and holds it where it is for a second press', async () => {
-    const detail = await openPart();
-    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
-    await elapse(130);
-    const first = slideOf(detail)[0];
-    // A second press during the slide: it stops where it is (held), and the next slide starts from there.
-    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Map' })); });
-    expect(first.commitStyles).toHaveBeenCalled();
-    expect(first.cancel).toHaveBeenCalled();
-    await elapse(130);
-    const second = slideOf(detail)[1];
-    expect(second).toBeDefined();
-    // Back of the browser during that slide: it ends at once, and the place stays where the page puts it.
-    act(() => history.back());
-    await elapse(1);
-    expect(second.cancel).toHaveBeenCalled();
-    expect(second.commitStyles).not.toHaveBeenCalled();
-    expect(document.querySelector<HTMLElement>('.ws-detail')?.style.translate ?? '').toBe('');
-  });
-
-  it('keeps the whole swap on the plain view', async () => {
-    screenOf({ motion: true, wide: true, mode: 'absent' });
-    await mount();
-    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
-    expect(classesOf()).toContain('swap-out');
-    expect(classesOf()).not.toContain('strip-out');
-    await elapse(130);
-    expect(classesOf()).toContain('swap-in');
   });
 });
 

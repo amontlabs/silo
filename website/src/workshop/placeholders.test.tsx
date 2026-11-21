@@ -9,14 +9,13 @@ import { describe, expect, it } from 'vitest';
 import { App } from './App';
 import type { Comment } from './api';
 import { buildData, issue, liveState } from './fixtures';
-import { LATEST_GHOSTS } from './Latest';
 import { detail, itemOf, mockApi, ok, owner, rowButton } from './test-support';
 import type { Reply } from './test-support';
 
-// The placeholders' class names, read from the code that draws them: ws-ph (and ws-ph-*), a ghost, a held place.
+// The placeholders' class names, read from the code that draws them: ws-ph and wa-ph (and their -*), a ghost, a held place.
 const dir = join(process.cwd(), 'src/workshop');
 const sources = readdirSync(dir).filter((file) => /\.tsx$/.test(file) && !/\.test\.|^test-support/.test(file));
-const NAME = /\bws-(?:ph(?:-[a-z]+)?|[a-z]+-ghost|held)\b/g;
+const NAME = /\b(?:ws-(?:ph(?:-[a-z]+)?|[a-z]+-ghost|held)|wa-ph(?:-[a-z]+)?)\b/g;
 const classes = [...new Set(sources.flatMap((file) => readFileSync(join(dir, file), 'utf8').match(NAME) ?? []))];
 const PLACEHOLDER = classes.map((name) => `.${name}`).join(',');
 
@@ -43,12 +42,12 @@ type Visit = { name: string; hash: string; opens?: string; holds: Holds; signedI
 const VISITS: Visit[] = [
   { name: 'rows and an open entry, state and me asked', hash: '#part-b', opens: 'Create and delete a computer', holds: { state: true, me: true }, signedIn: true },
   { name: 'suggestions, state and me asked', hash: '#suggested', holds: { state: true, me: true }, signedIn: true },
-  { name: 'Latest, state and me asked', hash: '#latest', holds: { state: true, me: true }, signedIn: true },
+  { name: 'All, state and me asked', hash: '?view=all', holds: { state: true, me: true }, signedIn: true },
   { name: 'rows and an open entry, state asked, signed out', hash: '#part-b', opens: 'Create and delete a computer', holds: { state: true }, signedIn: false },
   { name: 'suggestions, state asked, signed out', hash: '#suggested', holds: { state: true }, signedIn: false },
   { name: 'an open entry with no thread, state and me asked', hash: '#part-d', opens: 'One silo command', holds: { state: true, me: true }, signedIn: true },
   { name: 'an open entry with no thread, state asked, signed out', hash: '#part-d', opens: 'One silo command', holds: { state: true }, signedIn: false },
-  { name: 'Latest, state asked, signed out', hash: '#latest', holds: { state: true }, signedIn: false },
+  { name: 'All, state asked, signed out', hash: '?view=all', holds: { state: true }, signedIn: false },
   { name: 'suggest form, only me asked', hash: '#suggested', holds: { me: true }, signedIn: true },
   { name: 'rows, only me asked', hash: '#part-b', holds: { me: true }, signedIn: true },
   { name: 'the thread of an open entry, only its comments asked', hash: '#part-b', opens: 'Create and delete a computer', holds: { issue: true }, signedIn: true },
@@ -82,7 +81,7 @@ async function hold(visit: Visit) {
   // Like the page: the account is drawn in a slot of the header, which the page marks busy.
   const slot = document.body.appendChild(document.createElement('div'));
   render(<App data={buildData()} accountSlot={slot} />);
-  await waitFor(() => expect(document.getElementById('ws-part-title')).not.toBeNull());
+  await waitFor(() => expect(document.querySelector('#ws-part-title, .wa-list')).not.toBeNull());
   if (!visit.holds.state) await waitFor(() => expect(document.querySelector('.ws[data-live="answered"]')).not.toBeNull());
   if (visit.opens) fireEvent.click(rowButton(visit.opens));
   const release = async () => {
@@ -103,7 +102,7 @@ async function hold(visit: Visit) {
 
 describe('placeholders while the page waits', () => {
   it('reads the placeholder class names from the code', () => {
-    expect(classes).toEqual(expect.arrayContaining(['ws-ph', 'ws-ph-vote', 'ws-ph-account', 'ws-ph-shape', 'ws-ph-row', 'ws-h-ghost', 'ws-c-ghost', 'ws-latest-ghost', 'ws-held']));
+    expect(classes).toEqual(expect.arrayContaining(['ws-ph', 'ws-ph-vote', 'ws-ph-account', 'ws-ph-shape', 'ws-ph-row', 'ws-h-ghost', 'ws-c-ghost', 'wa-ph', 'wa-ph-side', 'ws-held']));
   });
 
   for (const visit of VISITS) {
@@ -133,17 +132,21 @@ describe('placeholders while the page waits', () => {
       await release();
       leave();
     }
-    // The notes' and the history's placeholders wait on a chunk, not on an answer, and are held by a busy container of their own.
-    expect(classes.filter((name) => !all.has(name) && name !== 'ws-ph-notes' && name !== 'ws-h-ghost')).toEqual([]);
+    // The notes' and the history's placeholders wait on a chunk, and a film's on its frame, not on an answer; each is held
+    // by a busy container of its own.
+    expect(classes.filter((name) => !all.has(name) && !['ws-ph-notes', 'ws-h-ghost', 'wa-ph-film'].includes(name))).toEqual([]);
   });
 
-  it('holds one place per number, per line of the thread and per line of Latest', async () => {
-    // Numbers: one placeholder per vote that arrives.
+  it('holds one place per number and per line of the thread', async () => {
+    // Numbers: one placeholder per row's votes, and the opened row's thumb.
     let release = await hold(visitOf('rows and an open entry, state and me'));
-    const slots = document.querySelectorAll('.ws-detail .ws-item .ws-ph-vote').length;
+    const slots = document.querySelectorAll('.ws-detail .wa-item > .wa-row > .wa-side > .wa-ph-side').length;
+    const thumbs = document.querySelectorAll('.ws-detail .wa-item .ws-ph-vote').length;
     await release();
-    expect(slots).toBeGreaterThan(0);
-    expect(document.querySelectorAll('.ws-detail .ws-item .ws-vote')).toHaveLength(slots);
+    expect(slots).toBe(document.querySelectorAll('.ws-detail .wa-item > .wa-row > .wa-side').length);
+    expect(thumbs).toBe(1);
+    // The opened row's own thumb, beside its state (its comments have thumbs of their own).
+    expect(document.querySelectorAll('.ws-detail .wa-item .ws-state .ws-vote')).toHaveLength(thumbs);
     leave();
     // The thread: one per comment it will hold.
     release = await hold(visitOf('the thread'));
@@ -152,12 +155,6 @@ describe('placeholders while the page waits', () => {
     await release();
     await waitFor(() => expect(item.querySelectorAll('.ws-c').length).toBeGreaterThan(0));
     expect(ghosts).toBe(item.querySelectorAll('.ws-c').length);
-    leave();
-    // Latest: the number the code declares.
-    release = await hold(visitOf('Latest, state and me'));
-    expect(document.querySelectorAll('.ws-latest-ghost')).toHaveLength(LATEST_GHOSTS);
-    expect(screen.queryByText('Nothing yet.')).not.toBeInTheDocument();
-    await release();
   });
 
   it('keeps "Sign in to suggest" and "Sign in to comment" at hand while signed out, and says offline only for a failed load', async () => {

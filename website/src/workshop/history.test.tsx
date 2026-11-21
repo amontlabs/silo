@@ -245,30 +245,6 @@ describe('the chunk of changes', () => {
   });
 });
 
-describe('Latest with changes', () => {
-  it('lists the changes with the comments by time, each line opening its entry, and loads the chunk itself', async () => {
-    const load = vi.fn(() => Promise.resolve({
-      shells: [change(3, new Date(Date.now() - 1_800_000).toISOString(), ['started'])],
-      core: [change(2, new Date(Date.now() - 3_600_000).toISOString(), ['taken'])],
-      'core-in-zig': [change(1, new Date(Date.now() - 7_200_000).toISOString(), ['text'])],
-    }));
-    mockApi({ me: owner });
-    window.history.replaceState(null, '', '/workshop#latest');
-    await renderApp(buildData(), undefined, undefined, load);
-    const rows = await waitFor(() => {
-      const found = [...document.querySelectorAll<HTMLAnchorElement>('.ws-latest a.ws-row')];
-      expect(found).toHaveLength(3);
-      return found;
-    });
-    expect(load).toHaveBeenCalledTimes(1);
-    expect(rows.map((row) => row.getAttribute('href'))).toEqual(['#part-c/shells', '#part-a/core', '#part-a/core-in-zig']);
-    expect(rows.map((row) => row.querySelector('.ws-sub')?.textContent)).toEqual(['Being built', 'Decided', 'Text changed']);
-    expect(rows.map((row) => row.querySelector('.ws-word')?.textContent)).toEqual(['just now', '1 hour ago', '2 hours ago']);
-    await userEvent.click(rows[2]);
-    await waitFor(() => expect(rowButton(ZIG)).toHaveAttribute('aria-expanded', 'true'));
-  });
-});
-
 describe('the data of the page', () => {
   it('holds for each entry only its last change and their number, never the texts', () => {
     const text = { before: { title: 'OLD TITLE', body: 'OLD BODY' }, after: { title: 'NEW TITLE', body: 'NEW BODY' } };

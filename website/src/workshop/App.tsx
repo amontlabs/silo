@@ -1,22 +1,30 @@
-// The Workshop: the drawing of Silo (tiles on narrow screens), an opened part under it, and its entries
-// opening in place. The places that are not parts (Product, Latest, Left out, the suggestions) are a row of links in
-// the title row. Addresses follow routes.ts; the live state and every write live in useWorkshop.ts.
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+// The Workshop: the drawing of Silo (tiles on narrow screens) with the films' line above it, an opened part or film
+// under it, and All, every feature and decision in the order they are built. Entries open in place. Product and the
+// suggestions are places too, linked from the title row, which also holds the search and the switch between the map
+// and All. Addresses follow routes.ts and all.ts; the live state and every write live in useWorkshop.ts.
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal, flushSync } from 'react-dom';
+import { allSections, filmSections, formatQuery, graphOf, locate, NO_QUERY, parseQuery, partSections, productSections, rowKeyOf } from './all';
+import type { Query, Section, View } from './all';
+import { AllView } from './AllView';
 import { loginUrl } from './api';
 import type { Me } from './api';
-import { LeftPlace, PartPlace, ProductPlace } from './PartView';
-import { LatestPlace } from './Latest';
+import { FilmPlace, PartPlace, ProductPlace } from './PartView';
+import type { PlaceList } from './PartView';
 import type { EntryContext } from './Entry';
+import { FilmsLine, Icon } from './Films';
 import { MapView } from './MapView';
 import { FOLD_HEIGHT, hasMap, MAP_WIDTH } from './map';
+import { recallHabit, rememberHabit } from './memory';
 import { statusLine } from './plan';
-import type { PartState, BuildData, Facts, Histories, Notes } from './plan';
-import { formatHash, HOME, placeFrom, resolveHash, samePlace } from './routes';
+import type { BuildData, Facts, Histories, Notes, Row } from './plan';
+import { relationStore } from './relation';
+import { formatHash, HOME, placeFrom, resolveHash, rowHash, rowsOf, samePlace } from './routes';
 import type { Place } from './routes';
 import { SuggestPlace } from './Suggest';
 import { Tiles } from './Tiles';
+import { Tips } from './Tips';
 import { useWorkshop } from './useWorkshop';
 
 export interface AppProps {
@@ -53,27 +61,19 @@ const noNotes = () => Promise.resolve({});
 const noFacts = () => Promise.resolve({ entries: {}, statements: {} });
 const noHistory = () => Promise.resolve({});
 
-type View = 'map' | 'order';
 /** What the page uses of the browser's `ViewTransition`. */
 type ViewTransitionLike = { finished: Promise<void>; ready?: Promise<void>; skipTransition?: () => void };
 /** `bring`: what takes the focus is brought into view at once (going back off the map). */
-type Focus = { kind: 'title' } | { kind: 'part'; part: string; bring?: boolean } | { kind: 'selector'; selector: string; bring?: boolean } | { kind: 'row'; key: string; reveal?: boolean } | { kind: 'reveal'; key: string };
+type Focus = { kind: 'title' } | { kind: 'part'; part: string; bring?: boolean } | { kind: 'selector'; selector: string; bring?: boolean } | { kind: 'row'; key: string; reveal?: boolean; again?: boolean } | { kind: 'reveal'; key: string; again?: boolean };
 
 const LEAVE_MS = 140;
 /** How long what just arrived is marked, for its fade in (about 150 ms). */
 const ARRIVE_MS = 400;
 const ACCOUNT_WIDTH = 'silo-workshop-account-width';
-const SWAP_MS = 130;
-/** How long the place takes to slide to its new height when Map and Order swap with it open. */
-const SLIDE_MS = 260;
 /** At most how long the map stays pinned under the header after going back from a scrolled part. */
 const PIN_MS = 1500;
 /** How long the map takes to fold, and an entry to open. */
 const FOLD_MS = 440;
-/** The header's key: a state's mark and word, shown only when a part is in that state. The map's own key says what a dashed line means. */
-const KEY: [PartState, string, string][] = [
-  ['built', 'ws-pip built', 'built'], ['building', 'ws-pip building', 'being built'], ['next', 'ws-pip next', 'next'], ['decided', 'ws-pip decided', 'decided'],
-];
 
 function media(query: string, fallback: boolean): boolean {
   return typeof matchMedia === 'function' ? matchMedia(query).matches : fallback;
@@ -119,11 +119,6 @@ function useArrival(on: boolean, boot: boolean): boolean {
   return arriving;
 }
 
-/** An item of the key; one that appears after the first frames fades in. */
-function KeyItem({ mark, label, boot }: { mark: string; label: string; boot: boolean }) {
-  const [fade] = useState(!boot);
-  return <li className={fade ? 'ws-in' : undefined}><i className={mark} />{label}</li>;
-}
 
 /**
  * The line under the title; a line that appears or changes after the first frames fades in. On the plain view it also
@@ -168,23 +163,84 @@ function SignIn({ href }: { href: string }) {
   );
 }
 
-// At build time there is no address: the plain view. Without a map, the tiles are all there is.
-const viewFrom = (map: boolean): View => (!map || (typeof location !== 'undefined' && new URLSearchParams(location.search).get('view') === 'order') ? 'order' : 'map');
-const address = (hash = '') => `${location.pathname}${location.search}${hash}`;
+
+/**
+ * The view and All's query the address asks for. A plain address shows the view and the order the person used last
+ * (memory.ts); at build time there is no address and nothing remembered: the map.
+ */
+function fromAddress(): { view: View; query: Query; recalled: boolean } {
+  if (typeof location === 'undefined') return { view: 'map', query: NO_QUERY, recalled: false };
+  const asked = parseQuery(location.search);
+  const plain = !location.search && location.hash.length <= 1;
+  const habit = plain ? recallHabit() : null;
+  const view = asked.view ?? habit?.view ?? 'map';
+  const order = asked.order ?? (habit && view === 'all' ? habit.order : 'build');
+  return { view, query: { ...asked.query, order }, recalled: Boolean(habit && view === 'all') };
+}
+const address = (search: string, hash = '') => `${location.pathname}${search}${hash}`;
+
+/** The search of the title row: an icon until pressed, then a field. Typing shows All with the matches. */
+function Search({ value, open, onOpen, onChange, onClose }: { value: string; open: boolean; onOpen: () => void; onChange: (text: string) => void; onClose: () => void }) {
+  const field = useRef<HTMLInputElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  // Escape in the field gives the focus back to the search button once it is drawn again.
+  const back = useRef(false);
+  useEffect(() => {
+    if (open) field.current?.focus();
+  }, [open]);
+  const closed = !open && !value;
+  useEffect(() => {
+    if (!closed || !back.current) return;
+    back.current = false;
+    button.current?.focus();
+  }, [closed]);
+  if (closed) {
+    return <button type="button" ref={button} className="wa-ctl icon wa-searchctl" aria-label="Search" data-tip="Search" data-kbd="/" onClick={onOpen}><Icon name="search" /></button>;
+  }
+  return (
+    <label className="wa-search">
+      <Icon name="search" />
+      <input
+        ref={field} type="search" value={value} aria-label="Search" placeholder="Search"
+        onChange={(event) => onChange(event.target.value)}
+        onBlur={() => { if (!value) onClose(); }}
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape') return;
+          event.stopPropagation();
+          back.current = true;
+          onChange('');
+          onClose();
+        }}
+      />
+      {value ? <button type="button" className="wa-x" aria-label="Clear the search" onClick={() => { onChange(''); field.current?.focus(); }}><Icon name="x" /></button> : null}
+    </label>
+  );
+}
 
 export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistory = noHistory, accountSlot }: AppProps) {
   const mapped = hasMap(data.map);
-  const initialView = () => viewFrom(mapped);
+  const [first] = useState(fromAddress);
   const [place, setPlace] = useState<Place>(HOME);
-  // Rows open independently; `openKey` is the one opened last: the address, Enter and the guard follow it.
+  // Rows open independently. Being open belongs to the entry, by its row's key, not to one drawing of it: a decision
+  // opened under its feature is open wherever the list draws it. `openKey` is the one opened last: the address follows
+  // it. `openAt` is the drawing of it last opened or found (all.ts `underKey`), whose relations are drawn.
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [openKeys, setOpenKeys] = useState<ReadonlySet<string>>(new Set());
+  const [openAt, setOpenAt] = useState<string | null>(null);
   const [openings, setOpenings] = useState(0);
-  const [view, setViewState] = useState<View>(initialView);
+  const [view, setViewState] = useState<View>(first.view);
+  const [query, setQueryState] = useState<Query>(first.query);
+  const [searching, setSearching] = useState(false);
+  // Features and bundles folded or unfolded by hand, and those whose "more" was pressed.
+  const [folds, setFolds] = useState<ReadonlyMap<string, boolean>>(new Map());
+  const [more, setMore] = useState<ReadonlySet<string>>(new Set());
+  // The film pointed at on the films' line: the map marks its parts.
+  const [filmPoint, setFilmPoint] = useState<string | null>(null);
+  const [store] = useState(relationStore);
+  const handlers = useRef<{ toggle: EntryContext['onToggle']; filmEntries: (film: string) => void }>({ toggle: () => {}, filmEntries: () => {} });
+  const stableToggle = useCallback<EntryContext['onToggle']>((row, instance) => handlers.current.toggle(row, instance), []);
+  const stableFilmEntries = useCallback((film: string) => handlers.current.filmEntries(film), []);
   const [leaving, setLeaving] = useState(false);
-  // Map and Order swapping. What swaps is read from what is shown at each render: on the plain view everything under the
-  // title row (`swap-*`), with a place open the strip alone (`strip-*`).
-  const [swap, setSwap] = useState<'out' | 'in' | null>(null);
   // After going back from a scrolled part on the map, the map stays pinned under the header until the scroll to the top
   // has brought its own place below that line: unpinned sooner, it would jump up, then come down with the scroll.
   const [pinned, setPinned] = useState(false);
@@ -198,12 +254,11 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   const openKeyRef = useRef<string | null>(null);
   const w = useWorkshop(data, openKey, openKeys, openings, loadNotes, loadFacts, loadHistory);
   const { plan, rowByKey, live } = w;
-  /** No state is shown and the first answer is still to come. */
-  const holding = !live.state && live.load === 'pending';
+  const graph = useMemo(() => graphOf(plan), [plan]);
+  const sections = useMemo(() => allSections(plan, graph, data.stages, query), [plan, graph, data.stages, query]);
   const focusNext = useRef<Focus | null>(null);
-  const wantedHash = useRef<string | null>(null);
-  /** A row named by the address while the live state loads; it opens once the state is there. */
-  const heldOpen = useRef<string | null>(null);
+  /** An address naming what has not arrived yet (a suggestion comes with the live state), and whether the browser's history gave it. */
+  const wantedHash = useRef<{ hash: string; fromHistory: boolean } | null>(null);
   const foldedAt = useRef(0);
   /** The scroll driven by the fold, from a scrolled full map. */
   const lift = useRef<{ frame: number; from: number; full: number } | null>(null);
@@ -213,18 +268,14 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   const heldHeight = useRef<ReturnType<typeof setTimeout>>(undefined);
   /** The count of the move that is a going-back; while no move came after it, that going-back is under way. */
   const goingBack = useRef(-1);
-  /** The control to focus once Back or Forward has shown the other view, when the focus was in the one hidden. */
-  const viewFocus = useRef<string | null>(null);
   /** The move whose view transition set the mark on `<html>` (`vt-open`, `vt-back`); -1 when none is set. */
   const markOwner = useRef(-1);
   /** True while a view transition's update runs: what it scrolls is set at once, before the new view is captured. */
   const inTransition = useRef(false);
   /** The browser's view transition of the last move that started one, until it ends or another move starts. */
   const transition = useRef<ViewTransitionLike | null>(null);
-  /** Where the place and the footer were on screen before Map and Order swapped with a place open, to slide from. */
-  const slideFrom = useRef<{ node: HTMLElement; top: number }[] | null>(null);
-  /** The slides of the place and the footer under way. */
-  const slides = useRef<Animation[]>([]);
+  const queryRef = useRef(query);
+  queryRef.current = query;
   // Once who is signed in is known, the account slot takes the width of what it holds (see workshop.css).
   useEffect(() => {
     if (!accountSlot) return;
@@ -248,12 +299,10 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   }, [accountSlot, w.me]);
 
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const swapTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const mainRef = useRef<HTMLDivElement>(null);
   useEffect(() => () => {
-    [...timers.current, ...swapTimers.current].forEach(clearTimeout);
+    timers.current.forEach(clearTimeout);
     clearTimeout(heldHeight.current);
-    endSlide();
     if (lift.current) cancelAnimationFrame(lift.current.frame);
     clearMark();
   }, []);
@@ -268,39 +317,66 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   useLayoutEffect(() => {
     if (accountSlot) accountSlot.classList.toggle('ws-arr-p', arrivedPerson);
   }, [accountSlot, arrivedPerson]);
+  // The row opened last draws its relations while the pointer and the focus are elsewhere.
+  useEffect(() => store.open(openAt), [store, openAt]);
 
   const shown: Place = place;
+  const isAll = view === 'all';
   const isHome = shown.kind === 'home';
-  /** Whether the plain view is shown, for what runs later than this render (the swap when it applies). */
-  const homeRef = useRef(isHome);
-  homeRef.current = isHome;
-  const onMap = () => view === 'map' && wide();
+  const onMap = () => !isAll && wide() && mapped;
 
-  /** Moves to a place, with at most the one row open. */
-  function settle(next: Place, key: string | null) {
+  /** The rows of a place as its list draws them, to find where an entry stands. */
+  const sectionsOf = (where: Place, inAll: boolean): Section[] => {
+    if (inAll) return sections;
+    if (where.kind === 'part') return partSections(graph, rowsOf(plan, where));
+    if (where.kind === 'product') return productSections(plan.product);
+    if (where.kind === 'film') return filmSections(graph, rowsOf(plan, where));
+    return [];
+  };
+  /** Where an entry stands in a list: the instance to open, its holder unfolded (and its "more" pressed) when it is under one. */
+  const standing = (key: string, where: Place, inAll: boolean): string => {
+    if (where.kind === 'suggested') return key;
+    const found = locate(sectionsOf(where, inAll), key, more);
+    if (!found) return key;
+    if (found.holder) {
+      const holder = found.holder;
+      setFolds((now) => (now.get(holder) === true ? now : new Map(now).set(holder, true)));
+      if (found.more) setMore((now) => new Set(now).add(holder));
+    }
+    return found.instance;
+  };
+
+  /** Moves to a place, with at most the one row open; `instance` is the drawing of it to show open (its own key by default). */
+  function settle(next: Place, key: string | null, instance: string | null = key) {
     timers.current.forEach(clearTimeout);
     timers.current = [];
-    heldOpen.current = null;
     setLeaving(false);
     setPlace(next);
     setOpenKey(key);
     setOpenKeys(key ? new Set([key]) : new Set());
+    setOpenAt(key ? instance : null);
     if (key) setOpenings((n) => n + 1);
     openKeyRef.current = key;
     navigations.current += 1;
   }
 
-  function address$(next: Place, key: string | null, push = false) {
-    const hash = formatHash(next, key);
-    if (hash === location.hash) return;
-    if (push) history.pushState(null, '', address(hash));
-    else history.replaceState(null, '', address(hash));
+  /** The address of what is shown: the view and All's query, then the place or, in All, the open row. */
+  function hashOf(next: Place, instance: string | null, inAll = isAll): string {
+    const row = instance ? rowByKey.get(rowKeyOf(instance)) : undefined;
+    if (inAll) return row ? rowHash(row) : '';
+    return formatHash(next, row ? row.key : null);
+  }
+  function address$(next: Place, instance: string | null, push = false, inAll = isAll, q = query) {
+    const target = address(formatQuery(location.search, inAll ? 'all' : 'map', q), hashOf(next, instance, inAll));
+    if (target === `${location.pathname}${location.search}${location.hash}`) return;
+    if (push) history.pushState(null, '', target);
+    else history.replaceState(null, '', target);
   }
 
-  function go(next: Place, key: string | null, options: { push?: boolean; focus?: Focus | null; announce?: string } = {}) {
-    address$(next, key, options.push);
-    if (next.kind === 'part' && shown.kind === 'home') foldedAt.current = Date.now();
-    settle(next, key);
+  function go(next: Place, instance: string | null, options: { push?: boolean; focus?: Focus | null; announce?: string } = {}) {
+    address$(next, instance, options.push);
+    if ((next.kind === 'part' || next.kind === 'film') && shown.kind === 'home') foldedAt.current = Date.now();
+    settle(next, instance);
     if (options.announce !== undefined) w.setAnnounce(options.announce);
     focusNext.current = options.focus ?? null;
   }
@@ -312,30 +388,9 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   }
 
   /**
-   * Ends the slide of the place and the footer at once, and drops one about to start. `hold` leaves them where they are
-   * on screen, for the next swap to slide from there; otherwise they land where the page puts them. Whatever ends a
-   * swap calls it: Back and Forward, a new move, another press of Map or Order. It only touches refs and the page.
-   */
-  function endSlide(hold = false) {
-    slideFrom.current = null;
-    for (const animation of slides.current) {
-      if (hold) {
-        try {
-          animation.commitStyles();
-        } catch {
-          // Not rendered: nothing to hold.
-        }
-      }
-      animation.cancel();
-    }
-    slides.current = [];
-    if (!hold) document.querySelectorAll<HTMLElement>('.ws-detail, .ws-foot').forEach((node) => { node.style.translate = ''; });
-  }
-
-  /**
    * A new move starts: what an earlier one left waiting (the end of going back, a view transition's update) never
-   * lands after it, its view transition ends at once with its mark, so no picture of it covers this move, the slide
-   * of a swap ends, and the height a going-back kept is let go at once. Returns this move's count.
+   * lands after it, its view transition ends at once with its mark, so no picture of it covers this move, and the
+   * height a going-back kept is let go at once. Returns this move's count.
    */
   function moveStarts(): number {
     // Counted first: the update of the transition skipped here, if the browser runs it now, finds it was overtaken.
@@ -344,7 +399,6 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     transition.current = null;
     overtaken?.skipTransition?.();
     clearMark();
-    endSlide();
     timers.current.forEach(clearTimeout);
     timers.current = [];
     clearTimeout(heldHeight.current);
@@ -392,22 +446,34 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     return mine;
   }
 
-  /** Opens a row: next to the open ones in this place, or alone where it lives. */
-  function openRow(key: string | null, options: { focus?: boolean; reveal?: boolean; push?: boolean; closing?: string } = {}) {
+  /**
+   * Opens an entry: next to the open ones where it stands now, or alone in the place where it lives. A link to an entry
+   * always opens it: in All when the list holds it, else in its own place (its part, Product, the suggestions).
+   * `instance` names the drawing pressed, when one was.
+   */
+  function openRow(key: string | null, options: { focus?: boolean; reveal?: boolean; push?: boolean; closing?: string; instance?: string } = {}) {
     const row = key ? rowByKey.get(key) : undefined;
     if (!row) {
       if (options.closing) closeRow(options.closing);
       return;
     }
-    const target = placeFrom(row, shown, plan);
-    if (!samePlace(target, shown)) {
+    const inList = isAll && (options.instance !== undefined || locate(sections, row.key, more) !== null);
+    const target = isAll ? (inList ? HOME : placeOf$(row)) : placeFrom(row, shown, plan);
+    if (!inList && (isAll || !samePlace(target, shown))) {
       w.fetchNow(row);
-      go(target, row.key, { push: options.push !== false, announce: `${row.name}, open`, focus: options.focus ? { kind: 'row', key: row.key, reveal: options.reveal !== false } : null });
+      if (isAll) setViewState('map');
+      const instance = standing(row.key, target, false);
+      address$(target, row.key, options.push !== false, false);
+      if ((target.kind === 'part' || target.kind === 'film') && shown.kind === 'home') foldedAt.current = Date.now();
+      settle(target, row.key, instance);
+      w.setAnnounce(`${row.name}, open`);
+      focusNext.current = options.focus ? { kind: 'row', key: instance, reveal: options.reveal !== false } : null;
       return;
     }
+    const instance = options.instance ?? standing(row.key, shown, isAll);
     // Asked for in the same event as the opening, so a failed early fetch shows as loading, not as an error.
     w.fetchNow(row);
-    address$(target, row.key);
+    address$(shown, row.key);
     setOpenKeys((current) => {
       const next = new Set(current);
       if (options.closing) next.delete(options.closing);
@@ -415,13 +481,14 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
       return next;
     });
     setOpenKey(row.key);
+    setOpenAt(instance);
     setOpenings((n) => n + 1);
     openKeyRef.current = row.key;
     w.setAnnounce(`${row.name}, open`);
-    focusNext.current = options.focus ? { kind: 'row', key: row.key, reveal: options.reveal !== false } : null;
+    focusNext.current = options.focus ? { kind: 'row', key: instance, reveal: options.reveal !== false } : null;
   }
 
-  /** Closes one row and leaves the others as they are. */
+  /** Closes one entry, wherever it is drawn, and leaves the others as they are. */
   function closeRow(key: string) {
     setOpenKeys((current) => {
       const next = new Set(current);
@@ -431,6 +498,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     if (openKey === key || openKeyRef.current === key) {
       address$(shown, null);
       setOpenKey(null);
+      setOpenAt(null);
       openKeyRef.current = null;
     }
   }
@@ -438,11 +506,12 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   function back() {
     // A going-back under way lands at its time: a second one (the button pressed twice, Escape again) changes nothing.
     if (isHome || backUnderWay()) return;
-    // The link of the title row that leads to the place being closed takes the focus, however the place was reached, or
-    // the page's title when there is none.
+    // What leads to the place being closed takes the focus, however the place was reached, or the page's title.
     // Off the map, with a view transition or without one, it is brought into view; the map has its own going-back.
     const bring = !onMap();
-    const focus: Focus = shown.kind === 'part' ? { kind: 'part', part: shown.part, bring } : { kind: 'selector', selector: `.ws-places a[href="${formatHash(shown)}"]`, bring };
+    const focus: Focus = shown.kind === 'part' ? { kind: 'part', part: shown.part, bring }
+      : shown.kind === 'film' ? { kind: 'selector', selector: `.wa-films [data-film="${shown.film}"]`, bring }
+        : { kind: 'selector', selector: `.ws-places a[href="${formatHash(shown)}"]`, bring };
     const finish = () => go(HOME, null, { push: true, focus, announce: '' });
     if (still()) {
       finish();
@@ -473,16 +542,29 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   }
 
   function openPlace(next: Place) {
-    if (samePlace(next, shown)) {
+    if (samePlace(next, shown) && !isAll) {
       // While going back from this place, its part or tile is a new move that keeps it open: the going-back is dropped.
       if (backUnderWay()) moveStarts();
       else back();
       return;
     }
+    if (isAll) {
+      // From All, a place opens on the map's side, at once.
+      moveStarts();
+      setViewState('map');
+      rememberHabit({ view: 'map', order: recallHabit()?.order ?? 'build' });
+      const title = next.kind === 'part' ? plan.parts.find((group) => group.part.id === next.part)?.part.title : null;
+      address$(next, null, true, false);
+      if (next.kind === 'part' || next.kind === 'film') foldedAt.current = Date.now();
+      settle(next, null);
+      w.setAnnounce(title ? `${title}, open` : '');
+      focusNext.current = { kind: 'title' };
+      return;
+    }
     // From a scrolled full map, the fold drives the scroll back to the top: each frame the page is scrolled in
     // proportion to how far the map has folded, so every box travels one way during the fold.
     if (isHome && onMap() && scrollY > 0 && !still()) startLift();
-    const title = next.kind === 'part' ? plan.parts.find((group) => group.part.id === next.part)?.part.title : null;
+    const title = next.kind === 'part' ? plan.parts.find((group) => group.part.id === next.part)?.part.title : next.kind === 'film' ? plan.films.find((film) => film.id === next.film)?.title : null;
     travel(() => go(next, null, { push: true, focus: { kind: 'title' }, announce: title ? `${title}, open` : '' }), isHome ? 'open' : null);
   }
 
@@ -512,93 +594,169 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     state.frame = requestAnimationFrame(step);
   }
 
-  // Addresses: on load, on Back and Forward, and once rows that did not exist yet arrive.
-  const follow = useCallback(() => {
+  /** The map or All, from a press of the switch: a move of its own, which Back undoes. */
+  function setView(next: View) {
+    if (next === view && isHome) return;
+    moveStarts();
+    setViewState(next);
+    // Pressing All shows the order used last, and writes it into the address. The order is remembered only from its own
+    // control: an address that shows another one changes nothing remembered.
+    const order = recallHabit()?.order ?? 'build';
+    const q = next === 'all' ? { ...query, order } : query;
+    if (next === 'all') setQueryState(q);
+    rememberHabit({ view: next, order });
+    address$(HOME, null, true, next === 'all', q);
+    settle(HOME, null);
+    focusNext.current = null;
+  }
+
+  /** All's query changes in place: the address follows, and the folds made by hand start over. */
+  function setQuery(next: Query) {
+    setQueryState(next);
+    if (next.order !== query.order) rememberHabit({ view: 'all', order: next.order });
+    const filtersChanged = next.states.join() !== query.states.join() || next.parts.join() !== query.parts.join() || next.films.join() !== query.films.join() || next.q !== query.q || next.order !== query.order;
+    const nextSections = allSections(plan, graph, data.stages, next);
+    if (filtersChanged) {
+      // The folds made by hand start over, but an open entry is always drawn while the list holds it: its feature stays
+      // unfolded, and its "more" pressed when it lies past the first six.
+      const folds = new Map<string, boolean>();
+      const shownMore = new Set<string>();
+      for (const key of openKeys) {
+        const found = locate(nextSections, key, new Set());
+        if (!found?.holder) continue;
+        folds.set(found.holder, true);
+        if (found.more) shownMore.add(found.holder);
+      }
+      setFolds(folds);
+      setMore(shownMore);
+    }
+    // The entry open last stays named only while the list still draws it; open, it is drawn open wherever it now stands.
+    const open = openKeyRef.current;
+    const found = open ? locate(nextSections, open, new Set()) : null;
+    if (!isAll) {
+      // A search typed elsewhere shows All with its matches; the open entries the results hold stay open, and the one
+      // opened last stays named in the address.
+      const kept = [...openKeys].filter((key) => locate(nextSections, key, new Set()) !== null);
+      moveStarts();
+      setViewState('all');
+      address$(HOME, found ? open : null, true, true, next);
+      settle(HOME, found ? open : null, found?.instance ?? null);
+      setOpenKeys(new Set(kept));
+      return;
+    }
+    if (open && !found) {
+      setOpenKey(null);
+      setOpenAt(null);
+      openKeyRef.current = null;
+    } else if (found) setOpenAt(found.instance);
+    address$(HOME, found ? open : null, false, true, next);
+  }
+
+  /** The entries a film shows, in All. */
+  function filmEntries(film: string) {
+    setQuery({ ...NO_QUERY, films: [film], order: query.order });
+    if (isAll) scrollTo({ top: 0, behavior: 'instant' });
+  }
+
+  // Addresses: on load, on Back and Forward, and once rows that did not exist yet arrive. The address is the truth: an
+  // address with no `order` is Build order. An entry it names opens at once, from the build's data: its comments fill
+  // their placeholders when the live state comes.
+  const follow = useCallback((fromHistory: boolean) => {
     const resolved = resolveHash(location.hash, plan, rowByKey);
     if (!resolved) {
-      wantedHash.current = location.hash;
+      wantedHash.current = { hash: location.hash, fromHistory };
       return;
     }
     wantedHash.current = null;
-    const canonical = formatHash(resolved.place, resolved.key);
-    if (location.hash && canonical !== location.hash) history.replaceState(history.state, '', address(canonical));
-    // While the live state loads, the named row waits closed: it would grow when votes and comments arrive.
-    const hold = resolved.key !== null && holdingRef.current;
-    settle(resolved.place, hold ? null : resolved.key);
-    if (hold) heldOpen.current = resolved.key;
-    focusNext.current = resolved.key && !hold ? { kind: 'reveal', key: resolved.key } : null;
+    const asked = parseQuery(location.search);
+    let inAll = asked.view === 'all';
+    let q = asked.query;
+    // An old address that was a place (Latest, Left out) opens All as it asks.
+    if (resolved.all) {
+      inAll = true;
+      q = { ...NO_QUERY, ...resolved.all };
+    }
+    // In All, a place's address (Product, a film, a part with no row) opens that place on the map's side.
+    if (inAll && resolved.key === null && resolved.place.kind !== 'home') inAll = false;
+    const row = resolved.key === null ? undefined : rowByKey.get(resolved.key);
+    const lists = inAll ? allSections(plan, graphOf(plan), data.stages, q) : null;
+    let found = lists && resolved.key !== null ? locate(lists, resolved.key, new Set()) : null;
+    // A link to an entry always opens it: when the list does not hold it, in its own place.
+    if (inAll && row && !found) inAll = false;
+    // In All, the list; asked in All but not held there, the entry's own place; else the place the address names.
+    const where: Place = inAll ? HOME : row && lists ? placeOf$(row) : resolved.place;
+    if (!inAll && row) found = locate(sectionsOf(where, false), row.key, new Set());
+    if (found?.holder) {
+      const holder = found.holder;
+      setFolds((now) => new Map(now).set(holder, true));
+      if (found.more) setMore((now) => new Set(now).add(holder));
+    }
+    setViewState(inAll ? 'all' : 'map');
+    setQueryState(q);
+    const canonical = address(formatQuery(location.search, inAll ? 'all' : 'map', q), inAll ? (row ? rowHash(row) : '') : formatHash(where, row ? row.key : null));
+    // An address read from the history is shown as it is; one followed on load or by hand is written in its own form.
+    if (!fromHistory && `${location.pathname}${location.search}${location.hash}` !== canonical && (location.hash || resolved.all || location.search)) history.replaceState(history.state, '', canonical);
+    const instance = row ? found?.instance ?? row.key : null;
+    settle(where, row ? row.key : null, instance);
+    focusNext.current = instance ? { kind: 'reveal', key: instance } : null;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan, rowByKey]);
-  const holdingRef = useRef(holding);
-  holdingRef.current = holding;
   const followRef = useRef(follow);
   followRef.current = follow;
   const moveStartsRef = useRef(moveStarts);
   moveStartsRef.current = moveStarts;
-  const viewRef = useRef(view);
-  viewRef.current = view;
   // The address is read before the first paint, so the first frame is already the place it names. On Back, Forward
-  // and an address followed, the view is the one the address names too, as on a fresh load: a swap still under way
-  // is dropped, and the view is set without one. It is a new move, even when the place it names is not known yet.
+  // and an address followed it is read again, as on a fresh load. It is a new move, even when the place it names is
+  // not known yet. A view recalled for a plain address is written into it.
   useLayoutEffect(() => {
-    followRef.current();
-    const listener = () => {
+    if (first.recalled) history.replaceState(history.state, '', address(formatQuery(location.search, 'all', first.query), location.hash));
+    followRef.current(false);
+    // Back and Forward across fragments fire popstate, then hashchange for the same address: the second is the same
+    // move and is not followed again. Where the browser says how it navigates (the Navigation API), a popstate that is
+    // not a traverse (a fragment followed or typed) is a person's address; elsewhere every popstate is the history's.
+    let kind: string | null = null;
+    let popped: string | null = null;
+    const nav = (window as Window & { navigation?: EventTarget }).navigation;
+    const onNavigate = (event: Event) => { kind = (event as Event & { navigationType?: string }).navigationType ?? null; };
+    const onPop = () => {
+      const fromHistory = kind === null || kind === 'traverse';
+      kind = null;
+      popped = location.href;
       moveStartsRef.current();
-      swapTimers.current.forEach(clearTimeout);
-      swapTimers.current = [];
-      setSwap(null);
-      const next = initialView();
-      // On a wide screen the other view's panel is taken out of sight: the focus in it goes to the same part in the view
-      // now shown, else to the title, rather than to the page itself.
-      const hidden = document.querySelector(`.ws-swap-${viewRef.current}`);
-      const focused = document.activeElement;
-      if (next !== viewRef.current && wide() && focused && hidden?.contains(focused)) {
-        const part = focused.closest<HTMLElement>('[data-part]');
-        const id = part?.dataset.part;
-        viewFocus.current = !id ? '' : next === 'map' ? `.ws-part[data-part="${id}"]` : `.ws-tile[data-part="${id}"] .ws-tile-hit`;
+      followRef.current(fromHistory);
+    };
+    const onHash = () => {
+      if (popped === location.href) {
+        popped = null;
+        return;
       }
-      setViewState(next);
-      followRef.current();
+      popped = null;
+      moveStartsRef.current();
+      followRef.current(false);
     };
-    addEventListener('popstate', listener);
-    addEventListener('hashchange', listener);
+    nav?.addEventListener('navigate', onNavigate);
+    addEventListener('popstate', onPop);
+    addEventListener('hashchange', onHash);
     return () => {
-      removeEventListener('popstate', listener);
-      removeEventListener('hashchange', listener);
+      nav?.removeEventListener('navigate', onNavigate);
+      removeEventListener('popstate', onPop);
+      removeEventListener('hashchange', onHash);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
-    if (wantedHash.current === null) return;
-    if (resolveHash(wantedHash.current, plan, rowByKey)) follow();
+    const wanted = wantedHash.current;
+    if (wanted === null) return;
+    // However late it loads, an address the history gave is shown as it is.
+    if (resolveHash(wanted.hash, plan, rowByKey)) follow(wanted.fromHistory);
     else if (w.settled) {
       // A link to something that the state shown does not have falls back to the plan, once the load has ended
       // (the `fresh=1` ask included, when one was made: what was just suggested may be only in that answer).
       wantedHash.current = null;
-      history.replaceState(history.state, '', address());
+      if (!wanted.fromHistory) history.replaceState(history.state, '', address(location.search));
       settle(HOME, null);
     }
   }, [plan, rowByKey, w.settled, follow]);
-  useEffect(() => {
-    const key = heldOpen.current;
-    if (holding || !key) return;
-    heldOpen.current = null;
-    if (!rowByKey.has(key)) return;
-    setOpenKeys((current) => new Set([...current, key]));
-    // When the person opened another row meanwhile, that row stays the current one and keeps the address.
-    if (openKeyRef.current !== null) return;
-    setOpenKey(key);
-    setOpenings((n) => n + 1);
-    openKeyRef.current = key;
-    focusNext.current = { kind: 'reveal', key };
-  }, [holding, rowByKey]);
-  // After Back or Forward showed the other view, the focus that was in the hidden one lands in the one shown.
-  useLayoutEffect(() => {
-    const selector = viewFocus.current;
-    if (selector === null) return;
-    viewFocus.current = null;
-    const node = (selector && document.querySelector<HTMLElement>(selector)) || document.querySelector<HTMLElement>('.ws-top h1');
-    if (node?.tagName === 'H1' && !node.hasAttribute('tabindex')) node.setAttribute('tabindex', '-1');
-    node?.focus({ preventScroll: true });
-  });
 
   // Focus follows what the person asked for; a new part starts at its top, under the folded map.
   useLayoutEffect(() => {
@@ -607,13 +765,18 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     focusNext.current = null;
     if (target.kind === 'row' || target.kind === 'reveal') {
       const item = document.getElementById(target.key);
-      if (target.kind === 'row') item?.querySelector<HTMLElement>('.ws-row')?.focus({ preventScroll: true });
+      // A row under a feature that unfolds in this same move is drawn on the next render: wait for it, once.
+      if (!item && !target.again) {
+        focusNext.current = { ...target, again: true };
+        return;
+      }
+      if (target.kind === 'row') item?.querySelector<HTMLElement>(':scope > .wa-row > .wa-hit, :scope > .ws-line > .ws-row')?.focus({ preventScroll: true });
       // While the map folds, the page under it moves: the row is brought into view once the fold is done.
       const wait = Math.max(0, foldedAt.current + FOLD_MS - Date.now());
-      const reveal = () => document.getElementById(target.key)?.scrollIntoView?.({ block: 'nearest', behavior: still() ? 'instant' : 'smooth' });
+      const show = () => document.getElementById(target.key)?.scrollIntoView?.({ block: 'nearest', behavior: still() ? 'instant' : 'smooth' });
       if (target.kind === 'row' && target.reveal === false) return;
-      if (wait) later(reveal, wait);
-      else reveal();
+      if (wait) later(show, wait);
+      else show();
     } else if (target.kind === 'title') {
       const top = document.querySelector<HTMLElement>('.ws-top');
       const header = document.querySelector<HTMLElement>('.site-header');
@@ -667,62 +830,13 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     };
   }, [pinned]);
 
-  // Map and Order swapped with a place open: the place and the footer slide from where they were to where the new strip
-  // puts them, in one move. The slide is an animation of `translate` of its own, so it leaves every transition of the
-  // place and the footer (the fade of going back) as it is.
-  useLayoutEffect(() => {
-    const from = slideFrom.current;
-    if (!from) return;
-    slideFrom.current = null;
-    const ease = getComputedStyle(document.documentElement).getPropertyValue('--ease').trim() || 'cubic-bezier(.3, .7, .2, 1)';
-    for (const { node, top } of from) {
-      // Where a held slide left it, until it slides from there.
-      node.style.translate = '';
-      if (!node.isConnected || typeof node.animate !== 'function') continue;
-      const by = top - node.getBoundingClientRect().top;
-      if (Math.abs(by) < 1) continue;
-      const animation = node.animate([{ translate: `0 ${by}px` }, { translate: '0 0' }], { duration: SLIDE_MS, easing: ease });
-      slides.current.push(animation);
-      animation.finished.then(() => { slides.current = slides.current.filter((one) => one !== animation); }, () => {});
-    }
-  }, [view]);
-
-  // Map or Order. The swap runs on its own timers: a navigation in the middle never leaves it half done.
-  function setView(next: View) {
-    if (next === view || !mapped) return;
-    const apply = () => {
-      setViewState(next);
-      const params = new URLSearchParams(location.search);
-      if (next === 'order') params.set('view', 'order');
-      else params.delete('view');
-      const search = params.toString();
-      history.replaceState(history.state, '', `${location.pathname}${search ? `?${search}` : ''}${location.hash}`);
-    };
-    swapTimers.current.forEach(clearTimeout);
-    // A swap under way ends here: its slide stops where it is, and the next one starts from there.
-    endSlide(true);
-    setSwap(null);
-    if (still() || !wide()) {
-      endSlide();
-      apply();
-      return;
-    }
-    // On the plain view, everything under the title row swaps. With a place open, only the strip does: the place and
-    // the footer stay and slide to their new height. Which one is read when it applies, from what is shown then.
-    setSwap('out');
-    swapTimers.current = [setTimeout(() => {
-      const from = homeRef.current ? null : [...document.querySelectorAll<HTMLElement>('.ws-detail, .ws-foot')].map((node) => ({ node, top: node.getBoundingClientRect().top }));
-      endSlide(from !== null);
-      slideFrom.current = from;
-      apply();
-      setSwap('in');
-      swapTimers.current.push(setTimeout(() => setSwap(null), 300));
-    }, SWAP_MS)];
-  }
-
   const keyHandler = useRef<(event: KeyboardEvent) => void>(() => {});
   keyHandler.current = (event: KeyboardEvent) => {
-    if (event.key === 'Escape' && !isHome && !isField(event.target)) {
+    if (isField(event.target) || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.key === '/') {
+      event.preventDefault();
+      setSearching(true);
+    } else if (event.key === 'Escape' && !isHome && !isAll) {
       // A held key repeats: only the press itself goes back.
       if (!event.repeat) back();
     }
@@ -734,9 +848,19 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   }, []);
 
   const signIn = loginUrl(typeof location === 'undefined' ? '' : location.hash);
-  const ctx: EntryContext = {
-    w, signIn, open: openKeys,
-    onToggle: (row) => (openKeys.has(row.key) ? closeRow(row.key) : openRow(row.key)),
+  // The rows call these through stable functions, so a row that does not render again still calls the current ones.
+  handlers.current = {
+    toggle: (row, instance) => {
+      if (openKeys.has(row.key)) closeRow(row.key);
+      else openRow(row.key, instance === undefined ? {} : { instance });
+    },
+    filmEntries,
+  };
+  const ctx: EntryContext = { w, signIn, open: openKeys, onToggle: stableToggle, onFilmEntries: stableFilmEntries };
+  const list: PlaceList = {
+    plan, graph, ctx, store, folds, more, waiting: w.waiting,
+    onFold: (key, open) => setFolds((now) => new Map(now).set(key, open)),
+    onMore: (key) => setMore((now) => new Set(now).add(key)),
   };
   const account = <Account me={w.me} signIn={signIn} onSignOut={() => void w.signOut()} />;
 
@@ -757,28 +881,28 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     );
   };
   const notes = notesOf(false);
-  const present = new Set(plan.parts.map((group) => group.state));
-  // With no entry the key is an empty box that keeps the title row's height, and no list a screen reader would read.
-  const keyed = KEY.filter(([state]) => present.has(state));
   const current = shown.kind === 'part' ? shown.part : null;
+  const film = shown.kind === 'film' ? plan.films.find((one) => one.id === shown.film) ?? null : null;
+  // The map marks the parts of the film pointed at, or of the film whose place is open.
+  const pointed = filmPoint ? plan.films.find((one) => one.id === filmPoint) : null;
+  const marked = pointed ? new Set(pointed.parts) : film ? new Set(film.parts) : null;
   const link = (target: Place) => (event: { preventDefault: () => void }) => {
     event.preventDefault();
     openPlace(target);
   };
   /** A link of the title row: marked while its place is open, where pressing it again goes back. */
   const placeLink = (target: Place, label: string, className = 'ws-place') => {
-    const on = samePlace(target, shown);
+    const on = !isAll && samePlace(target, shown);
     return <a className={on ? `${className} on` : className} href={formatHash(target)} aria-current={on ? 'true' : undefined} onClick={link(target)}>{label}</a>;
   };
 
   let detail = null;
   if (shown.kind === 'part') {
     const group = plan.parts.find((item) => item.part.id === shown.part);
-    if (group) detail = <PartPlace group={group} ctx={ctx} onBack={back} notes={notes} />;
+    if (group) detail = <PartPlace group={group} list={list} onBack={back} notes={notes} onFilm={(id) => openPlace({ kind: 'film', film: id })} />;
   } else if (shown.kind === 'suggested') detail = <SuggestPlace ctx={ctx} onBack={back} notes={notes} />;
-  else if (shown.kind === 'left') detail = <LeftPlace rows={plan.left} ctx={ctx} onBack={back} notes={notes} />;
-  else if (shown.kind === 'product') detail = <ProductPlace rows={plan.product} ctx={ctx} onBack={back} notes={notes} />;
-  else if (shown.kind === 'latest') detail = <LatestPlace ctx={ctx} onBack={back} notes={notes} />;
+  else if (shown.kind === 'product') detail = <ProductPlace rows={plan.product} list={list} onBack={back} notes={notes} />;
+  else if (film) detail = <FilmPlace film={film} rows={rowsOf(plan, shown)} list={list} onBack={back} notes={notes} />;
 
   // The place in the first frame is drawn where it stands: it never runs its entrance afterwards. A place opened
   // later rises in as before; one that opens with a row open fades in where it stands, so that the rows under that row
@@ -790,8 +914,9 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   if (isHome) entrance.current = null;
   else if (entrance.current?.place !== formatHash(shown)) entrance.current = { place: formatHash(shown), fade: openKey !== null };
   const detailClass = formatHash(shown) === firstPlace.current ? 'ws-detail ws-still' : entrance.current?.fade ? 'ws-detail ws-fade' : 'ws-detail';
-  const classes = ['ws', isHome ? 'is-sheet' : 'is-open', `v-${view}`, leaving ? 'ws-leaving' : '', swap && isHome ? `swap-${swap}` : '', swap && !isHome ? `strip-${swap}` : '', boot ? 'ws-boot' : '', lifting ? 'ws-lifting' : '', held ? 'ws-keeping' : '', pinned ? 'ws-pinned' : '',
+  const classes = ['ws', isAll ? 'is-all' : isHome ? 'is-sheet' : 'is-open', isAll ? 'v-all' : 'v-map', mapped ? '' : 'no-map', leaving ? 'ws-leaving' : '', boot ? 'ws-boot' : '', lifting ? 'ws-lifting' : '', held ? 'ws-keeping' : '', pinned ? 'ws-pinned' : '',
     arrivedState ? 'ws-arr-s' : '', arrivedPerson ? 'ws-arr-p' : ''].filter(Boolean).join(' ');
+  const status = statusLine(plan.parts);
   return (
     <>
       {accountSlot ? createPortal(account, accountSlot) : accountSlot === false ? null : <div className="ws-account-inline">{account}</div>}
@@ -799,44 +924,54 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
         <section className="ws-top joint">
           <div className="ws-head">
             <h1>Workshop</h1>
-            <Status key={statusLine(plan.parts)} text={statusLine(plan.parts)} boot={boot}>{isHome ? notesOf(true) : null}</Status>
+            <Status key={status} text={status} boot={boot}>{isHome ? notesOf(true) : null}</Status>
           </div>
           <div className="ws-top-side">
             <div className="ws-tools">
               <nav className="ws-places" aria-label="Places">
                 {plan.product.length ? placeLink({ kind: 'product' }, 'Product') : null}
-                {placeLink({ kind: 'latest' }, 'Latest')}
-                {plan.left.length ? placeLink({ kind: 'left' }, `Left out · ${plan.left.length}`) : null}
+                <Search value={query.q} open={searching} onOpen={() => setSearching(true)} onClose={() => setSearching(false)} onChange={(text) => setQuery({ ...query, q: text })} />
                 {placeLink({ kind: 'suggested' }, 'Suggest a feature', 'ws-btn ws-suggest')}
               </nav>
-              {mapped ? (
-                <div className="ws-seg" role="group" aria-label="Arrangement">
-                  <button type="button" aria-pressed={view === 'map'} onClick={() => setView('map')}>Map</button>
-                  <button type="button" aria-pressed={view === 'order'} onClick={() => setView('order')}>Order</button>
-                </div>
-              ) : null}
+              <div className="ws-seg wa-view" role="group" aria-label="View">
+                <button type="button" aria-pressed={!isAll} onClick={() => setView('map')}>{mapped ? <><span className="wa-wide">Map</span><span className="wa-narrow">Parts</span></> : 'Parts'}</button>
+                <button type="button" aria-pressed={isAll} onClick={() => setView('all')}>All</button>
+              </div>
             </div>
-            {keyed.length ? (
-              <ul className="ws-key" aria-label="Key">
-                {keyed.map(([state, mark, label]) => <KeyItem key={state} mark={mark} label={label} boot={boot} />)}
-              </ul>
-            ) : <div className="ws-key" aria-hidden="true" />}
           </div>
         </section>
-        {mapped ? (
-          <div className="ws-swap ws-swap-map">
-            <MapView layout={data.map} groups={plan.parts} folded={!isHome && !leaving} current={current} onOpen={(part) => openPlace({ kind: 'part', part })} />
-          </div>
-        ) : null}
-        <div className="ws-swap ws-swap-order">
-          <Tiles groups={plan.parts} current={current} onOpen={(part) => openPlace({ kind: 'part', part })} />
-        </div>
-        {isHome ? null : (
-          <section className={detailClass} key={formatHash(shown)} aria-labelledby="ws-part-title">{detail}</section>
+        {isAll ? (
+          <AllView
+            plan={plan} graph={graph} sections={sections} query={query} onQuery={setQuery} ctx={ctx} store={store}
+            folds={folds} onFold={list.onFold} more={more} onMore={list.onMore} waiting={w.waiting}
+            onOpen={(key) => openRow(key, { focus: true })}
+          />
+        ) : (
+          <>
+            <FilmsLine films={plan.films} current={film?.id ?? null} onOpen={(id) => openPlace({ kind: 'film', film: id })} onPoint={setFilmPoint} />
+            {mapped ? (
+              <div className="ws-swap ws-swap-map">
+                <MapView layout={data.map} groups={plan.parts} folded={!isHome && !leaving} current={current} marked={marked} onOpen={(part) => openPlace({ kind: 'part', part })} />
+              </div>
+            ) : null}
+            <div className="ws-swap ws-swap-order">
+              <Tiles groups={plan.parts} current={current} onOpen={(part) => openPlace({ kind: 'part', part })} />
+            </div>
+            {isHome ? null : (
+              <section className={detailClass} key={formatHash(shown)} aria-labelledby="ws-part-title">{detail}</section>
+            )}
+          </>
         )}
         <p className="sr-only" aria-live="polite">{w.announce}</p>
         {w.notice ? <p className="ws-notice" role="alert">{w.notice}</p> : null}
       </div>
+      <Tips />
     </>
   );
+}
+
+/** Where a row lives, as a place on the map's side. */
+function placeOf$(row: Row): Place {
+  if (row.kind === 'suggestion') return { kind: 'suggested' };
+  return row.part ? { kind: 'part', part: row.part } : { kind: 'product' };
 }

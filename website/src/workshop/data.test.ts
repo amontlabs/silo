@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { canonicalText } from '../../../tools/plan/model/index.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadDir } from '../../../tools/plan/read/index.js';
-import { buildDataFrom, factsFrom, historiesFrom, historyFromGit, layoutPlanFrom, notesFrom, planDir, readBuildData, readHistories, readHistory, unshallow } from './data';
+import { buildDataFrom, factsFrom, filmOrder, historiesFrom, historyFromGit, layoutPlanFrom, notesFrom, planDir, readBuildData, readFilms, readHistories, readHistory, printedChanged, unshallow } from './data';
 import type { Git } from './data';
 import { made } from '../../scripts/films-test-support.mjs';
 import { buildData, CORE_NOTES, DECISIONS, emptyPlanFiles, FEATURES, PARTS, planFiles, withLists, ZIG_NOTES } from './fixtures';
@@ -156,7 +156,7 @@ describe('reading plan/ from a repository folder', () => {
       const { put } = made(root, join(REPOSITORY, 'films', 'player', 'page.html'));
       cpSync(join(root, 'films', 'tiny'), join(root, 'films', 'another'), { recursive: true });
       put('another/film.json', JSON.stringify({ id: 'another', title: 'Another' }));
-      expect(readBuildData(root, EXAMPLE_MAP).films).toEqual([{ id: 'another', playable: true }, { id: 'tiny', playable: true }]);
+      expect(readBuildData(root, EXAMPLE_MAP).films.map(({ id, title, playable }) => ({ id, title, playable }))).toEqual([{ id: 'another', title: 'Another', playable: true }, { id: 'tiny', title: expect.any(String), playable: true }]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -765,4 +765,138 @@ describe('the map layout', () => {
     const css = readFileSync(join(dirname(new URL(import.meta.url).pathname), 'workshop.css'), 'utf8');
     expect(css).toContain(`.ws-stage { --u: calc(100cqw / 1136); position: relative; height: calc(${MAP_HEIGHT} * var(--u));`);
   });
+});
+
+describe('the films', () => {
+  const entry = (fields: Record<string, unknown>) => JSON.stringify({ name: 'Fork', what: 'Copy a computer.', ...fields });
+
+  it('come in the order films/README.md gives, and the real repository\'s are all there, each with its title, line and entries', () => {
+    expect(filmOrder('# Films\n\n## The films, in the order they are watched\n\n| Film | Kind |\n|---|---|\n| `b` | x |\n| `a` | y |\n\n## Next\n| `c` | z |\n')).toEqual(['b', 'a']);
+    const films = readFilms(REPOSITORY, false);
+    expect(films.map((film) => film.id)).toEqual(filmOrder(readFileSync(join(REPOSITORY, 'films', 'README.md'), 'utf8')));
+    expect(films).toHaveLength(5);
+    for (const film of films) {
+      expect(film.title).not.toBe('');
+      expect(film.shows.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('are behind on an entry whose printed part changed after them, or that was dropped or replaced; never for a take alone', () => {
+    const set = { in: 'words', id: 'twin', word: 'twin', means: 'A copy.' };
+    expect(printedChanged(entry({}), entry({ suggest: { verdict: 'take' } }))).toBe(false);
+    expect(printedChanged(entry({}), entry({ what: 'Copy a whole computer.' }))).toBe(true);
+    expect(printedChanged(entry({ name: 'Fork' }), entry({ name: 'Forks' }))).toBe(true);
+    expect(printedChanged(entry({ asks: 'A?' }), entry({ asks: 'B?' }))).toBe(true);
+    expect(printedChanged(entry({ answer: 'Yes.' }), entry({ answer: 'No.' }))).toBe(true);
+    expect(printedChanged(entry({ sets: [set] }), entry({ sets: [{ ...set, means: 'Another copy.' }] }))).toBe(true);
+    expect(printedChanged(entry({ sets: [] }), entry({ sets: [set] }))).toBe(true);
+    expect(printedChanged(entry({ removes: ['a'] }), entry({ removes: ['b'] }))).toBe(true);
+    expect(printedChanged(entry({ keeps: ['a'] }), entry({ keeps: ['a', 'b'] }))).toBe(true);
+    expect(printedChanged(entry({ surfaces: { cli: 'silo fork' } }), entry({ surfaces: { cli: 'silo copy' } }))).toBe(true);
+    expect(printedChanged(entry({}), entry({ verdict: 'drop' }))).toBe(true);
+    expect(printedChanged(entry({ verdict: 'take' }), entry({ verdict: 'take', replaced_by: 'other' }))).toBe(true);
+    expect(printedChanged(entry({}), null)).toBe(true);
+    expect(printedChanged(null, entry({}))).toBe(false);
+    // A take writes the ids of `sets` as `adds` and deletes `sets` and `removes`: the same statements stand.
+    expect(printedChanged(entry({ sets: [set], removes: ['scrap'] }), entry({ adds: ['twin'], verdict: 'take' }))).toBe(false);
+    expect(printedChanged(entry({ sets: [set] }), entry({ adds: ['twin', 'more'], verdict: 'take' }))).toBe(true);
+    // A word of `sets` has no id: it is named by its word, as the lists name it.
+    expect(printedChanged(entry({ sets: [{ in: 'words', word: 'Pause point', means: 'A stop.' }] }), entry({ adds: ['pause-point'], verdict: 'take' }))).toBe(false);
+  });
+
+  it('compare the texts of an entry\'s statements wherever they live at each end: in its sets before a take, in the lists after', () => {
+    const root = mkdtempSync(join(tmpdir(), 'workshop-films-'));
+    const git = (args: string[]) => execFileSync('git', ['-C', root, ...args], { env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }, stdio: 'ignore' });
+    const write = (path: string, text: string) => {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), text);
+    };
+    const word = (name: string, means: string) => ({ word: name, means });
+    try {
+      git(['init', '-q', '-b', 'main']);
+      write('plan/words.json', JSON.stringify([word('main', 'One computer.'), word('old', 'Taken before the film.')]));
+      write('plan/principles.json', JSON.stringify([{ id: 'least-power', says: 'Less sure, less power.', asks: 'What triggers it?' }]));
+      // Proposed at the film's commit, each with the statement it would set.
+      write('plan/p/decisions/same-text.json', entry({ asks: 'Same?', sets: [{ in: 'words', ...word('twin', 'A copy.') }] }));
+      write('plan/p/decisions/new-text.json', entry({ asks: 'New?', sets: [{ in: 'principles', id: 'first-ask', says: 'Ask first.', asks: 'Who asks?' }] }));
+      // Taken before the film: its statement lives in the lists.
+      write('plan/p/decisions/taken-before.json', entry({ asks: 'Old?', adds: ['old'], verdict: 'take' }));
+      write('films/one/film.json', JSON.stringify({ id: 'one', title: 'One', line: 'L.', shows: ['same-text', 'new-text', 'taken-before'] }));
+      git(['add', '.']);
+      git(['commit', '-q', '-m', 'the film']);
+      // Taken since: one with the text it proposed, one with a new text; and the text of the old one changed in its list.
+      write('plan/p/decisions/same-text.json', entry({ asks: 'Same?', adds: ['twin'], verdict: 'take' }));
+      write('plan/p/decisions/new-text.json', entry({ asks: 'New?', adds: ['first-ask'], verdict: 'take' }));
+      write('plan/words.json', JSON.stringify([word('main', 'One computer.'), word('old', 'Taken before the film, said again.'), word('twin', 'A copy.')]));
+      write('plan/principles.json', JSON.stringify([{ id: 'least-power', says: 'Less sure, less power.', asks: 'What triggers it?' }, { id: 'first-ask', says: 'Ask first, always.', asks: 'Who asks?' }]));
+      git(['commit', '-q', '-am', 'taken']);
+      expect(readFilms(root, false)[0].behind).toEqual(['new-text', 'taken-before']);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('find each entry at the film\'s commit by its id, two files with the same bytes included, wherever they moved since', () => {
+    const root = mkdtempSync(join(tmpdir(), 'workshop-films-'));
+    const git = (args: string[]) => execFileSync('git', ['-C', root, ...args], { env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }, stdio: 'ignore' });
+    const write = (path: string, text: string) => {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), text);
+    };
+    try {
+      git(['init', '-q', '-b', 'main']);
+      write('plan/p/decisions/twin-a.json', entry({ asks: 'Same?' }));
+      write('plan/p/decisions/twin-b.json', entry({ asks: 'Same?' }));
+      write('films/one/film.json', JSON.stringify({ id: 'one', title: 'One', line: 'L.', shows: ['twin-a', 'twin-b'] }));
+      git(['add', '.']);
+      git(['commit', '-q', '-m', 'the film']);
+      mkdirSync(join(root, 'plan/q/decisions'), { recursive: true });
+      git(['mv', 'plan/p/decisions/twin-a.json', 'plan/q/decisions/twin-a.json']);
+      git(['mv', 'plan/p/decisions/twin-b.json', 'plan/q/decisions/twin-b.json']);
+      git(['commit', '-q', '-m', 'moved']);
+      expect(readFilms(root, false)[0].behind).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('compare what an entry says now with what it said at the film\'s last commit: a change undone does not count, a moved file is the same entry, a new one counts', () => {
+    const root = mkdtempSync(join(tmpdir(), 'workshop-films-'));
+    const git = (args: string[]) => execFileSync('git', ['-C', root, ...args], { env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }, stdio: 'ignore' });
+    const write = (path: string, text: string) => {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), text);
+    };
+    try {
+      git(['init', '-q', '-b', 'main']);
+      for (const id of ['undone', 'changed', 'moved', 'taken']) write(`plan/p/features/${id}.json`, entry({ name: id }));
+      // A film shows statements too: `least-power` is a principle, an entry at neither end.
+      write('films/one/film.json', JSON.stringify({ id: 'one', title: 'One', line: 'L.', shows: ['undone', 'changed', 'moved', 'taken', 'new', 'least-power'] }));
+      git(['add', '.']);
+      git(['commit', '-q', '-m', 'the film']);
+      // On a side branch, a change made and undone; merged.
+      git(['checkout', '-q', '-b', 'side']);
+      write('plan/p/features/undone.json', entry({ name: 'undone, for a while' }));
+      git(['commit', '-q', '-am', 'change']);
+      write('plan/p/features/undone.json', entry({ name: 'undone' }));
+      git(['commit', '-q', '-am', 'undo']);
+      git(['checkout', '-q', 'main']);
+      git(['merge', '-q', '--no-ff', '-m', 'merge', 'side']);
+      write('plan/p/features/changed.json', entry({ name: 'changed since' }));
+      mkdirSync(join(root, 'plan/q/features'), { recursive: true });
+      git(['mv', 'plan/p/features/moved.json', 'plan/q/features/moved.json']);
+      write('plan/p/features/taken.json', entry({ name: 'taken', verdict: 'take' }));
+      write('plan/p/features/new.json', entry({ name: 'new' }));
+      git(['add', '.']);
+      git(['commit', '-q', '-am', 'after']);
+      expect(readFilms(root, false)).toEqual([{ id: 'one', title: 'One', line: 'L.', shows: ['undone', 'changed', 'moved', 'taken', 'new', 'least-power'], behind: ['changed', 'new'] }]);
+      expect(readFilms(root, true)[0].behind).toEqual([]);
+      // A commit git cannot read says nothing.
+      expect(readFilms(root, false, () => 'f'.repeat(40))[0].behind).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+
 });

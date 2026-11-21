@@ -17,7 +17,6 @@ describe('a signed-in person', () => {
     await userEvent.type(box, 'Please keep the defaults small.');
     await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
     expect(screen.getByText('Please keep the defaults small.')).toBeInTheDocument();
-    expect(within(itemOf('Create and delete a computer')).getByText('💬 3')).toBeInTheDocument();
     expect(posts(calls, 'comment')[0]).toMatchObject({ body: { entry: 'create', text: 'Please keep the defaults small.' }, headers: { 'X-Workshop': '1' } });
 
     await userEvent.click(within(itemOf('Create and delete a computer')).getByRole('button', { name: /12 votes/ }));
@@ -80,7 +79,8 @@ describe('a signed-in person', () => {
 
   it('give a signed-out visitor a reason on the thumbs-up, and say offline plainly', async () => {
     mockApi();
-    history.replaceState(null, '', '/workshop#part-b');
+    // The thumb is in the opened row.
+    history.replaceState(null, '', '/workshop#part-b/exec');
     const first = await renderApp();
     expect(within(itemOf('Run a command')).getByRole('link', { name: /4 votes/ })).toHaveAttribute('title', 'Sign in to vote');
     first.unmount();
@@ -111,10 +111,11 @@ describe('the old list of decisions', () => {
 });
 
 describe('writes the server has not confirmed', () => {
+  /** A route whose answers wait; `release` answers every ask made so far (an opened row and a click may both ask). */
   function deferred() {
-    let release: (value: { status: number; body: unknown }) => void = () => {};
-    const route: Route = () => new Promise((resolve) => { release = resolve; });
-    return { route, release: (value: { status: number; body: unknown }) => release(value) };
+    const waiting: ((value: { status: number; body: unknown }) => void)[] = [];
+    const route: Route = () => new Promise((resolve) => { waiting.push(resolve); });
+    return { route, release: (value: { status: number; body: unknown }) => { for (const resolve of waiting.splice(0)) resolve(value); } };
   }
   /** The room of a comment's 👍 while it is being sent. */
   const roomOf = (comment: HTMLElement) => comment.querySelector('.ws-vote.ws-cvote-room');
@@ -140,7 +141,6 @@ describe('writes the server has not confirmed', () => {
     await act(async () => answer.release(ok()));
     expect(screen.getByText('On its way.').closest('.ws-c')).not.toHaveClass('ws-pending');
     expect(within(screen.getByText('On its way.').closest('.ws-c') as HTMLElement).getByRole('button', { name: /votes on this comment/ })).toBeInTheDocument();
-    expect(within(itemOf('Run a command')).getByText('💬 1')).toBeInTheDocument();
     expect(localStorage.getItem('silo-workshop-writes-2')).toContain('On its way.');
   });
 
@@ -214,7 +214,7 @@ describe('writes the server has not confirmed', () => {
     const asked = deferred();
     const answer = deferred();
     const calls = mockApi({ me: visitor, routes: { 'GET vote': asked.route, 'POST vote': answer.route } });
-    history.replaceState(null, '', '/workshop#part-b');
+    history.replaceState(null, '', '/workshop#part-b/exec');
     await renderApp();
     fireEvent.click(exec().getByRole('button', { name: /4 votes/ }));
     // Working at once, and nothing guessed: the count and the pressed state stay as they are.
@@ -313,7 +313,7 @@ describe('a refused write', () => {
       typed: () => expect(screen.getByRole('textbox', { name: 'Comment' })).toHaveValue('Hello'),
     },
     {
-      name: 'vote', as: visitor, at: '#part-b', route: 'POST vote', alert: /vote/i,
+      name: 'vote', as: visitor, at: '#part-b/exec', route: 'POST vote', alert: /vote/i,
       async make() {
         await userEvent.click(within(itemOf(VOTED)).getByRole('button', { name: /4 votes/ }));
       },

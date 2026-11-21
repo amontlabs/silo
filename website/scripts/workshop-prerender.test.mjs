@@ -39,8 +39,9 @@ const between = (open, close) => html.slice(html.indexOf(open) + open.length, ht
 
 test('the built page holds the plain view: the title row with its places, and a tile for every part', () => {
   const root = between('<div id="workshop-root" data-prerendered>', '<noscript');
-  // Silo's map has no place yet: the tiles alone, with no Map and Order control and no drawing.
-  assert.match(root, /^<div class="ws is-sheet v-order ws-boot" data-live="pending">/);
+  // The sample plan has no map: the tiles alone, no drawing, and the switch reads Parts and All.
+  assert.match(root, /^<div class="ws is-sheet v-map no-map ws-boot" data-live="pending">/);
+  assert.match(root, /<div class="ws-seg wa-view" role="group" aria-label="View"><button type="button" aria-pressed="true">Parts<\/button><button type="button" aria-pressed="false">All<\/button>/);
   assert.match(root, /<h1>Workshop<\/h1>/);
   assert.match(root, /class="ws-status"/);
   assert.doesNotMatch(root, /ws-swap-map|ws-stage|aria-label="Arrangement"/);
@@ -49,8 +50,8 @@ test('the built page holds the plain view: the title row with its places, and a 
     assert.ok(root.includes(escape(part.title)), `the title of ${part.id}`);
   }
   assert.doesNotMatch(root, /ws-under|data-part="suggested"/);
-  // The sample has decisions of the whole product; Latest and "Suggest a feature" are always there.
-  assert.match(root, /<nav class="ws-places" aria-label="Places"><a class="ws-place" href="#product">Product<\/a><a class="ws-place" href="#latest">Latest<\/a>/);
+  // The sample has decisions of the whole product; Search and "Suggest a feature" are always there.
+  assert.match(root, /<nav class="ws-places" aria-label="Places"><a class="ws-place" href="#product">Product<\/a><button type="button" class="wa-ctl icon wa-searchctl" aria-label="Search"/);
   assert.match(root, /class="ws-btn ws-suggest" href="#suggested">Suggest a feature</);
   // Nothing of the account is drawn inside the root: it has its place in the header.
   assert.doesNotMatch(root, /ws-account-inline|Sign in/);

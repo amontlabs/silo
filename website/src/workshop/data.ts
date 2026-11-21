@@ -1,7 +1,7 @@
 // The plan as the repository holds it, in plan/: read with tools/plan/read and checked with tools/plan/check
 // at build time. Any error stops the build with the file, the field and the fix.
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkFiles, formatProblem } from '../../../tools/plan/check/index.js';
 import { entryStatus, listKind, replacedBy, wordId } from '../../../tools/plan/model/index.js';
@@ -12,7 +12,7 @@ import { checkLayout, LayoutError, NO_MAP, pageLayout, SILO_MAP } from './map.ts
 import type { LayoutPlan, MapLayout } from './map.ts';
 import { RESERVED_ADDRESSES } from './routes.ts';
 import { playableFilms } from '../../scripts/films.mjs';
-import type { BuildData, Change, Entry, EntryFacts, Facts, Histories, Notes, Statement, Verdict } from './plan.ts';
+import type { BuildData, Change, Entry, EntryFacts, Facts, Film, Histories, Notes, Statement, Verdict } from './plan.ts';
 
 export const PLAN_DIR = 'plan';
 
@@ -64,7 +64,12 @@ export interface BuildOptions {
   history?: HistorySource | null;
   /** The films whose page the build writes (scripts/films.mjs); none by default. */
   films?: string[];
+  /** What each film of films/ says of itself and which of its entries it is behind (`readFilms`), in the order films/README.md gives; none by default. */
+  filmInfo?: FilmInfo[];
 }
+
+/** A film as films/<id>/film.json describes it, with the ids of the entries it shows that changed after it. */
+export type FilmInfo = Omit<Film, 'playable'>;
 
 const hasNotes = (raw: RawEntry) => typeof raw.notes === 'string' && raw.notes.trim() !== '';
 
@@ -189,7 +194,7 @@ export function partDepends(parts: { id: string }[], entries: Pick<Entry, 'id' |
 }
 
 /** The plan object of tools/plan/read, as the page holds it: decisions and features in the order of order.json. */
-export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null, films = [] }: BuildOptions = {}): BuildData {
+export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null, films = [], filmInfo = [] }: BuildOptions = {}): BuildData {
   const entries: Entry[] = ordered(plan).map((raw) => ({
     id: raw.id,
     kind: raw.kind,
@@ -215,7 +220,7 @@ export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null, fil
     entries,
     map: pageLayout(map, layoutPlanOf(plan)),
     shallow: history?.shallow === true,
-    films: films.map((id) => ({ id, playable: true })),
+    films: filmInfo.map((film) => ({ ...film, playable: films.includes(film.id) })),
   };
 }
 
@@ -348,10 +353,234 @@ export function readHistory(repository: string): HistorySource | null {
   return source;
 }
 
+/** The order films/README.md gives the films in: the ids of its table "The films, in the order they are watched". */
+export function filmOrder(readme: string): string[] {
+  const at = readme.indexOf('## The films, in the order they are watched');
+  if (at === -1) return [];
+  const ids: string[] = [];
+  for (const line of readme.slice(at).split('\n').slice(1)) {
+    if (line.startsWith('## ')) break;
+    const id = /^\|\s*`([a-z0-9-]+)`\s*\|/.exec(line)?.[1];
+    if (id) ids.push(id);
+  }
+  return ids;
+}
+
+type EntryFile = Record<string, unknown>;
+
+/** The text of a statement, as an item of `sets` or of a list holds it: every field but `in`, in order. A take copies a `sets` item into its list without `in`, so the same statement reads the same at both. */
+function statementText(item: Record<string, unknown>): string {
+  return JSON.stringify(Object.keys(item).filter((key) => key !== 'in').sort().map((key) => [key, item[key]]));
+}
+
+/** The id of a statement item: a word by its word, as the lists name it (`wordId`); a principle or a property by its id. */
+const statementId = (item: Record<string, unknown>): string | null => (typeof item?.id === 'string' ? item.id : typeof item?.word === 'string' ? wordId(item.word) : null);
+
+/** The statements of the plan's lists (`words.json`, `principles.json`, the `properties.json` files), as texts by id. */
+export type ListTexts = ReadonlyMap<string, string>;
+
+/** Whether a file of plan/ is one of its lists. */
+const isListFile = (path: string) => /(?:^|\/)(?:words|principles|properties)\.json$/.test(path);
+
+/** The statements of some list files' texts, by id. */
+function listTextsOf(texts: string[]): Map<string, string> {
+  const statements = new Map<string, string>();
+  for (const text of texts) {
+    let items: unknown;
+    try {
+      items = JSON.parse(text);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(items)) continue;
+    for (const item of items as Record<string, unknown>[]) {
+      const id = statementId(item);
+      if (id) statements.set(id, statementText(item));
+    }
+  }
+  return statements;
+}
+
+/** The statements an entry sets or added, each with its text: from its `sets` item, or for an id of `adds` from the lists (null when they lack it). */
+function setOrAdded(entry: EntryFile, lists: ListTexts): Map<string, string | null> {
+  const statements = new Map<string, string | null>();
+  for (const id of list(entry.adds)) statements.set(id, lists.get(id) ?? null);
+  if (Array.isArray(entry.sets)) {
+    for (const item of entry.sets as Record<string, unknown>[]) {
+      const id = statementId(item);
+      if (id) statements.set(id, statementText(item));
+    }
+  }
+  return statements;
+}
+
+/**
+ * Whether an entry file, at two moments, differs in what the Workshop prints of it: its question or name,
+ * its answer or what, the ids or the texts of the statements it sets or added, what it removes, what it keeps, its
+ * surfaces; or it was dropped, replaced or deleted. The texts of its statements are compared wherever they live at each
+ * moment: in its `sets` before a take, in the plan's lists (`listsBefore`, `listsAfter`) after it. A take alone changes
+ * none of these: it writes the ids of `sets` as `adds`, the items into the lists, and deletes `sets` and `removes`. A file that did not exist before is new, not changed; one that no longer exists has changed.
+ */
+export function printedChanged(before: string | null, after: string | null, listsBefore: ListTexts = new Map(), listsAfter: ListTexts = new Map()): boolean {
+  if (before === null) return false;
+  if (after === null) return true;
+  let was: EntryFile;
+  let now: EntryFile;
+  try {
+    was = JSON.parse(before) as EntryFile;
+    now = JSON.parse(after) as EntryFile;
+  } catch {
+    return false;
+  }
+  if (now.verdict === 'drop' && was.verdict !== 'drop') return true;
+  if (typeof now.replaced_by === 'string' && was.replaced_by !== now.replaced_by) return true;
+  const took = now.verdict === 'take' && was.verdict !== 'take';
+  const printed = (entry: EntryFile) => JSON.stringify([
+    entry.name ?? null, entry.asks ?? null, entry.what ?? null, entry.answer ?? null,
+    took ? [] : [...list(entry.removes)].sort(), [...list(entry.keeps)].sort(), entry.surfaces ?? null,
+  ]);
+  if (printed(was) !== printed(now)) return true;
+  const a = setOrAdded(was, listsBefore);
+  const b = setOrAdded(now, listsAfter);
+  if (a.size !== b.size || [...a.keys()].some((id) => !b.has(id))) return true;
+  return [...a].some(([id, text]) => text !== null && b.get(id) !== null && b.get(id) !== text);
+}
+
+/** The id of the entry a file of plan/ holds, from its path (`<part>/decisions/<id>.json`, `decisions/<id>.json`, …). */
+const entryIdOf = (path: string): string | null => /(?:^|\/)(?:decisions|features)\/([^/]+)\.json$/.exec(path)?.[1] ?? null;
+
+/** The entries a film shows and the plan's lists, at one moment. */
+export interface PlanAt {
+  /** The files of the entries asked for, by id. */
+  entries: Map<string, string>;
+  lists: ListTexts;
+}
+
+/**
+ * The files of the entries `ids` as they were at `commit`, each found by its id (its file's name) wherever it was, and
+ * the plan's lists then; null when git cannot say.
+ */
+export function planAt(repository: string, commit: string, ids: ReadonlySet<string>): PlanAt | null {
+  const git = (args: string[], input?: string) => execFileSync('git', ['-C', repository, ...args], { input, maxBuffer: 512 * 1024 * 1024, timeout: 120_000, stdio: ['pipe', 'pipe', 'ignore'] });
+  try {
+    // By the file's name, which is the entry's id: two entries whose files hold the same bytes are still two.
+    const oidOf = new Map<string, string>();
+    const listOids: string[] = [];
+    for (const line of git(['ls-tree', '-r', '-z', commit, '--', PLAN_DIR]).toString('utf8').split('\0')) {
+      const [meta, path] = line.split('\t');
+      if (!path) continue;
+      const oid = meta.split(' ')[2];
+      const id = entryIdOf(path);
+      if (id && ids.has(id)) oidOf.set(id, oid);
+      else if (isListFile(path)) listOids.push(oid);
+    }
+    const oids = [...new Set([...oidOf.values(), ...listOids])];
+    const blobs = new Map<string, string>();
+    if (oids.length) {
+      const out = git(['cat-file', '--batch'], oids.map((oid) => `${oid}\n`).join(''));
+      let at = 0;
+      for (const oid of oids) {
+        const end = out.indexOf(10, at);
+        if (end === -1) break;
+        const [, type, size] = out.subarray(at, end).toString().split(' ');
+        if (type === 'missing') {
+          at = end + 1;
+          continue;
+        }
+        blobs.set(oid, out.subarray(end + 1, end + 1 + Number(size)).toString('utf8'));
+        at = end + 1 + Number(size) + 1;
+      }
+    }
+    const entries = new Map<string, string>();
+    for (const [id, oid] of oidOf) {
+      const text = blobs.get(oid);
+      if (text !== undefined) entries.set(id, text);
+    }
+    return { entries, lists: listTextsOf(listOids.flatMap((oid) => blobs.get(oid) ?? [])) };
+  } catch {
+    return null;
+  }
+}
+
+/** The files of the entries `ids` as plan/ holds them now, by id, wherever they are, and its lists. */
+export function planNow(dir: string, ids: ReadonlySet<string>): PlanAt {
+  const entries = new Map<string, string>();
+  const listFiles: string[] = [];
+  const walk = (folder: string) => {
+    for (const entry of readdirSync(folder, { withFileTypes: true })) {
+      const path = join(folder, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else {
+        const id = entryIdOf(path);
+        if (id && ids.has(id)) entries.set(id, readFileSync(path, 'utf8'));
+        else if (isListFile(path)) listFiles.push(readFileSync(path, 'utf8'));
+      }
+    }
+  };
+  if (existsSync(dir)) walk(dir);
+  return { entries, lists: listTextsOf(listFiles) };
+}
+
+/** The last commit that is not a merge and touched a folder of the repository; null when git cannot say. */
+function folderCommit(repository: string, folder: string): string | null {
+  try {
+    return execFileSync('git', ['-C', repository, 'log', '-1', '--no-merges', '--format=%H', '--', folder], { encoding: 'utf8', timeout: 60_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The films of `repository`: each real folder directly under films/ that holds a film.json, in the order films/README.md
+ * gives (one it does not name comes after, by id). A film is behind on an entry it shows when what the Workshop prints of
+ * that entry (`printedChanged`) is different now from what it was at the film's last commit that is not a merge: the two
+ * ends are compared, so a change undone since does not count, and an entry is found by its id wherever its file is. An
+ * entry that did not exist at the film's commit makes the film behind; an id that is an entry at neither end (a film also
+ * shows statements of the lists) is not looked at. A shallow history, a film git knows no commit
+ * of, or a commit git cannot read, says nothing is behind.
+ */
+export function readFilms(
+  repository: string,
+  shallow: boolean,
+  lastCommit: (folder: string) => string | null = (folder) => folderCommit(repository, folder),
+  atCommit: (commit: string, ids: ReadonlySet<string>) => PlanAt | null = (commit, ids) => planAt(repository, commit, ids),
+  now: (ids: ReadonlySet<string>) => PlanAt = (ids) => planNow(join(repository, PLAN_DIR), ids),
+): FilmInfo[] {
+  const dir = join(repository, 'films');
+  if (!existsSync(dir)) return [];
+  const films: FilmInfo[] = [];
+  for (const name of readdirSync(dir).sort()) {
+    const file = join(dir, name, 'film.json');
+    if (name.startsWith('.') || !lstatSync(join(dir, name)).isDirectory() || !existsSync(file)) continue;
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as { title?: unknown; line?: unknown; shows?: unknown };
+    const shows = list(raw.shows);
+    const commit = shallow ? null : lastCommit(`films/${name}`);
+    let behind: string[] = [];
+    if (commit) {
+      const ids = new Set(shows);
+      const then = atCommit(commit, ids);
+      const current = now(ids);
+      // A film shows statements too (a principle, a property, a word): an id that is an entry at neither end is none.
+      if (then) {
+        behind = shows.filter((id) => (then.entries.has(id) || current.entries.has(id))
+          && (!then.entries.has(id) || printedChanged(then.entries.get(id)!, current.entries.get(id) ?? null, then.lists, current.lists)));
+      }
+    }
+    films.push({ id: name, title: typeof raw.title === 'string' ? raw.title : name, line: typeof raw.line === 'string' ? raw.line : '', shows, behind });
+  }
+  const readme = join(dir, 'README.md');
+  const order = existsSync(readme) ? filmOrder(readFileSync(readme, 'utf8')) : [];
+  const rank = (id: string) => (order.includes(id) ? order.indexOf(id) : order.length);
+  return films.sort((a, b) => rank(a.id) - rank(b.id) || a.id.localeCompare(b.id));
+}
+
 /** Reads the plan of `repository` and returns the page's data for the real build. Silo's map draws plan/; another plan has none. */
 export function readBuildData(repository: string, map: MapLayout = planDir(repository) === join(repository, PLAN_DIR) ? SILO_MAP : NO_MAP): BuildData {
   const films = playableFilms(join(repository, 'films'));
-  return buildDataFrom(planFilesIn(planDir(repository)), { map, history: readHistory(repository), films }, (path) => existsSync(join(repository, path)));
+  const history = readHistory(repository);
+  // Another plan's folder is not this repository's: its films are not shown with it.
+  const filmInfo = history ? readFilms(repository, history.shallow) : [];
+  return buildDataFrom(planFilesIn(planDir(repository)), { map, history, films, filmInfo }, (path) => existsSync(join(repository, path)));
 }
 
 /** Reads the plan of `repository` and returns its facts, or throws. */

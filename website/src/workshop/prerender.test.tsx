@@ -102,7 +102,9 @@ describe('the prerendered Workshop', () => {
     const data = buildData();
     const { root, slot } = page(data);
     expect(root.querySelector('.ws.is-sheet .ws-top h1')?.textContent).toBe('Workshop');
-    expect([...root.querySelectorAll('.ws-top .ws-places a')].map((a) => a.textContent)).toEqual(['Product', 'Latest', 'Left out · 3', 'Suggest a feature']);
+    expect([...root.querySelectorAll('.ws-top .ws-places a')].map((a) => a.textContent)).toEqual(['Product', 'Suggest a feature']);
+    expect(root.querySelector('.ws-top .ws-places .wa-searchctl')?.getAttribute('aria-label')).toBe('Search');
+    expect([...root.querySelectorAll('.ws-top .wa-view button')].map((button) => [button.textContent, button.getAttribute('aria-pressed')])).toEqual([['MapParts', 'true'], ['All', 'false']]);
     for (const part of data.parts) {
       expect(root.querySelector(`.ws-part[data-part="${part.id}"]`)).not.toBeNull();
       expect(root.querySelector(`.ws-tile[data-part="${part.id}"]`)).not.toBeNull();

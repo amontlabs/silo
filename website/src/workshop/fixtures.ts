@@ -3,7 +3,7 @@ import { canonicalDecision, canonicalFeature, canonicalText } from '../../../too
 import { buildDataFrom, factsFrom, historiesFrom, notesFrom } from './data';
 import type { HistorySource } from './data';
 import { EXAMPLE_MAP } from './map-example';
-import type { BuildData, Facts, Histories, LiveIssue, LiveLatest, LiveState, Notes } from './plan';
+import type { BuildData, Facts, Histories, LiveIssue, LiveState, Notes } from './plan';
 
 /** What an entry's file may hold beyond its text and verdict: ids it needs, statements it sets, removes, adds or keeps. */
 interface FixtureLists {
@@ -277,7 +277,7 @@ export function threadsOf(issues: Record<string, LiveIssue>): Record<string, num
 }
 
 /** Live state: `core` has votes, `create` has votes and comments. `threads` is the issue of each entry named, unless given. */
-export function liveState(extra: Record<string, LiveIssue> = {}, latest: LiveLatest[] = [], threads?: Record<string, number>): LiveState {
+export function liveState(extra: Record<string, LiveIssue> = {}, threads?: Record<string, number>): LiveState {
   const issues: Record<string, LiveIssue> = {
       10: issue({ entry: 'core', title: 'The engine runs on its own', up: 8 }),
       11: issue({ entry: 'calls', title: 'Every call defined once', up: 3 }),
@@ -291,5 +291,5 @@ export function liveState(extra: Record<string, LiveIssue> = {}, latest: LiveLat
       31: issue({ kind: 'suggestion', title: 'Share a base computer', up: 14, author: 'mara-k', bot: false }),
       ...extra,
   };
-  return { repo: 'amontlabs/silo', fetchedAt: new Date(Date.now()).toISOString(), issues, threads: threads ?? threadsOf(issues), latest };
+  return { repo: 'amontlabs/silo', fetchedAt: new Date(Date.now()).toISOString(), issues, threads: threads ?? threadsOf(issues) };
 }
