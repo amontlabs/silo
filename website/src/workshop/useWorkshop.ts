@@ -97,7 +97,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     setHistories('loading');
     loadHistory().then((loaded) => setHistories(loaded), () => setHistories('error'));
   }, [loadHistory]);
-  const plan = useMemo(() => buildPlan(data, live.state, typeof histories === 'object' ? histories : undefined, closedKeys), [data, live.state, histories, closedKeys]);
+  const plan = useMemo(() => buildPlan(data, live.state, closedKeys), [data, live.state, closedKeys]);
   const rows = useMemo(() => allRows(plan), [plan]);
   const rowByKey = useMemo(() => new Map(rows.map((row) => [row.key, row])), [rows]);
 

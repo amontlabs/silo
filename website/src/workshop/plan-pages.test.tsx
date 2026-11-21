@@ -73,76 +73,6 @@ describe('the line of Notes', () => {
   });
 });
 
-describe('Latest', () => {
-  const at = (hours: number) => new Date(NOW - hours * 3_600_000).toISOString();
-  const latest: LiveLatest[] = [
-    { n: 12, entry: 'create', author: 'mara-k', bot: false, createdAt: at(1), text: 'Keep stop separate.' },
-    { n: 10, entry: 'core', author: 'silo-workshop[bot]', bot: true, createdAt: at(5), text: 'Posted by the App.' },
-    { n: 14, entry: 'fork', author: 'devin-oss', bot: false, createdAt: at(30), text: 'Fork what, exactly?' },
-  ];
-
-  it('is reachable from the title row, and lists the newest first, each linking to its entry', async () => {
-    fixedNow();
-    mockApi({ state: () => ok(liveState({}, latest)) });
-    await renderApp();
-    const link = document.querySelector('.ws-top .ws-places a[href="#latest"]') as HTMLAnchorElement;
-    expect(link).toHaveTextContent('Latest');
-    await userEvent.click(link);
-    expect(location.hash).toBe('#latest');
-    expect(screen.getByRole('heading', { level: 2, name: 'Latest' })).toHaveFocus();
-    const rows = [...document.querySelectorAll<HTMLAnchorElement>('.ws-latest a.ws-row')];
-    expect(rows.map((row) => row.getAttribute('href'))).toEqual(['#part-b/create', '#part-a/core', '#part-d/fork']);
-    expect(rows.map((row) => row.querySelector('.ws-name')?.textContent)).toEqual([
-      'Create and delete a computermara-k: Keep stop separate.',
-      'The engine runs on its ownsilo-workshop[bot]: Posted by the App.',
-      'Fork a computerdevin-oss: Fork what, exactly?',
-    ]);
-    expect(rows.map((row) => row.querySelector('.ws-word')?.textContent)).toEqual(['1 hour ago', '5 hours ago', 'yesterday']);
-  });
-
-  it('leaves a click with a modifier key to the browser, so an item opens in a new tab', async () => {
-    fixedNow();
-    mockApi({ state: () => ok(liveState({}, latest)) });
-    history.replaceState(null, '', '/workshop#latest');
-    await renderApp();
-    const link = await screen.findByRole('link', { name: /^The engine runs on its own/ });
-    for (const init of [{ metaKey: true }, { ctrlKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }]) {
-      const event = new MouseEvent('click', { bubbles: true, cancelable: true, ...init });
-      link.dispatchEvent(event);
-      expect(event.defaultPrevented).toBe(false);
-    }
-    expect(location.hash).toBe('#latest');
-    const plain = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
-    await act(async () => { link.dispatchEvent(plain); });
-    expect(plain.defaultPrevented).toBe(true);
-    await waitFor(() => expect(location.hash).toBe('#part-a/core'));
-  });
-
-  it('opens the entry of a row in its part when clicked', async () => {
-    fixedNow();
-    mockApi({ state: () => ok(liveState({}, latest)) });
-    history.replaceState(null, '', '/workshop#latest');
-    await renderApp();
-    await userEvent.click(await screen.findByRole('link', { name: /^The engine runs on its own/ }));
-    expect(location.hash).toBe('#part-a/core');
-    expect(screen.getByRole('heading', { level: 2, name: 'Part A' })).toBeInTheDocument();
-    await waitFor(() => expect(rowButton('The engine runs on its own')).toHaveAttribute('aria-expanded', 'true'));
-  });
-
-  it('says so when nothing happened yet, and when the live state is offline', async () => {
-    mockApi({ state: () => ok(liveState()) });
-    history.replaceState(null, '', '/workshop#latest');
-    const first = await renderApp();
-    expect(await screen.findByText('Nothing yet.')).toBeInTheDocument();
-    first.unmount();
-    // A first visit: nothing remembered.
-    localStorage.clear();
-    mockApi({ state: () => refused(503, 'not configured') });
-    await renderApp();
-    expect(await screen.findByText('Latest is offline.')).toBeInTheDocument();
-  });
-});
-
 describe('decisions from the plan', () => {
   it('are rows of their part: the asks, then the answer and the notes once open', async () => {
     mockApi({ me: owner });
@@ -167,7 +97,7 @@ describe('the status of an entry', () => {
     history.replaceState(null, '', '/workshop#part-d/fork');
     await renderApp(built('fork'));
     await waitFor(() => expect(rowButton('Fork a computer')).toHaveAttribute('aria-expanded', 'true'));
-    expect(within(itemOf('Fork a computer')).getByText('built')).toBeInTheDocument();
+    expect(within(itemOf('Fork a computer')).getByRole('img', { name: 'built' })).toBeInTheDocument();
     expect(screen.getByText('Built, 16 Nov.')).toBeInTheDocument();
   });
 });

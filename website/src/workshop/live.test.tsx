@@ -27,7 +27,14 @@ function held<T>() {
   return { promise, release: (value: T) => release(value) };
 }
 const at = (ms: number) => new Date(ms).toISOString();
-const votes = (name: string) => itemOf(name).querySelector('.ws-vote')?.textContent;
+/** The votes a row shows: its thumb when it is open, else the count on its line (nothing below one vote). */
+const votes = (name: string) => {
+  const item = itemOf(name);
+  const thumb = item.querySelector('.ws-vote');
+  if (thumb) return thumb.textContent;
+  const side = item.querySelector(':scope > .wa-row > .wa-side')?.textContent?.replace(/\s/g, '');
+  return side || '👍';
+};
 
 describe('the first frame', () => {
   it('shows the remembered numbers and the remembered person before any answer', () => {
@@ -35,13 +42,14 @@ describe('the first frame', () => {
     remember(liveState(), owner);
     const answer = held<{ status: number; body: unknown }>();
     mockApi({ state: () => answer.promise, routes: { 'GET me': () => answer.promise } });
-    history.replaceState(null, '', '/workshop#part-b');
+    history.replaceState(null, '', '/workshop#part-b/create');
     render(<App data={buildData()} />);
     expect(votes('Create and delete a computer')).toBe('👍12');
     expect(within(itemOf('Create and delete a computer')).getByLabelText('2 comments')).toBeInTheDocument();
     expect(screen.getByText('polarzero')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
-    expect(document.querySelector('.ws-ph')).toBeNull();
+    // No placeholder for what was remembered (the opened row's facts and comments load on their own).
+    expect(document.querySelector('.ws-ph-vote, .wa-ph-side, .ws-ph-account')).toBeNull();
   });
 
   it('reads what an earlier page remembered: a person with a "decides" flag, a state with verdicts', async () => {
@@ -96,17 +104,18 @@ describe('the first frame', () => {
     history.replaceState(null, '', '/workshop#part-b');
     remember({ ...liveState(), fetchedAt: at(Date.now() - 8 * 86_400_000) });
     const old = render(<App data={buildData()} />);
-    expect(document.querySelector('.ws-ph-vote')).toBeInTheDocument();
+    expect(document.querySelector('.wa-ph-side')).toBeInTheDocument();
     old.unmount();
     localStorage.setItem(STATE, JSON.stringify({ repo: 'amontlabs/silo', fetchedAt: at(Date.now()), issues: { 12: { up: 'many' } } }));
     render(<App data={buildData()} />);
-    expect(document.querySelector('.ws-ph-vote')).toBeInTheDocument();
+    expect(document.querySelector('.wa-ph-side')).toBeInTheDocument();
   });
 
   it('remembers the answer and, apart, its own writes, and shows both on the next visit', async () => {
     const calls = mockApi({ me: owner });
     history.replaceState(null, '', '/workshop#part-b');
     const first = await renderApp();
+    await userEvent.click(rowButton('Create and delete a computer'));
     await userEvent.click(screen.getByRole('button', { name: '12 votes' }));
     await waitFor(() => expect(posts(calls, 'vote')).toHaveLength(1));
     await waitFor(() => expect(votes('Create and delete a computer')).toBe('👍13'));
@@ -289,7 +298,7 @@ describe('the page\'s own writes over an answer', () => {
         state: (url) => (url.searchParams.get('fresh') === '1' ? fresh.promise : cdn.promise),
         routes: { 'POST vote': () => ok(server ? { ok: true, up: 21 } : { ok: true }) },
       });
-      history.replaceState(null, '', '/workshop#part-b');
+      history.replaceState(null, '', '/workshop#part-b/create');
       const first = render(<App data={buildData()} />);
       expect(votes('Create and delete a computer')).toBe('👍12');
       fireEvent.click(screen.getByRole('button', { name: '12 votes' }));

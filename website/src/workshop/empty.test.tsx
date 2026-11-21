@@ -24,25 +24,24 @@ describe('the Workshop with an empty plan', () => {
     const calls = mockApi({ state: () => ok(withGoneEntries()) });
     await renderApp(empty());
     expect(screen.getByRole('heading', { level: 1, name: 'Workshop' })).toBeInTheDocument();
-    // No map: no Map and Order control, no drawing, only the tiles.
+    // No map: the switch says Parts and All, and there is no drawing, only the tiles.
     expect(screen.queryByRole('button', { name: 'Map' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Order' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Parts' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'All' })).toBeInTheDocument();
     expect(document.querySelector('.ws-swap-map, .ws-stage')).toBeNull();
-    expect(document.querySelector('.ws')).toHaveClass('v-order');
+    expect(document.querySelector('.ws')).toHaveClass('v-map', 'no-map');
+    // No film: no films' line.
+    expect(document.querySelector('.wa-films')).toBeNull();
     // No part: no tile, and no board.
     expect(document.querySelector('.ws-tile, .ws-board')).toBeNull();
     expect(screen.queryByText('After that')).toBeNull();
-    // No part is done, next or planned: the key draws nothing and is no list, but its box keeps the title row's height.
-    expect(screen.queryByRole('list', { name: 'Key' })).toBeNull();
-    expect(document.querySelector('.ws-key')).toHaveAttribute('aria-hidden', 'true');
-    expect(document.querySelector('.ws-key')).toBeEmptyDOMElement();
     expect(screen.getByRole('link', { name: 'Sign in with GitHub' })).toBeInTheDocument();
     expect(calls.some((call) => call.method === 'GET' && call.path === 'state')).toBe(true);
     // The issue of a feature the plan no longer holds shows nowhere.
     expect(screen.queryByText('Gone')).toBeNull();
-    // Latest is there whatever the plan holds.
-    expect(screen.getByRole('link', { name: 'Latest' })).toHaveAttribute('href', '#latest');
-    expect(screen.queryByRole('link', { name: /Left out/ })).toBeNull();
+    // Search is there whatever the plan holds, and Left out and Latest are no places.
+    expect(screen.getByRole('button', { name: 'Search' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Left out|Latest/ })).toBeNull();
     expect(screen.getByRole('link', { name: 'Suggest a feature' })).toHaveAttribute('href', '#suggested');
 
     await userEvent.click(screen.getByRole('link', { name: 'Product' }));

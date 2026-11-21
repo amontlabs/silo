@@ -135,8 +135,29 @@ export interface BuildData {
   map: PageLayout;
   /** Set when the build could not read the whole history of the repository: every History ends with a line that says so. */
   shallow: boolean;
-  /** The films of films/, by id: `playable` when the build wrote the film's page, at /films/<id>/. */
-  films: { id: string; playable: boolean }[];
+  /** The films of films/, in the order films/README.md gives. */
+  films: Film[];
+}
+
+/** A film of films/: what its film.json says, and whether the site plays it. */
+export interface Film {
+  id: string;
+  title: string;
+  line: string;
+  /** The ids of the entries it shows. */
+  shows: string[];
+  /** The ids of the entries it shows that changed in what they say, or were dropped or replaced, after the film last changed. */
+  behind: string[];
+  /** Whether the build wrote its page, at /films/<id>/. */
+  playable: boolean;
+}
+
+/** A film with what the page works out of it. */
+export interface FilmItem extends Film {
+  /** The parts of the entries it shows, in the order of the parts. */
+  parts: string[];
+  /** The keys of the rows of the entries it shows, in the plan's order; an id the plan no longer holds is left out. */
+  rows: string[];
 }
 
 export interface LiveIssue {
@@ -193,6 +214,10 @@ export interface Row {
   notes: boolean;
   /** Whether the entry has something to show from `Facts`. */
   more: boolean;
+  /** The ids of the films that show this entry, in the films' order. */
+  films: string[];
+  /** Whether a film that shows it is behind on it. */
+  filmBehind: boolean;
   /** The entry's closed History line; null when it has no change. */
   history: HistorySummary | null;
   /** The entry's verdict; null for no verdict, and for anything that is not an entry. */
@@ -215,19 +240,6 @@ export interface Row {
   /** Whether the thread of this entry is closed on GitHub. */
   closed: boolean;
 }
-
-/** A line of Latest: a comment (`text`, from `author`) or a change of the entry's history. */
-export interface LatestItem {
-  key: string;
-  row: Row;
-  author: string;
-  createdAt: string;
-  text: string | null;
-  change: Change | null;
-}
-
-/** How many lines Latest holds. */
-export const LATEST_LINES = 30;
 
 /** A part's features by status. */
 export interface Counts {
@@ -270,12 +282,10 @@ export interface Plan {
   parts: PartGroup[];
   /** The decisions of the whole product (plan/decisions/), in order. */
   product: Row[];
-  /** Every dropped entry of the parts, in order. */
-  left: Row[];
   /** Suggestions by votes; dropped ones last. */
   suggestions: Row[];
-  /** The newest comments and changes across the entries, newest first. */
-  latest: LatestItem[];
+  /** The films, in the order films/README.md gives. */
+  films: FilmItem[];
   /** Whether the history is cut short (BuildData.shallow). */
   shallow: boolean;
 }
@@ -332,7 +342,7 @@ function suggestionStatus(live: LiveIssue): Status {
 
 function baseRow(key: string, kind: RowKind, name: string): Row {
   return {
-    key, kind, of: null, name, what: null, issue: null, status: 'undecided', stage: null, part: null, n: null, notes: false, more: false, history: null, verdict: null, needs: [], started: null, built: null,
+    key, kind, of: null, name, what: null, issue: null, status: 'undecided', stage: null, part: null, n: null, notes: false, more: false, films: [], filmBehind: false, history: null, verdict: null, needs: [], started: null, built: null,
     author: null, up: null, comments: null, replaces: [], replacedBy: null, date: null, closedAt: null, closed: false,
   };
 }
@@ -374,8 +384,15 @@ export function partStates(groups: { rows: Row[]; counts: Counts }[]): PartState
   return states;
 }
 
-/** Where the build is, in one line: the part being built, or else the part that holds the first decided feature. */
+/**
+ * Where the build is, in one line: while no feature is decided, how many are proposed; then the part being built, or
+ * else the part that holds the first decided feature.
+ */
 export function statusLine(groups: { part: Part; state: PartState; counts: Counts }[]): string {
+  if (groups.every((group) => !group.counts.decided && !group.counts.building && !group.counts.built)) {
+    const proposed = groups.reduce((sum, group) => sum + group.counts.undecided, 0);
+    return `${proposed} ${proposed === 1 ? 'feature' : 'features'} proposed, none decided yet.`;
+  }
   const building = groups.find((group) => group.state === 'building');
   if (building) return `${building.part.title} is being built.`;
   const next = groups.find((group) => group.state === 'next');
@@ -397,7 +414,7 @@ export function stateWords(group: { state: PartState; counts: Counts }): string 
 }
 
 /** @param closedKeys the rows whose thread the server refused a write on as closed, before the state says so */
-export function buildPlan(data: BuildData, live: LiveState | null, histories: Histories = {}, closedKeys: ReadonlySet<string> = new Set()): Plan {
+export function buildPlan(data: BuildData, live: LiveState | null, closedKeys: ReadonlySet<string> = new Set()): Plan {
   const issues = live?.issues ?? {};
   // An entry's thread is the issue the server names for it; the page matches none by itself.
   const threads = live?.threads ?? {};
@@ -471,24 +488,18 @@ export function buildPlan(data: BuildData, live: LiveState | null, histories: Hi
   const dropped = (row: Row) => (row.status === 'dropped' ? 1 : 0);
   suggestions.sort((a, b) => dropped(a) - dropped(b) || (b.up ?? 0) - (a.up ?? 0) || (a.issue ?? 0) - (b.issue ?? 0));
 
-  const latest: LatestItem[] = [];
-  for (const [index, item] of (live?.latest ?? []).entries()) {
-    const row = entries.get(item.entry);
-    if (!row || row.issue !== item.n) continue;
-    latest.push({ key: `latest-${index}`, row, author: item.author, createdAt: item.createdAt, text: item.text ?? null, change: null });
-  }
-  for (const [id, changes] of Object.entries(histories)) {
-    const row = entries.get(id);
-    if (!row) continue;
-    for (const [index, change] of changes.entries()) latest.push({ key: `latest-${id}-${index}`, row, author: '', createdAt: change.date, text: null, change });
-  }
-  // Newest first; a comment goes before a change of the same second, and what is equal keeps its order.
-  latest.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-  latest.length = Math.min(latest.length, LATEST_LINES);
+  const films: FilmItem[] = data.films.map((film) => {
+    const shown = film.shows.map((id) => entries.get(id)).filter((row): row is Row => row !== undefined).sort((a, b) => (a.n ?? 0) - (b.n ?? 0));
+    for (const row of shown) {
+      row.films.push(film.id);
+      if (film.behind.includes(row.key.slice('entry-'.length))) row.filmBehind = true;
+    }
+    const covered = new Set(shown.flatMap((row) => (row.part ? [row.part] : [])));
+    return { ...film, parts: data.parts.map((part) => part.id).filter((id) => covered.has(id)), rows: shown.map((row) => row.key) };
+  });
 
   const product = rows.filter((row) => row.part === null);
-  const left = groups.flatMap((group) => group.rows.filter((row) => row.status === 'dropped')).sort((a, b) => (a.n ?? 0) - (b.n ?? 0));
-  return { parts: groups, product, left, suggestions, latest, shallow: data.shallow };
+  return { parts: groups, product, suggestions, films, shallow: data.shallow };
 }
 
 /** Every row once: the parts' entries, the whole product's decisions, then suggestions. */

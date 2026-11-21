@@ -18,28 +18,30 @@ async function openFrom(hash: string, name: string, data = buildData()) {
 }
 
 describe('a replaced decision', () => {
-  it('says "replaced" on its row, where a decided one says "decided", and is styled as dropped is', async () => {
+  it('says "replaced" by its pip, where a decided one says "decided", and is struck through as dropped is', async () => {
     mockApi({ me: owner });
     history.replaceState(null, '', '/workshop#product');
     await renderApp();
     const old = itemOf(OLD);
-    expect(within(old).getByText('replaced')).toBeInTheDocument();
-    expect(old).toHaveClass('st-replaced', 'quiet');
-    expect(old.querySelector('.ws-pip')).toHaveClass('replaced');
-    expect(within(itemOf('How is security built?')).getByText('decided')).toBeInTheDocument();
-    expect(within(old).queryByText('decided')).not.toBeInTheDocument();
+    expect(within(old).getByRole('img', { name: 'replaced' })).toHaveClass('ws-pip', 'replaced');
+    expect(old).toHaveClass('gone');
+    expect(rowButton(OLD)).toHaveAccessibleName(`${OLD}, replaced`);
+    expect(within(itemOf('How is security built?')).getByRole('img', { name: 'decided' })).toBeInTheDocument();
+    expect(itemOf('How is security built?')).not.toHaveClass('gone');
     expect(screen.getByText(/^Decisions:/)).toHaveTextContent('Decisions: 1 decided · 1 not decided · 1 replaced');
   });
 
   it('keeps its place in its part, and is not among the dropped entries', async () => {
     mockApi({ me: owner });
+    // The old address of the dropped entries opens All with that filter.
     history.replaceState(null, '', '/workshop#left');
     await renderApp();
+    expect(location.search).toBe('?view=all&state=dropped');
     expect(screen.queryByRole('button', { name: new RegExp(`^${OLD}`) })).not.toBeInTheDocument();
     history.replaceState(null, '', '/workshop#product');
     window.dispatchEvent(new HashChangeEvent('hashchange'));
     await waitFor(() => expect(rowButton(OLD)).toBeInTheDocument());
-    expect([...document.querySelectorAll('.ws-detail .ws-name')].map((name) => name.textContent)).toEqual(['How is security built?', 'Which host runs Silo first?', OLD]);
+    expect([...document.querySelectorAll('.ws-detail .wa-name > span:first-child')].map((name) => name.textContent)).toEqual(['How is security built?', 'Which host runs Silo first?', OLD]);
   });
 
   it('shows what it showed when taken and the line "Replaced by", linked to the decision where it lives', async () => {
@@ -109,7 +111,8 @@ describe('the latest changes', () => {
     mockApi();
     history.replaceState(null, '', '/workshop#latest');
     await renderApp(data);
-    const row = await screen.findByRole('link', { name: new RegExp(`^${CURRENT}`) });
+    await waitFor(() => expect(rowButton(CURRENT)).toBeInTheDocument());
+    const row = itemOf(CURRENT).querySelector('.wa-change') as HTMLElement;
     expect(row).toHaveTextContent('What a yes would do changed · Replaced by');
     expect(row.textContent).not.toMatch(/\b(sets|replaces|replaced)\b/);
     await act(async () => {});

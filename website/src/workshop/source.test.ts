@@ -28,15 +28,19 @@ describe('state classes', () => {
       throw new Error(`a state class this check cannot read: ${text}`);
     };
     const items = statement.slice('const classes = ['.length).split(',').map((item) => item.trim()).filter(Boolean);
-    const states = new Set(items.flatMap((item) => {
-      const branches = item.match(/^[\w.!&| ]+\?\s*(.+?)\s*:\s*(.+)$/);
-      return (branches ? [branches[1], branches[2]] : [item]).filter((text) => text !== "''").flatMap(nameOf);
-    }));
+    // A condition's branches are read in turn; a branch may hold a condition of its own.
+    const namesIn = (text: string): string[] => {
+      const branches = text.match(/^[\w.!&| ]+\?\s*(.+?)\s*:\s*(.+)$/);
+      if (branches) return [branches[1], branches[2]].flatMap(namesIn);
+      return text === "''" ? [] : nameOf(text);
+    };
+    const states = new Set(items.flatMap(namesIn));
     states.delete('ws');
     // A name with a hyphen cannot be a variable, so finding it anywhere in the code means an element may carry it.
     expect([...states].filter((name) => !name.includes('-'))).toEqual([]);
     expect(states).toContain('v-map');
-    expect(states).toContain('swap-out');
+    expect(states).toContain('v-all');
+    expect(states).toContain('is-open');
     // The same state on purpose: the account slot in the header fades in with the person's details, like the Workshop.
     const shared = "accountSlot.classList.toggle('ws-arr-p'";
     expect(app).toContain(shared);

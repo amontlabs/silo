@@ -23,9 +23,12 @@ export const HOLD_MS = 180;
 export interface EntryContext {
   w: Workshop;
   signIn: string;
-  onToggle: (row: Row) => void;
-  /** The rows open now. */
+  /** Opens or closes a row; `instance` names the one drawn under a feature, when the same entry is drawn there. */
+  onToggle: (row: Row, instance?: string) => void;
+  /** The rows open now, by instance key (a row on its own line is its own key; all.ts `underKey`). */
   open: ReadonlySet<string>;
+  /** Shows All with the entries a film shows. */
+  onFilmEntries?: (film: string) => void;
 }
 
 /** A row's word: one that is not decided says nothing on its own row. */
@@ -56,9 +59,46 @@ export function stateText(row: Row): string {
 
 export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryContext }) {
   const { w } = ctx;
+  const word = WORDS[row.status];
+  const quiet = !isDecided(row);
+  const classes = ['ws-item', `st-${row.status}`, open ? 'open' : '', quiet ? 'quiet' : ''].filter(Boolean).join(' ');
+  return (
+    <li className={classes} id={row.key}>
+      <div className="ws-line">
+        <button type="button" className="ws-row" aria-expanded={open} aria-controls={`${row.key}-more`} onClick={() => ctx.onToggle(row)} onPointerEnter={() => w.prefetch(row)} onPointerDown={() => w.prefetch(row)} onTouchStart={() => w.prefetch(row)} onFocus={() => w.prefetch(row)}>
+          <i className={pipClass(row)} aria-hidden="true" />
+          <span className="ws-name">{row.name}</span>
+          <b className="ws-word">{word ?? ''}</b>
+        </button>
+        <Side row={row} ctx={ctx} />
+      </div>
+      <Panel row={row} open={open} ctx={ctx} id={`${row.key}-more`} />
+    </li>
+  );
+}
+
+export interface PanelProps {
+  row: Row;
+  open: boolean;
+  ctx: EntryContext;
+  id: string;
+  /** What the panel shows first: an entry's film. */
+  lead?: ReactNode;
+  /** The vote button and the count of comments, in the panel, for a row that shows only its votes. */
+  vote?: boolean;
+  /** Mounted by the press that opens it: it opens as a panel that was there closed does. */
+  late?: boolean;
+}
+
+/**
+ * What a row shows once open. It opens at once and grows when its comments are in, or after HOLD_MS; its body stays
+ * mounted while it closes, so the close animates too.
+ */
+export function Panel({ row, open, ctx, id, lead, vote = false, late = false }: PanelProps) {
+  const { w } = ctx;
   // The body stays mounted while it closes, so the close animates too.
   const [closing, setClosing] = useState(false);
-  const [wasOpen, setWasOpen] = useState(open);
+  const [wasOpen, setWasOpen] = useState(late ? false : open);
   // The row shows itself open at once; its panel grows when the comments are in, or after HOLD_MS.
   const detail = row.issue === null ? undefined : w.details[row.issue];
   const ready = row.issue === null || row.issue <= 0 || !w.liveOk || typeof detail === 'object' || detail === 'error';
@@ -163,23 +203,10 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
   });
   useEffect(() => () => clearTimeout(settling.current), []);
 
-  const word = WORDS[row.status];
-  const quiet = !isDecided(row);
-  const classes = ['ws-item', `st-${row.status}`, open ? 'open' : '', quiet ? 'quiet' : ''].filter(Boolean).join(' ');
   return (
-    <li className={classes} id={row.key}>
-      <div className="ws-line">
-        <button type="button" className="ws-row" aria-expanded={open} aria-controls={`${row.key}-more`} onClick={() => ctx.onToggle(row)} onPointerEnter={() => w.prefetch(row)} onPointerDown={() => w.prefetch(row)} onTouchStart={() => w.prefetch(row)} onFocus={() => w.prefetch(row)}>
-          <i className={pipClass(row)} aria-hidden="true" />
-          <span className="ws-name">{row.name}</span>
-          <b className="ws-word">{word ?? ''}</b>
-        </button>
-        <Side row={row} ctx={ctx} />
-      </div>
-      <div className={grown ? 'ws-more open' : 'ws-more'} id={`${row.key}-more`} aria-hidden={open ? undefined : true} inert={!open}>
-        <div className="ws-more-in" ref={inner}>{open || closing ? <Body row={row} ctx={ctx} detail={shown} onExtras={() => setExtrasMoved((n) => n + 1)} /> : null}</div>
-      </div>
-    </li>
+    <div className={grown ? 'ws-more open' : 'ws-more'} id={id} aria-hidden={open ? undefined : true} inert={!open}>
+      <div className="ws-more-in" ref={inner}>{open || closing ? <Body row={row} ctx={ctx} detail={shown} lead={lead} vote={vote} onExtras={() => setExtrasMoved((n) => n + 1)} /> : null}</div>
+    </div>
   );
 }
 
@@ -266,11 +293,11 @@ function CopyId({ id }: { id: string }) {
   );
 }
 
-function StateLine({ row }: { row: Row }) {
+function StateLine({ row, children }: { row: Row; children?: ReactNode }) {
   const text = stateText(row);
   const tone = isDecided(row) && row.status !== 'dropped' ? 'ws-yes' : 'ws-muted';
   const id = planId(row);
-  return <div className="ws-state"><span className={tone}>{text}</span>{id ? <CopyId id={id} /> : null}</div>;
+  return <div className="ws-state"><span className={tone}>{text}</span>{id ? <CopyId id={id} /> : null}{children}</div>;
 }
 
 /**
@@ -629,25 +656,6 @@ function YesLines({ own, facts }: { own: EntryFacts; facts: Facts }) {
   );
 }
 
-/** The state word of a row that another one needs; one that is not decided says nothing on its own row, and here says so. */
-function needWord(row: Row): string {
-  return WORDS[row.status] ?? 'not decided';
-}
-
-function NeedsLines({ row, ctx }: { row: Row; ctx: EntryContext }) {
-  const needs = row.needs.map((key) => ctx.w.rowByKey.get(key)).filter((other): other is Row => other !== undefined);
-  if (!needs.length) return null;
-  return (
-    <Fact label="Needs">
-      <ul className="ws-fact-lines ws-needs">
-        {needs.map((other) => (
-          <li key={other.key}><EntryLink other={other} ctx={ctx} /> <span className="ws-need-word">{needWord(other)}</span></li>
-        ))}
-      </ul>
-    </Fact>
-  );
-}
-
 /** What the open view says of the lists and of what the entry needs, in the order of the plan's model. */
 function OpenFacts({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const { w } = ctx;
@@ -681,7 +689,6 @@ function OpenFacts({ row, ctx }: { row: Row; ctx: EntryContext }) {
         </Fact>
       ) : null}
       <ReplaceLines row={row} ctx={ctx} only={(label) => label !== 'Replaced by'} />
-      <NeedsLines row={row} ctx={ctx} />
       {facts && own?.keeps && row.of === 'feature' ? (
         <Fact label="Must keep">
           <ul className="ws-fact-lines ws-keeps">
@@ -701,14 +708,15 @@ function OpenFacts({ row, ctx }: { row: Row; ctx: EntryContext }) {
   );
 }
 
-function Body({ row, ctx, detail, onExtras }: { row: Row; ctx: EntryContext; detail: Detail | undefined; onExtras: () => void }) {
+function Body({ row, ctx, detail, lead, vote, onExtras }: { row: Row; ctx: EntryContext; detail: Detail | undefined; lead?: ReactNode; vote: boolean; onExtras: () => void }) {
   const { w } = ctx;
   const what = row.kind === 'entry' ? row.what : typeof detail === 'object' ? detail.body : null;
   return (
     <div className="ws-more-pad">
+      {lead}
       {what ? <div className="ws-what"><RichText text={what} /></div> : null}
       {row.kind === 'entry' ? <OpenFacts row={row} ctx={ctx} /> : null}
-      <StateLine row={row} />
+      <StateLine row={row}>{vote ? <Side row={row} ctx={ctx} /> : null}</StateLine>
       <ReplaceLines row={row} ctx={ctx} only={(label) => label === 'Replaced by'} />
       {row.kind === 'entry' ? <Extras row={row} ctx={ctx} onMove={onExtras} /> : null}
       <Talk row={row} ctx={ctx} detail={detail} />

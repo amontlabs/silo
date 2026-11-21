@@ -1,7 +1,7 @@
 // The plan as the repository holds it, in plan/: read with tools/plan/read and checked with tools/plan/check
 // at build time. Any error stops the build with the file, the field and the fix.
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkFiles, formatProblem } from '../../../tools/plan/check/index.js';
 import { entryStatus, listKind, replacedBy, wordId } from '../../../tools/plan/model/index.js';
@@ -12,7 +12,7 @@ import { checkLayout, LayoutError, NO_MAP, pageLayout, SILO_MAP } from './map.ts
 import type { LayoutPlan, MapLayout } from './map.ts';
 import { RESERVED_ADDRESSES } from './routes.ts';
 import { playableFilms } from '../../scripts/films.mjs';
-import type { BuildData, Change, Entry, EntryFacts, Facts, Histories, Notes, Statement, Verdict } from './plan.ts';
+import type { BuildData, Change, Entry, EntryFacts, Facts, Film, Histories, Notes, Statement, Verdict } from './plan.ts';
 
 export const PLAN_DIR = 'plan';
 
@@ -64,7 +64,12 @@ export interface BuildOptions {
   history?: HistorySource | null;
   /** The films whose page the build writes (scripts/films.mjs); none by default. */
   films?: string[];
+  /** What each film of films/ says of itself and which of its entries it is behind (`readFilms`), in the order films/README.md gives; none by default. */
+  filmInfo?: FilmInfo[];
 }
+
+/** A film as films/<id>/film.json describes it, with the ids of the entries it shows that changed after it. */
+export type FilmInfo = Omit<Film, 'playable'>;
 
 const hasNotes = (raw: RawEntry) => typeof raw.notes === 'string' && raw.notes.trim() !== '';
 
@@ -189,7 +194,7 @@ export function partDepends(parts: { id: string }[], entries: Pick<Entry, 'id' |
 }
 
 /** The plan object of tools/plan/read, as the page holds it: decisions and features in the order of order.json. */
-export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null, films = [] }: BuildOptions = {}): BuildData {
+export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null, films = [], filmInfo = [] }: BuildOptions = {}): BuildData {
   const entries: Entry[] = ordered(plan).map((raw) => ({
     id: raw.id,
     kind: raw.kind,
@@ -215,7 +220,7 @@ export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null, fil
     entries,
     map: pageLayout(map, layoutPlanOf(plan)),
     shallow: history?.shallow === true,
-    films: films.map((id) => ({ id, playable: true })),
+    films: filmInfo.map((film) => ({ ...film, playable: films.includes(film.id) })),
   };
 }
 
@@ -348,10 +353,140 @@ export function readHistory(repository: string): HistorySource | null {
   return source;
 }
 
+/** The order films/README.md gives the films in: the ids of its table "The films, in the order they are watched". */
+export function filmOrder(readme: string): string[] {
+  const at = readme.indexOf('## The films, in the order they are watched');
+  if (at === -1) return [];
+  const ids: string[] = [];
+  for (const line of readme.slice(at).split('\n').slice(1)) {
+    if (line.startsWith('## ')) break;
+    const id = /^\|\s*`([a-z0-9-]+)`\s*\|/.exec(line)?.[1];
+    if (id) ids.push(id);
+  }
+  return ids;
+}
+
+/** Whether an entry file, before and after a commit, changed in what the entry says: its question, answer, name, text or what it would set, or it was dropped or replaced. A verdict alone does not count. */
+export function sayingChanged(before: string | null, after: string | null): boolean {
+  if (before === null || after === null) return before !== after && after === null;
+  let was: Record<string, unknown>;
+  let now: Record<string, unknown>;
+  try {
+    was = JSON.parse(before) as Record<string, unknown>;
+    now = JSON.parse(after) as Record<string, unknown>;
+  } catch {
+    return false;
+  }
+  const says = (entry: Record<string, unknown>) => JSON.stringify([entry.name, entry.what, entry.asks, entry.answer, entry.sets ?? null]);
+  return says(was) !== says(now) || (now.verdict === 'drop' && was.verdict !== 'drop') || (typeof now.replaced_by === 'string' && was.replaced_by !== now.replaced_by);
+}
+
+/** One change of an entry's file in a commit that is not a merge: its text before and after (null where the file did not exist). */
+export interface FileChange {
+  id: string;
+  /** The commit time, in seconds. */
+  time: number;
+  before: string | null;
+  after: string | null;
+}
+
+/** The changes to the files of `ids` under plan/ after `since` (seconds), one per commit that is not a merge. */
+export function entryFileChanges(repository: string, since: number, ids: ReadonlySet<string>): FileChange[] {
+  const git = (args: string[], input?: string) => execFileSync('git', ['-C', repository, ...args], { input, maxBuffer: 512 * 1024 * 1024, timeout: 120_000, stdio: ['pipe', 'pipe', 'ignore'] });
+  try {
+    const log = git(['log', '--no-merges', '--raw', '-z', '--no-abbrev', '--no-renames', '--format=%x01%ct', '--', PLAN_DIR]).toString('utf8');
+    const found: { id: string; time: number; old: string; now: string }[] = [];
+    let time = 0;
+    const tokens = log.split('\0');
+    for (let i = 0; i < tokens.length; i += 1) {
+      const token = tokens[i].replace(/^\n/, '');
+      const head = token.indexOf('\x01');
+      if (head !== -1) {
+        time = Number(token.slice(head + 1).trim().split(/\s/)[0]);
+        const rest = token.slice(head + 1).replace(/^\d+\s*/, '');
+        if (!rest.startsWith(':')) continue;
+        tokens[i] = rest;
+        i -= 1;
+        continue;
+      }
+      if (!token.startsWith(':')) continue;
+      const [, , old, now] = token.slice(1).split(' ');
+      const path = tokens[(i += 1)] ?? '';
+      const id = /(?:^|\/)(?:decisions|features)\/([^/]+)\.json$/.exec(path)?.[1];
+      if (id && ids.has(id) && time > since) found.push({ id, time, old, now });
+    }
+    const none = (oid: string) => /^0+$/.test(oid);
+    const blobs = new Map<string, string>();
+    const oids = [...new Set(found.flatMap(({ old, now }) => [old, now]).filter((oid) => !none(oid)))];
+    if (oids.length) {
+      const out = git(['cat-file', '--batch'], oids.map((oid) => `${oid}\n`).join(''));
+      let at = 0;
+      for (const oid of oids) {
+        const end = out.indexOf(10, at);
+        if (end === -1) break;
+        const [, type, size] = out.subarray(at, end).toString().split(' ');
+        if (type === 'missing') {
+          at = end + 1;
+          continue;
+        }
+        blobs.set(oid, out.subarray(end + 1, end + 1 + Number(size)).toString('utf8'));
+        at = end + 1 + Number(size) + 1;
+      }
+    }
+    return found.map(({ id, time: when, old, now }) => ({ id, time: when, before: none(old) ? null : blobs.get(old) ?? null, after: none(now) ? null : blobs.get(now) ?? null }));
+  } catch {
+    return [];
+  }
+}
+
+/** When a folder of the repository last changed, in seconds: its newest commit that is not a merge; null when git cannot say. */
+function folderTime(repository: string, folder: string): number | null {
+  try {
+    const out = execFileSync('git', ['-C', repository, 'log', '-1', '--no-merges', '--format=%ct', '--', folder], { encoding: 'utf8', timeout: 60_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return out ? Number(out) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The films of `repository`: each real folder directly under films/ that holds a film.json, in the order films/README.md
+ * gives (one it does not name comes after, by id). A film is behind on an entry it shows when that entry's file changed in
+ * what it says after the last commit that is not a merge and touched the film's folder. A shallow history says nothing is behind.
+ */
+export function readFilms(
+  repository: string,
+  shallow: boolean,
+  lastChange: (folder: string) => number | null = (folder) => folderTime(repository, folder),
+  changesAfter: (since: number, ids: ReadonlySet<string>) => FileChange[] = (since, ids) => entryFileChanges(repository, since, ids),
+): FilmInfo[] {
+  const dir = join(repository, 'films');
+  if (!existsSync(dir)) return [];
+  const films: (FilmInfo & { since: number | null })[] = [];
+  for (const name of readdirSync(dir).sort()) {
+    const file = join(dir, name, 'film.json');
+    if (name.startsWith('.') || !lstatSync(join(dir, name)).isDirectory() || !existsSync(file)) continue;
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as { id?: unknown; title?: unknown; line?: unknown; shows?: unknown };
+    const shows = Array.isArray(raw.shows) ? raw.shows.filter((id): id is string => typeof id === 'string') : [];
+    films.push({ id: name, title: typeof raw.title === 'string' ? raw.title : name, line: typeof raw.line === 'string' ? raw.line : '', shows, behind: [], since: lastChange(`films/${name}`) });
+  }
+  const known = films.flatMap((film) => (film.since === null ? [] : [film.since]));
+  const changes = !shallow && known.length ? changesAfter(Math.min(...known), new Set(films.flatMap((film) => film.shows))) : [];
+  const readme = join(dir, 'README.md');
+  const order = existsSync(readme) ? filmOrder(readFileSync(readme, 'utf8')) : [];
+  const rank = (id: string) => (order.includes(id) ? order.indexOf(id) : order.length);
+  return films
+    .map(({ since, ...film }) => ({ ...film, behind: since === null ? [] : film.shows.filter((id) => changes.some((change) => change.id === id && change.time > since && sayingChanged(change.before, change.after))) }))
+    .sort((a, b) => rank(a.id) - rank(b.id) || a.id.localeCompare(b.id));
+}
+
 /** Reads the plan of `repository` and returns the page's data for the real build. Silo's map draws plan/; another plan has none. */
 export function readBuildData(repository: string, map: MapLayout = planDir(repository) === join(repository, PLAN_DIR) ? SILO_MAP : NO_MAP): BuildData {
   const films = playableFilms(join(repository, 'films'));
-  return buildDataFrom(planFilesIn(planDir(repository)), { map, history: readHistory(repository), films }, (path) => existsSync(join(repository, path)));
+  const history = readHistory(repository);
+  // Another plan's folder is not this repository's: its films are not shown with it.
+  const filmInfo = history ? readFilms(repository, history.shallow) : [];
+  return buildDataFrom(planFilesIn(planDir(repository)), { map, history, films, filmInfo }, (path) => existsSync(join(repository, path)));
 }
 
 /** Reads the plan of `repository` and returns its facts, or throws. */

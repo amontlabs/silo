@@ -29,9 +29,10 @@ Vite. It has two pages:
   `/scripts/share-image.html`.
 - **Workshop** (`workshop/index.html`, `src/workshop/`), at
   [silo.amontlabs.com/workshop](https://silo.amontlabs.com/workshop): Silo's
-  plan, the parts of the product as tiles, each with its decisions and
-  features, Product (the decisions about the whole product), and the features
-  people suggest. Anyone signed in with GitHub can suggest a feature, and vote and
+  plan, the parts of the product on a map (as tiles under 1200 px), each with its
+  decisions and features, the films that show them, All (every feature and
+  decision in the order they are built), Product (the decisions about the whole
+  product), and the features people suggest. Anyone signed in with GitHub can suggest a feature, and vote and
   comment on a suggestion, a decision or a feature. Its API lives under `/api/workshop/` (`server/`,
   `api/`). While the plan holds no part, it is the same page with no tile; the
   title row keeps its links and "Suggest a feature".
@@ -104,7 +105,7 @@ The first command downloads Playwright's own Chromium once; the check never
 uses an installed Chrome. It opens `http://127.0.0.1:4174/workshop` (pass
 another URL after `--` to check another server) at 1440 × 900, 1440 × 1100,
 2560 × 1440, 1024 × 1366 and 390 × 844, on the plain view, the first part
-that has rows, `#product` when Product has rows, `#latest`
+that has rows, `#product` when Product has rows, All (`?view=all`)
 and `#suggested`. The parts and Product's
 rows are read from the page's data
 (`window.__workshopData`, set by `main.tsx`), and the places to visit are chosen
@@ -131,8 +132,7 @@ footer is the last row of the frame, at the bottom of the window when the page
 is shorter than the window and right after the content otherwise, once before
 the page's script runs and once after everything has loaded. It exits with an
 error when that check fails, a first frame lacks what it must hold, or a
-load's layout shifts add up to more than 0.01 (the key gains an item when the
-state arrives, a shift of a few ten-thousandths). `--slow-api <ms>` holds back
+load's layout shifts add up to more than 0.01. `--slow-api <ms>` holds back
 each API answer, `--slow-script <ms>` holds back the page's script, and
 `--signed-in` fakes the `me` answer as a signed-in person. Last, with the page's script
 held (run it with `--slow-script 3000`) and the API held longer, it loads the
@@ -152,11 +152,10 @@ places. Built that way, it is checked at the places it has, and passes.
 
 To see the page's moves frame by frame, with the same server running,
 `npm --prefix website run motion-sheet` (a URL, `--out <dir>` and flow names
-after `--`). For each move, such as the plain view to a part and back at
-1440 × 900 and 390 × 844, or on the map at 1440 × 900 the map to a part and
-back, a scrolled map to a part and back, Map to Order and back on the plain
-view, and Map to Order and back with a part and a row open (the flows named
-`map-*`), it writes to `website/.motion/` a contact sheet of
+after `--`). For each move, such as the plain view to a part and back on the
+tiles at 1100 × 900 and 390 × 844, or on the map at 1440 × 900 the map to a part
+and back and a scrolled map to a part and back (the flows named `map-*`), it
+writes to `website/.motion/` a contact sheet of
 the frames at fixed times after the action and a text file with each change
 of the scroll and of each element's box and opacity, the animations that ran
 and the layout shifts. It exits with an error when, in any move, a box it
@@ -170,10 +169,8 @@ It also exits with an error when
 a move between the plain view and a place scrolls the page more than once,
 when a move between two places runs a view transition, when Notes opening
 grows its panel in fewer than four steps, when a comment changes height as it
-is confirmed, when a row's opening or closing covers more than 16% of its way
-in its first frame, or when Map and Order swap with a place open and the place
-or the footer goes under an opacity of 0.95 or is missing from a frame, or the
-place's top takes one step of more than 30 px; the full list is at the top of `scripts/motion-sheet.mjs`.
+is confirmed, or when a row's opening or closing covers more than 16% of its way
+in its first frame; the full list is at the top of `scripts/motion-sheet.mjs`.
 `npm test` does not run it either.
 
 To build and check the page on another plan than `plan/` (the real plan may be
@@ -211,8 +208,8 @@ checks it with `tools/plan/check` (`data.ts`); any error of `plan check` stops
 the build with the file, the field and the fix. The same file calls `readSteps`
 and `entryHistory` of `tools/plan/history` on the repository, once per build:
 that is the history of each entry (see "History" below). A part with no feature is fine.
-A part whose id is `product`, `left`, `suggested` or `latest` stops the build:
-those are the page's own addresses, and the message names the part and the fix.
+A part whose id is `product`, `left`, `suggested`, `latest` or `films` stops the build:
+those are the page's own addresses, or old ones it still reads, and the message names the part and the fix.
 `map.ts` holds the drawing, `SILO_MAP`. It places every part of
 `plan/parts.json` on the full map and on the folded one, inside two zones: your
 Mac, and the virtual machines in it. Text that is not a part stands for what is
@@ -255,13 +252,9 @@ dashed outline or line has one source for each kind of thing:
   solid once it is decided, next, being built or built. What a place or a copy rests on
   changes nothing there, and the page gets no mark for either.
 
-A key on the full map (class `ws-mapkey`, not the header's `ws-key`) says what a
-solid and a dashed line mean ("decided", "not decided"). The header's key, at
-the end of the title row in the Map and the Order view, has an entry only for a
-state a part is in: "built", "being built", "next" and "decided", each with its
-pip. It has no entry for a part not decided: the map's key says what a dashed
-line means, and a screen reader still hears "not decided" for such a part. With no entry
-it draws nothing and is no list, but its empty box keeps the title row's height.
+A key on the full map (class `ws-mapkey`) says what a solid and a dashed line
+mean ("decided", "not decided"). The title row has no key of its own: a part's
+state is on its box, and a screen reader hears it.
 
 What a part depends on: part X depends on part Y when an entry of X (a decision
 or a feature) names an entry of Y in `needs`, and Y starts before X in the plan's
@@ -327,7 +320,7 @@ state line under a title is not checked by the build, since its words come from
 the code: a test checks that every box holds the longest one, "99/99 built".
 
 A layout with no place in it (`NO_MAP`) draws no map: any plan passes, and the
-page shows the parts as tiles only, without the Map and Order control. A plan
+page shows the parts as tiles only, and the switch reads Parts and All at every width. A plan
 read from another folder (`WORKSHOP_PLAN`) is built with it. `map-example.ts`
 is a made-up layout of five parts that shows every kind of thing a layout can
 hold, a wire that is not decided among them; the tests draw their fixture plan (`fixtures.ts`) with it, and the page
@@ -360,7 +353,8 @@ its script arrives:
 - With the session marker (`ws-session` on `<html>`), CSS shows the account's
   placeholder in the slot instead of the drawn sign-in, while the script may
   still take over.
-- At any other address (a hash, `?view=order`, `?signin=failed`) the head script
+- At any other address (a hash, `?view=all`, `?signin=failed`), and at the
+  plain address when the page remembers that the person left it on All, the head script
   sets `ws-hold` before first paint: what is under the title row stays hidden
   with its room kept, and the footer with it, until the script has drawn that
   place.
@@ -383,44 +377,93 @@ on GitHub changes it.
 
 What a person sees:
 
-- The parts as tiles in the order of `parts.json`; parts that hold an entry of
-  the first five stages sit in the first band, the others after "After that".
-  With a map, at 1200 px and wider, the map of the parts (Map) or the tiles
-  (Order); narrower, the tiles only. Where the browser has view transitions,
+- Everyone lands on the map, with the films' line above it. Under 1200 px, and
+  for a plan with no map, the parts' tiles stand in the map's place, in the
+  order of `parts.json`; parts that hold an entry of the first five stages sit
+  in the first band, the others after "After that". Under 760 px the tiles come
+  one per line, each with its sentence and without its dots. Nobody lands on All
+  unless the address says so, or the page remembers it (below). Where the browser has view transitions,
   opening a tile rolls the sheet of tiles up into the strip of part names, like
   a blind, and the place is uncovered under it; going back rolls it down again.
   A move from one place to another (a name in the strip, a link to an entry
-  that lives elsewhere, a line of Latest) shows the new place at once. In the
+  that lives elsewhere, a film) shows the new place at once. In the
   strip, the name under the pointer turns to the ink colour; the lighter ground
   and the line under it mark the open part alone. The strip holds the parts
   only.
 - A place opened after the first frames rises 8 px into place as it fades in.
-  One that opens with a row open (a line of Latest, a link to an entry, an
+  One that opens with a row open (a link to an entry, an
   address) fades in where it stands, so the rows under that row only move down
   as its panel grows. Going back on the map, the place fades out over 130 ms
   while the map unfolds. Going back from a scrolled part, the map stays pinned
   under the header until the scroll to the top has brought it to its own
   place, so it never jumps up.
-- Map and Order swap on the plain view by fading out everything under the
-  title row, then fading it in 8 px low as it rises. With a place open, only
-  the strip changes: the one that leaves fades out, the other fades in, and
-  the place and the footer, which stay in sight, slide to their new height in
-  one move of 260 ms. Which of the two swaps runs is read when it applies, from
-  what is shown then. A second press meanwhile stops the slide where it is and
-  the next one starts from there; Back, Forward and any other move end it at
-  once. With
-  reduced motion, none of these moves animates.
-- A part's rows are its features, under the heading "Features", then its
-  decisions, under "Decisions"; each group keeps the order of `order.json`, and
-  the same row draws both. A group with no row shows nothing, its heading
-  included. "Left out", the page without JavaScript and the plain list shown
-  when the page fails group their rows the same way; Product holds decisions
-  only and has no heading. The page says how far an entry is in one set of
+  With reduced motion, none of these moves animates.
+- The title row holds the title with the line that says where the build is,
+  then Product, Search, "Suggest a feature" and the switch: Map and All at
+  1200 px and wider, Parts and All under it. Under 760 px the switch leads the
+  title row's tools and the others go on the next line. The switch is a move
+  of its own: Back undoes it. Pressing the view shown while a place is open
+  goes back to its plain view. While no feature is decided, the line under the
+  title reads "<N> features proposed, none decided yet.", N being the features
+  that are not dropped.
+- All (`?view=all`, `AllView.tsx`, its model in `all.ts`) lists every feature in
+  the order it is built, numbered from 1 (its step), under the titles of the
+  stages of `order.json`. A feature is one line: a caret, its step, its pip, its
+  name, a meter of its decisions decided ("2/16", a bar and the number), its part
+  and its votes ("👍 3" from one vote up). The decisions a feature needs fold
+  under it, those not decided first, then the others, each in the plan's order;
+  six show, then a line "N more" opens the rest. After the last feature come the
+  decisions no feature needs, one foldable row per part, under "Decisions no
+  feature needs". A dropped or replaced row is struck through. Above the list,
+  under the header and staying there while it scrolls, are the line of controls
+  and the strip.
+- The line of controls: Build order or Latest; Filter, a menu with a field and
+  State, Part and Film, each a menu of values with their number of entries
+  (typing in the field lists the values of all three that match); a chip per
+  value applied, with a button that takes it away, and "Clear" from two chips;
+  the count of entries shown ("21 of 31") while a filter or a search applies;
+  Display, which shows features, decisions and films as rows (features and
+  decisions by default; another choice puts a dot on the button). A filter
+  keeps a feature when it or a decision under it passes, and the decisions that
+  pass show unfolded: `?view=all&state=undecided` is every feature unfolded to its
+  decisions not decided. Latest lists features and decisions together, newest
+  change first, under a title per day, each saying what changed in the words
+  of History; a search lists its matches on lines of their own. With nothing to
+  show, "Nothing matches." and "Clear". Keys: `/` search, `F` filter, up and
+  down move between rows, right unfolds, left folds, Enter opens, Escape closes
+  a menu. The address holds the view, the order, the filters, what is
+  displayed and the search (`view`, `order`, `state`, `part`, `film`, `show`,
+  `q`), a default left out.
+- The strip: one pip per feature in build order, always all of them; a filter
+  leaves the pips in place and those it removes go faint. Each pip is a target
+  24 px high, its tooltip the step and the name; a press brings that step's row
+  into view and gives it the focus. The strip is one stop for the keyboard, the
+  arrows moving along it. Under 760 px each feature is a bar 4 px high, and the
+  strip does not stay under the header.
+- Relations are drawn, never written. Pointing at a row for 120 ms, focusing it
+  or opening it rings its pip on the strip, inks the pips of what it needs and
+  of what waits for it, fades the others and joins the three with a comb under
+  the strip (a dot under a need, an arrowhead under what waits). In the list's
+  left margin a rail joins the row to each row it needs (a dot) and each that
+  waits for it (an arrowhead), and those rows take the ground of a row under
+  the pointer; the rail goes on dotted to the list's edge when some are out of
+  sight. For a decision, what waits is the features that need it. The pointer's
+  row wins over the focused one, and that one over the row opened last. An
+  opened row holds no list of what it needs. All of it is drawn by hand on the
+  page (`relation.ts`), so pointing renders no row.
+- A part's rows are All's rows: under "Features" its features with their steps,
+  pips and meters, each with the decisions it needs folded under it (a decision
+  of another part says its part), then under "Decisions" its decisions that none
+  of its features needs, one per line. Product's decisions are All's rows too, one
+  per line and with no heading. A group with no row shows nothing, its heading
+  included. The page without JavaScript and the plain list shown when the page
+  fails list each part's features, then its decisions. What was left out is a
+  filter of All: State, dropped. The page says how far an entry is in one set of
   words: not decided, decided, being built, built (`plan/README.md`, "States").
   A feature is decided (taken, ready or not), being built (its file says
-  `started`), built (its file says `built`), dropped, or not decided. A row not
-  decided shows no word; wherever a word is said for it (the counts, what a
-  screen reader hears, the line of a need) it is "not decided". A feature being
+  `started`), built (its file says `built`), dropped, or not decided. A row says
+  its state by its pip, whose tooltip and accessible name are the word: "not
+  decided", "decided", "being built", "built", "dropped", "replaced". A feature being
   built has a mark of its own, half filled in the accent, between the ring of a
   decided one and the full dot of a built one, in a row, in a part's dots and on
   a tile. A decision's name is its `asks`
@@ -430,13 +473,12 @@ What a person sees:
   names in `replaces`; the page passes it to the model, which reads the state
   from that key. A replaced decision is not counted as decided: a part's
   decisions line shows "N replaced" before "N dropped". It stays at its place
-  in the order of `order.json`, looks as a dropped row does, and is not in
-  "Left out". Opened, it shows what it showed when taken and the line
+  in the order of `order.json`, looks as a dropped row does, and is not among
+  the dropped entries. Opened, it shows what it showed when taken and the line
   "Replaced by", with the question of the decision that replaced it as a link
   that opens it where it lives. A decision that names others in `replaces`
   shows "Replaces" (taken) or "Would replace" (no verdict) with their questions
-  as links; a dropped one shows no such line. In Latest, a change of
-  `replaces` reads "Replaces changed".
+  as links; a dropped one shows no such line.
 - A part's state, counts and the line under the title come from its features
   only: being built (one of its features is), built (something built, nothing
   decided left), next (the part holding the first decided feature in order that
@@ -444,7 +486,7 @@ What a person sees:
   being built is being built. On the map and on a tile a part reads "being
   built", "built", "next", "N decided", or "n/m built" while some are built and
   others decided; a part not decided has no line. A part being built takes the
-  accent, as the next one does. The line under the title says "<Part> is being
+  accent, as the next one does. Once a feature is decided, the line under the title says "<Part> is being
   built." while a part is, and otherwise what is next. An open part shows one
   dot per feature, its features' counts (built, being built, decided, not
   decided, dropped), and its decisions' counts on a line of their own
@@ -499,14 +541,12 @@ What a person sees:
   once more after 1.5 s (not on `not_configured`); then "Votes and comments are
   offline." shows with "Try again", and remembered numbers stay on screen.
 - While no state is shown and the first answer is to come, placeholders hold the
-  room of what is known to come: the vote of every row, the
-  header's account when the cookie is there and nobody is remembered, Latest's
-  lines, in an open entry's panel "No comments yet." and the comment box (the shape most entries have; a thread with comments makes the panel grow once, as a slow one does), two rows of suggestions
+  room of what is known to come: the votes of every row, the
+  header's account when the cookie is there and nobody is remembered, in an open entry's panel "No comments yet." and the comment box (the shape most entries have; a thread with comments makes the panel grow once, as a slow one does), two rows of suggestions
   and the suggest form; notes have their own while their chunk loads. They
   pulse slowly (not with reduced motion), are `aria-hidden`, and their region
   is `aria-busy`. Nothing has a placeholder that may not come (comment counts,
-  the link to an issue). What arrives after the first frames (numbers, the account, a new
-  item of the key) fades in over 150 ms where it stands;
+  the link to an issue). What arrives after the first frames (numbers, the account) fades in over 150 ms where it stands;
   nothing fades on navigation or when a row opens, or with reduced motion.
 - An open entry shows, in this order, each part only when it has something: its
   text (a decision's answer, a feature's `what`); on an entry with no verdict,
@@ -517,9 +557,7 @@ What a person sees:
   and "After" the new one) and "A yes would remove" (each id of `removes` with
   its kind and the text in force), then "Would replace"; on a taken entry,
   "Added" (each statement of `adds` with its kind and text from the lists) and
-  "Replaces"; "Needs" (each entry of `needs` by its question or name, as a link
-  that opens it where it lives, with its state word; one not decided says "not
-  decided yet"); on a feature, "Must keep" (the text of each property of
+  "Replaces"; on a feature, "Must keep" (the text of each property of
   `keeps`) and "Where it shows" (`surfaces`: "App", "Command"); then the state
   and "Replaced by". A part is a small quiet label with its lines under it, the
   texts at the size of the answer, as text and never as HTML. The id of the
@@ -568,8 +606,8 @@ What a person sees:
   The page's data holds, for each entry, only its last change and the number of
   changes (`Entry.history`), enough for the closed line. The changes with their
   texts are a chunk of their own (`virtual:workshop-history`, `Histories`),
-  loaded the first time a pointer, a press or focus reaches a History, or Latest
-  opens, with one placeholder line per change meanwhile; if it cannot load,
+  loaded the first time a pointer, a press or focus reaches a History, with one
+  placeholder line per change meanwhile; if it cannot load,
   the list says so and the next time tries again.
 - An open row, a decision, a feature or a suggestion, shows its thread and a box
   to add a comment. A comment of the Workshop's App is an ordinary
@@ -583,6 +621,8 @@ What a person sees:
   matches none by itself, so an issue that merely names the entry is not its thread. A feature
   whose file has `suggested_in` shows once, as the feature, and its thread is that
   suggestion's issue, which is not listed among the suggestions.
+- A row of All shows its votes as a count; its 👍 button and its count of comments are in the
+  opened row, beside its state. A suggestion's row shows its 👍 button and its comments on its line.
 - A row whose entry has no thread yet shows the vote with the thumb alone. Opened, it shows
   "No comments yet." and then the comment box (signed in) or "Sign in to comment", and no link to
   GitHub, since there is no issue yet; the room of that link stays empty, so the row taking its
@@ -618,22 +658,47 @@ What a person sees:
   the count shown, so a newer `state` moves the count under it. The count the server answers replaces it.
 - A refusal takes back the page's own change, one up or one down from the count shown by then, and says
   "Vote: not saved." with the server's words. A thread found closed (403 `closed`) takes it back too.
-- The title row links to the places that are not parts, before Map and Order:
+- The title row links to the places that are not parts, before the switch:
   "Product" (`#product`: the decisions of `plan/decisions/`, with their own
-  counts), "Latest", "Left out · N" (every dropped decision and feature of the
-  parts, when there is one) and the small button "Suggest a feature"
-  (`#suggested`). Under 1200 px they sit under the title, wrapping when they
+  counts) and the small button "Suggest a feature" (`#suggested`), with Search
+  between them. Under 1200 px they sit under the title, wrapping when they
   must. They are there on the plain view and in every place. The open one is in
   the ink colour and `aria-current`; pressed again, it goes back to the plain
   view. Going back from such a place gives its own link the focus, however it
   was reached (the row, its address, Back or Forward). On the plain view, "Votes and comments are
   offline." and "Sign-in did not complete." follow the text of the line under
   the title; in a place, they sit under its counts. The map or the tiles end on
-  the footer's line. Latest (`#latest`) lists the newest 30
-  comments and changes (from the history chunk) across the entries, merged by
-  time, newest first, each opening its entry (a click with a modifier key, or a middle click, is left to the
-  browser). While it loads, ten one-line placeholders hold its place and
-  nothing sits below the list in its column.
+  the footer's line.
+- Search is an icon until pressed (or `/`), then a field. Typing shows All with
+  the entries whose name or question holds the text, from any view; Escape
+  empties and closes it.
+- The page remembers the view and All's order used last (`memory.ts`): a plain
+  address shows them again, written into the address, so a person who left on
+  Latest comes back to Latest. An address that names a view, a place or a row
+  shows what it names.
+- The films: one control per film on the line between the title row and the map
+  or the tiles, in the order of `films/README.md`, at every width (it scrolls
+  sideways under 760 px). Pointing at a film, or focusing it, marks its parts on
+  the map, with the map's own `marked` and `faint`. Pressing it opens the film's
+  place (`#films/<id>`), as a part opens: the map folds and keeps the film's parts
+  marked, the left column says "Film", its title and its line, and the right one
+  holds the film then the entries it shows, one per line. Its control stays
+  pressed. A film that shows the entries of one part only has its control in
+  that part's place too. An entry a film shows has the film's mark after its
+  name ("Has a film"), and an opened row shows the film first, with its title,
+  its line and its number of entries, which lists them in All. A film is behind
+  when an entry it shows changed in what it says (its question, answer, name,
+  text or what it would set) or was dropped or replaced after the last commit
+  that is not a merge and touched the film's folder (`readFilms` in `data.ts`);
+  its frame is dashed then, on the control and on that entry's mark ("Film is
+  behind the plan"). A verdict alone does not make a film behind.
+- A film plays in a frame of its own page, `/films/<id>/?in=workshop`, loaded
+  only when its place or its row is open; a placeholder of the frame's size
+  stands there until it has loaded. The page opens paused on a picture of the
+  film with its Play control, says how tall it is, and the frame follows: the
+  stage alone at the top of an opened row (its caption and bar show once it
+  plays), the stage with its caption, subtitle and bar in a film's place. A film
+  the site does not play shows its title and line with no frame.
 - The header's account slot has a fixed width from first paint: signed in when
   the readable `workshop-hint` cookie is there (a long login is cut by an
   ellipsis), signed out otherwise. It changes only when that cookie was stale.
@@ -645,8 +710,12 @@ What a person sees:
   focus, a tooltip tied to the button says "or comment directly on GitHub",
   taking no room.
 
-Addresses: `#<part>`, `#<part>/<entry id>`, `#product`, `#suggested` and
-`#left`, each with an optional open row (`#suggested/issue-<n>`), and `#latest`.
+Addresses: `#<part>`, `#<part>/<entry id>`, `#product` and `#suggested`, each
+with an optional open row (`#suggested/issue-<n>`), and `#films/<film id>`. All is
+`?view=all` with its query (above); there, `#<part>/<entry id>` opens the row in the
+list, under the feature that holds it when it is folded there. The older `#latest`
+opens All in the order Latest and `#left` opens All with the dropped entries;
+`#left/<entry id>` opens the row where it lives, and `?view=order` shows the map.
 A row named by an address is looked for first
 among the plan's entries, by id, whatever place the address names (an entry
 whose id begins with `issue-` included), and only then among the suggestions;
@@ -660,11 +729,12 @@ Back and Forward move between places; opening a row replaces the address.
 | --- | --- |
 | `App.tsx` | Places, addresses, focus, keyboard, the layout. |
 | `useWorkshop.ts` | Live state and every write: the load, pending writes. |
-| `MapView.tsx`, `Tiles.tsx` | The map and the tiles. |
-| `PartView.tsx`, `Suggest.tsx`, `Latest.tsx` | An opened part, Product's decisions and what is left out; the suggestions; the latest changes. |
-| `Entry.tsx` | One row and what it shows open: the text, what the entry says of the plan's lists and what it needs, its id and the button that copies it, the state, notes, history, and the thread with the votes on its comments. |
-| `routes.ts`, `plan.ts`, `map.ts`, `data.ts` | Addresses; the rows, statuses, parts' counts and states on top of the plan's model; the drawing; the build-time reader. |
-| `api.ts`, `writes.ts`, `memory.ts`, `RichText.tsx`, `Markdown.tsx`, `Boundary.tsx` | The API client, the page's own writes (a list of values set, kept a day; its comments six minutes), the remembered answer and person, text from GitHub, notes, the fallback list. |
+| `MapView.tsx`, `Tiles.tsx`, `Films.tsx` | The map, the tiles, the films' line and a film's frame. |
+| `AllView.tsx`, `AllList.tsx`, `all.ts`, `relation.ts`, `Tips.tsx` | All: its controls, menus and strip; its rows and the rail, which a part's place, Product and a film draw too; its model and its address; which row's relations are drawn; the tooltips. |
+| `PartView.tsx`, `Suggest.tsx` | An opened part, Product's decisions and a film's place; the suggestions. |
+| `Entry.tsx` | A suggestion's row, and what any row shows open (`Panel`): the text, what the entry says of the plan's lists, its id and the button that copies it, the state, notes, history, and the thread with the votes on its comments. |
+| `routes.ts`, `plan.ts`, `map.ts`, `data.ts` | Addresses; the rows, statuses, films, parts' counts and states on top of the plan's model; the drawing; the build-time reader, the films' order and when a film is behind. |
+| `api.ts`, `writes.ts`, `memory.ts`, `RichText.tsx`, `Markdown.tsx`, `Boundary.tsx` | The API client, the page's own writes (a list of values set, kept a day; its comments six minutes), the remembered answer, person, view and order, text from GitHub, notes, the fallback list. |
 | `prerender.tsx`, `NoScript.tsx`, `takeover.ts` | The markup the build writes into the page, the list for a reader without JavaScript, and the script's takeover. |
 
 ## Storage
@@ -1178,7 +1248,19 @@ into `dist/films/`:
   films' review page: no title or line above the film, no entries, no
   questions, no copy button, and no `page.js`. The tab bears the film's title.
   `voice.json` is inlined, each clip's source pointing at `/films/<id>/voice/`.
-  It opens paused on its Play control: no sound starts without a press. It
+  It opens paused on a picture of the film: the stage as it stands at the end
+  of its last scene (the frame the player holds for `?scene=<last>`), with the
+  Play control over it. Of the end of the first scene and the end of the last,
+  the last gives the better picture on all five films; several first scenes are
+  an almost empty stage. The first press on Play, the play control or the space
+  bar starts the film from its beginning, with sound; no sound starts without a
+  press. An address that asks for a moment (`t`, `scene`, `embed`) is left as the
+  player reads it. In the Workshop's frame (`?in=workshop`) the page takes the
+  Workshop's paper around the stage in both themes, keeps no margin of its own,
+  and posts its height to the Workshop; under 480 px wide it shows the stage
+  alone until the film plays. The page's script and styles for this are inline
+  (`PICTURE` and `FRAMED` in `scripts/films.mjs`); nothing in `films/player/`
+  changes. It
   takes the site's theme from `/theme.js` (light, dark or the system's, as the
   home page and the Workshop keep it), as every page of the site does, and
   follows a change made in another tab; `?theme=` is not promised there. The
@@ -1220,9 +1302,11 @@ published, nor its text put into a page. The step uses Node only, and nothing
 it makes is committed. It does not check that a file is tracked by git: the
 deployed site is always built from a fresh clone, where every file is tracked.
 
-The Workshop's build data says which films the site plays: `films`, one
-`{ id, playable }` per film, `playable` true for a film whose page the build
-writes (`readBuildData` in `src/workshop/data.ts`).
+The Workshop's build data holds every film of `films/`, in the order
+`films/README.md` gives, each with its `id`, `title`, `line` and `shows` from its
+`film.json`, `behind` (the entries it shows that changed after it, see "What a
+person sees") and `playable`, true for a film whose page the build writes
+(`readBuildData` and `readFilms` in `src/workshop/data.ts`).
 
 A film's page may be framed by a page of the site, and by nothing else:
 `/films/` answers `frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN`,

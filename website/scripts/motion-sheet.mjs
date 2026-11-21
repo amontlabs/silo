@@ -17,13 +17,10 @@
 // - a move between two places runs any `::view-transition-*` animation;
 // - Notes opening changes the panel's height in fewer than four steps;
 // - a comment's height or the comment box's top changes when the comment is confirmed;
-// - a row's opening or closing covers more than 16% of its way in its first frame;
-// - Map to Order or back, with a place open: the place or the footer goes under an opacity of 0.95, or the place's top
-//   takes one step of more than 30 px, or the place or the footer is missing from a frame.
-// On a page with a map, the moves on the tiles run in Order, where the tiles are; the flows named map-* run on the map, at
-// 1440 x 900: the map to a part and back, a scrolled map to a part and back from a scrolled part, Map to Order and back
-// on the plain view and with a part and a row open.
-// Each flow sets the view it needs, whatever view the url names.
+// - a row's opening or closing covers more than 16% of its way in its first frame.
+// On a page with a map, the moves on the tiles run under 1200 px, where the tiles stand in the map's place; the flows
+// named map-* run on the map, at 1440 x 900: the map to a part and back, a scrolled map to a part and back from a
+// scrolled part. Each flow runs on the map's side, whatever view the url names.
 // It drives Playwright's own browser: `npx playwright-core install chromium-headless-shell` once.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -35,6 +32,8 @@ const wait = (ms) => new Promise((done) => setTimeout(done, ms));
 const TIMES = [0, 33, 66, 100, 130, 166, 200, 250, 300, 350, 400, 450, 500, 650, 900, 1400];
 const PHONE = [390, 844];
 const DESK = [1440, 900];
+/** A desk under 1200 px: the tiles stand in the map's place. */
+const TILES = [1100, 900];
 
 function parseArgs(argv) {
   const options = { url: 'http://127.0.0.1:4174/workshop', out: join(dirname(fileURLToPath(import.meta.url)), '..', '.motion'), flows: [] };
@@ -191,18 +190,6 @@ function problemsOf(kind, rows, t0, keys, meant = {}) {
       if (share > 0.16) problems.push(`the row covers ${Math.round(share * 100)}% of its way in its first frame (${before} → ${first} of ${end})`);
     }
   }
-  if (kind === 'swap') {
-    // With a place open, Map and Order swap the strip only: the place and the footer stay, the place slides.
-    for (const key of ['detail', 'foot']) {
-      const missing = after.find((row) => !row[key]);
-      if (missing) problems.push(`${key} is missing (+${missing.t - t0} ms)`);
-      const low = after.find((row) => row[key] && row[key][4] < 0.95);
-      if (low) problems.push(`${key}'s opacity goes to ${low[key][4]} (+${low.t - t0} ms)`);
-    }
-    const tops = fromAction(rows, t0).filter((row) => row.detail).map((row) => ({ t: row.t - t0, v: row.detail[1] }));
-    const step = tops.slice(1).find((top, i) => Math.abs(top.v - tops[i].v) > 30);
-    if (step) problems.push(`the place's top takes a step of ${Math.round(step.v - tops[tops.indexOf(step) - 1].v)} px (+${step.t} ms)`);
-  }
   if (kind === 'comment') {
     // The comment is the one with the text sent; its classes say whether it is being sent.
     const pending = (row) => row.comment[5].split(' ').includes('ws-pending');
@@ -283,7 +270,10 @@ async function capture(out, page, name, action, { selectors = ROWS, kind = null,
   return problems;
 }
 
-const ROWS = { title: '#ws-part-title', back: '.ws-back', board: '.ws-board', detail: '.ws-detail', places: '.ws-places', row1: '.ws-item:nth-of-type(1)', row2: '.ws-item:nth-of-type(2)' };
+/** The first rows of a place: All's rows, in their first group. */
+const ROW1 = '.ws-detail .wa-list > section > .wa-item:nth-of-type(1)';
+const ROW2 = '.ws-detail .wa-list > section > .wa-item:nth-of-type(2)';
+const ROWS = { title: '#ws-part-title', back: '.ws-back', board: '.ws-board', detail: '.ws-detail', places: '.ws-places', row1: ROW1, row2: ROW2 };
 /** What the map's moves read: the stage, the part opened, a part inside another, a wire's word, the back control and the detail. */
 const MAP_ROWS = { stage: '.ws-stage', opened: '.ws-part.on', inner: '.ws-part.inner', views: '.ws-part[data-part="views"]', word: '.ws-wl', back: '.ws-back', detail: '.ws-detail', places: '.ws-places' };
 /**
@@ -300,6 +290,8 @@ const MEANT = {
   },
 };
 const click = (selector) => async (page) => { await page.locator(selector).first().click({ noWaitAfter: true }); };
+/** A row of All's rows, pressed on its name: its cells lie over the line's button, and a press anywhere opens it. */
+const pressRow = (selector) => async (page) => { await page.locator(selector).first().click({ position: { x: 300, y: 12 }, noWaitAfter: true }); };
 const tileOf = (part) => `.ws-tile[data-part="${part}"] .ws-tile-hit`;
 
 /** What the moves need from the page's data: its parts in order, those with rows, an entry with notes. */
@@ -360,26 +352,6 @@ const FLOWS = {
     await wait(200);
     return [...problems, ...await capture(s.out, page, 'map-scrolled-back', async (p) => { await p.keyboard.press('Escape'); }, { selectors: MAP_ROWS })];
   },
-  // Map to Order and back, on the plain view.
-  'map-order': async (s) => {
-    if (!s.site.mapped) return [];
-    const page = await s.open({ map: true });
-    const order = '.ws-seg button:has-text("Order")';
-    const problems = await capture(s.out, page, 'map-to-order', click(order), { selectors: { ...MAP_ROWS, tile: '.ws-tile' } });
-    await wait(300);
-    return [...problems, ...await capture(s.out, page, 'order-to-map', click('.ws-seg button:has-text("Map")'), { selectors: { ...MAP_ROWS, tile: '.ws-tile' } })];
-  },
-  // A part and a row open on the map, then Order, then the map again: the strip swaps, the place slides.
-  'map-order-open': async (s) => {
-    if (!s.site.mapped) return [];
-    const page = await s.open({ map: true, hash: `#${s.site.withRows[0]}` });
-    await click('.ws-item:nth-of-type(1) .ws-row')(page);
-    await wait(800);
-    const selectors = { ...MAP_ROWS, board: '.ws-board', row1: '.ws-item:nth-of-type(1)', row2: '.ws-item:nth-of-type(2)', more: '.ws-item.open .ws-more', foot: '.ws-foot' };
-    const problems = await capture(s.out, page, 'map-to-order-open', click('.ws-seg button:has-text("Order")'), { kind: 'swap', selectors });
-    await wait(300);
-    return [...problems, ...await capture(s.out, page, 'order-to-map-open', click('.ws-seg button:has-text("Map")'), { kind: 'swap', selectors })];
-  },
   // The plain view to a part and back, on a desk and on a phone.
   'open-and-back': (s) => openAndBack(s, DESK, ''),
   'phone-open-and-back': (s) => openAndBack(s, PHONE, 'phone-'),
@@ -391,9 +363,9 @@ const FLOWS = {
   // A row opens and closes.
   rows: async (s) => {
     const page = await s.open({ hash: `#${s.site.withRows[0]}` });
-    const selectors = { ...ROWS, more: '.ws-item:nth-of-type(1) .ws-more' };
-    const problems = await capture(s.out, page, 'row-open', click('.ws-item:nth-of-type(1) .ws-row'), { kind: 'row', ms: 900, selectors });
-    return [...problems, ...await capture(s.out, page, 'row-close', click('.ws-item:nth-of-type(1) .ws-row'), { kind: 'row', ms: 900, selectors })];
+    const selectors = { ...ROWS, more: `${ROW1} > .ws-more` };
+    const problems = await capture(s.out, page, 'row-open', pressRow(`${ROW1} > .wa-row`), { kind: 'row', ms: 900, selectors });
+    return [...problems, ...await capture(s.out, page, 'row-close', pressRow(`${ROW1} > .wa-row`), { kind: 'row', ms: 900, selectors })];
   },
   // The Notes of an open row, their chunk loaded on the click.
   notes: async (s) => {
@@ -407,8 +379,8 @@ const FLOWS = {
   // Signed in through the fake GitHub's page, a comment sent; the server's answer is held back so it is seen being sent.
   comment: async (s) => {
     const page = await s.open({ hash: `#${s.site.withRows[0]}`, signIn: true });
-    await click('.ws-item:nth-of-type(1) .ws-row')(page);
-    const box = page.locator('.ws-item.open textarea');
+    await pressRow(`${ROW1} > .wa-row`)(page);
+    const box = page.locator('.wa-item.open textarea');
     await box.waitFor();
     await wait(600);
     // A text of its own each run: the page shows a person's comment once per text, and the server keeps earlier runs'.
@@ -418,27 +390,14 @@ const FLOWS = {
       if (route.request().method() === 'POST') await wait(400);
       await route.continue();
     });
-    return capture(s.out, page, 'comment-sent', click('.ws-item.open form button[type="submit"]'), {
+    return capture(s.out, page, 'comment-sent', click('.wa-item.open form button[type="submit"]'), {
       kind: 'comment', ms: 1400,
-      selectors: { ...ROWS, comment: { selector: '.ws-item.open .ws-c', text }, box: '.ws-item.open .ws-talk > .ws-box' },
+      selectors: { ...ROWS, comment: { selector: '.wa-item.open .ws-c', text }, box: '.wa-item.open .ws-talk > .ws-box' },
     });
-  },
-  // Latest from the plain view, then a line of Latest that opens its entry where it lives.
-  latest: async (s) => {
-    const page = await s.open({});
-    // In view before the capture, so that the only scroll in it is the page's.
-    const link = '.ws-places a[href="#latest"]';
-    await page.locator(link).scrollIntoViewIfNeeded();
-    await wait(200);
-    const problems = await capture(s.out, page, 'open-latest', click(link), { kind: 'blind', selectors: { ...ROWS, latest: '.ws-latest' } });
-    const line = '.ws-latest li:not(.ws-latest-ghost) a.ws-row';
-    await page.waitForSelector(line);
-    await wait(300);
-    return [...problems, ...await capture(s.out, page, 'latest-to-entry', click(line), { kind: 'between', ms: 1400 })];
   },
   // The plain view scrolled down, then the last tile; that part scrolled down, then Escape.
   scrolled: async (s) => {
-    const page = await s.open({ size: [1440, 700] });
+    const page = await s.open({ size: [TILES[0], 700] });
     await page.evaluate(() => scrollTo({ top: 400, behavior: 'instant' }));
     await wait(200);
     const low = s.site.parts[s.site.parts.length - 1];
@@ -460,15 +419,15 @@ async function main() {
     const site = await siteOf(browser, options.url);
     if (!site.parts.length) throw new Error('the page has no part');
     const contexts = [];
-    // A page at an address with its state loaded, in the view the flow needs whatever the url names: on the map for the
-    // map's flows, in Order for the others on a page with a map.
-    const open = async ({ size = DESK, hash = '', signIn = false, map = false }) => {
+    // A page at an address with its state loaded, on the map's side whatever the url names: at 1440 px for the map's
+    // flows; the others, on a page with a map, under 1200 px, where the tiles are.
+    const open = async ({ size: asked = DESK, hash = '', signIn = false, map = false }) => {
+      const size = site.mapped && !map && asked === DESK ? TILES : asked;
       const context = await browser.newContext({ viewport: { width: size[0], height: size[1] }, deviceScaleFactor: 1 });
       contexts.push(context);
       const page = await context.newPage();
       const url = new URL(options.url);
-      if (site.mapped && !map) url.searchParams.set('view', 'order');
-      else url.searchParams.delete('view');
+      url.searchParams.delete('view');
       if (signIn) {
         await page.goto(url.href, { waitUntil: 'networkidle' });
         await page.locator('#workshop-account a.button').click();

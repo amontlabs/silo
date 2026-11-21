@@ -25,7 +25,8 @@ import { chromium } from 'playwright-core';
 const SIZES = [[1440, 900], [1440, 1100], [2560, 1440], [1024, 1366], [390, 844]];
 const LATE = {
   account: '#workshop-account > :not(.ws-ph)',
-  votes: '.ws-vote',
+  // The votes known: a row's votes without their placeholder (a row with none shows no number), or a thumb.
+  votes: '.wa-side:not(:has(.wa-ph-side)), .ws-vote',
   'Suggest a feature': '.ws-suggest',
 };
 // Room for rounding between boxes, in CSS pixels.
@@ -57,14 +58,15 @@ function recordTimeline(late) {
   // markup the build drew (marked data-prerendered until the script takes over) is not the app's render.
   let first = null;
   const frame = () => {
-    const rows = [...document.querySelectorAll('.ws-detail .ws-item')].filter((row) => row.querySelector('.ws-votes'));
+    // All's rows (a part's place, Product) show their votes on the line; the suggestions' rows hold a thumb.
+    const rows = [...document.querySelectorAll('.ws-detail .wa-item > .wa-row, .ws-detail .ws-item')].filter((row) => row.querySelector('.wa-side, .ws-votes'));
     return {
       at: Math.round(performance.now()),
       signIn: Boolean(document.querySelector('#workshop-account a.button')),
       suggest: Boolean(document.querySelector('.ws-suggest')),
       rows: rows.length,
-      rowsWithPlaceholder: rows.filter((row) => row.querySelector('.ws-votes .ws-ph-vote')).length,
-      votes: document.querySelectorAll('.ws-vote').length,
+      rowsWithPlaceholder: rows.filter((row) => row.querySelector('.wa-side .wa-ph-side, .ws-votes .ws-ph-vote')).length,
+      votes: document.querySelectorAll('.wa-side:not(:has(.wa-ph-side)), .ws-vote').length,
       login: document.querySelector('#workshop-account .ws-login')?.textContent ?? null,
     };
   };
@@ -274,12 +276,13 @@ async function visits(browser, options, rows, page$) {
     const fresh = await browser.newContext({ viewport: { width: view[0], height: view[1] }, deviceScaleFactor: 1, reducedMotion: 'no-preference' });
     let opened = null;
     const open = async (page) => {
-      opened = await page.evaluate((ids) => [...document.querySelectorAll('.ws-detail .ws-item')].map((item) => item.id).find((id) => !ids.includes(id)) ?? null, talked);
+      opened = await page.evaluate((ids) => [...document.querySelectorAll('.ws-detail .wa-list > section > .wa-item:not(.bundle)')].map((item) => item.id).find((id) => !ids.includes(id)) ?? null, talked);
       if (!opened) throw new Error(`${place.name} has no entry without comments`);
-      await page.click(`#${opened} .ws-row`);
+      // On the row's name: the cells lie over the line's button, and a press anywhere on the line opens it.
+      await page.click(`[id="${opened}"] > .wa-row`, { position: { x: 300, y: 12 } });
       await wait(500);
     };
-    const result = await run(browser, plain, view, { ...place, name: `${place.name}, an entry opened before the answers`, act: open, watch: '.ws-detail .ws-item' }, fresh);
+    const result = await run(browser, plain, view, { ...place, name: `${place.name}, an entry opened before the answers`, act: open, watch: '.ws-detail .wa-list > section > .wa-item' }, fresh);
     passed = report({ ...result, place: `${result.place} (${opened})` }) && passed;
     await fresh.close();
   }
@@ -302,7 +305,7 @@ async function visits(browser, options, rows, page$) {
  * the rows, each with its part's id or null for the whole product. Returns `tile`, the first part's id (its tile is drawn whether or not it has rows), or null
  * without parts; `part`, the first part that has rows; `product`, the whole product when it has rows; `rows`, the
  * first of these two (the place that shows entries' rows), or null when the plan has none; and `places`: the plain
- * view, those two, Latest and the suggestions. A part without rows is not visited as a place with rows, so its
+ * view, those two, All and the suggestions. A part without rows is not visited as a place with rows, so its
  * correct render of zero rows is not refused.
  */
 export function placesOf({ parts, entries }) {
@@ -319,7 +322,7 @@ export function placesOf({ parts, entries }) {
       { name: 'plain view', hash: '' },
       ...(part ? [part] : []),
       ...(product ? [product] : []),
-      { name: '#latest', hash: '#latest' },
+      { name: 'All', hash: '?view=all' },
       { name: '#suggested', hash: '#suggested' },
     ],
   };
@@ -337,7 +340,7 @@ async function pageOf(browser, url) {
   });
   await page.waitForSelector('#workshop-root:not([data-prerendered]) .ws', { timeout: 15000 });
   await page.waitForLoadState('networkidle');
-  // Whether the map shows at this url, not whether it is in the document: in Order, CSS hides it.
+  // Whether the map shows at this url, not whether it is in the document: under 1200 px, CSS hides it.
   const mapped = await page.locator('.ws-stage').first().isVisible();
   await context.close();
   return { mapped, ...placesOf(data) };

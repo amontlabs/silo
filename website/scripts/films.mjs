@@ -210,6 +210,64 @@ function swap(page, from, to) {
   return page.replace(from, () => to);
 }
 
+/**
+ * What the page opens on: the film itself, paused at the end of its last scene (the frame the player holds for
+ * `?scene=<last>`), with the Play control over it. That moment shows the whole of what the film builds; the end of its
+ * first scene is often an empty stage. The first press on Play, the play control or the space bar starts the film from
+ * its beginning. An address that asks for a moment (`t`, `scene`, `embed`) is left as the player reads it.
+ * In the Workshop's frame (`?in=workshop`) the page takes the Workshop's ground, keeps no margin of its own, and tells
+ * the Workshop its height; a narrow frame shows the stage alone until the film plays.
+ */
+const PICTURE = `(() => {
+  const q = new URLSearchParams(location.search);
+  const root = document.documentElement;
+  const framed = q.get('in') === 'workshop' && parent !== window;
+  if (framed) root.classList.add('in-workshop');
+  // \`shown\`: the picture was put up once; \`held\`: it is still what the stage shows, until the first press.
+  let shown = false, held = false;
+  const hold = () => {
+    const timing = window.__timing, player = window.__player;
+    if (shown || q.has('t') || q.has('scene') || q.has('embed') || !timing || !player || !timing.scenes.length) return;
+    player.seek(timing.scenes[timing.scenes.length - 1][1]);
+    shown = held = true;
+  };
+  const fromStart = (event) => {
+    if (!held || (event.type === 'keydown' && event.key !== ' ')) return;
+    if (event.type === 'click' && !event.target.closest('.bigplay, .pp')) return;
+    held = false;
+    window.__player && window.__player.seek(0);
+  };
+  addEventListener('click', fromStart, true);
+  addEventListener('keydown', fromStart, true);
+  const started = () => {
+    const tl = window.__film && window.__film.timeline;
+    if (tl && !tl.paused()) root.classList.add('started');
+  };
+  new MutationObserver(() => { if (document.body.dataset.ready === '1') hold(); started(); }).observe(document.body, { attributes: true, subtree: true, attributeFilter: ['data-ready', 'hidden'] });
+  if (document.body.dataset.ready === '1') hold();
+  if (framed && typeof ResizeObserver === 'function') {
+    const tell = () => parent.postMessage({ film: location.pathname, height: Math.ceil(document.querySelector('main').getBoundingClientRect().height) }, location.origin);
+    new ResizeObserver(tell).observe(document.querySelector('main'));
+  }
+})();`;
+
+/** The page in the Workshop's frame: the Workshop's paper around the stage, in both themes, and no margin of its own. */
+const FRAMED = [
+  ':root.in-workshop, .in-workshop body { background: #f7f7f4; }',
+  ':root.in-workshop[data-theme="dark"], :root.in-workshop[data-theme="dark"] body { background: #171a1b; }',
+  '.in-workshop body { margin: 0; overflow: hidden; }',
+  '.in-workshop main { max-width: none; padding: 0; }',
+  '.in-workshop #frame .caption { margin: 0 0 8px; font-size: 16px; min-height: 24px; }',
+  '.in-workshop .subtitle { margin-top: 10px; font-size: 17px; }',
+  '@media (max-width: 480px) {',
+  '  .in-workshop:not(.started) #frame > :not(.screen) { display: none; }',
+  '  .in-workshop .bigplay { padding: 9px 18px 9px 14px; font-size: 15px; gap: 6px; }',
+  '  .in-workshop .bigplay svg { width: 20px; height: 20px; }',
+  '  .in-workshop #frame .caption { font-size: 13px; min-height: 18px; margin-bottom: 6px; }',
+  '  .in-workshop .subtitle { font-size: 13px; margin-top: 6px; }',
+  '}',
+].join('\n');
+
 /** The page of one film: films/player/page.html without the review page's parts, the player and the film as files. */
 export function filmPage(filmsDir, film) {
   const at = (path) => `${FILMS_URL}${path}`;
@@ -233,7 +291,8 @@ export function filmPage(filmsDir, film) {
   page = swap(page, '<!--VOICE-->', scriptText(JSON.stringify(film.voice)));
   page = swap(page, '<!--PLAYER-->', [script(`${PLAYER}/voice.js`), script(`${PLAYER}/kit.js`)].join('\n'));
   page = swap(page, '<script><!--EXPLAINER--></script>', script(`${film.id}/explainer.js`));
-  page = swap(page, '<script><!--PAGE--></script>\n', '');
+  page = swap(page, '<script><!--PAGE--></script>\n', `<script>${PICTURE}</script>\n`);
+  page = swap(page, '</head>', `<style>${FRAMED}</style>\n</head>`);
   if (page.includes('<!--')) throw new FilmError(`films/player/page.html: (file): holds a part this step does not fill (${page.match(/<!--[^>]*-->/)?.[0]}). Fix: make website/scripts/films.mjs fill it or leave it out`);
   const licences = LICENCES.map((name) => at(`${PLAYER}/licences/${name}`)).join(' and ');
   return `${page.trimEnd()}\n<!-- The third-party files this page loads and their licences: ${licences}, and films/kit/NOTICE.md in the repository. -->\n`;

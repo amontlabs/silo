@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { canonicalText } from '../../../tools/plan/model/index.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadDir } from '../../../tools/plan/read/index.js';
-import { buildDataFrom, factsFrom, historiesFrom, historyFromGit, layoutPlanFrom, notesFrom, planDir, readBuildData, readHistories, readHistory, unshallow } from './data';
+import { buildDataFrom, factsFrom, filmOrder, historiesFrom, historyFromGit, layoutPlanFrom, notesFrom, planDir, readBuildData, readFilms, readHistories, readHistory, sayingChanged, unshallow } from './data';
 import type { Git } from './data';
 import { made } from '../../scripts/films-test-support.mjs';
 import { buildData, CORE_NOTES, DECISIONS, emptyPlanFiles, FEATURES, PARTS, planFiles, withLists, ZIG_NOTES } from './fixtures';
@@ -156,7 +156,7 @@ describe('reading plan/ from a repository folder', () => {
       const { put } = made(root, join(REPOSITORY, 'films', 'player', 'page.html'));
       cpSync(join(root, 'films', 'tiny'), join(root, 'films', 'another'), { recursive: true });
       put('another/film.json', JSON.stringify({ id: 'another', title: 'Another' }));
-      expect(readBuildData(root, EXAMPLE_MAP).films).toEqual([{ id: 'another', playable: true }, { id: 'tiny', playable: true }]);
+      expect(readBuildData(root, EXAMPLE_MAP).films.map(({ id, title, playable }) => ({ id, title, playable }))).toEqual([{ id: 'another', title: 'Another', playable: true }, { id: 'tiny', title: expect.any(String), playable: true }]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -764,5 +764,50 @@ describe('the map layout', () => {
   it('gives the stage in the stylesheet the height of the full map, which clips what goes past it', () => {
     const css = readFileSync(join(dirname(new URL(import.meta.url).pathname), 'workshop.css'), 'utf8');
     expect(css).toContain(`.ws-stage { --u: calc(100cqw / 1136); position: relative; height: calc(${MAP_HEIGHT} * var(--u));`);
+  });
+});
+
+describe('the films', () => {
+  const entry = (fields: Record<string, unknown>) => JSON.stringify({ name: 'Fork', what: 'Copy a computer.', ...fields });
+
+  it('come in the order films/README.md gives, and the real repository\'s are all there, each with its title, line and entries', () => {
+    expect(filmOrder('# Films\n\n## The films, in the order they are watched\n\n| Film | Kind |\n|---|---|\n| `b` | x |\n| `a` | y |\n\n## Next\n| `c` | z |\n')).toEqual(['b', 'a']);
+    const films = readFilms(REPOSITORY, false);
+    expect(films.map((film) => film.id)).toEqual(filmOrder(readFileSync(join(REPOSITORY, 'films', 'README.md'), 'utf8')));
+    expect(films).toHaveLength(5);
+    for (const film of films) {
+      expect(film.title).not.toBe('');
+      expect(film.shows.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('are behind on an entry whose question, answer, name, text or what it would set changed after them, or that was dropped or replaced; never for a verdict alone', () => {
+    expect(sayingChanged(entry({}), entry({ verdict: 'take' }))).toBe(false);
+    expect(sayingChanged(entry({}), entry({ suggest: { verdict: 'take' } }))).toBe(false);
+    expect(sayingChanged(entry({}), entry({ what: 'Copy a whole computer.' }))).toBe(true);
+    expect(sayingChanged(entry({ asks: 'A?' }), entry({ asks: 'B?' }))).toBe(true);
+    expect(sayingChanged(entry({ answer: 'Yes.' }), entry({ answer: 'No.' }))).toBe(true);
+    expect(sayingChanged(entry({ sets: [] }), entry({ sets: [{ id: 'x' }] }))).toBe(true);
+    expect(sayingChanged(entry({}), entry({ verdict: 'drop' }))).toBe(true);
+    expect(sayingChanged(entry({ verdict: 'take' }), entry({ verdict: 'take', replaced_by: 'other' }))).toBe(true);
+    expect(sayingChanged(null, entry({}))).toBe(false);
+  });
+
+  it('count only the changes after the film\'s own last change, and none from a history cut short', () => {
+    const root = mkdtempSync(join(tmpdir(), 'workshop-films-'));
+    try {
+      mkdirSync(join(root, 'films', 'one'), { recursive: true });
+      writeFileSync(join(root, 'films', 'one', 'film.json'), JSON.stringify({ id: 'one', title: 'One', line: 'L.', shows: ['fork', 'copy', 'later'] }));
+      const changes = [
+        { id: 'fork', time: 50, before: entry({}), after: entry({ what: 'Changed before the film.' }) },
+        { id: 'copy', time: 150, before: entry({}), after: entry({ verdict: 'take' }) },
+        { id: 'later', time: 200, before: entry({}), after: entry({ what: 'Changed after the film.' }) },
+      ];
+      const read = (shallow: boolean) => readFilms(root, shallow, () => 100, (since) => changes.filter((change) => change.time > since));
+      expect(read(false)).toEqual([{ id: 'one', title: 'One', line: 'L.', shows: ['fork', 'copy', 'later'], behind: ['later'] }]);
+      expect(read(true)[0].behind).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

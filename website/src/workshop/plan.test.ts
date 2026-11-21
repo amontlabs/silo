@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { buildDataFrom } from './data';
 import { buildData, DECISIONS, FEATURES, issue, liveState, planFiles } from './fixtures';
-import { allRows, buildPlan, changeLine, changePhrase, countDecisions, entryStatuses, isDecided, LATEST_LINES, relativeTime, shortDate, statusLine, stateWords } from './plan';
-import type { Change, ChangeName, Entry, PartGroup } from './plan';
+import { allRows, buildPlan, changeLine, changePhrase, countDecisions, entryStatuses, isDecided, relativeTime, shortDate, statusLine, stateWords } from './plan';
+import type { ChangeName, Entry, Film, PartGroup } from './plan';
 
 const names = (rows: { name: string }[]) => rows.map((row) => row.name);
 const byPart = (plan: ReturnType<typeof buildPlan>) => new Map(plan.parts.map((group) => [group.part.id, group]));
@@ -26,13 +26,6 @@ describe('the plan by part', () => {
     const plan = buildPlan(buildData(), null);
     expect(plan.product.map((row) => [row.key, row.status])).toEqual([['entry-security-properly', 'decided'], ['entry-one-host', 'undecided'], ['entry-plain-logs', 'replaced']]);
     expect(allRows(plan).filter((row) => row.part === null && row.kind === 'entry')).toEqual(plan.product);
-  });
-
-  it('lists every dropped entry of the parts as left out, and keeps it in its own part', () => {
-    const plan = buildPlan(withFeatures({ exec: { verdict: 'drop' } }), null);
-    expect(plan.left.map((row) => row.key)).toEqual(['entry-exec', 'entry-old-format', 'entry-reviewer', 'entry-old-desktop']);
-    expect(plan.left.every((row) => row.status === 'dropped')).toBe(true);
-    expect(names(byPart(plan).get('part-b')!.rows)).toContain('Run a command');
   });
 
   it('takes the status from the file alone: a live issue, open or closed, changes nothing', () => {
@@ -143,59 +136,11 @@ describe('the plan by part', () => {
     expect(create).not.toHaveProperty('updates');
   });
 
-  it('puts the latest comments on their entries, newest first as given, and skips one of another issue', () => {
-    const at = '2026-11-16T10:00:00Z';
-    const plan = buildPlan(buildData(), liveState({}, [
-      { n: 12, entry: 'create', author: 'mara-k', bot: false, createdAt: at, text: 'Hello' },
-      { n: 99, entry: 'exec', author: 'x', bot: false, createdAt: at, text: 'Wrong issue' },
-      { n: 10, entry: 'core', author: 'silo-workshop[bot]', bot: true, createdAt: at, text: 'From the App' },
-      { n: 5, entry: 'nothing', author: 'x', bot: false, createdAt: at, text: 'Gone' },
-    ]));
-    expect(plan.latest.map((item) => [item.row.key, item.text, item.change])).toEqual([['entry-create', 'Hello', null], ['entry-core', 'From the App', null]]);
-  });
-
   it('holds the decisions of the fixture plan as entries, with nothing of the old list of decisions', () => {
     const data = buildData();
     expect(data.entries.filter((entry) => entry.kind === 'decision').map((entry) => entry.id).sort()).toEqual(DECISIONS.map((decision) => decision.id).sort());
     expect(Object.keys(buildPlan(data, null))).not.toContain('decided');
   });
-});
-
-describe('Latest: comments and changes merged by time', () => {
-  const change = (commit: string, date: string, what: ChangeName[] = ['notes']): Change => ({ commit, date, what });
-  const comment = (n: number, entry: string, createdAt: string, text: string) => ({ n, entry, author: 'mara-k', bot: false, createdAt, text });
-
-  it('lists comments and changes together, newest first, each on its entry', () => {
-    const histories = {
-      core: [change('c3', '2026-11-18T10:00:00Z', ['taken']), change('c1', '2026-11-12T10:00:00Z', ['added'])],
-      calls: [change('c2', '2026-11-15T10:00:00Z')],
-    };
-    const plan = buildPlan(buildData(), liveState({}, [comment(12, 'create', '2026-11-17T10:00:00Z', 'Hello'), comment(13, 'exec', '2026-11-13T10:00:00Z', 'Older')]), histories);
-    expect(plan.latest.map((item) => [item.row.key, item.text, item.change?.commit ?? null])).toEqual([
-      ['entry-core', null, 'c3'], ['entry-create', 'Hello', null], ['entry-calls', null, 'c2'], ['entry-exec', 'Older', null], ['entry-core', null, 'c1'],
-    ]);
-    expect(new Set(plan.latest.map((item) => item.key)).size).toBe(5);
-  });
-
-  it('puts a comment before a change made at the same time', () => {
-    const at = '2026-11-17T10:00:00Z';
-    const plan = buildPlan(buildData(), liveState({}, [comment(12, 'create', at, 'Hello')]), { core: [change('c1', at)] });
-    expect(plan.latest.map((item) => item.text ?? item.change?.commit)).toEqual(['Hello', 'c1']);
-  });
-
-  it('holds 30 lines in all, the oldest dropped, and skips an entry the plan lacks', () => {
-    const changes = Array.from({ length: 25 }, (_, i) => change(`c${i}`, new Date(Date.parse('2026-11-20T23:00:00Z') - i * 3_600_000).toISOString()));
-    const comments = Array.from({ length: 12 }, (_, i) => comment(12, 'create', `2026-11-0${1 + (i % 9)}T10:00:0${i % 10}Z`, `Comment ${i}`));
-    const plan = buildPlan(buildData(), liveState({}, comments), { core: changes, nothing: [change('gone', '2026-11-20T23:59:00Z')] });
-    expect(LATEST_LINES).toBe(30);
-    expect(plan.latest).toHaveLength(30);
-    expect(plan.latest.some((item) => item.change?.commit === 'gone')).toBe(false);
-    const times = plan.latest.map((item) => Date.parse(item.createdAt));
-    expect(times).toEqual([...times].sort((a, b) => b - a));
-    expect(plan.latest.filter((item) => item.change)).toHaveLength(25);
-    expect(plan.latest.filter((item) => item.text)).toHaveLength(5);
-  });
-
 });
 
 describe('the phrases of a change', () => {
@@ -281,13 +226,19 @@ describe('the line under the title', () => {
     expect(line(notStarted(Object.fromEntries(['core', 'calls'].map((id) => [id, { verdict: 'take' as const, built: '2026-11-16' }]))))).toBe('Part C is next.');
   });
 
-  it('says nothing when nothing is decided', () => {
+  it('says how many features are proposed while none is decided, dropped ones aside', () => {
+    expect(line(withFeatures(undecided('core', 'calls', 'shells')))).toBe('19 features proposed, none decided yet.');
+    expect(line(withFeatures({ ...undecided('core', 'calls', 'shells'), exec: { verdict: 'drop' } }))).toBe('18 features proposed, none decided yet.');
+    const one = { part: { id: 'p', title: 'P', line: '', dependsOn: [] }, state: 'open' as const, counts: { built: 0, building: 0, decided: 0, undecided: 1, dropped: 0 } };
+    expect(statusLine([one])).toBe('1 feature proposed, none decided yet.');
+  });
+
+  it('says nothing once all that was decided is built', () => {
     expect(line(withBuilt('core', 'calls', 'shells'))).toBe('');
-    expect(line(withFeatures(undecided('core', 'calls', 'shells')))).toBe('');
   });
 
   it('is never moved by a decision: a taken decision is not a decided feature', () => {
-    expect(line(buildData({ features: FEATURES.filter((feature) => feature.part !== 'part-a' && feature.id !== 'shells') }))).toBe('');
+    expect(line(buildData({ features: FEATURES.filter((feature) => feature.part !== 'part-a' && feature.id !== 'shells') }))).toBe('16 features proposed, none decided yet.');
     expect(line(buildData({ features: FEATURES.filter((feature) => feature.part !== 'part-a').map((feature) => (feature.id === 'shells' ? { ...feature, started: undefined } : feature)) }))).toBe('Starting with Part C.');
   });
 });
@@ -331,7 +282,6 @@ describe('a replaced decision', () => {
   it('stays at its place, and is not in the list of dropped entries', () => {
     const plan = buildPlan(buildData(), null);
     expect(plan.product.map((row) => row.key)).toEqual(['entry-security-properly', 'entry-one-host', 'entry-plain-logs']);
-    expect(plan.left.map((row) => row.key)).not.toContain('entry-plain-logs');
     expect(allRows(plan).filter((row) => row.key === 'entry-plain-logs')).toHaveLength(1);
   });
 
@@ -339,5 +289,28 @@ describe('a replaced decision', () => {
     const decisions = DECISIONS.map((item) => (item.id === 'tamper-proof-logs' ? { ...item, verdict: 'drop' as const } : item));
     const row = buildPlan(buildData({ decisions }), null).parts.flatMap((group) => group.rows).find((item) => item.key === 'entry-tamper-proof-logs');
     expect(row).toMatchObject({ status: 'dropped', replaces: [] });
+  });
+});
+
+describe('the films', () => {
+  const film = (fields: Partial<Film>): Film => ({ id: 'one', title: 'One', line: 'A line.', shows: [], behind: [], playable: true, ...fields });
+
+  it('gives each film the parts of the entries it shows, in the parts\' order, and its rows in the plan\'s order', () => {
+    const data = { ...buildData(), films: [film({ id: 'across', shows: ['one-way', 'core', 'security-properly', 'gone-entry'] }), film({ id: 'alone', shows: ['create'] })] };
+    const plan = buildPlan(data, null);
+    expect(plan.films.map((one) => [one.id, one.parts, one.rows])).toEqual([
+      ['across', ['part-a', 'part-d'], ['entry-security-properly', 'entry-core', 'entry-one-way']],
+      ['alone', ['part-b'], ['entry-create']],
+    ]);
+    const rows = new Map(allRows(plan).map((row) => [row.key, row]));
+    expect(rows.get('entry-core')?.films).toEqual(['across']);
+    expect(rows.get('entry-calls')?.films).toEqual([]);
+  });
+
+  it('marks an entry a film is behind on, and no other', () => {
+    const plan = buildPlan({ ...buildData(), films: [film({ shows: ['core', 'calls'], behind: ['calls'] })] }, null);
+    const rows = new Map(allRows(plan).map((row) => [row.key, row]));
+    expect(rows.get('entry-calls')?.filmBehind).toBe(true);
+    expect(rows.get('entry-core')?.filmBehind).toBe(false);
   });
 });

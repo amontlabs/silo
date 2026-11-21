@@ -72,8 +72,6 @@
 .ws .ws-seg button:hover { color: var(--ink); }
 .ws .ws-seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
 .ws .ws-seg button:focus-visible { outline-offset: 2px; }
-.ws-key { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 16px; font: 12px/16px var(--mono); color: var(--muted); min-height: 16px; }
-.ws-key li { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
 
 /* ---- pips: one per entry ---- */
 .ws-pip { flex: none; width: 14px; height: 16px; display: grid; place-items: center; font-style: normal; }
@@ -245,22 +243,13 @@
 .is-open .ws-tile:hover .ws-title, .is-open .ws-tile.on .ws-title { color: var(--ink); }
 .is-open .ws-tile.on { background-color: var(--surface-hover); box-shadow: inset 0 -2px 0 var(--accent), 0 1px 0 var(--line); }
 
-/* which arrangement shows */
+/* The map at 1200 px and wider; narrower, and without a map, the tiles stand in its place. */
 @media (min-width: 1200px) {
-  .v-map .ws-swap-order { display: none; }
-  .v-order .ws-swap-map { display: none; }
-  .v-order .lbl-map, .v-map .lbl-order { display: none; }
+  .ws:not(.no-map) .ws-swap-order { display: none; }
 }
 @media (max-width: 1199.98px) {
-  .ws-swap-map, .ws .ws-seg, .lbl-map { display: none; }
+  .ws-swap-map { display: none; }
 }
-/* On the plain view, Map and Order swap with everything under them, so nothing below jumps on its own. With a place
-   open, only the strip swaps: it fades out, and the other fades in while the place and the footer slide to their new
-   height (App.tsx, SLIDE_MS). */
-.ws.swap-out .ws-swap, .workshop-shell:has(.ws.swap-out) .ws-foot { opacity: 0; transition: opacity .13s; }
-.ws.swap-in .ws-swap, .workshop-shell:has(.ws.swap-in) .ws-foot { animation: ws-swap-in .26s var(--ease) both; }
-.ws.strip-out .ws-swap { opacity: 0; transition: opacity .13s; }
-.ws.strip-in .ws-swap { animation: ws-appear .26s var(--ease) both; }
 
 /* On the plain view, the notes follow the status text on its line. */
 .ws-status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 12px; }
@@ -331,12 +320,11 @@
 .ws-fact-text { color: var(--muted); overflow-wrap: anywhere; }
 .ws-fact-lines { display: grid; gap: 6px; color: var(--muted); }
 .ws-fact-lines li { display: grid; grid-template-columns: 76px minmax(0, 1fr); column-gap: 8px; row-gap: 2px; overflow-wrap: anywhere; }
-.ws-keeps li, .ws-needs li { display: block; }
+.ws-keeps li { display: block; }
 .ws-tag { font: 12px/1.9 var(--mono); color: var(--faint); }
 .ws-fact-lines code { justify-self: start; padding: 0; background: none; font: 12px/1.9 var(--mono); color: var(--faint); }
 .ws-st b { font-weight: 400; color: var(--ink); }
 .ws-st-asks { color: var(--faint); }
-.ws-need-word { margin-left: 6px; font: 12px var(--mono); color: var(--faint); }
 .ws-fact-lines a { color: var(--accent-ink); text-decoration: underline; }
 /* The id and its button: the button keeps the width of its longer word, so nothing moves when it changes. */
 .ws-id { display: inline-flex; align-items: center; gap: 10px; margin-left: 8px; }
@@ -395,7 +383,6 @@
 @keyframes ws-rise { from { opacity: .2; transform: translateY(8px); } }
 @keyframes ws-show { from { opacity: .2; } }
 @keyframes ws-appear { from { opacity: 0; } }
-@keyframes ws-swap-in { from { opacity: 0; transform: translateY(8px); } }
 
 /* Off the map, between the plain view and a place: the sheet of tiles rolls up into the strip like a blind, uncovering
    the place under it, and rolls down again over it. `vt-open` or `vt-back` on <html> says the way for the time of the
@@ -437,13 +424,11 @@ html.vt-back::view-transition-new(board) { animation: ws-appear .2s ease both; }
   .ws-top-side { margin-left: 0; width: 100%; align-items: flex-start; gap: 8px; }
   .ws-tools { min-height: 0; }
   .is-sheet .ws-tile .ws-pips { margin-right: 0; }
-  .ws-key { justify-content: flex-start; }
 }
 @media (max-width: 760px) {
   .ws-noscript { padding: 0 16px 24px; }
   .ws-top { padding: 26px 16px 16px; }
   .ws-top h1 { font-size: 34px; }
-  .ws-key { min-height: 36px; align-content: flex-start; }
   .is-sheet .ws-band-first, .is-sheet .ws-band-after { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .is-sheet .ws-band > .ws-tile.ws-tile:last-child { grid-column: auto; }
   .is-sheet .ws-band > .ws-tile.ws-tile:last-child:nth-child(odd) { grid-column: span 2; }
@@ -489,7 +474,7 @@ html.vt-back::view-transition-new(board) { animation: ws-appear .2s ease both; }
 }
 .workshop-shell .site-header .button.small { white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) {
-  .ws *, .ws *::before, .ws *::after, .ws-detail, .ws.swap-in .ws-swap { animation: none !important; transition: none !important; }
+  .ws *, .ws *::before, .ws *::after, .ws-detail { animation: none !important; transition: none !important; }
 }
 .ws.ws-boot *, .ws.ws-boot *::before, .ws.ws-boot *::after { transition: none !important; animation: none !important; }
 /* Going back to the full map, the footer is hidden at once, waits while the page keeps its height, then fades in. */
@@ -579,21 +564,11 @@ html.vt-back::view-transition-new(board) { animation: ws-appear .2s ease both; }
 @media (max-width: 640px) { .ws-h-diff { grid-template-columns: 1fr; } }
 .ws-h-ghost { height: 22px; border-radius: 3px; background: color-mix(in srgb, var(--line) 25%, transparent); }
 
-/* Latest: one line per change or comment, under the entry it belongs to. */
-.ws-latest .ws-name { display: grid; }
-.ws-latest-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ws-latest-ghost .ws-pip { visibility: hidden; }
-.ws-latest-ghost .ws-latest-name, .ws-latest-ghost .ws-sub { justify-self: start; border-radius: 3px; background: color-mix(in srgb, var(--line) 25%, transparent); }
-.ws-latest-ghost .ws-latest-name { width: min(60%, 320px); }
-.ws-latest-ghost .ws-sub { width: min(40%, 220px); }
-.workshop-shell:has(.ws-list-loading) .ws-foot { opacity: 0; transition: none; }
-.ws-sub { font: 12px/1.5 var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ws-latest .ws-word { min-width: 0; }
 
 /* Placeholders: where something is known to come and has not yet, its room held and gently pulsing. */
 @keyframes ws-pulse { 50% { opacity: .45; } }
 .ws-ph { display: block; border-radius: 3px; background: color-mix(in srgb, var(--line) 40%, transparent); }
-.ws-ph, .ws-c-ghost, .ws-h-ghost, .ws-latest-ghost .ws-latest-name, .ws-latest-ghost .ws-sub { animation: ws-pulse 1.6s ease-in-out infinite; }
+.ws-ph, .ws-c-ghost, .ws-h-ghost, .wa-ph { animation: ws-pulse 1.6s ease-in-out infinite; }
 .ws-ph-vote { display: inline-block; width: 36px; height: 22px; vertical-align: middle; border-radius: 999px; }
 /* A placeholder built from the real boxes (the suggest form, the comment box), so it has their exact size. */
 .ws .ws-ph-shape :is(input, textarea, .ws-btn) {
@@ -625,7 +600,7 @@ html.vt-back::view-transition-new(board) { animation: ws-appear .2s ease both; }
 .ws-hold #workshop-root[data-prerendered] .ws > :not(.ws-top), .ws-hold .workshop-shell:has(#workshop-root[data-prerendered]) .ws-foot { visibility: hidden; }
 
 /* What arrives after the first frames fades in where it stands. */
-.ws-arr-s .ws-late-s, .ws-arr-p .ws-late-p, .ws-key .ws-in, .ws-status.ws-in, #workshop-account.ws-arr-p > * { animation: ws-appear .15s ease-out both; }
+.ws-arr-s .ws-late-s, .ws-arr-p .ws-late-p, .ws-status.ws-in, #workshop-account.ws-arr-p > * { animation: ws-appear .15s ease-out both; }
 @media (prefers-reduced-motion: reduce) {
   #workshop-account > *, #workshop-account::before { animation: none !important; transition: none !important; }
 }
@@ -646,3 +621,295 @@ html.vt-back::view-transition-new(board) { animation: ws-appear .2s ease both; }
 .ws-note .ws-retry { padding: 8px 0; margin-block: -8px; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
 .ws-note .ws-retry:hover { color: var(--accent-ink); }
 .ws-note .ws-retry:disabled { opacity: .55; cursor: default; }
+
+/* ==== All, the films' line, a part's place with All's rows, a film's place ====
+   Tokens, .ws-seg, .ws-pip, .ws-tip, .ws-vote, .ws-disc and the opened entry's panel are the page's own. Spacing is 4,
+   8, 12, 16, 24. One radius, 3px. */
+
+/* ---- one control: 28px high, 1px line, the mono of the segmented control ---- */
+.ws .wa-ctl { display: inline-flex; align-items: center; gap: 6px; flex: none; height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface); font: 12px/18px var(--mono); color: var(--muted); white-space: nowrap; transition: background-color .16s, border-color .16s, color .16s; }
+.ws .wa-ctl[aria-expanded="true"] { color: var(--ink); border-color: var(--ink); }
+.ws .wa-ctl[aria-pressed="true"] { color: var(--paper); border-color: var(--ink); background: var(--ink); }
+.ws .wa-ctl:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+.ws .wa-ctl:disabled { opacity: .5; }
+.ws .wa-ctl.icon { width: 28px; padding: 0; justify-content: center; }
+.wa-i { flex: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.wa-i .solid { fill: currentColor; stroke: none; }
+/* A control whose menu holds a choice that is not the default carries a dot. */
+.wa-ctl .wa-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--ink); }
+.wa-kbd { padding: 0 4px; border: 1px solid var(--line); border-radius: 3px; font: 12px/16px var(--mono); color: var(--muted); }
+
+/* ---- the line of controls ---- */
+.wa-bar { position: sticky; top: var(--header-height); z-index: 6; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 24px; background: var(--paper); border-bottom: 1px solid var(--line); }
+.wa-bar .ws-seg { display: flex; flex: none; }
+.wa-bar .wa-gap { flex: 1; min-width: 0; }
+.wa-chips { display: flex; gap: 8px; min-width: 0; overflow: hidden; }
+.wa-chip { display: inline-flex; align-items: center; flex: none; height: 28px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface); font: 12px/18px var(--mono); color: var(--ink); white-space: nowrap; }
+.ws .wa-chip > button:first-child { display: inline-flex; align-items: center; gap: 6px; height: 100%; padding: 0 2px 0 8px; }
+.ws .wa-chip .wa-x { display: grid; place-items: center; width: 24px; height: 100%; color: var(--muted); border-radius: 0 2px 2px 0; }
+.ws .wa-chip .wa-x:hover { color: var(--ink); background: var(--surface-hover); }
+.ws .wa-chip button:focus-visible { outline-offset: -2px; }
+.wa-count { flex: none; font: 12px/18px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.ws .wa-clear { flex: none; padding: 5px 4px; font: 12px/18px var(--mono); color: var(--muted); }
+.ws .wa-clear:hover { color: var(--accent-ink); }
+.wa-search { display: flex; align-items: center; gap: 6px; flex: none; width: 240px; height: 28px; padding: 0 6px 0 8px; border: 1px solid var(--ink); border-radius: 3px; background: var(--paper); color: var(--muted); }
+.ws .wa-search input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: none; font: 13px/18px var(--sans); color: var(--ink); outline: 0; }
+
+/* ---- a menu: the theme menu's box; a checked item shows the check, in the ink ---- */
+.wa-menu { position: absolute; z-index: 20; width: 232px; padding: 4px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); box-shadow: 0 8px 24px #0002, 0 2px 6px #0001; }
+.ws .wa-menu > input { display: block; width: 100%; height: 28px; margin-bottom: 4px; padding: 0 8px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: none; font: 13px/18px var(--sans); }
+.ws .wa-menu > input:focus-visible { outline: 0; }
+.ws .wa-menu button { display: flex; align-items: center; gap: 8px; width: 100%; height: 28px; padding: 0 8px; border-radius: 2px; font: 13px/18px var(--sans); color: var(--ink); }
+.ws .wa-menu button:hover, .ws .wa-menu button:focus-visible, .ws .wa-menu button[aria-expanded="true"] { background: color-mix(in srgb, var(--ink) 7%, var(--paper)); }
+.ws .wa-menu button:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
+.wa-menu button > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wa-menu button > small { font: 12px/18px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.wa-menu .wa-check { flex: none; width: 12px; height: 12px; background: var(--ink); mask: var(--icon-check) center / contain no-repeat; visibility: hidden; }
+.wa-menu button[aria-checked="true"] .wa-check { visibility: visible; }
+.wa-menu .wa-i { color: var(--muted); }
+.wa-menu hr { height: 1px; margin: 4px 0; border: 0; background: var(--line); }
+
+/* ---- the strip: one pip per feature, in the order they are built ---- */
+.wa-strip { position: sticky; top: calc(var(--header-height) + 44px); z-index: 5; height: 28px; padding: 0 24px; background: var(--paper); border-bottom: 1px solid var(--line); }
+.wa-strip ol { position: relative; display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); height: 100%; margin: 0; padding: 0; list-style: none; }
+.ws .wa-sp { display: grid; place-items: center; width: 100%; height: 20px; padding: 0; }
+.wa-sp::before { content: ""; width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid transparent; }
+.wa-sp.undecided::before { border-color: color-mix(in srgb, var(--faint) 70%, transparent); }
+.wa-sp.decided::before { border-color: var(--ink); }
+.wa-sp.next::before { border-color: var(--accent); }
+.wa-sp.building::before { border-color: var(--accent); background: linear-gradient(90deg, var(--accent) 50%, transparent 50%); }
+.wa-sp.built::before { border-color: var(--ink); background: var(--ink); }
+.wa-sp.dropped::before { width: 7px; height: 1.5px; border: 0; border-radius: 0; background: var(--faint); }
+.ws .wa-sp:hover::before { border-color: var(--accent-ink); }
+.ws .wa-sp:focus-visible { outline-offset: -2px; }
+/* A filter leaves every pip in its place: the ones it removes go faint. */
+.wa-sp.out::before { opacity: .3; }
+/* While a row is pointed at or open: its pip is ringed, the pips it needs and the ones that wait for it keep their
+   ink, the others go faint, and the comb under them joins the three. */
+.wa-strip.relating .wa-sp:not(.rel):not(.cur)::before { opacity: .55; }
+.wa-sp.rel::before { border-color: var(--ink); }
+.wa-sp.cur::before { border-color: var(--ink); box-shadow: 0 0 0 2px var(--paper), 0 0 0 3px var(--ink); }
+.wa-comb { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.wa-comb path { fill: none; stroke: var(--ink); stroke-width: 1; }
+.wa-comb .solid { fill: var(--ink); stroke: none; }
+.wa-comb .node { fill: var(--paper); stroke: var(--ink); stroke-width: 1.5; }
+.wa-comb .far { stroke-dasharray: 2 3; }
+
+/* ---- the list ---- */
+.wa-list { position: relative; padding-bottom: 64px; --cols: 32px 16px 28px 20px minmax(0, 1fr) 104px 176px 56px 24px; }
+.wa-grp { display: flex; align-items: center; height: 28px; padding: 0 24px; font: 12px/1 var(--mono); letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); }
+.wa-grp + .wa-item > .wa-row { border-top: 1px solid var(--line); }
+.wa-item + .wa-grp { border-top: 1px solid var(--line); }
+.wa-item { position: relative; }
+.wa-row { position: relative; display: grid; grid-template-columns: var(--cols); align-items: center; height: 36px; cursor: pointer; transition: background-color .12s; }
+.wa-item.f + .wa-item.f > .wa-row { border-top: 1px solid var(--line); }
+.wa-row:hover, .wa-row.lit { background: var(--surface-hover); }
+.wa-row:has(> .wa-hit:focus-visible) { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
+.ws .wa-caret { grid-column: 2; display: grid; place-items: center; width: 16px; height: 100%; color: var(--muted); }
+.wa-caret::before { content: ""; border-left: 4px solid currentColor; border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent; transition: transform .16s var(--ease-out); }
+.wa-caret[aria-expanded="true"]::before, .wa-caret.on::before { transform: rotate(90deg); }
+.ws .wa-caret:hover { color: var(--ink); }
+.wa-n { grid-column: 3; padding-right: 8px; font: 12px/16px var(--mono); color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.wa-row > .ws-pip { grid-column: 4; justify-self: center; }
+.wa-name { grid-column: 5; display: flex; align-items: center; gap: 8px; min-width: 0; padding-left: 4px; font-size: 15px; font-weight: 500; }
+.wa-name > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wa-meter { grid-column: 6; display: flex; align-items: center; justify-content: flex-end; gap: 8px; height: 100%; padding-right: 16px; font: 12px/16px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.wa-meter i { position: relative; flex: none; width: 40px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.wa-meter i::before { content: ""; position: absolute; inset: 0 auto 0 0; width: calc(var(--p) * 100%); background: var(--ink); }
+.wa-meter span { min-width: 5ch; text-align: right; }
+.wa-part { grid-column: 7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px/16px var(--mono); color: var(--muted); }
+.wa-side { grid-column: 8; display: flex; justify-content: flex-end; align-items: center; font: 12px/16px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wa-change { grid-column: 6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px/16px var(--mono); color: var(--muted); }
+
+/* A decision under its feature: 32px, the question in the regular weight, its pip under the feature's name. */
+.wa-kids { position: relative; padding-bottom: 4px; }
+.wa-kids::before { content: ""; position: absolute; left: 85.5px; top: 0; bottom: 20px; width: 1px; background: var(--line); }
+.wa-item.d > .wa-row, .wa-row.more { grid-template-columns: 32px 16px 28px 20px 20px minmax(0, 1fr) 104px 176px 56px 24px; }
+.wa-item.d > .wa-row { height: 32px; }
+.wa-item.d > .wa-row > .ws-pip { grid-column: 5; }
+.wa-item.d .wa-name { grid-column: 6; font-size: 14px; font-weight: 400; }
+.wa-item.d .wa-part { grid-column: 8; }
+.wa-item.d .wa-side { grid-column: 9; }
+.wa-item.gone .wa-name > span:first-child { color: var(--muted); text-decoration: line-through; }
+.wa-row.more { height: 28px; cursor: pointer; }
+.wa-row.more > span { grid-column: 6; padding-left: 4px; font: 12px/16px var(--mono); color: var(--muted); }
+.wa-row.more:hover > span { color: var(--ink); }
+/* Decisions listed by themselves (Latest, or Features off): no step, the pip in the features' column. */
+.wa-item.d.flat > .wa-row { grid-template-columns: var(--cols); }
+.wa-item.d.flat > .wa-row > .ws-pip { grid-column: 4; }
+.wa-item.d.flat .wa-name { grid-column: 5; }
+.wa-item.d.flat .wa-part { grid-column: 7; }
+.wa-item.d.flat .wa-side { grid-column: 8; }
+/* Latest: what changed stands where the meter was. */
+.wa-list.latest { --cols: 32px 16px 28px 20px minmax(0, 1fr) 136px 176px 0 24px; }
+.wa-list.latest .wa-side { display: none; }
+
+/* A list with no folding (Latest, a search): every row has its line. */
+.wa-list.flat .wa-item + .wa-item > .wa-row { border-top: 1px solid var(--line); }
+
+/* The film mark of a row: after the name. Its frame is dashed when the plan has passed the film. */
+.wa-film { flex: none; display: grid; place-items: center; width: 20px; height: 20px; margin: 0 -3px; color: var(--muted); border-radius: 3px; }
+.wa-film.behind rect { stroke-dasharray: 2 1.6; }
+.wa-row:hover .wa-film { color: var(--ink); }
+
+/* The rail: in the left gutter, what the pointed row needs (a dot, above) and what waits for it (an arrow, below). */
+.wa-rail { position: absolute; left: 0; top: 0; z-index: 2; overflow: visible; pointer-events: none; }
+.wa-rail path { fill: none; stroke: var(--ink); stroke-width: 1; }
+.wa-rail .solid { fill: var(--ink); stroke: none; }
+.wa-rail .node { fill: var(--paper); stroke: var(--ink); stroke-width: 1.5; }
+.wa-rail .far { stroke-dasharray: 2 3; }
+
+/* ---- an opened row: the page's own open mark, and the entry's panel under the name ---- */
+.wa-item.open > .wa-row, .wa-item.open > .wa-open, .wa-item.open > .ws-more { background: var(--surface); }
+.wa-item.open > .wa-row { box-shadow: inset 2px 0 0 var(--accent), inset 0 1px 0 var(--line); border-top-color: transparent; }
+.wa-item.open > .wa-open, .wa-item.open > .ws-more { box-shadow: inset 2px 0 0 var(--accent), inset 0 -1px 0 var(--line); }
+.wa-open { padding: 4px 24px 20px 100px; }
+.wa-item.d > .wa-open { padding-left: 120px; }
+.wa-item.d.flat > .wa-open { padding-left: 100px; }
+.wa-open .ws-talk { max-width: 720px; }
+.wa-filmbox { display: flex; gap: 16px; align-items: flex-start; margin: 4px 0 16px; }
+.ws .wa-poster { position: relative; flex: none; width: 288px; aspect-ratio: 16 / 9; border: 1px solid var(--line); border-radius: 3px; background: var(--media); overflow: hidden; }
+.wa-filmbox figcaption { display: grid; gap: 4px; min-width: 0; max-width: 44ch; padding-top: 2px; }
+.wa-filmbox b { font: 17px/1.3 var(--serif); font-weight: 400; }
+.wa-filmbox span { color: var(--muted); font-size: 14px; }
+.wa-filmbox small { font: 12px/18px var(--mono); color: var(--muted); }
+.wa-filmbox small u { text-decoration: underline dotted; text-underline-offset: 3px; }
+
+/* ---- nothing to show, and what has not arrived ---- */
+.wa-none { display: flex; align-items: center; gap: 12px; height: 36px; padding: 0 24px 0 100px; color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); }
+.wa-ph { display: block; height: 12px; border-radius: 3px; background: color-mix(in srgb, var(--line) 40%, transparent); animation: ws-pulse 1.6s ease-in-out infinite; }
+.wa-row.ghost { cursor: default; }
+.wa-row.ghost:hover { background: none; }
+
+/* ---- the title row: search for the whole page, and the switch at every width ---- */
+.ws .ws-seg.wa-view { display: flex; }
+@media (min-width: 1200px) { .wa-narrow { display: none; } }
+@media (max-width: 1199.98px) { .wa-wide { display: none; } }
+.ws-places .wa-search { width: 220px; }
+
+/* ---- the films, on the line above the map or the tiles ---- */
+.wa-films { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 24px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.ws .wa-ctl.film { font: 13px/18px var(--sans); }
+.wa-ctl.film.behind rect { stroke-dasharray: 2 1.6; }
+
+/* ---- a place: a part's rows are All's rows; a film is a place too ---- */
+.ws-list > .wa-list { padding-bottom: 0; }
+.ws-list > .wa-list > .wa-grp:first-child { margin-top: 8px; }
+.wa-list.in-part .wa-item.f > .wa-row > .wa-part { visibility: hidden; }
+.ws-block .wa-ctl.film { margin-top: 16px; max-width: 100%; }
+.ws-block .wa-ctl.film > span { overflow: hidden; text-overflow: ellipsis; }
+.ws-block .wa-kind { color: var(--muted); }
+.wa-player { padding: 20px 24px 12px 32px; }
+.ws .wa-player .wa-poster { display: block; width: 100%; max-width: 776px; --chrome: 132px; }
+@media (max-width: 1099.98px) {
+  .ws-list > .wa-list { --cols: 32px 16px 28px 20px minmax(0, 1fr) 104px 0 0 24px; }
+  .ws-list > .wa-list .wa-item.d > .wa-row, .ws-list > .wa-list .wa-row.more { grid-template-columns: 32px 16px 28px 20px 20px minmax(0, 1fr) 104px 0 0 24px; }
+  .ws-list > .wa-list .wa-item.d.flat > .wa-row { grid-template-columns: var(--cols); }
+  .ws-list > .wa-list .wa-part, .ws-list > .wa-list .wa-side { display: none; }
+}
+
+/* ---- 1199 and narrower: no map, so no switch; All is the page ---- */
+@media (max-width: 899.98px) {
+  .wa-list { --cols: 32px 16px 28px 20px minmax(0, 1fr) 104px 0 0 24px; }
+  .wa-item.d > .wa-row, .wa-row.more { grid-template-columns: 32px 16px 28px 20px 20px minmax(0, 1fr) 104px 0 0 24px; }
+  .wa-part, .wa-side { display: none; }
+}
+@media (max-width: 760px) {
+  .wa-bar { padding: 0 16px; }
+  .wa-bar .wa-ctl { width: 28px; padding: 0; justify-content: center; }
+  .wa-bar .wa-ctl > span:not(.wa-dot) { display: none; }
+  .wa-bar.has-chips { height: auto; flex-wrap: wrap; padding-top: 8px; padding-bottom: 8px; }
+  .wa-bar.has-chips .wa-chips { order: 9; flex: 0 0 100%; overflow-x: auto; scrollbar-width: none; }
+  .wa-strip { position: static; height: 16px; padding: 0 16px; }
+  .ws .wa-sp { height: 15px; pointer-events: none; }
+  .wa-sp::before, .wa-sp.dropped::before { width: calc(100% - 1px); min-width: 1px; height: 4px; border: 0; border-radius: 0; background: var(--line); box-shadow: none; }
+  .wa-sp.decided::before { background: var(--muted); }
+  .wa-sp.built::before, .wa-sp.rel::before, .wa-sp.cur::before { background: var(--ink); }
+  .wa-sp.next::before, .wa-sp.building::before { background: var(--accent); }
+  .wa-sp.cur::before { height: 8px; }
+  .wa-comb { display: none; }
+  .wa-list { --cols: 12px 16px 24px 18px minmax(0, 1fr) 48px 0 0 12px; }
+  .wa-item.d > .wa-row, .wa-row.more { grid-template-columns: 12px 16px 24px 18px 18px minmax(0, 1fr) 0 0 0 12px; }
+  .wa-grp { padding: 0 16px; }
+  .wa-row { height: auto; min-height: 44px; }
+  .wa-item.d > .wa-row { height: auto; min-height: 40px; }
+  .wa-name { padding: 8px 0 8px 4px; font-size: 14.5px; }
+  .wa-name > span:first-child { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.3; }
+  .wa-meter { padding-right: 4px; }
+  .wa-meter i { display: none; }
+  .wa-item.d .wa-meter { display: none; }
+  .wa-kids::before { left: 60.5px; }
+  .wa-open, .wa-item.d.flat > .wa-open { padding: 4px 16px 16px 56px; }
+  .wa-item.d > .wa-open { padding-left: 56px; }
+  .wa-filmbox { flex-direction: column; gap: 8px; }
+  .ws .wa-poster { width: 100%; }
+  .wa-rail { display: none; }
+  .wa-none { padding-left: 16px; }
+  .wa-films { padding: 0 16px; }
+  .wa-player { padding: 12px 16px 8px; }
+  .ws-list > .wa-list { --cols: 12px 16px 24px 18px minmax(0, 1fr) 48px 0 0 12px; }
+  .ws-list > .wa-list .wa-item.d > .wa-row, .ws-list > .wa-list .wa-row.more { grid-template-columns: 12px 16px 24px 18px 18px minmax(0, 1fr) 0 0 0 12px; }
+  .wa-list.latest { --cols: 12px 16px 24px 18px minmax(0, 1fr) 0 0 0 12px; }
+  .wa-change { display: none; }
+}
+
+/* ---- revised after the paths ---- */
+/* In a part's place the part is known: its column is empty unless a decision belongs elsewhere. */
+.wa-list.in-part .wa-item.d.flat .wa-part { visibility: hidden; }
+/* On a phone the parts come one per line, each with its sentence, and the switch leads the title row's tools. */
+@media (max-width: 760px) {
+  .ws-tools { flex-wrap: wrap; gap: 8px 12px; width: 100%; }
+  .ws-tools .wa-view { order: -1; }
+  .ws-tools .ws-places { flex-wrap: nowrap; width: 100%; gap: 8px 14px; }
+  .is-sheet .ws-band-first, .is-sheet .ws-band-after { grid-template-columns: minmax(0, 1fr); }
+  .is-sheet .ws-band > .ws-tile.ws-tile:last-child:nth-child(odd) { grid-column: auto; }
+  .is-sheet .ws-tline, .is-sheet .ws-band-after .ws-tline { display: block; font-size: 13px; }
+  .is-sheet .ws-tile-hit, .is-sheet .ws-band-after .ws-tile-hit { min-height: 0; padding: 10px 16px 10px; }
+  .is-sheet .ws-tile .ws-pips { display: none; }
+  .ws-cut { padding-left: 16px; }
+}
+
+/* ==== what the built rows add to the design ==== */
+/* A row's whole line is one button under its cells: a press anywhere opens it, and the cells keep their own tooltips. */
+.ws .wa-hit { position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; border-radius: 0; cursor: pointer; }
+.ws .wa-hit:focus-visible { outline: 0; }
+.wa-row > :not(.wa-hit) { position: relative; z-index: 1; }
+.ws .wa-row.more, .ws .wa-row.more > span { text-align: left; }
+.wa-row.bundle .wa-name { color: var(--muted); font-weight: 400; }
+.wa-film.wa-film-pip { grid-column: 4; margin: 0; justify-self: center; }
+/* An opened row's panel: the entry's own, indented to the name. */
+.wa-item > .ws-more .ws-more-pad { padding: 4px 24px 20px 100px; }
+.wa-item.d > .ws-more .ws-more-pad { padding-left: 120px; }
+.wa-item.d.flat > .ws-more .ws-more-pad { padding-left: 100px; }
+.wa-item > .ws-more .ws-talk, .wa-item > .ws-more .ws-what { max-width: 720px; }
+.wa-item > .ws-more .ws-state .ws-side { margin-left: 12px; }
+.wa-strip { position: sticky; }
+.wa-strip > .wa-comb { left: 24px; }
+.ws .wa-sp { height: 24px; }
+.wa-ph-side { width: 24px; }
+/* A film's frame: its own page, with a placeholder of the frame's size until it has loaded. The box is the stage, 16:9,
+   and at the player's size the room of the film's caption, subtitle and bar (--chrome) under and over it. */
+.ws .wa-poster { height: auto; aspect-ratio: auto; padding-top: calc(56.25% + var(--chrome, 0px)); background: var(--paper); border: 0; }
+.wa-poster iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; opacity: 0; transition: opacity .2s; }
+.wa-poster.loaded iframe { opacity: 1; }
+.wa-poster .wa-ph-film { position: absolute; inset: 0; height: auto; border-radius: 0; }
+.wa-tip { display: flex; align-items: center; gap: 8px; color: var(--ink); white-space: nowrap; max-width: none; }
+.ws-tools .wa-search { width: 220px; }
+.wa-search input::-webkit-search-cancel-button { display: none; }
+.ws .wa-search .wa-x { display: grid; place-items: center; width: 20px; height: 20px; color: var(--muted); }
+.wa-bar { position: sticky; }
+.wa-bar > .wa-menu-filter { left: 120px; top: 36px; }
+.wa-bar > .wa-menu-sub { left: 356px; }
+.wa-bar > .wa-menu-display { right: 24px; top: 36px; width: 176px; }
+.wa-none { border-top: 0; }
+.no-map .wa-wide { display: none; }
+.no-map .wa-narrow { display: inline; }
+@media (max-width: 760px) {
+  .wa-item > .ws-more .ws-more-pad, .wa-item.d > .ws-more .ws-more-pad, .wa-item.d.flat > .ws-more .ws-more-pad { padding: 4px 16px 16px 56px; }
+  .wa-strip > .wa-comb { left: 16px; }
+  .ws .wa-sp { height: 15px; }
+  .wa-bar > .wa-menu-filter { left: 16px; }
+  .wa-bar > .wa-menu-sub { left: 40px; top: auto; }
+  .wa-bar > .wa-menu-display { right: 16px; }
+  .ws-tools .wa-search { width: 100%; max-width: 220px; }
+}

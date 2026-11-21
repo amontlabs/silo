@@ -34,8 +34,6 @@ describe('the map', () => {
     expect(tile('part-c')).toHaveAccessibleName('Part C, being built, 1 feature. A part inside Part B.');
     // The feature being built has its own mark, in its part's dots.
     expect([...tile('part-c').querySelectorAll('.ws-pips i')].map((pip) => pip.className)).toEqual(['ws-pip building']);
-    const key = screen.getByRole('list', { name: 'Key' });
-    expect(within(key).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['being built', 'next']);
   });
 
   it('shows built and next parts, on the map and the tiles alike', async () => {
@@ -50,7 +48,6 @@ describe('the map', () => {
       expect(tile(id).parentElement).toHaveClass(state);
     }
     expect(tile('part-a')).toHaveTextContent('built');
-    expect(within(screen.getByRole('list', { name: 'Key' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['built', 'being built', 'next']);
   });
 
   it('shows a decided part, and the line says what is next, when no part is being built', async () => {
@@ -62,42 +59,48 @@ describe('the map', () => {
     expect(part('part-c')).toHaveAccessibleName('Part C, 1 decided, 1 feature. A part inside Part B.');
     expect(tile('part-c').parentElement).toHaveClass('s-decided');
     expect(tile('part-c')).toHaveTextContent('1 decided');
-    expect(within(screen.getByRole('list', { name: 'Key' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['built', 'next', 'decided']);
   });
 
-  it('switches to the tiles in build order and back', async () => {
+  it('switches to All and back, a move Back undoes, and keeps the tiles for narrow windows', async () => {
     mockApi();
     await renderApp();
-    expect(screen.getByRole('button', { name: 'Map' })).toHaveAttribute('aria-pressed', 'true');
-    await userEvent.click(screen.getByRole('button', { name: 'Order' }));
-    expect(screen.getByRole('button', { name: 'Order' })).toHaveAttribute('aria-pressed', 'true');
-    expect(location.search).toBe('?view=order');
+    expect(screen.getByRole('button', { name: /^Map/ })).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(screen.getByRole('button', { name: 'All' }));
+    expect(screen.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true');
+    expect(location.search).toBe('?view=all');
+    expect(document.querySelector('.ws')).toHaveClass('v-all', 'is-all');
+    expect(document.querySelector('.ws-stage, .wa-films')).toBeNull();
+    expect(screen.getByRole('toolbar', { name: 'What the list shows' })).toBeInTheDocument();
+    act(() => history.back());
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Map/ })).toHaveAttribute('aria-pressed', 'true'));
+    expect(location.search).toBe('');
+    // The tiles stand in the map's place under 1200 px, and have no view of their own.
     const order = [...document.querySelectorAll<HTMLElement>('.ws-tile')].map((t) => t.dataset.part);
     expect(order.slice(0, 4)).toEqual(['part-a', 'part-b', 'part-c', 'part-d']);
-    expect(order).not.toContain('suggested');
-    expect(screen.getByText('After that')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Map' }));
-    expect(location.search).toBe('');
+    expect(screen.queryByRole('button', { name: 'Order' })).toBeNull();
+    // The old address of the tiles shows the map.
+    history.replaceState(null, '', '/workshop?view=order');
+    act(() => { dispatchEvent(new PopStateEvent('popstate')); });
+    expect(screen.getByRole('button', { name: /^Map/ })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('links to Product, Latest, what is left out and the suggestions in the title row, before Map and Order, on every place', async () => {
+  it('holds Product, Search and the suggestions in the title row, then the switch, on every place', async () => {
     mockApi();
     await renderApp();
     const row = () => screen.getByRole('navigation', { name: 'Places' });
     const links = () => within(row()).getAllByRole('link').map((a) => [a.textContent, a.getAttribute('href'), a.getAttribute('aria-current')]);
-    expect(links()).toEqual([['Product', '#product', null], ['Latest', '#latest', null], ['Left out · 3', '#left', null], ['Suggest a feature', '#suggested', null]]);
-    expect(row().closest('.ws-tools')?.lastElementChild).toHaveAttribute('aria-label', 'Arrangement');
-    // The line and the tile they replace are gone.
-    expect(document.querySelector('.ws-under, .ws-tile[data-part="suggested"]')).toBeNull();
+    expect(links()).toEqual([['Product', '#product', null], ['Suggest a feature', '#suggested', null]]);
+    expect(within(row()).getByRole('button', { name: 'Search' })).toBeInTheDocument();
+    expect(row().closest('.ws-tools')?.lastElementChild).toHaveAttribute('aria-label', 'View');
     await userEvent.click(part('part-b'));
-    expect(links().map(([name]) => name)).toEqual(['Product', 'Latest', 'Left out · 3', 'Suggest a feature']);
-    await userEvent.click(screen.getByRole('link', { name: 'Latest' }));
-    expect(location.hash).toBe('#latest');
-    expect(links()).toEqual([['Product', '#product', null], ['Latest', '#latest', 'true'], ['Left out · 3', '#left', null], ['Suggest a feature', '#suggested', null]]);
+    expect(links().map(([name]) => name)).toEqual(['Product', 'Suggest a feature']);
+    await userEvent.click(screen.getByRole('link', { name: 'Product' }));
+    expect(location.hash).toBe('#product');
+    expect(links()).toEqual([['Product', '#product', 'true'], ['Suggest a feature', '#suggested', null]]);
     // The open one, pressed again, goes back to the plain view.
-    await userEvent.click(screen.getByRole('link', { name: 'Latest' }));
+    await userEvent.click(screen.getByRole('link', { name: 'Product' }));
     await waitFor(() => expect(location.hash).toBe(''));
-    expect(screen.getByRole('link', { name: 'Latest' })).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('link', { name: 'Product' })).not.toHaveAttribute('aria-current');
   });
 });
 
@@ -151,16 +154,17 @@ describe('a part', () => {
     expect(location.hash).toBe('');
   });
 
-  it('shows each entry\'s state word, votes and comment counts', async () => {
+  it('shows each entry\'s state by its pip and its votes as a count; the thumb and the comments are in the opened row', async () => {
     history.replaceState(null, '', '/workshop#part-a');
     mockApi();
     await renderApp();
-    expect(within(itemOf('The engine runs on its own')).getByText('decided')).toBeInTheDocument();
-    expect(within(itemOf('The engine runs on its own')).getByRole('link', { name: '8 votes, sign in to vote' })).toHaveTextContent('👍8');
-    act(() => { location.hash = '#part-b'; });
+    expect(within(itemOf('The engine runs on its own')).getByRole('img', { name: 'decided' })).toBeInTheDocument();
+    expect(itemOf('The engine runs on its own').querySelector(':scope > .wa-row > .wa-side')).toHaveTextContent('👍 8');
+    expect(within(itemOf('The engine runs on its own')).queryByRole('link', { name: /votes/ })).toBeNull();
+    act(() => { location.hash = '#part-b/create'; });
     await waitFor(() => expect(within(itemOf('Create and delete a computer')).getByText('💬 2')).toBeInTheDocument());
     expect(within(itemOf('Create and delete a computer')).getByRole('link', { name: '12 votes, sign in to vote' })).toHaveTextContent('👍12');
-    expect(within(itemOf('Run a command')).queryByText(/💬/)).not.toBeInTheDocument();
+    expect(itemOf('Run a command').querySelector(':scope > .wa-row > .wa-side')).toHaveTextContent('👍 4');
   });
 });
 
@@ -199,19 +203,19 @@ describe('an entry', () => {
     history.replaceState(null, '', '/workshop#part-c/shells');
     await renderApp();
     expect(await screen.findByText('Being built.')).toBeInTheDocument();
-    expect(within(itemOf('Your shell inside')).getByText('being built')).toBeInTheDocument();
+    expect(within(itemOf('Your shell inside')).getByRole('img', { name: 'being built' })).toBeInTheDocument();
     expect(itemOf('Your shell inside').querySelector('.ws-pip')).toHaveClass('building');
     act(() => { location.hash = '#part-a/calls'; });
     await waitFor(() => expect(screen.getByText('Decided.')).toBeInTheDocument());
-    expect(within(itemOf('Every call defined once')).getByText('decided')).toBeInTheDocument();
+    expect(within(itemOf('Every call defined once')).getByRole('img', { name: 'decided' })).toBeInTheDocument();
     expect(itemOf('Every call defined once').querySelector('.ws-pip')).toHaveClass('decided');
     act(() => { location.hash = '#part-a/core-in-zig'; });
     await waitFor(() => expect(within(itemOf('Which language is the core written in?')).getByText('Decided.')).toBeInTheDocument());
-    expect(within(itemOf('Which language is the core written in?')).getByText('decided')).toBeInTheDocument();
+    expect(within(itemOf('Which language is the core written in?')).getByRole('img', { name: 'decided' })).toBeInTheDocument();
     expect(screen.getByText('Zig. It is the core piece.')).toBeInTheDocument();
     act(() => { location.hash = '#part-d/one-way'; });
     await waitFor(() => expect(screen.getByText('Not decided.')).toBeInTheDocument());
-    expect(itemOf('Which way do changes go?')).toHaveClass('st-undecided');
+    expect(within(itemOf('Which way do changes go?')).getByRole('img', { name: 'not decided' })).toHaveClass('undecided');
   });
 
   it('shows a verdict written in the file as decided, with nothing to confirm', async () => {
@@ -265,16 +269,18 @@ describe('addresses', () => {
     expect(document.querySelector('.ws-item.open')).toBeNull();
   });
 
-  it('open a dropped entry in the left-out list where it was opened', async () => {
+  it('open what was left out in All, with the dropped entries, and an old left-out row where it lives', async () => {
     mockApi();
     history.replaceState(null, '', '/workshop#left');
     await renderApp(buildData({ features: FEATURES.map((feature) => (feature.id === 'exec' ? { ...feature, verdict: 'drop' as const } : feature)) }));
+    expect(location.search).toBe('?view=all&state=dropped');
+    expect(location.hash).toBe('');
     await userEvent.click(rowButton('Run a command'));
     expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('heading', { level: 2, name: 'Left out' })).toBeInTheDocument();
-    expect(location.hash).toBe('#left/exec');
+    expect(location.hash).toBe('#part-b/exec');
     act(() => { history.replaceState(null, '', '/workshop#left/exec'); dispatchEvent(new PopStateEvent('popstate')); });
-    expect(screen.getByRole('heading', { level: 2, name: 'Left out' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Part B' })).toBeInTheDocument());
+    expect(location.hash).toBe('#part-b/exec');
   });
 
   it('open the part when its entry no longer exists, and find an entry under another part', async () => {
@@ -292,15 +298,17 @@ describe('addresses', () => {
 });
 
 describe('the places of the title row', () => {
-  it('lists every dropped entry of the parts, decisions and features', async () => {
+  it('gives what was left out as a filter of All: every dropped entry of the parts, decisions and features', async () => {
     mockApi();
     await renderApp();
-    await userEvent.click(screen.getByRole('link', { name: 'Left out · 3' }));
-    expect(location.hash).toBe('#left');
-    expect([...document.querySelectorAll('.ws-detail .ws-name')].map((name) => name.textContent)).toEqual(['A hosted reviewer', 'An earlier desktop stack', 'Which format does an export use?']);
-    expect(within(itemOf('A hosted reviewer')).getByText('dropped')).toBeInTheDocument();
-    expect(within(itemOf('Which format does an export use?')).getByText('dropped')).toBeInTheDocument();
-    expect([...document.querySelectorAll('.ws-detail .ws-tally')].map((tally) => tally.textContent?.replace(/\u00a0/g, ' '))).toEqual(['2 dropped', 'Decisions: 1 dropped']);
+    expect(screen.queryByRole('link', { name: /Left out/ })).toBeNull();
+    history.replaceState(null, '', '/workshop?view=all&state=dropped');
+    act(() => { dispatchEvent(new PopStateEvent('popstate')); });
+    await waitFor(() => expect(document.querySelector('.wa-list')).not.toBeNull());
+    expect([...document.querySelectorAll('.wa-list .wa-name > span:first-child')].map((name) => name.textContent)).toEqual(['A hosted reviewer', 'An earlier desktop stack', 'Part E', 'Which format does an export use?']);
+    // The dropped decision no feature needs stands, unfolded, under its part's row.
+    expect(within(itemOf('A hosted reviewer')).getByRole('img', { name: 'dropped' })).toBeInTheDocument();
+    expect(itemOf('A hosted reviewer')).toHaveClass('gone');
     await userEvent.click(rowButton('An earlier desktop stack'));
     expect(screen.getByText('Dropped.')).toBeInTheDocument();
   });
@@ -311,9 +319,9 @@ describe('the places of the title row', () => {
     history.replaceState(null, '', '/workshop#part-e');
     await renderApp(buildData({ features: FEATURES.map((feature) => ({ ...feature, ...states[feature.id] })) }));
     expect(document.querySelector('.ws-detail .ws-tally')?.textContent?.replace(/\u00a0/g, ' ')).toBe('1 built · 1 being built · 1 decided · 4 not decided · 1 dropped');
-    expect(within(itemOf('A Linux server')).getByText('being built')).toBeInTheDocument();
-    expect(within(itemOf('Signed releases')).getByText('decided')).toBeInTheDocument();
-    expect(within(itemOf('Tasks from GitHub events')).getByText('built')).toBeInTheDocument();
+    expect(within(itemOf('A Linux server')).getByRole('img', { name: 'being built' })).toBeInTheDocument();
+    expect(within(itemOf('Signed releases')).getByRole('img', { name: 'decided' })).toBeInTheDocument();
+    expect(within(itemOf('Tasks from GitHub events')).getByRole('img', { name: 'built' })).toBeInTheDocument();
     expect([...tile('part-e').querySelectorAll('.ws-pips i')].map((pip) => pip.className).slice(0, 3)).toEqual(['ws-pip built', 'ws-pip building', 'ws-pip decided']);
     expect(part('part-e')).toHaveClass('s-building');
     expect(part('part-e')).toHaveAccessibleName('Part E, being built, 7 features, 2 decisions. A wide bar under the drawing.');
@@ -325,7 +333,7 @@ describe('the places of the title row', () => {
     await userEvent.click(screen.getByRole('link', { name: 'Product' }));
     expect(location.hash).toBe('#product');
     expect(screen.getByRole('heading', { level: 2, name: 'Product' })).toHaveFocus();
-    expect([...document.querySelectorAll('.ws-detail .ws-name')].map((name) => name.textContent)).toEqual(['How is security built?', 'Which host runs Silo first?', 'Which logs does Silo keep?']);
+    expect([...document.querySelectorAll('.ws-detail .wa-name > span:first-child')].map((name) => name.textContent)).toEqual(['How is security built?', 'Which host runs Silo first?', 'Which logs does Silo keep?']);
     expect(document.querySelector('.ws-detail .ws-tally')).toHaveTextContent('Decisions: 1 decided · 1 not decided · 1 replaced');
   });
 
@@ -339,10 +347,10 @@ describe('the places of the title row', () => {
     expect(screen.getByRole('link', { name: 'Sign in to suggest' })).toHaveAttribute('href', '/api/workshop/login?return=%2Fworkshop%23suggested');
   });
 
-  it('returns to the link that opened the left-out list, Product, Latest or the suggestions', async () => {
+  it('returns to the link that opened Product or the suggestions', async () => {
     mockApi({ me: owner });
     await renderApp();
-    for (const [name, title] of [['Left out · 3', 'Left out'], ['Product', 'Product'], ['Latest', 'Latest'], ['Suggest a feature', 'Suggest a feature']]) {
+    for (const [name, title] of [['Product', 'Product'], ['Suggest a feature', 'Suggest a feature']]) {
       await userEvent.click(screen.getByRole('link', { name }));
       expect(screen.getByRole('heading', { level: 2, name: title })).toHaveFocus();
       fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' });
@@ -354,12 +362,12 @@ describe('the places of the title row', () => {
     mockApi({ me: owner });
     await renderApp();
     await userEvent.click(screen.getByRole('link', { name: 'Product' }));
-    // The address changed by hand: Latest is reached by its address, with no opener of its own.
-    act(() => { location.hash = '#latest'; });
-    await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Latest' })).toBeInTheDocument());
+    // The address changed by hand: the suggestions are reached by their address, with no opener of their own.
+    act(() => { location.hash = '#suggested'; });
+    await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Suggest a feature' })).toBeInTheDocument());
     await userEvent.click(screen.getByRole('button', { name: /← Full map/ }));
     await waitFor(() => expect(location.hash).toBe(''));
-    await waitFor(() => expect(screen.getByRole('link', { name: 'Latest' })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole('link', { name: 'Suggest a feature' })).toHaveFocus());
   });
 });
 
@@ -415,7 +423,8 @@ describe('when the API is missing or slow', () => {
     expect(rowButton('Create and delete a computer')).toBeInTheDocument();
     expect(screen.queryByText('Live comments are unavailable.')).not.toBeInTheDocument();
     expect(document.querySelector('.ws-vote')).toBeNull();
+    expect(itemOf('Create and delete a computer').querySelector('.wa-side .wa-ph-side')).not.toBeNull();
     await act(async () => release(ok(liveState())));
-    expect(await screen.findByRole('link', { name: '12 votes, sign in to vote' })).toHaveTextContent('👍12');
+    await waitFor(() => expect(itemOf('Create and delete a computer').querySelector('.wa-side')).toHaveTextContent('👍 12'));
   });
 });

@@ -14,7 +14,7 @@ test('a plan whose first part has no row visits the first part that has rows, an
   assert.equal(chosen.part.hash, '#full');
   assert.equal(chosen.product.hash, '#product');
   assert.equal(chosen.rows, chosen.part);
-  assert.deepEqual(hashes(chosen), ['', '#full', '#product', '#latest', '#suggested']);
+  assert.deepEqual(hashes(chosen), ['', '#full', '#product', '?view=all', '#suggested']);
   assert.ok(chosen.places.every((place) => place.hash !== '#empty'));
 });
 
@@ -26,14 +26,14 @@ test('a plan with rows only in the whole product visits the whole product as its
   assert.equal(chosen.tile, 'a');
   assert.equal(chosen.part, null);
   assert.equal(chosen.rows, chosen.product);
-  assert.deepEqual(hashes(chosen), ['', '#product', '#latest', '#suggested']);
+  assert.deepEqual(hashes(chosen), ['', '#product', '?view=all', '#suggested']);
 });
 
-test('a plan with no part and no row visits only the plain view, Latest and the suggestions', () => {
+test('a plan with no part and no row visits only the plain view, All and the suggestions', () => {
   const chosen = placesOf({ parts: [], entries: [] });
   assert.equal(chosen.tile, null);
   assert.equal(chosen.part, null);
   assert.equal(chosen.product, null);
   assert.equal(chosen.rows, null);
-  assert.deepEqual(hashes(chosen), ['', '#latest', '#suggested']);
+  assert.deepEqual(hashes(chosen), ['', '?view=all', '#suggested']);
 });

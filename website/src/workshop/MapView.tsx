@@ -84,10 +84,12 @@ export interface MapViewProps {
   groups: PartGroup[];
   folded: boolean;
   current: string | null;
+  /** Parts marked from outside the map (a film's), on the full map and the folded one; every other part fades. */
+  marked?: ReadonlySet<string> | null;
   onOpen: (part: string) => void;
 }
 
-export function MapView({ layout, groups, folded, current, onOpen }: MapViewProps) {
+export function MapView({ layout, groups, folded, current, marked = null, onOpen }: MapViewProps) {
   const states = new Map(groups.map((group) => [group.part.id, group.state]));
   const byId = new Map(groups.map((group) => [group.part.id, group]));
   const titles = new Map(groups.map((group) => [group.part.id, group.part.title]));
@@ -131,7 +133,7 @@ export function MapView({ layout, groups, folded, current, onOpen }: MapViewProp
 
   return (
     <section className="ws-mapsec" aria-label="Silo, part by part">
-      <div ref={stageRef} className={['ws-stage', folded ? 'fold' : '', related ? 'relating' : '', groups.length ? '' : 'ws-stage-empty'].filter(Boolean).join(' ')}>
+      <div ref={stageRef} className={['ws-stage', folded ? 'fold' : '', related || marked ? 'relating' : '', groups.length ? '' : 'ws-stage-empty'].filter(Boolean).join(' ')}>
         {groups.length ? null : <p className="ws-quiet">No part yet.</p>}
         {layout.zones.map((zone) => (
           // A zone with no folded place stays where it is and fades out as the map folds.
@@ -163,7 +165,7 @@ export function MapView({ layout, groups, folded, current, onOpen }: MapViewProp
           if (!group) return null;
           const on = current === id;
           const classes = ['ws-geo', 'ws-part', `s-${group.state}`, place.inner ? 'inner' : '', place.tall ? 'tall' : '', place.wide ? 'wide' : '', on ? 'on' : '',
-            related && related.dependsOn.includes(id) ? 'marked' : '', related && id !== related.id && !related.dependsOn.includes(id) ? 'faint' : ''].filter(Boolean).join(' ');
+            ...(marked && !related ? [marked.has(id) ? 'marked' : 'faint'] : [related && related.dependsOn.includes(id) ? 'marked' : '', related && id !== related.id && !related.dependsOn.includes(id) ? 'faint' : ''])].filter(Boolean).join(' ');
           return (
             <button
               type="button" key={id} data-part={id} className={classes} style={style(placeStyle(place.full, place.fold, place))}

@@ -1,13 +1,21 @@
-// An opened part: its title, line, one dot per feature and the counts on the left, its decisions and features on the
-// right: its features first, then its decisions. The same layout holds the decisions of Product, the suggestions, the dropped entries and the latest changes.
+// An opened part: its title, line, one dot per feature and the counts on the left, All's rows on the right: its
+// features, each with the decisions it needs folded under it, then its decisions that none of its features needs. The
+// same two columns hold Product's decisions, a film and the suggestions.
 import type { ReactNode } from 'react';
+import { AllList } from './AllList';
+import { filmSections, partFilm, partSections, productSections } from './all';
+import type { Graph, Section } from './all';
 import { Entry, pipClass } from './Entry';
 import type { EntryContext } from './Entry';
-import { countDecisions, countRows, splitRows } from './plan';
-import type { Counts, DecisionCounts, PartGroup, Row } from './plan';
+import { FilmControl, FilmFrame } from './Films';
+import { countDecisions, countRows } from './plan';
+import type { Counts, DecisionCounts, FilmItem, PartGroup, Plan, Row } from './plan';
+import type { RelationStore } from './relation';
 
 export interface BlockProps {
   num?: string;
+  /** `num` says what kind of place this is ("Film"), not a number. */
+  kind?: boolean;
   title: string;
   line?: string;
   onBack: () => void;
@@ -15,25 +23,23 @@ export interface BlockProps {
   list: ReactNode;
   /** Quiet lines under the counts: the API unavailable, sign-in failed. */
   notes?: ReactNode;
-  /** While the list loads, nothing sits below it in its column. */
-  loading?: boolean;
 }
 
 /** The two columns every opened place uses. */
-export function Block({ num, title, line, onBack, children, list, notes, loading = false }: BlockProps) {
+export function Block({ num, kind = false, title, line, onBack, children, list, notes }: BlockProps) {
   return (
     <>
       <div className="ws-block">
         <button type="button" className="ws-back" onClick={onBack}>
-          <span className="lbl-map">← Full map</span><span className="lbl-order">← All parts</span>
+          <span className="wa-wide">← Full map</span><span className="wa-narrow">← All parts</span>
         </button>
-        <span className="ws-num">{num ?? ''}</span>
+        <span className={kind ? 'ws-num wa-kind' : 'ws-num'}>{num ?? ''}</span>
         <h2 id="ws-part-title" tabIndex={-1}>{title}</h2>
         {line ? <p className="ws-aline">{line}</p> : null}
         {children}
         {notes ? <div className="ws-notes wide">{notes}</div> : null}
       </div>
-      <div className={loading ? 'ws-list ws-list-loading' : 'ws-list'}>{list}{notes && !loading ? <div className="ws-notes narrow">{notes}</div> : null}</div>
+      <div className="ws-list">{list}{notes ? <div className="ws-notes narrow">{notes}</div> : null}</div>
     </>
   );
 }
@@ -42,19 +48,25 @@ export function Rows({ rows, ctx }: { rows: Row[]; ctx: EntryContext }) {
   return <ul className="ws-rows">{rows.map((row) => <Entry key={row.key} row={row} open={ctx.open.has(row.key)} ctx={ctx} />)}</ul>;
 }
 
-/** A list that holds both kinds of entry: its features under "Features", then its decisions under "Decisions". A group with no row shows nothing. Without `headed`, the rows are one list. */
-export function GroupedRows({ rows, ctx, headed = true }: { rows: Row[]; ctx: EntryContext; headed?: boolean }) {
-  if (!headed) return <Rows rows={rows} ctx={ctx} />;
-  const { features, decisions } = splitRows(rows);
+/** What a place's list needs beyond its rows: the same as All's. */
+export interface PlaceList {
+  plan: Plan;
+  graph: Graph;
+  ctx: EntryContext;
+  store: RelationStore;
+  folds: ReadonlyMap<string, boolean>;
+  onFold: (key: string, open: boolean) => void;
+  more: ReadonlySet<string>;
+  onMore: (key: string) => void;
+  waiting: boolean;
+}
+
+function PlaceRows({ sections, list, inPart = null, flat = false }: { sections: Section[]; list: PlaceList; inPart?: string | null; flat?: boolean }) {
   return (
-    <>
-      {([['Features', features], ['Decisions', decisions]] as const).filter(([, group]) => group.length).map(([title, group]) => (
-        <section key={title} aria-label={title}>
-          <h3 className="ws-grp">{title}</h3>
-          <Rows rows={group} ctx={ctx} />
-        </section>
-      ))}
-    </>
+    <AllList
+      sections={sections.filter((section) => section.items.length)} graph={list.graph} plan={list.plan} ctx={list.ctx} store={list.store} inPart={inPart} flat={flat}
+      folds={list.folds} onFold={list.onFold} more={list.more} onMore={list.onMore} waiting={list.waiting}
+    />
   );
 }
 
@@ -96,39 +108,47 @@ function Tallies({ rows }: { rows: Row[] }) {
   );
 }
 
-export function PartPlace({ group, ctx, onBack, notes }: { group: PartGroup; ctx: EntryContext; onBack: () => void; notes?: ReactNode }) {
+export function PartPlace({ group, list, onBack, notes, onFilm }: { group: PartGroup; list: PlaceList; onBack: () => void; notes?: ReactNode; onFilm: (film: string) => void }) {
+  const film = partFilm(list.plan, group.part.id);
+  const sections = partSections(list.graph, group.rows);
   return (
     <Block
       num={String(group.number).padStart(2, '0')} title={group.part.title} line={group.part.line} onBack={onBack} notes={notes}
-      list={<GroupedRows rows={group.rows} ctx={ctx} />}
+      list={<PlaceRows sections={sections} list={list} inPart={group.part.id} />}
     >
       <div className="ws-pips" aria-hidden="true">
         {group.rows.filter((row) => row.of === 'feature' && row.status !== 'dropped').map((row) => <i className={pipClass(row)} key={row.key} />)}
       </div>
       <Tallies rows={group.rows} />
+      {film ? <FilmControl film={film} pressed={false} onOpen={onFilm} /> : null}
     </Block>
   );
 }
 
 /** Product: the decisions that are not about one part, from plan/decisions/. */
-export function ProductPlace({ rows, ctx, onBack, notes }: { rows: Row[]; ctx: EntryContext; onBack: () => void; notes?: ReactNode }) {
+export function ProductPlace({ rows, list, onBack, notes }: { rows: Row[]; list: PlaceList; onBack: () => void; notes?: ReactNode }) {
   return (
     <Block
       title="Product" line="The decisions that are not about one part." onBack={onBack} notes={notes}
-      list={<GroupedRows rows={rows} ctx={ctx} headed={false} />}
+      list={<PlaceRows sections={productSections(rows)} list={list} flat />}
     >
       <Tallies rows={rows} />
     </Block>
   );
 }
 
-export function LeftPlace({ rows, ctx, onBack, notes }: { rows: Row[]; ctx: EntryContext; onBack: () => void; notes?: ReactNode }) {
+/** A film's place: the film, then the entries it shows, each on its own line. */
+export function FilmPlace({ film, rows, list, onBack, notes }: { film: FilmItem; rows: Row[]; list: PlaceList; onBack: () => void; notes?: ReactNode }) {
+  const sections = filmSections(list.graph, rows);
   return (
     <Block
-      title="Left out" onBack={onBack} notes={notes}
-      list={<GroupedRows rows={rows} ctx={ctx} />}
-    >
-      <Tallies rows={rows} />
-    </Block>
+      num="Film" kind title={film.title} line={film.line} onBack={onBack} notes={notes}
+      list={(
+        <>
+          {film.playable ? <div className="wa-player"><FilmFrame film={film} /></div> : null}
+          <PlaceRows sections={sections} list={list} flat />
+        </>
+      )}
+    />
   );
 }

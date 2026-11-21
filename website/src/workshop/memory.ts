@@ -1,4 +1,4 @@
-// What the browser remembers between visits, so the first frame already shows them: the last live state the page
+// What the browser remembers between visits, so the first frame already shows them: the view and the order used last, the last live state the page
 // showed (its own confirmed writes applied) and who was signed in. Without storage the page waits for the server.
 import { hasSessionHint } from './api';
 import type { Me } from './api';
@@ -75,4 +75,22 @@ export function recallPerson(): Me | null {
 
 export function rememberPerson(person: Me | null) {
   write(PERSON, person ? { login: person.login, avatar: person.avatar } : null);
+}
+
+const VIEW = 'silo-workshop-view';
+
+/** The view and All's order a person used last, so a plain address shows them again. */
+export interface Habit {
+  view: 'map' | 'all';
+  order: 'build' | 'latest';
+}
+
+export function recallHabit(): Habit | null {
+  const habit = read(VIEW);
+  if (!isObject(habit) || (habit.view !== 'map' && habit.view !== 'all') || (habit.order !== 'build' && habit.order !== 'latest')) return null;
+  return { view: habit.view, order: habit.order };
+}
+
+export function rememberHabit(habit: Habit) {
+  write(VIEW, habit);
 }
