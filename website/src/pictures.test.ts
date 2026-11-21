@@ -311,6 +311,7 @@ describe('the two pictures', () => {
       const list = card(name).classList;
       const add = list.add.bind(list);
       const remove = list.remove.bind(list);
+      const toggle = list.toggle.bind(list);
       list.add = (...tokens: string[]) => {
         if (tokens.includes('playing') && !list.contains('playing')) startedAt.set(name, { at: Date.now(), dur: parseFloat(card(name).style.getPropertyValue('--dur')) });
         add(...tokens);
@@ -322,6 +323,13 @@ describe('the two pictures', () => {
           startedAt.delete(name);
         }
         remove(...tokens);
+      };
+      // The page adds and removes the class today. Should it toggle it one day, the same two paths measure it.
+      list.toggle = (token: string, force?: boolean) => {
+        const on = force ?? !list.contains(token);
+        if (token !== 'playing') return toggle(token, force);
+        if (on) list.add(token); else list.remove(token);
+        return on;
       };
     }
     for (const name of NAMES) see(card(name), 1);

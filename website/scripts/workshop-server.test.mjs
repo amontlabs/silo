@@ -24,6 +24,10 @@ import { planEntries } from './plan-entries.mjs';
 
 import { count, retiredNumber, entryNumber, FAILED, issueOf, ORIGIN, PLAN_ENTRIES, SESSION, setup, START, withBudget } from './workshop-test-support.mjs';
 
+// The two tests that hold a call at the fake GitHub end it themselves. This limit decides nothing while they pass:
+// it only turns a test left waiting on a call that never comes into a failure, where it would hang the whole run.
+const HELD_LIMIT_MS = 20_000;
+
 test('App JWT is RS256 with the App ID, and the installation token is cached until shortly before it expires', async () => {
   const t = await setup();
   try {
@@ -86,7 +90,7 @@ test('GitHub failing answers 502 when nothing is cached, and an unconfigured ser
   } finally { await u.close(); }
 });
 
-test('a hung or failing token refresh answers 502 and keeps the session; only an invalid refresh token signs out', async () => {
+test('a hung or failing token refresh answers 502 and keeps the session; only an invalid refresh token signs out', { timeout: HELD_LIMIT_MS }, async () => {
   const t = await setup({ cuttable: (path, body) => path === '/login/oauth/access_token' && body.includes('refresh_token') });
   let release;
   const gate = new Promise((resolve) => { release = resolve; });
@@ -138,7 +142,7 @@ test('a hung or failing token refresh answers 502 and keeps the session; only an
   } finally { t.fake.state.hook = null; release(); await t.close(); }
 });
 
-test('a call GitHub does not answer within the limit fails as a timeout', async () => {
+test('a call GitHub does not answer within the limit fails as a timeout', { timeout: HELD_LIMIT_MS }, async () => {
   const t = await setup();
   let release;
   const gate = new Promise((resolve) => { release = resolve; });
