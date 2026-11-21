@@ -109,11 +109,10 @@
 .ws-wire path { fill: none; stroke: var(--faint); stroke-width: 1; transition: stroke .3s; }
 .ws-wire.undecided path { stroke-dasharray: 4 3; }
 .ws-wire .ah { fill: var(--faint); stroke: none; stroke-dasharray: none; transition: fill .3s; }
-/* Wire labels are text over the drawing, so they keep a readable size when the map is small. */
-.ws-wl { position: absolute; left: calc(var(--lx) * var(--u)); top: calc(var(--ly) * var(--u)); transform: translateY(-80%); font: max(12px, calc(10 * var(--u)))/1 var(--mono); color: var(--faint); white-space: nowrap; pointer-events: none; transition: opacity .1s, color .3s; }
+/* Wire labels are text over the drawing, so they keep a readable size when the map is small, and an ink that reaches 4.5:1
+   whatever the part's state and whether the wire is decided: the line says that, not the word. */
+.ws-wl { position: absolute; left: calc(var(--lx) * var(--u)); top: calc(var(--ly) * var(--u)); transform: translateY(-80%); font: max(12px, calc(10 * var(--u)))/1 var(--mono); color: var(--muted); white-space: nowrap; pointer-events: none; transition: opacity .1s, color .3s; }
 .ws-wl.mid { transform: translate(-50%, -80%); }
-.ws-wl.s-done, .ws-wl.s-next, .ws-wl.s-planned { color: var(--muted); }
-.ws-wl.undecided { color: var(--muted); }
 .ws-stage.fold .ws-wl { opacity: 0; }
 .ws-stage:not(.fold) .ws-wl { transition: opacity .22s .2s, color .3s; }
 .ws-wire.s-done path { stroke: var(--ink); } .ws-wire.s-done .ah { fill: var(--ink); }

@@ -220,9 +220,9 @@ dashed outline or line has one source for each kind of thing:
   least one id in their `rests` is proposed. A decision with an answer or `sets`
   and no verdict, and a feature with no verdict, are proposed; a taken
   decision, a taken or built feature, a word and a part are in force. A wire
-  not decided is a dashed line, its word in the second ink; a zone is a dashed
-  outline; a text has its title in the second ink. A wire keeps the colour its
-  part's state gives it. The day the owner takes the entry, the same thing is
+  not decided is a dashed line; a zone is a dashed outline; a text has its
+  title in the second ink. A wire's line keeps the colour its part's state gives
+  it. The day the owner takes the entry, the same thing is
   drawn decided, with no change to the layout.
 - A part's box and a copy behind a part are drawn by the part's state alone,
   as the map has always drawn them: dashed while the part is "not decided yet",
@@ -232,9 +232,10 @@ dashed outline or line has one source for each kind of thing:
 A key on the full map (class `ws-mapkey`, not the header's `ws-key`) says what a
 solid and a dashed line mean ("decided", "not decided"). The page's data gets
 `undecided: true` on a wire, a zone or a text that is not decided and nothing
-else of `rests`, and never the layout's `file`. The words of a thing that is not
-decided keep an ink that reaches 4.5:1 on the page's ground in both themes: the
-faint ink does not.
+else of `rests`, and never the layout's `file`. A wire's word is in the second
+ink, never the faint one (2.53:1 on the light ground), whatever its part's state
+and whether the wire is decided: the line says that, not the word. The same
+holds for the title of a text that is not decided.
 
 The build checks the drawing against the plan. It stops, with the problem and
 the fix, when:
