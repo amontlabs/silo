@@ -64,6 +64,10 @@ const LEAVE_MS = 140;
 const ARRIVE_MS = 400;
 const ACCOUNT_WIDTH = 'silo-workshop-account-width';
 const SWAP_MS = 130;
+/** How long the place takes to slide to its new height when Map and Order swap with it open. */
+const SLIDE_MS = 260;
+/** At most how long the map stays pinned under the header after going back from a scrolled part. */
+const PIN_MS = 1500;
 /** How long the map takes to fold, and an entry to open. */
 const FOLD_MS = 440;
 const KEY: [PartState, string, string][] = [
@@ -186,7 +190,13 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   const [openings, setOpenings] = useState(0);
   const [view, setViewState] = useState<View>(initialView);
   const [leaving, setLeaving] = useState(false);
+  // Map and Order swapping: on the plain view everything under the title row (`swap`); with a place open, the strip
+  // alone (`strip`).
   const [swap, setSwap] = useState<'out' | 'in' | null>(null);
+  const [strip, setStrip] = useState<'out' | 'in' | null>(null);
+  // After going back from a scrolled part on the map, the map stays pinned under the header until the scroll to the top
+  // has brought its own place below that line: unpinned sooner, it would jump up, then come down with the scroll.
+  const [pinned, setPinned] = useState(false);
   // While the fold drives the scroll, the folded map is not pinned yet: pinned, it would jump down first.
   const [lifting, setLifting] = useState(false);
   // While the page keeps its height after going back, the footer waits hidden; it fades in at its place.
@@ -222,6 +232,9 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   const inTransition = useRef(false);
   /** The browser's view transition of the last move that started one, until it ends or another move starts. */
   const transition = useRef<ViewTransitionLike | null>(null);
+  /** Where the place and the footer were on screen before Map and Order swapped with a place open, to slide from. */
+  const slideFrom = useRef<{ node: HTMLElement; top: number }[] | null>(null);
+  const slideTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   // Once who is signed in is known, the account slot takes the width of what it holds (see workshop.css).
   useEffect(() => {
     if (!accountSlot) return;
@@ -250,6 +263,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   useEffect(() => () => {
     [...timers.current, ...swapTimers.current].forEach(clearTimeout);
     clearTimeout(heldHeight.current);
+    clearTimeout(slideTimer.current);
     if (lift.current) cancelAnimationFrame(lift.current.frame);
     clearMark();
   }, []);
@@ -322,6 +336,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     if (mainRef.current) mainRef.current.style.minHeight = '';
     setHeld(false);
     setLeaving(false);
+    setPinned(false);
     return mine;
   }
 
@@ -434,7 +449,10 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
         setHeld(false);
       }, LEAVE_MS + 420);
     }
-    if (scrollY > 0) scrollTo({ top: 0, behavior: 'smooth' });
+    if (scrollY > 0) {
+      setPinned(true);
+      scrollTo({ top: 0, behavior: 'smooth' });
+    }
     setLeaving(true);
     later(finish, LEAVE_MS);
   }
@@ -514,6 +532,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
       swapTimers.current.forEach(clearTimeout);
       swapTimers.current = [];
       setSwap(null);
+      setStrip(null);
       const next = initialView();
       // On a wide screen the other view's panel is taken out of sight: the focus in it goes to the same part in the view
       // now shown, else to the title, rather than to the page itself.
@@ -619,6 +638,44 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     return () => observer.disconnect();
   }, []);
 
+  // The map pinned after going back stays so until its own place is below the header, at most PIN_MS.
+  useEffect(() => {
+    if (!pinned) return;
+    const check = () => {
+      const top = document.querySelector<HTMLElement>('.ws-top');
+      const header = document.querySelector<HTMLElement>('.site-header')?.offsetHeight ?? 0;
+      if (!top || scrollY <= top.offsetTop + top.offsetHeight - header) setPinned(false);
+    };
+    addEventListener('scroll', check, { passive: true });
+    const timer = setTimeout(() => setPinned(false), PIN_MS);
+    return () => {
+      removeEventListener('scroll', check);
+      clearTimeout(timer);
+    };
+  }, [pinned]);
+
+  // Map and Order swapped with a place open: the place and the footer slide from where they were to where the new strip
+  // puts them, in one move. Measured with any slide under way, so a second swap starts from where it is.
+  useLayoutEffect(() => {
+    const from = slideFrom.current;
+    if (!from) return;
+    slideFrom.current = null;
+    clearTimeout(slideTimer.current);
+    const moving = from.filter(({ node }) => node.isConnected).map(({ node, top }) => {
+      node.style.transition = 'none';
+      node.style.transform = '';
+      return { node, by: top - node.getBoundingClientRect().top };
+    }).filter(({ by }) => Math.abs(by) >= 1);
+    for (const { node, by } of moving) node.style.transform = `translateY(${by}px)`;
+    if (!moving.length) return;
+    moving[0].node.getBoundingClientRect();
+    for (const { node } of moving) {
+      node.style.transition = `transform ${SLIDE_MS}ms var(--ease)`;
+      node.style.transform = '';
+    }
+    slideTimer.current = setTimeout(() => moving.forEach(({ node }) => { node.style.transition = ''; }), SLIDE_MS + 40);
+  }, [view]);
+
   // Map or Order. The swap runs on its own timers: a navigation in the middle never leaves it half done.
   function setView(next: View) {
     if (next === view || !mapped) return;
@@ -631,16 +688,21 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
       history.replaceState(history.state, '', `${location.pathname}${search ? `?${search}` : ''}${location.hash}`);
     };
     swapTimers.current.forEach(clearTimeout);
+    setSwap(null);
+    setStrip(null);
     if (still() || !wide()) {
-      setSwap(null);
       apply();
       return;
     }
-    setSwap('out');
+    // On the plain view, everything under the title row swaps. With a place open, only the strip does: the place and
+    // the footer stay and slide to their new height.
+    const set = isHome ? setSwap : setStrip;
+    set('out');
     swapTimers.current = [setTimeout(() => {
+      slideFrom.current = isHome ? null : [...document.querySelectorAll<HTMLElement>('.ws-detail, .ws-foot')].map((node) => ({ node, top: node.getBoundingClientRect().top }));
       apply();
-      setSwap('in');
-      swapTimers.current.push(setTimeout(() => setSwap(null), 300));
+      set('in');
+      swapTimers.current.push(setTimeout(() => set(null), 300));
     }, SWAP_MS)];
   }
 
@@ -703,11 +765,16 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   else if (shown.kind === 'latest') detail = <LatestPlace ctx={ctx} onBack={back} notes={notes} />;
 
   // The place in the first frame is drawn where it stands: it never runs its entrance afterwards. A place opened
-  // later rises in as before.
+  // later rises in as before; one that opens with a row open fades in where it stands, so that the rows under that row
+  // only move down as its panel grows. Its entrance is chosen once, when it opens.
   const firstPlace = useRef<string | null>(null);
   if (boot && !isHome) firstPlace.current = formatHash(shown);
   else if (!boot && firstPlace.current !== null && firstPlace.current !== formatHash(shown)) firstPlace.current = null;
-  const classes = ['ws', isHome ? 'is-sheet' : 'is-open', `v-${view}`, leaving ? 'ws-leaving' : '', swap ? `swap-${swap}` : '', boot ? 'ws-boot' : '', lifting ? 'ws-lifting' : '', held ? 'ws-keeping' : '',
+  const entrance = useRef<{ place: string; fade: boolean } | null>(null);
+  if (isHome) entrance.current = null;
+  else if (entrance.current?.place !== formatHash(shown)) entrance.current = { place: formatHash(shown), fade: openKey !== null };
+  const detailClass = formatHash(shown) === firstPlace.current ? 'ws-detail ws-still' : entrance.current?.fade ? 'ws-detail ws-fade' : 'ws-detail';
+  const classes = ['ws', isHome ? 'is-sheet' : 'is-open', `v-${view}`, leaving ? 'ws-leaving' : '', swap ? `swap-${swap}` : '', strip ? `strip-${strip}` : '', boot ? 'ws-boot' : '', lifting ? 'ws-lifting' : '', held ? 'ws-keeping' : '', pinned ? 'ws-pinned' : '',
     arrivedState ? 'ws-arr-s' : '', arrivedPerson ? 'ws-arr-p' : ''].filter(Boolean).join(' ');
   return (
     <>
@@ -747,7 +814,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
           <Tiles groups={plan.parts} current={current} onOpen={(part) => openPlace({ kind: 'part', part })} />
         </div>
         {isHome ? null : (
-          <section className={formatHash(shown) === firstPlace.current ? 'ws-detail ws-still' : 'ws-detail'} key={formatHash(shown)} aria-labelledby="ws-part-title">{detail}</section>
+          <section className={detailClass} key={formatHash(shown)} aria-labelledby="ws-part-title">{detail}</section>
         )}
         <p className="sr-only" aria-live="polite">{w.announce}</p>
         {w.notice ? <p className="ws-notice" role="alert">{w.notice}</p> : null}

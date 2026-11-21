@@ -136,15 +136,25 @@ To see the page's moves frame by frame, with the same server running,
 `npm --prefix website run motion-sheet` (a URL, `--out <dir>` and flow names
 after `--`). For each move, such as the plain view to a part and back at
 1440 × 900 and 390 × 844, or on the map at 1440 × 900 the map to a part and
-back, a scrolled map to a part and back, and Map to Order and back (the flows
-named `map-*`), it writes to `website/.motion/` a contact sheet of
+back, a scrolled map to a part and back, Map to Order and back on the plain
+view, and Map to Order and back with a part and a row open (the flows named
+`map-*`), it writes to `website/.motion/` a contact sheet of
 the frames at fixed times after the action and a text file with each change
 of the scroll and of each element's box and opacity, the animations that ran
-and the layout shifts. It exits with an error when a move between the plain view and
-a place scrolls the page more than once, when a move between two places runs a
-view transition, when Notes opening grows its panel in fewer than four steps,
-or when a comment changes height as it is confirmed; the full list is at the
-top of `scripts/motion-sheet.mjs`. `npm test` does not run it either.
+and the layout shifts. It exits with an error when, in any move, a box it
+follows turns back (its top or its height goes more than 2 px one way, then
+more than 2 px the other) or goes from an opacity above 0.9 to one below 0.1
+between two frames while it stays in the page. A move where one of these is
+meant is named in the script's `MEANT`, with its reason: from one part to
+another, the new place rises 8 px into place. It also exits with an error when
+a move between the plain view and a place scrolls the page more than once,
+when a move between two places runs a view transition, when Notes opening
+grows its panel in fewer than four steps, when a comment changes height as it
+is confirmed, when a row's opening or closing covers more than 16% of its way
+in its first frame, or when Map and Order swap with a place open and the place
+or the footer goes under an opacity of 0.95 or the place's top takes one step
+of more than 30 px; the full list is at the top of `scripts/motion-sheet.mjs`.
+`npm test` does not run it either.
 
 To build and check the page on another plan than `plan/` (the real plan may be
 in the middle of a change), name its folder in `WORKSHOP_PLAN` for the build
@@ -281,7 +291,21 @@ What a person sees:
   A move from one place to another (a name in the strip, a link to an entry
   that lives elsewhere, a line of Latest) shows the new place at once. In the
   strip, the name under the pointer turns to the ink colour; the lighter ground
-  and the line under it mark the open part alone.
+  and the line under it mark the open part alone. The strip holds the parts
+  only.
+- A place opened after the first frames rises 8 px into place as it fades in.
+  One that opens with a row open (a line of Latest, a link to an entry, an
+  address) fades in where it stands, so the rows under that row only move down
+  as its panel grows. Going back on the map, the place fades out over 130 ms
+  while the map unfolds. Going back from a scrolled part, the map stays pinned
+  under the header until the scroll to the top has brought it to its own
+  place, so it never jumps up.
+- Map and Order swap on the plain view by fading out everything under the
+  title row, then fading it in 8 px low as it rises. With a place open, only
+  the strip changes: the one that leaves fades out, the other fades in, and
+  the place and the footer, which stay in sight, slide to their new height in
+  one move of 260 ms. A second press meanwhile starts from where they are. With
+  reduced motion, none of these moves animates.
 - A part's rows are its decisions and features, in the order of `order.json`,
   drawn by the same row. A feature is planned (taken, ready or not), built (its
   file says `built`), dropped, or not decided. A decision's name is its `asks`
@@ -311,8 +335,9 @@ What a person sees:
   row with no thread yet loads nothing);
   it shows itself open at once, its panel grows when the comments are in or
   after 180 ms, and while they still load each one the count announces holds
-  its place. The panel also grows or shrinks over 200 ms when Notes or History
-  opens or closes, and when their text arrives after its placeholder. A comment
+  its place. The panel opens and closes over 260 ms, and grows or shrinks over
+  the same time and on the same curve (`--ease`) when Notes or History opens
+  or closes, and when their text arrives after its placeholder. A comment
   being sent shows its 👍 disabled, so it keeps its height once confirmed, and
   "GitHub #N" next to the box keeps at least the room of "GitHub #000 ↗". An entry named by the address
   waits closed until the first answer when no live state is shown yet. An

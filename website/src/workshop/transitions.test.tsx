@@ -718,3 +718,143 @@ describe('going back off the map without a view transition', () => {
     expect(started).toEqual([]);
   });
 });
+
+describe('Map and Order with a place open', () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('swaps the strip alone: the place stays in sight and slides from where it was to its new height', async () => {
+    screenOf({ motion: true, wide: true, mode: 'absent' });
+    await mount();
+    act(() => { fireEvent.click(part('part-b')); });
+    await elapse(600);
+    // The folded map is 93 px taller than the strip of tiles: the place is that much lower in Map.
+    const plain = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (!this.matches('.ws-detail')) return plain.call(this);
+      const shift = Number(this.style.transform.match(/translateY\((-?[\d.]+)px\)/)?.[1] ?? 0);
+      const top = (rootOf().classList.contains('v-map') ? 353 : 260) + shift;
+      return { x: 0, y: top, top, left: 0, right: 1000, bottom: top + 900, width: 1000, height: 900, toJSON() {} } as DOMRect;
+    });
+    const detail = document.querySelector<HTMLElement>('.ws-detail')!;
+    const styles: string[] = [];
+    const observer = new MutationObserver((records) => records.forEach((record) => styles.push(record.oldValue ?? '')));
+    observer.observe(detail, { attributes: true, attributeFilter: ['style'], attributeOldValue: true });
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
+    // The strip fades out; the place is not part of the swap.
+    expect(classesOf()).toContain('strip-out');
+    expect(classesOf()).not.toContain('swap-out');
+    await elapse(130);
+    expect(shownView()).toBe('order');
+    expect(classesOf()).toContain('strip-in');
+    expect(document.querySelector('.ws-detail')).toBe(detail);
+    await act(async () => { await Promise.resolve(); });
+    // It started 93 px lower, where it was, and slides to its place.
+    expect([...styles, detail.getAttribute('style') ?? '']).toContainEqual(expect.stringContaining('translateY(93px)'));
+    await elapse(300);
+    expect(classesOf()).not.toContain('strip-in');
+    expect(detail.style.transform).toBe('');
+    expect(detail.style.transition).toBe('');
+    // Pressed again in the middle of the slide, the swap back starts from where the place is.
+    styles.length = 0;
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Map' })); });
+    await elapse(130);
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
+    await elapse(130);
+    await elapse(400);
+    expect(shownView()).toBe('order');
+    expect(location.search).toBe('?view=order');
+    expect(detail.style.transform).toBe('');
+    expect(classesOf().filter((name) => /^(strip|swap)-/.test(name))).toEqual([]);
+    observer.disconnect();
+  });
+
+  it('keeps the whole swap on the plain view', async () => {
+    screenOf({ motion: true, wide: true, mode: 'absent' });
+    await mount();
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
+    expect(classesOf()).toContain('swap-out');
+    expect(classesOf()).not.toContain('strip-out');
+    await elapse(130);
+    expect(classesOf()).toContain('swap-in');
+  });
+});
+
+describe('going back from a scrolled part on the map', () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    restoreScrollY();
+  });
+
+  it('keeps the map pinned until the scroll has brought its place below the header, and never on the plain view after', async () => {
+    screenOf({ motion: true, wide: true, mode: 'absent' });
+    vi.spyOn(window, 'scrollTo').mockImplementation((() => {}) as typeof window.scrollTo);
+    await mount();
+    act(() => { fireEvent.click(part('part-b')); });
+    await elapse(600);
+    Object.defineProperty(window, 'scrollY', { value: 500, configurable: true });
+    act(() => { fireEvent.click(document.querySelector<HTMLElement>('.ws-back')!); });
+    await elapse(200);
+    expect(shownPart()).toBe('');
+    expect(classesOf()).toContain('ws-pinned');
+    // The page is still scrolled past the map's place (here: the title row's bottom, 0 px in this document).
+    Object.defineProperty(window, 'scrollY', { value: 40, configurable: true });
+    act(() => { dispatchEvent(new Event('scroll')); });
+    expect(classesOf()).toContain('ws-pinned');
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true });
+    act(() => { dispatchEvent(new Event('scroll')); });
+    expect(classesOf()).not.toContain('ws-pinned');
+  });
+
+  it('lets the map go after a while even if the scroll never gets there, and does not pin it from the top', async () => {
+    screenOf({ motion: true, wide: true, mode: 'absent' });
+    vi.spyOn(window, 'scrollTo').mockImplementation((() => {}) as typeof window.scrollTo);
+    await mount();
+    act(() => { fireEvent.click(part('part-b')); });
+    await elapse(600);
+    Object.defineProperty(window, 'scrollY', { value: 500, configurable: true });
+    act(() => { fireEvent.click(document.querySelector<HTMLElement>('.ws-back')!); });
+    await elapse(1600);
+    expect(classesOf()).not.toContain('ws-pinned');
+    // From the top of the page, nothing needs pinning.
+    act(() => { fireEvent.click(part('part-b')); });
+    await elapse(600);
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true });
+    act(() => { fireEvent.click(document.querySelector<HTMLElement>('.ws-back')!); });
+    expect(classesOf()).not.toContain('ws-pinned');
+  });
+});
+
+describe('a place that opens with a row open', () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('fades in where it stands; a place opened alone rises in, and the first place drawn does neither', async () => {
+    screenOf({ motion: true, wide: true, mode: 'absent' });
+    await mount();
+    act(() => { fireEvent.click(part('part-b')); });
+    expect(document.querySelector('.ws-detail')?.className).toBe('ws-detail');
+    act(() => { history.pushState(null, '', '/workshop#part-d/fork'); dispatchEvent(new PopStateEvent('popstate')); });
+    await elapse(10);
+    expect(document.querySelector('.ws-detail')?.className).toBe('ws-detail ws-fade');
+    // Closing the row later does not change its entrance.
+    act(() => { fireEvent.click(rowButton('Fork a computer')); });
+    expect(document.querySelector('.ws-detail')?.className).toBe('ws-detail ws-fade');
+    cleanup();
+    vi.useRealTimers();
+    history.replaceState(null, '', '/workshop#part-d/fork');
+    vi.useFakeTimers();
+    mockApi();
+    render(<App data={buildData()} />);
+    await elapse(600);
+    expect(document.querySelector('.ws-detail')?.className).toBe('ws-detail ws-still');
+  });
+});

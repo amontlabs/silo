@@ -226,15 +226,21 @@
 @media (max-width: 1199.98px) {
   .ws-swap-map, .ws .ws-seg, .lbl-map { display: none; }
 }
-/* Map and Order swap with everything under them, so nothing below jumps on its own. */
-.ws.swap-out :is(.ws-swap, .ws-detail), .workshop-shell:has(.ws.swap-out) .ws-foot { opacity: 0; transition: opacity .13s; }
-.ws.swap-in :is(.ws-swap, .ws-detail), .workshop-shell:has(.ws.swap-in) .ws-foot { animation: ws-swap-in .26s var(--ease) both; }
+/* On the plain view, Map and Order swap with everything under them, so nothing below jumps on its own. With a place
+   open, only the strip swaps: it fades out, and the other fades in while the place and the footer slide to their new
+   height (App.tsx, SLIDE_MS). */
+.ws.swap-out .ws-swap, .workshop-shell:has(.ws.swap-out) .ws-foot { opacity: 0; transition: opacity .13s; }
+.ws.swap-in .ws-swap, .workshop-shell:has(.ws.swap-in) .ws-foot { animation: ws-swap-in .26s var(--ease) both; }
+.ws.strip-out .ws-swap { opacity: 0; transition: opacity .13s; }
+.ws.strip-in .ws-swap { animation: ws-appear .26s var(--ease) both; }
 
 /* On the plain view, the notes follow the status text on its line. */
 .ws-status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 12px; }
 
 /* ---- an opened place ---- */
-.ws-detail { display: grid; grid-template-columns: 304px minmax(0, 1fr); animation: ws-rise .24s var(--ease-out) both; view-transition-name: detail; }
+/* Its entrance fills backwards only: once over, it leaves the opacity to the fade of going back. */
+.ws-detail { display: grid; grid-template-columns: 304px minmax(0, 1fr); animation: ws-rise .24s var(--ease-out) backwards; view-transition-name: detail; }
+.ws-detail.ws-fade { animation-name: ws-show; }
 .ws-detail.ws-still { animation: none; }
 .ws.ws-leaving .ws-detail { opacity: 0; transition: opacity .13s; pointer-events: none; }
 .ws-block { position: sticky; top: var(--header-height); align-self: start; padding: 20px 24px 28px; min-width: 0; }
@@ -281,7 +287,8 @@
 .ws .ws-vote:hover { color: var(--accent-ink); border-color: var(--accent-ink); }
 .ws .ws-vote.on { color: var(--accent-ink); border-color: var(--accent-ink); background: var(--accent-wash); }
 .ws .ws-vote:focus-visible { outline-offset: 2px; }
-.ws-more { position: relative; display: grid; grid-template-rows: 0fr; transition: grid-template-rows .2s var(--ease-out); }
+/* Opening, closing and later growth (Entry.tsx, GROW_MS) share one curve and one time. */
+.ws-more { position: relative; display: grid; grid-template-rows: 0fr; transition: grid-template-rows .26s var(--ease); }
 .ws-more.open { grid-template-rows: 1fr; }
 .ws-more-in { min-height: 0; overflow: hidden; opacity: 0; transition: opacity .18s var(--ease-out); }
 .ws-more.open > .ws-more-in { opacity: 1; }
@@ -357,6 +364,7 @@
 .ws-plain h2 { font: 20px var(--serif); margin: 14px 0 6px; }
 
 @keyframes ws-rise { from { opacity: .2; transform: translateY(8px); } }
+@keyframes ws-show { from { opacity: .2; } }
 @keyframes ws-appear { from { opacity: 0; } }
 @keyframes ws-swap-in { from { opacity: 0; transform: translateY(8px); } }
 
@@ -384,7 +392,7 @@ html.vt-back::view-transition-new(board) { animation: ws-appear .2s ease both; }
 
 /* ---- narrower ---- */
 @media (min-width: 1200px) and (min-height: 760px) {
-  .ws.is-open.v-map:not(.ws-lifting) .ws-swap-map { position: sticky; top: var(--header-height); z-index: 6; }
+  .ws.is-open.v-map:not(.ws-lifting) .ws-swap-map, .ws.ws-pinned.v-map .ws-swap-map { position: sticky; top: var(--header-height); z-index: 6; }
   .ws.is-open.v-map .ws-block { top: calc(var(--header-height) + 1px + var(--ws-foldh, 180px)); }
 }
 @media (max-width: 1199.98px) {
