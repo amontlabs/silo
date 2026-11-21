@@ -1,5 +1,13 @@
 # A secret an agent asks for
 
+## The owner's words (21 November 2026)
+
+> Stuff such as asking a secret for instance could just be a silo tool shouldn't be?
+
+So the agent asks with a tool of the `silo` command inside the computer, and the answer comes from
+you in Silo's prompt. The `silo` command so far only reads (`silo-command-reads-the-app`); this adds
+asks to it.
+
 From the list of smaller features the owner put on the roadmap on 21 November 2026. The owner's
 words on the list are in `silos-own-extensions`.
 
