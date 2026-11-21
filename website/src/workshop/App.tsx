@@ -33,8 +33,10 @@ export interface AppProps {
   loadNotes?: () => Promise<Notes>;
   /** Loads the statements in force and what the entries say of them, a chunk apart: the first time a row with something to show is reached. */
   loadFacts?: () => Promise<Facts>;
-  /** Loads the changes of every entry, a chunk apart: the first time a person opens a History, or reaches Latest. */
+  /** Loads the changes of every entry, a chunk apart: the first time a pointer, a press or focus reaches a History. */
   loadHistory?: () => Promise<Histories>;
+  /** The rows the page's own reload asked to open again (memory.ts `takeReopen`), opened beside the address's own where the place shown holds them. */
+  reopen?: readonly string[];
   /**
    * The element in the site header that holds sign-in and the signed-in login; without one, they are drawn inline.
    * `false` when the build draws them into the header itself (see prerender.tsx).
@@ -217,7 +219,7 @@ function Search({ value, open, onOpen, onChange, onClose }: { value: string; ope
   );
 }
 
-export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistory = noHistory, accountSlot }: AppProps) {
+export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistory = noHistory, accountSlot, reopen = [] }: AppProps) {
   const mapped = hasMap(data.map);
   const [first] = useState(fromAddress);
   const [place, setPlace] = useState<Place>(HOME);
@@ -665,7 +667,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     const resolved = resolveHash(location.hash, plan, rowByKey);
     if (!resolved) {
       wantedHash.current = { hash: location.hash, fromHistory };
-      return;
+      return null;
     }
     wantedHash.current = null;
     const asked = parseQuery(location.search);
@@ -699,6 +701,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     const instance = row ? found?.instance ?? row.key : null;
     settle(where, row ? row.key : null, instance);
     focusNext.current = instance ? { kind: 'reveal', key: instance } : null;
+    return { where, inAll };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan, rowByKey]);
   const followRef = useRef(follow);
@@ -710,7 +713,19 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   // not known yet. A view recalled for a plain address is written into it.
   useLayoutEffect(() => {
     if (first.recalled) history.replaceState(history.state, '', address(formatQuery(location.search, 'all', first.query), location.hash));
-    followRef.current(false);
+    const followed = followRef.current(false);
+    // After the page's own reload, the rows that were open, and those with a draft, open again where the place shown
+    // holds them; the address's own row is already open.
+    if (followed) {
+      const { where, inAll } = followed;
+      const holds = (key: string) => (where.kind === 'suggested' ? plan.suggestions.some((row) => row.key === key) : locate(sectionsOf(where, inAll), key, more) !== null);
+      const again = reopen.filter((key) => key !== openKeyRef.current && rowByKey.has(key) && holds(key));
+      for (const key of again) {
+        standing(key, where, inAll);
+        w.fetchNow(rowByKey.get(key) as Row);
+      }
+      if (again.length) setOpenKeys((current) => new Set([...current, ...again]));
+    }
     // Back and Forward across fragments fire popstate, then hashchange for the same address: the second is the same
     // move and is not followed again. Where the browser says how it navigates (the Navigation API), a popstate that is
     // not a traverse (a fragment followed or typed) is a person's address; elsewhere every popstate is the history's.

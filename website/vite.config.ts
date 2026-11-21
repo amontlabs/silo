@@ -3,7 +3,8 @@ import react from '@vitejs/plugin-react';
 import type { Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
 import { createReadStream } from 'node:fs';
-import { extname, resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { extname, resolve, sep } from 'node:path';
 import { planDir, readBuildData, readFacts, readHistories, readNotes } from './src/workshop/data.ts';
 import { FILMS_URL, filmFileFor, filmFiles, writeFilms } from './scripts/films.mjs';
 
@@ -59,6 +60,31 @@ function workshopHistory(): Plugin {
     load(source) {
       if (source !== `\0${id}`) return null;
       return `export default ${JSON.stringify(readHistories(repository))};`;
+    },
+  };
+}
+
+/**
+ * The id of this build, written into the Workshop's page (`<meta name="workshop-build">`) and into its script
+ * (`__WORKSHOP_BUILD__`), so a page left open can tell that the site now serves another build (src/workshop/chunks.ts).
+ * A new id for every build: it is part of the script, so the script's name changes with it and a browser never holds
+ * one build's script under another build's page. The dev server and the tests have none.
+ */
+function workshopBuild(): Plugin {
+  const id = randomUUID();
+  let building = false;
+  return {
+    name: 'workshop-build',
+    config: (_config, env) => {
+      building = env.command === 'build';
+      return { define: { __WORKSHOP_BUILD__: JSON.stringify(building ? id : '') } };
+    },
+    transformIndexHtml: {
+      order: 'pre',
+      handler(html, context) {
+        if (!building || !context.filename.endsWith(`${sep}workshop${sep}index.html`)) return html;
+        return [{ tag: 'meta', attrs: { name: 'workshop-build', content: id }, injectTo: 'head-prepend' }];
+      },
     },
   };
 }
@@ -129,7 +155,7 @@ function films(): Plugin {
 export default defineConfig({
   // website/, wherever Vite is started from: films/ is found beside it.
   root: fileURLToPath(new URL('.', import.meta.url)),
-  plugins: [react(), workshopData(), workshopNotes(), workshopFacts(), workshopHistory(), planWatch(), films()],
+  plugins: [react(), workshopBuild(), workshopData(), workshopNotes(), workshopFacts(), workshopHistory(), planWatch(), films()],
   // The page imports the plan's model from tools/plan/model, outside website/.
   server: { fs: { allow: [repository] } },
   build: {

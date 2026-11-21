@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { api, ApiError, hasSessionHint } from './api';
 import type { Comment, IssueDetail, Me, MyVotes, Target } from './api';
-import { recallPerson, recallState, rememberPerson, rememberState } from './memory';
+import { recallDrafts, recallPerson, recallState, rememberDrafts, rememberPerson, rememberReopen, rememberState } from './memory';
 import { applyKept, keep, keepCommentUp, keptComments, newerAnswer } from './writes';
 import type { Write } from './writes';
 import { allRows, buildPlan } from './plan';
@@ -16,8 +16,9 @@ export type ChunkState<T> = T | 'loading' | 'error' | 'changed' | undefined;
 
 /**
  * A chunk loaded once, and what asks for it. A failed load is tried again only when `again` is set: an opening asks
- * again, while a pointer passing over does not, so the failure stays as it is under it. A chunk gone with a newer
- * deployment is never asked for again: only a reload reaches it.
+ * again, while a pointer passing over does not, so the failure stays as it is under it. A browser may keep a failed
+ * import failed for the life of the page, so that retry may never succeed: what a failure offers is a reload. A chunk
+ * gone with a newer deployment is never asked for again.
  */
 function useChunk<T extends object>(load: () => Promise<T>): [ChunkState<T>, (again?: boolean) => void] {
   const [value, setValue] = useState<ChunkState<T>>(undefined);
@@ -32,6 +33,9 @@ function useChunk<T extends object>(load: () => Promise<T>): [ChunkState<T>, (ag
   }, [load]);
   return [value, want];
 }
+
+/** How the page reloads itself; tests replace it. */
+export const pageConfig = { reload: () => location.reload() };
 
 const NOTICE_MS = 8000;
 /** A fetch of an issue's comments this recent serves an opening. */
@@ -91,8 +95,10 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   const [voteOwn, setVoteOwn] = useState<Record<string, { on: boolean; delta: number }>>({});
   const [commentVotePending, setCommentVotePending] = useState<ReadonlySet<string>>(new Set());
   const [suggestionsSending, setSuggestionsSending] = useState<{ id: number; title: string; author: string }[]>([]);
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [suggestDraft, setSuggestDraft] = useState({ title: '', text: '' });
+  // What the person typed and has not sent, as the tab kept it (memory.ts): a reload puts it back in its box.
+  const [recalledDrafts] = useState(recallDrafts);
+  const [drafts, setDrafts] = useState<Record<string, string>>(recalledDrafts.comments);
+  const [suggestDraft, setSuggestDraft] = useState(recalledDrafts.suggest);
   const [announce, setAnnounce] = useState('');
   const [votes, setVotes] = useState<Record<number, boolean>>({});
   // The comments of each issue the person has given a 👍, as `GET vote` says and as the person changes them.
@@ -109,7 +115,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   const waiting = !liveOk && live.load === 'pending' && !offline;
   const liveRefOk = useRef(liveOk);
   liveRefOk.current = liveOk;
-  // The changes of the entries: loaded once, the first time a History is reached or Latest is reached.
+  // The changes of the entries: loaded once, the first time a pointer, a press or focus reaches a History.
   const [histories, wantHistory] = useChunk(loadHistory);
   const plan = useMemo(() => buildPlan(data, live.state, closedKeys), [data, live.state, closedKeys]);
   const rows = useMemo(() => allRows(plan), [plan]);
@@ -205,7 +211,6 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
       () => setDetails((current) => (typeof current[n] === 'object' ? current : { ...current, [n]: 'error' })),
     ).finally(() => fetching.current.delete(n));
   }, []);
-  /** Early fetch for a row the person is about to open. */
   // The features' notes: loaded once, the first time a person's pointer, press or focus reaches a "Notes".
   const [notes, wantNotes] = useChunk(loadNotes);
 
@@ -213,6 +218,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   // opened.
   const [facts, wantFacts] = useChunk(loadFacts);
 
+  /** Early fetch for a row the person is about to open. */
   const prefetch = useCallback((row: Row) => {
     if (row.more) wantFacts(false);
     if (liveRefOk.current && row.issue !== null && row.issue > 0 && !openKeys.has(row.key)) loadDetail(row.issue);
@@ -228,6 +234,15 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     if (liveOk && row?.issue != null) loadDetail(row.issue);
     // The plan changing under the same open row does not load again.
   }, [liveOk, openKey, openings, loadDetail]);
+  // Rows opened together before any state was shown (the page's own reload opens several) load their comments once
+  // one is; the row opened last is loaded by the opening above.
+  useEffect(() => {
+    if (!liveOk) return;
+    for (const key of openKeys) {
+      const n = rowByKey.get(key)?.issue;
+      if (key !== openKey && n != null && n > 0 && detailRef.current[n] === undefined) loadDetail(n);
+    }
+  }, [liveOk]);
   /** What the person's own votes on an issue are, as `GET vote` answered; what the page already knows stays. */
   const noteVotes = (n: number, mine: MyVotes) => {
     setVotes((current) => (n in current ? current : { ...current, [n]: mine.on }));
@@ -471,6 +486,27 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     }
   };
 
+  // The drafts are kept for the tab as they change; a sent one is gone from its box, and so from what is kept.
+  useEffect(() => {
+    rememberDrafts({ comments: drafts, suggest: suggestDraft });
+  }, [drafts, suggestDraft]);
+
+  /**
+   * The page's own reload, offered where a chunk failed. A write being sent finishes or fails first: a failed comment
+   * or suggestion is back in its box, and kept, before the page leaves. The rows open now, and those with a draft,
+   * open again after it.
+   */
+  const [reloading, setReloading] = useState(false);
+  const writing = Object.values(sending).some((list) => list.length > 0) || suggestionsSending.length > 0 || votePending.size > 0 || commentVotePending.size > 0;
+  const reload = useCallback(() => setReloading(true), []);
+  useEffect(() => {
+    if (!reloading || writing) return;
+    const drafted = Object.keys(drafts).filter((key) => drafts[key].trim() !== '');
+    rememberReopen([...new Set([...openKeys, ...drafted])]);
+    pageConfig.reload();
+    // Declared after the drafts are kept, so a draft a failed write put back is kept before this runs.
+  }, [reloading, writing]);
+
   const sendSuggestion = async (event: FormEvent) => {
     event.preventDefault();
     const title = suggestDraft.title.trim();
@@ -512,7 +548,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     live, liveOk, waiting, offline, settled, me, retry, plan, rowByKey, details, prefetch, notes, wantNotes, facts, wantFacts, histories, wantHistory, fetchNow, sending, votePending, voteOwn,
     votes, commentVotes, commentVotePending, toggleCommentVote, suggestionsSending, notice, drafts, setDrafts, suggestDraft,
     setSuggestDraft, announce, setAnnounce, signinFailed, sendComment, toggleVote,
-    sendSuggestion, signOut,
+    sendSuggestion, signOut, reload, reloading,
   };
 }
 

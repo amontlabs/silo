@@ -90,3 +90,82 @@ export function recallHabit(): Habit | null {
 export function rememberHabit(habit: Habit) {
   write(VIEW, habit);
 }
+
+// What a person typed and has not sent yet, kept for the tab in session storage as it is typed, so a reload puts it
+// back in its box: the comment being written on each entry or suggestion, by the key of its row, and the draft of a
+// suggestion. It stays in this tab and goes nowhere else. Without session storage, or with it full, typing works the
+// same and a reload loses the drafts.
+const DRAFTS = 'silo-workshop-drafts';
+/** The rows open when the page reloaded itself, so the reload opens them again. */
+const REOPEN = 'silo-workshop-reopen';
+/** The longest texts the boxes take (Entry.tsx, Suggest.tsx). */
+const COMMENT_MAX = 5000;
+const TITLE_MAX = 120;
+
+export interface Drafts {
+  comments: Record<string, string>;
+  suggest: { title: string; text: string };
+}
+
+function session(): Storage | null {
+  // At build time there is no browser and nothing is kept.
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+function readSession(key: string): unknown {
+  try {
+    const raw = session()?.getItem(key) ?? null;
+    return raw === null ? null : (JSON.parse(raw) as unknown);
+  } catch {
+    return null;
+  }
+}
+
+function writeSession(key: string, value: unknown) {
+  try {
+    const storage = session();
+    if (value === null) storage?.removeItem(key);
+    else storage?.setItem(key, JSON.stringify(value));
+  } catch {
+    // Unavailable or full: the drafts live in the page only.
+  }
+}
+
+const text = (value: unknown, max: number): string => (typeof value === 'string' ? value.slice(0, max) : '');
+
+/** The drafts kept in this tab; none when there are none or they are not what the page expects. */
+export function recallDrafts(): Drafts {
+  const kept = readSession(DRAFTS);
+  const comments: Record<string, string> = {};
+  const raw = isObject(kept) && isObject(kept.comments) ? kept.comments : {};
+  for (const [key, value] of Object.entries(raw)) {
+    const draft = text(value, COMMENT_MAX);
+    if (draft) comments[key] = draft;
+  }
+  const suggest = isObject(kept) && isObject(kept.suggest) ? kept.suggest : {};
+  return { comments, suggest: { title: text(suggest.title, TITLE_MAX), text: text(suggest.text, COMMENT_MAX) } };
+}
+
+/** Keeps the drafts as they are now; an empty box keeps nothing. */
+export function rememberDrafts(drafts: Drafts) {
+  const comments = Object.fromEntries(Object.entries(drafts.comments).filter(([, draft]) => draft !== ''));
+  const suggest = drafts.suggest.title || drafts.suggest.text ? drafts.suggest : null;
+  writeSession(DRAFTS, Object.keys(comments).length || suggest ? { comments, ...(suggest ? { suggest } : {}) } : null);
+}
+
+/** Before the page reloads itself: the rows to open again after it. */
+export function rememberReopen(keys: readonly string[]) {
+  writeSession(REOPEN, keys.length ? keys : null);
+}
+
+/** The rows the page's own reload asked to open again, taken once: a later reload opens only what its address names. */
+export function takeReopen(): string[] {
+  const keys = readSession(REOPEN);
+  writeSession(REOPEN, null);
+  return Array.isArray(keys) ? keys.filter((key): key is string => typeof key === 'string') : [];
+}

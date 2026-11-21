@@ -17,3 +17,6 @@ declare module 'virtual:workshop-history' {
   const histories: import('./plan').Histories;
   export default histories;
 }
+
+/** The id of this build, also in the page's `meta` (chunks.ts); empty on the dev server and in tests. */
+declare const __WORKSHOP_BUILD__: string;

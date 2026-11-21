@@ -174,6 +174,22 @@ is confirmed, or when a row's opening or closing covers more than 16% of its way
 in its first frame; the full list is at the top of `scripts/motion-sheet.mjs`.
 `npm test` does not run it either.
 
+To check that a Workshop page left open across a deployment recovers, run
+`npm --prefix website run reload-check` (no server and no build needed; it
+needs Playwright's own Chromium, as the load check does). It builds the plan
+in `plan/` twice into a directory of its own: build A names its chunks apart,
+as a deployment whose chunks changed does, and build B replaces it. It serves
+A with the API against the fake GitHub and opens it as `owner-fake`, at a part
+that has a feature with facts, notes and history (F) and a feature with none
+of the facts (X). It drafts a suggestion and types a comment on X. Then B
+replaces A, and F's facts, Notes and History must each say "The Workshop has
+changed since this page opened." with Reload. After Reload the page must be
+build B, X and F open, both drafts back in their boxes, F's facts, notes and
+history loaded, and no Reload left. The same case is run again with the
+network cut in place of a new build: the parts must say "Details could not
+load.", "Notes could not load." and "History could not load.", with the same
+Reload, which works once the network is back. `npm test` does not run it.
+
 To build and check the page on another plan than `plan/` (the real plan may be
 in the middle of a change), name its folder in `WORKSHOP_PLAN` for the build
 and for the runner:
@@ -520,7 +536,7 @@ What a person sees:
   was made. The person's own vote on an opened row and their votes on its comments
   come from one `GET vote`, asked only once `me` has answered on this visit, so a session found gone
   on page load says nothing; a row with no thread yet asks nothing. The suggest form shows whenever the person is shown signed in and
-  keeps its draft; it sends only while a state is shown.
+  keeps its draft, across a reload too (see the chunks below); it sends only while a state is shown.
 - What the page shows first: the plan is in the bundle. The live state (votes,
   comments, suggestions) and who is signed in come from
   `GET state` and `GET me`, and the page remembers both in local storage
@@ -581,7 +597,8 @@ What a person sees:
   its own (`virtual:workshop-facts`, `Facts`), loaded the first time a pointer,
   a press or focus reaches a row that has something in it (`Row.more`, known
   from the page's data) or such a row opens, with three placeholder lines in
-  the place of its parts meanwhile; if it cannot load, the parts are left out.
+  the place of its parts meanwhile; if it cannot load, "Details could not
+  load." takes their place (see below).
   Then "Notes" (its `<id>.md`) and "History", side by side, each closed by
   default and opened in place. Notes: headings, paragraphs, lists, http and https
   links (an address may hold one level of brackets), inline code and code
@@ -619,17 +636,37 @@ What a person sees:
   texts are a chunk of their own (`virtual:workshop-history`, `Histories`),
   loaded the first time a pointer, a press or focus reaches a History, with one
   placeholder line per change meanwhile; if it cannot load,
-  the list says so and the next time tries again.
-- A chunk that failed (facts, notes, history) is tried again only when its
-  row, Notes or History opens; a pointer, press or focus that only passes over
-  leaves the failure as it is, so nothing flickers under it (`useChunk` in
-  `useWorkshop.ts`). Each deployment names its chunks after their content and
-  the site serves only the newest, so a page opened before a deployment finds
-  its chunks gone. When a chunk fails, the page fetches its own address again;
-  if that no longer names the page's script, the site has changed (`chunks.ts`,
-  `SiteChanged`): Notes and History say "The Workshop has changed since this
-  page opened." with a Reload button, the facts are left out, and the chunk is
-  not asked for again.
+  the list says so (see below).
+- A chunk that failed (facts, notes, history) says so in the place its content
+  would be, with a Reload button: "Details could not load.", "Notes could not
+  load." or "History could not load.". Nothing is left out silently. Each
+  deployment names its chunks after their content, and the site serves only
+  the newest, so a page opened before a deployment finds its chunks gone.
+  The build writes one id into the page (`<meta name="workshop-build">`) and
+  into its script (`vite.config.ts`, `workshopBuild`). When a chunk fails, the
+  page fetches its own address again, with no cache, and compares the id of
+  that page with its own (`chunks.ts`). Another id means the site has changed:
+  the part says "The Workshop has changed since this page opened." instead,
+  and that chunk is not asked for again. The same id, an answer that is not
+  the Workshop's page (a sign-in or gateway page), a page with no id, or no
+  answer within 8 seconds is an ordinary failure. The dev server writes no id,
+  so there nothing is ever called changed. An ordinary failure is tried again
+  when its row, Notes or History opens again; a pointer, press or focus that
+  only passes over leaves it as it is, so nothing flickers under it
+  (`useChunk` in `useWorkshop.ts`). A browser may keep a failed chunk failed
+  for the life of the page, so Reload is what recovery rests on.
+- Reload keeps what the person typed. The comment being written on each row
+  and the suggestion's draft are kept for the tab in session storage as they
+  are typed (`memory.ts`, by the key of the row), and go nowhere else. A sent
+  one leaves its box and what is kept; one whose sending fails comes back to
+  both. After a reload they are back in their boxes: after any reload of the
+  tab. After the page's own Reload, the rows that were open and those with a
+  draft open again too, where the place the address names holds them; the
+  next load opens only what its address names. Reload waits for a write being
+  sent (a comment, a suggestion, a vote) to finish or fail, so a failed comment
+  is back in its box, and kept, before the page leaves. Without session
+  storage, or with it full, typing works the same and a reload loses the
+  drafts.
 - An open row, a decision, a feature or a suggestion, shows its thread and a box
   to add a comment. A comment of the Workshop's App is an ordinary
   comment. While the thread loads, each comment the live state counts holds
@@ -781,7 +818,8 @@ Back and Forward move between places; opening a row replaces the address.
 | `PartView.tsx`, `Suggest.tsx` | An opened part, Product's decisions and a film's place; the suggestions. |
 | `Entry.tsx` | A suggestion's row, and what any row shows open (`Panel`): the text, what the entry says of the plan's lists, its id and the button that copies it, the state, notes, history, and the thread with the votes on its comments. |
 | `routes.ts`, `plan.ts`, `map.ts`, `data.ts` | Addresses; the rows, statuses, films, parts' counts and states on top of the plan's model; the drawing; the build-time reader, the films' order and when a film is behind. |
-| `api.ts`, `writes.ts`, `memory.ts`, `RichText.tsx`, `Markdown.tsx`, `Boundary.tsx` | The API client, the page's own writes (a list of values set, kept a day; its comments six minutes), the remembered answer, person, view and order, text from GitHub, notes, the fallback list. |
+| `api.ts`, `writes.ts`, `memory.ts`, `RichText.tsx`, `Markdown.tsx`, `Boundary.tsx` | The API client, the page's own writes (a list of values set, kept a day; its comments six minutes), the remembered answer, person, view and order and the tab's drafts, text from GitHub, notes, the fallback list. |
+| `chunks.ts` | A chunk that fails: whether the site now serves another build. |
 | `prerender.tsx`, `NoScript.tsx`, `takeover.ts` | The markup the build writes into the page, the list for a reader without JavaScript, and the script's takeover. |
 
 ## Storage

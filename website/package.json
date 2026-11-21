@@ -13,7 +13,8 @@
     "workshop:dev": "node scripts/workshop-dev.mjs",
     "load-check": "node scripts/load-check.mjs",
     "motion-sheet": "node scripts/motion-sheet.mjs",
-    "film-seams": "node scripts/film-seams.mjs"
+    "film-seams": "node scripts/film-seams.mjs",
+    "reload-check": "node scripts/reload-check.mjs"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",

@@ -524,7 +524,7 @@ function HistoryList({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const repo = w.live.state?.repo ?? DEFAULT_REPO;
   const shallow = w.plan.shallow ? <p className="ws-quiet">Earlier changes are not available in this build.</p> : null;
   if (changes) return <>{changes.map((change) => <HistoryLine key={change.commit} change={change} row={row} ctx={ctx} repo={repo} />)}{shallow}</>;
-  if (w.histories === 'error' || w.histories === 'changed') return <ChunkFailed what="History" state={w.histories} />;
+  if (w.histories === 'error' || w.histories === 'changed') return <ChunkFailed what="History" state={w.histories} w={w} />;
   return (
     <div aria-busy="true">
       {Array.from({ length: Math.min(row.history?.count ?? 1, HISTORY_GHOSTS) }, (_, i) => <div className="ws-h-ghost" key={i} aria-hidden="true" />)}
@@ -533,13 +533,15 @@ function HistoryList({ row, ctx }: { row: Row; ctx: EntryContext }) {
   );
 }
 
-/** What shows in place of a chunk that did not load: that it failed, or that the page must be reloaded to reach it. */
-function ChunkFailed({ what, state }: { what: string; state: 'error' | 'changed' }) {
-  if (state === 'error') return <p className="ws-quiet">{what} could not load.</p>;
+/**
+ * What shows in place of a chunk that did not load: that the site has changed since the page opened, or that it could
+ * not load, and Reload, which always reaches it. Reload waits for a write being sent (useWorkshop `reload`).
+ */
+function ChunkFailed({ what, state, w }: { what: string; state: 'error' | 'changed'; w: Workshop }) {
   return (
     <p className="ws-quiet">
-      The Workshop has changed since this page opened.{' '}
-      <button type="button" className="ws-link" onClick={() => location.reload()}>Reload</button>
+      {state === 'changed' ? 'The Workshop has changed since this page opened.' : `${what} could not load.`}{' '}
+      <button type="button" className={`ws-link${w.reloading ? ' ws-pending' : ''}`} aria-busy={w.reloading || undefined} onClick={w.reload}>Reload</button>
     </p>
   );
 }
@@ -579,7 +581,7 @@ function Extras({ row, ctx, onMove }: { row: Row; ctx: EntryContext; onMove: () 
       </div>
       {row.notes && shown ? (
         <div className="ws-extras-in" id={`${row.key}-notes`}>
-          {notes ? <Markdown text={notes} /> : w.notes === 'error' || w.notes === 'changed' ? <ChunkFailed what="Notes" state={w.notes} /> : typeof w.notes === 'object' ? null : (
+          {notes ? <Markdown text={notes} /> : w.notes === 'error' || w.notes === 'changed' ? <ChunkFailed what="Notes" state={w.notes} w={w} /> : typeof w.notes === 'object' ? null : (
             <div className="ws-ph-notes" aria-busy="true">
               <i className="ws-ph" aria-hidden="true" /><i className="ws-ph" aria-hidden="true" /><i className="ws-ph" aria-hidden="true" />
             </div>
@@ -671,7 +673,8 @@ function OpenFacts({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const id = planId(row);
   const facts = typeof w.facts === 'object' ? w.facts : null;
   const own = facts && id !== null ? facts.entries[id] : undefined;
-  const waiting = row.more && !facts && w.facts !== 'error' && w.facts !== 'changed';
+  const failed = row.more && (w.facts === 'error' || w.facts === 'changed') ? w.facts : null;
+  const waiting = row.more && !facts && !failed;
   const open = row.verdict === null;
   const taken = row.verdict === 'take';
   const adds = taken && own?.adds ? own.adds.map((statementId) => facts?.statements[statementId]).filter((statement): statement is Statement => statement !== undefined) : [];
@@ -684,6 +687,7 @@ function OpenFacts({ row, ctx }: { row: Row; ctx: EntryContext }) {
           </div>
         </div>
       ) : null}
+      {failed ? <div className="ws-fact"><ChunkFailed what="Details" state={failed} w={w} /></div> : null}
       {open && own?.suggest ? (
         <Fact label={`Recommended: ${own.suggest.verdict}`}>
           {own.suggest.why ? <p className="ws-fact-text">{own.suggest.why}</p> : null}

@@ -15,4 +15,5 @@ afterEach(() => {
   history.replaceState(null, '', '/workshop');
   document.cookie = 'workshop-hint=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
   localStorage.clear();
+  sessionStorage.clear();
 });
