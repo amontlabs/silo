@@ -32,6 +32,7 @@ interface RawEntry {
   verdict?: string;
   replaces?: string[];
   replaced_by?: string;
+  started?: string;
   built?: string;
   suggest?: { verdict?: string; why?: string };
   sets?: Record<string, unknown>[];
@@ -168,6 +169,7 @@ export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null }: B
     verdict: (raw.verdict ?? null) as Verdict | null,
     replaces: Array.isArray(raw.replaces) ? raw.replaces : [],
     replacedBy: typeof raw.replaced_by === 'string' ? raw.replaced_by : null,
+    started: raw.started ?? null,
     built: raw.built ?? null,
     notes: hasNotes(raw),
     more: hasFacts(raw),

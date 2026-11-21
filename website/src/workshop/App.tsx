@@ -72,7 +72,7 @@ const PIN_MS = 1500;
 const FOLD_MS = 440;
 /** The header's key: a state's mark and word, shown only when a part is in that state. The map's own key says what a dashed line means. */
 const KEY: [PartState, string, string][] = [
-  ['done', 'ws-pip built', 'done'], ['next', 'ws-pip next', 'next'], ['planned', 'ws-pip planned', 'planned'],
+  ['built', 'ws-pip built', 'built'], ['building', 'ws-pip building', 'being built'], ['next', 'ws-pip next', 'next'], ['decided', 'ws-pip decided', 'decided'],
 ];
 
 function media(query: string, fallback: boolean): boolean {

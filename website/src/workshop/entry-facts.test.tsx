@@ -148,8 +148,8 @@ describe('what an entry needs', () => {
     ]);
     expect([...part.querySelectorAll('li')].map((li) => li.textContent)).toEqual([
       'How is security built? decided',
-      'Which way do changes go? not decided yet',
-      'The engine runs on its own planned',
+      'Which way do changes go? not decided',
+      'The engine runs on its own decided',
     ]);
   });
 
@@ -208,14 +208,14 @@ describe('the order of the parts', () => {
     const both = buildData({ ...withLists(), decisions: [...DECISIONS, ...LIST_DECISIONS.map((decision) => (decision.id === 'name-a-snapshot' ? { ...decision, answer: 'A snapshot.', removes: ['scrap'], notes: undefined } : decision))] });
     const item = await openFrom('#part-b/name-a-snapshot', SNAPSHOT, both);
     await within(item).findByText('A yes would remove');
-    const labels = ['A snapshot.', 'Recommended: take', 'A yes would add', 'A yes would change', 'A yes would remove', 'Not decided yet.'];
+    const labels = ['A snapshot.', 'Recommended: take', 'A yes would add', 'A yes would change', 'A yes would remove', 'Not decided.'];
     inOrder(item, labels);
   });
 
   it('goes: the body, needs, what it must keep, where it shows, then the state', async () => {
     const item = await openFrom('#part-b/fork-keeps', 'Keep a fork apart');
     await within(item).findByText('Must keep');
-    const labels = ['A fork shares nothing', 'Needs', 'Must keep', 'Where it shows', 'Not decided yet.'];
+    const labels = ['A fork shares nothing', 'Needs', 'Must keep', 'Where it shows', 'Not decided.'];
     inOrder(item, labels);
   });
 
@@ -280,7 +280,7 @@ describe('the chunk', () => {
     await wait(30);
     expect(item.querySelector('.ws-ph-notes')).toBeNull();
     expect(within(item).queryByText(/^A yes would/)).not.toBeInTheDocument();
-    expect(item).toHaveTextContent('Not decided yet.');
+    expect(item).toHaveTextContent('Not decided.');
   });
 
   it('draws what it holds as text, never as HTML', async () => {

@@ -38,7 +38,7 @@ describe('the closed line of History', () => {
     const { item } = await open('#part-a/core', CORE, source({
       core: [change(3, '2026-11-20T12:00:00Z', ['taken']), change(2, '2026-11-18T09:00:00Z', ['notes']), change(1, '2026-11-12T09:00:00Z', ['added'])],
     }));
-    expect(historyButton(item)).toHaveTextContent('History · Planned, 20 Nov · 3 changes');
+    expect(historyButton(item)).toHaveTextContent('History · Decided, 20 Nov · 3 changes');
     expect(historyButton(item)).toHaveAttribute('aria-expanded', 'false');
     expect(lines(item)).toHaveLength(0);
   });
@@ -95,12 +95,12 @@ describe('the list of History', () => {
     expect(historyButton(item)).toHaveAttribute('aria-expanded', 'true');
     await waitFor(() => expect(lines(item)).toHaveLength(4));
     expect(lines(item).map((line) => line.querySelector('small')?.textContent)).toEqual(['20 Nov', '18 Nov', '15 Nov', '12 Nov']);
-    expect(lines(item).map(phrasesOf)).toEqual(['Planned', 'Needs changed · Where it shows changed', 'Moved to another part', 'Added']);
+    expect(lines(item).map(phrasesOf)).toEqual(['Decided', 'Needs changed · Where it shows changed', 'Moved to another part', 'Added']);
     // In the open row, below its text: nothing above it moves.
     expect(item.querySelector('.ws-more-in')).toContainElement(lines(item)[0]);
     await userEvent.click(historyButton(item));
     expect(item.querySelector('.ws-h')).toBeNull();
-    expect(historyButton(item)).toHaveTextContent('History · Planned, 20 Nov · 4 changes');
+    expect(historyButton(item)).toHaveTextContent('History · Decided, 20 Nov · 4 changes');
   });
 
   it('links each line to its commit on GitHub, in a new tab', async () => {
@@ -115,19 +115,19 @@ describe('the list of History', () => {
     }
   });
 
-  it('says each name of a change in the page\'s words, "Decided" on a decision and "Planned" on a feature', async () => {
-    const names: ChangeName[] = ['added', 'moved', 'sets', 'needs', 'keeps', 'surfaces', 'suggest', 'notes', 'taken', 'dropped', 'cleared', 'built'];
+  it('says each name of a change in the page\'s words, "Decided" on a decision and on a feature', async () => {
+    const names: ChangeName[] = ['added', 'moved', 'sets', 'needs', 'keeps', 'surfaces', 'suggest', 'notes', 'taken', 'dropped', 'cleared', 'started', 'built'];
     const all = [change(2, '2026-11-20T12:00:00Z', names), change(1, '2026-11-12T09:00:00Z', ['added'])];
     const feature = await open('#part-a/core', CORE, source({ core: all }));
     await userEvent.click(historyButton(feature.item));
     await waitFor(() => expect(lines(feature.item)).toHaveLength(2));
-    expect(phrasesOf(lines(feature.item)[0])).toBe('Added · Moved to another part · What a yes would do changed · Needs changed · What it must keep changed · Where it shows changed · Recommendation changed · Notes edited · Planned · Dropped · Back to not decided · Built');
+    expect(phrasesOf(lines(feature.item)[0])).toBe('Added · Moved to another part · What a yes would do changed · Needs changed · What it must keep changed · Where it shows changed · Recommendation changed · Notes edited · Decided · Dropped · Back to not decided · Being built · Built');
     const decision = await open('#part-a/core-in-zig', ZIG, source({ 'core-in-zig': all }));
     await userEvent.click(historyButton(decision.item));
     await waitFor(() => expect(lines(decision.item)).toHaveLength(2));
     expect(phrasesOf(lines(decision.item)[0])).toContain('Notes edited · Decided · Dropped');
     // No name of a key ever reaches the page.
-    expect(decision.item.textContent).not.toMatch(/\b(taken|sets|keeps|surfaces|suggest|cleared)\b/);
+    expect(decision.item.textContent).not.toMatch(/\b(taken|sets|keeps|surfaces|suggest|cleared|started|planned)\b/);
   });
 
   it('opens the title and the body before and after for "Text changed", and closes them again', async () => {
@@ -247,20 +247,24 @@ describe('the chunk of changes', () => {
 
 describe('Latest with changes', () => {
   it('lists the changes with the comments by time, each line opening its entry, and loads the chunk itself', async () => {
-    const load = vi.fn(() => Promise.resolve({ core: [change(2, new Date(Date.now() - 3_600_000).toISOString(), ['taken'])], 'core-in-zig': [change(1, new Date(Date.now() - 7_200_000).toISOString(), ['text'])] }));
+    const load = vi.fn(() => Promise.resolve({
+      shells: [change(3, new Date(Date.now() - 1_800_000).toISOString(), ['started'])],
+      core: [change(2, new Date(Date.now() - 3_600_000).toISOString(), ['taken'])],
+      'core-in-zig': [change(1, new Date(Date.now() - 7_200_000).toISOString(), ['text'])],
+    }));
     mockApi({ me: owner });
     window.history.replaceState(null, '', '/workshop#latest');
     await renderApp(buildData(), undefined, undefined, load);
     const rows = await waitFor(() => {
       const found = [...document.querySelectorAll<HTMLAnchorElement>('.ws-latest a.ws-row')];
-      expect(found).toHaveLength(2);
+      expect(found).toHaveLength(3);
       return found;
     });
     expect(load).toHaveBeenCalledTimes(1);
-    expect(rows.map((row) => row.getAttribute('href'))).toEqual(['#part-a/core', '#part-a/core-in-zig']);
-    expect(rows.map((row) => row.querySelector('.ws-sub')?.textContent)).toEqual(['Planned', 'Text changed']);
-    expect(rows.map((row) => row.querySelector('.ws-word')?.textContent)).toEqual(['1 hour ago', '2 hours ago']);
-    await userEvent.click(rows[1]);
+    expect(rows.map((row) => row.getAttribute('href'))).toEqual(['#part-c/shells', '#part-a/core', '#part-a/core-in-zig']);
+    expect(rows.map((row) => row.querySelector('.ws-sub')?.textContent)).toEqual(['Being built', 'Decided', 'Text changed']);
+    expect(rows.map((row) => row.querySelector('.ws-word')?.textContent)).toEqual(['just now', '1 hour ago', '2 hours ago']);
+    await userEvent.click(rows[2]);
     await waitFor(() => expect(rowButton(ZIG)).toHaveAttribute('aria-expanded', 'true'));
   });
 });

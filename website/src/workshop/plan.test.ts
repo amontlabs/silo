@@ -19,12 +19,12 @@ describe('the plan by part', () => {
 
   it('draws a decision as a row: its asks the name, its answer the body', () => {
     const zig = byPart(buildPlan(buildData(), null)).get('part-a')!.rows[0];
-    expect(zig).toMatchObject({ kind: 'entry', of: 'decision', name: 'Which language is the core written in?', what: 'Zig. It is the core piece.', status: 'planned', notes: true, part: 'part-a' });
+    expect(zig).toMatchObject({ kind: 'entry', of: 'decision', name: 'Which language is the core written in?', what: 'Zig. It is the core piece.', status: 'decided', notes: true, part: 'part-a' });
   });
 
   it('puts the decisions of the whole product in a place of their own', () => {
     const plan = buildPlan(buildData(), null);
-    expect(plan.product.map((row) => [row.key, row.status])).toEqual([['entry-security-properly', 'planned'], ['entry-one-host', 'undecided'], ['entry-plain-logs', 'replaced']]);
+    expect(plan.product.map((row) => [row.key, row.status])).toEqual([['entry-security-properly', 'decided'], ['entry-one-host', 'undecided'], ['entry-plain-logs', 'replaced']]);
     expect(allRows(plan).filter((row) => row.part === null && row.kind === 'entry')).toEqual(plan.product);
   });
 
@@ -42,36 +42,39 @@ describe('the plan by part', () => {
     });
     const statuses = (plan: ReturnType<typeof buildPlan>) => allRows(plan).filter((row) => row.kind === 'entry').map((row) => `${row.key}:${row.status}`);
     expect(statuses(buildPlan(buildData(), live))).toEqual(statuses(buildPlan(buildData(), null)));
-    expect(byPart(buildPlan(buildData(), live)).get('part-a')!.rows.map((row) => row.status)).toEqual(['planned', 'planned', 'planned']);
+    expect(byPart(buildPlan(buildData(), live)).get('part-a')!.rows.map((row) => row.status)).toEqual(['decided', 'decided', 'decided']);
     expect(byPart(buildPlan(withBuilt('fork'), null)).get('part-d')!.rows.find((row) => row.key === 'entry-fork')).toMatchObject({ status: 'built', built: '2026-11-16' });
   });
 
   it('says a status in the page\'s words, through the plan\'s model', () => {
-    const entry = (fields: Partial<Entry>): Entry => ({ id: 'x', kind: 'feature', part: 'p', stage: 's', position: 1, name: 'X', what: 'X.', needs: [], verdict: null, replaces: [], replacedBy: null, built: null, notes: false, more: false, history: null, ...fields });
+    const entry = (fields: Partial<Entry>): Entry => ({ id: 'x', kind: 'feature', part: 'p', stage: 's', position: 1, name: 'X', what: 'X.', needs: [], verdict: null, replaces: [], replacedBy: null, started: null, built: null, notes: false, more: false, history: null, ...fields });
     const status = (fields: Partial<Entry>, others: Entry[] = []) => entryStatuses([entry(fields), ...others]).get('x');
     expect(status({})).toBe('undecided');
-    expect(status({ verdict: 'take' })).toBe('planned');
-    // Taken but waiting for a need that is not done: still planned.
-    expect(status({ verdict: 'take', needs: ['y'] }, [entry({ id: 'y' })])).toBe('planned');
+    expect(status({ verdict: 'take' })).toBe('decided');
+    // Taken but waiting for a need that is not done: still decided.
+    expect(status({ verdict: 'take', needs: ['y'] }, [entry({ id: 'y' })])).toBe('decided');
+    expect(status({ verdict: 'take', started: '2026-11-15' })).toBe('building');
     expect(status({ verdict: 'take', built: '2026-11-16' })).toBe('built');
+    expect(status({ verdict: 'take', started: '2026-11-15', built: '2026-11-16' })).toBe('built');
     expect(status({ verdict: 'drop' })).toBe('dropped');
     expect(status({ kind: 'decision', what: null })).toBe('undecided');
     expect(status({ kind: 'decision', what: 'Yes.' })).toBe('undecided');
-    expect(status({ kind: 'decision', what: 'Yes.', verdict: 'take' })).toBe('planned');
+    expect(status({ kind: 'decision', what: 'Yes.', verdict: 'take' })).toBe('decided');
     expect(status({ kind: 'decision', verdict: 'drop' })).toBe('dropped');
   });
 
   it('counts a part from its features only, and its decisions apart', () => {
     const plan = buildPlan(buildData(), null);
     const partA = byPart(plan).get('part-a')!;
-    expect(partA.counts).toEqual({ built: 0, planned: 2, undecided: 0, dropped: 0 });
+    expect(partA.counts).toEqual({ built: 0, building: 0, decided: 2, undecided: 0, dropped: 0 });
     expect(partA.decisions).toEqual({ decided: 1, undecided: 0, replaced: 0, dropped: 0 });
     const partE = byPart(plan).get('part-e')!;
-    expect(partE.counts).toEqual({ built: 0, planned: 0, undecided: 7, dropped: 1 });
+    expect(partE.counts).toEqual({ built: 0, building: 0, decided: 0, undecided: 7, dropped: 1 });
+    expect(byPart(plan).get('part-c')!.counts).toEqual({ built: 0, building: 1, decided: 0, undecided: 0, dropped: 1 });
     expect(partE.decisions).toEqual({ decided: 1, undecided: 1, replaced: 0, dropped: 1 });
     // A part that holds only decisions is open, with no feature counted.
     const onlyDecisions = buildPlan(buildData({ features: FEATURES.filter((feature) => feature.part !== 'part-a') }), null);
-    expect(byPart(onlyDecisions).get('part-a')).toMatchObject({ counts: { built: 0, planned: 0, undecided: 0, dropped: 0 }, state: 'open', rows: [{ key: 'entry-core-in-zig' }] });
+    expect(byPart(onlyDecisions).get('part-a')).toMatchObject({ counts: { built: 0, building: 0, decided: 0, undecided: 0, dropped: 0 }, state: 'open', rows: [{ key: 'entry-core-in-zig' }] });
   });
 
   it('puts a part holding an entry of the first five stages in the first band', () => {
@@ -196,26 +199,24 @@ describe('Latest: comments and changes merged by time', () => {
 });
 
 describe('the phrases of a change', () => {
-  const names: ChangeName[] = ['added', 'moved', 'text', 'sets', 'needs', 'keeps', 'surfaces', 'suggest', 'notes', 'taken', 'dropped', 'cleared', 'replaced', 'built'];
+  const names: ChangeName[] = ['added', 'moved', 'text', 'sets', 'needs', 'keeps', 'surfaces', 'suggest', 'notes', 'taken', 'dropped', 'cleared', 'replaced', 'started', 'built'];
 
-  it('say each name in the page\'s words, for a decision and for a feature', () => {
-    const words = (of: 'decision' | 'feature') => names.map((name) => changePhrase(name, of));
-    expect(words('decision')).toEqual([
+  it('say each name in the page\'s words, the same for a decision and a feature', () => {
+    expect(names.map((name) => changePhrase(name))).toEqual([
       'Added', 'Moved to another part', 'Text changed', 'What a yes would do changed', 'Needs changed', 'What it must keep changed', 'Where it shows changed',
-      'Recommendation changed', 'Notes edited', 'Decided', 'Dropped', 'Back to not decided', 'Replaced by', 'Built',
+      'Recommendation changed', 'Notes edited', 'Decided', 'Dropped', 'Back to not decided', 'Replaced by', 'Being built', 'Built',
     ]);
-    expect(words('feature')).toEqual([...words('decision').slice(0, 9), 'Planned', ...words('decision').slice(10)]);
   });
 
   it('never let the name of a key through', () => {
-    const line = changeLine(names, 'decision');
-    expect(line).not.toMatch(/\b(taken|sets|keeps|surfaces|suggest|cleared|replaced)\b|[a-z]+_[a-z]+/);
+    const line = changeLine(names);
+    expect(line).not.toMatch(/\b(taken|sets|keeps|surfaces|suggest|cleared|replaced|started|planned)\b|[a-z]+_[a-z]+/);
     expect(line.split(' · ')).toHaveLength(names.length);
   });
 
   it('join the phrases of one change by a middle dot, in the order given', () => {
-    expect(changeLine(['text', 'notes', 'taken'], 'feature')).toBe('Text changed · Notes edited · Planned');
-    expect(changeLine(['added'], 'decision')).toBe('Added');
+    expect(changeLine(['text', 'notes', 'taken'])).toBe('Text changed · Notes edited · Decided');
+    expect(changeLine(['added'])).toBe('Added');
   });
 
   it('write a date as day and month', () => {
@@ -235,48 +236,72 @@ describe('time', () => {
 
 describe('part states', () => {
   it('says the few words on a part', () => {
-    const words = (state: PartGroup['state'], counts: Partial<PartGroup['counts']>) => stateWords({ state, counts: { built: 0, planned: 0, undecided: 0, dropped: 0, ...counts } });
-    expect(words('done', { built: 4 })).toBe('done');
-    expect(words('next', { planned: 3 })).toBe('next');
-    expect(words('planned', { planned: 4 })).toBe('4 planned');
-    expect(words('planned', { built: 1, planned: 4 })).toBe('1/5 built');
+    const words = (state: PartGroup['state'], counts: Partial<PartGroup['counts']>) => stateWords({ state, counts: { built: 0, building: 0, decided: 0, undecided: 0, dropped: 0, ...counts } });
+    expect(words('built', { built: 4 })).toBe('built');
+    expect(words('building', { built: 1, building: 1, decided: 2 })).toBe('being built');
+    expect(words('next', { decided: 3 })).toBe('next');
+    expect(words('decided', { decided: 4 })).toBe('4 decided');
+    expect(words('decided', { built: 1, decided: 4 })).toBe('1/5 built');
     expect(words('open', { undecided: 4 })).toBe('');
+  });
+
+  it('gives a part being built its own state, and keeps next for the first decided feature neither being built nor built', () => {
+    const states = (data = buildData()) => buildPlan(data, null).parts.map((group) => [group.part.id, group.state]);
+    // The fixture: Part A holds the first decided feature, Part C a feature being built.
+    expect(states()).toEqual([['part-a', 'next'], ['part-b', 'open'], ['part-c', 'building'], ['part-d', 'open'], ['part-e', 'open']]);
+    // Every decided feature built: Part A is built.
+    expect(states(withBuilt('core', 'calls'))).toEqual([['part-a', 'built'], ['part-b', 'open'], ['part-c', 'building'], ['part-d', 'open'], ['part-e', 'open']]);
+    // A part both next and being built reads being built, and no other part is next.
+    const both = withFeatures({ core: { started: '2026-11-17' } });
+    expect(states(both)).toEqual([['part-a', 'building'], ['part-b', 'open'], ['part-c', 'building'], ['part-d', 'open'], ['part-e', 'open']]);
+    // Next moves to the first decided feature that is neither being built nor built.
+    const later = withFeatures({ core: { started: '2026-11-17' }, calls: { started: '2026-11-17' }, fork: { verdict: 'take' } });
+    expect(states(later)).toEqual([['part-a', 'building'], ['part-b', 'open'], ['part-c', 'building'], ['part-d', 'next'], ['part-e', 'open']]);
   });
 });
 
 describe('the line under the title', () => {
   const line = (data = buildData()) => statusLine(buildPlan(data, null).parts);
-  const undecided = (...ids: string[]) => Object.fromEntries(ids.map((id) => [id, { verdict: undefined }]));
+  const undecided = (...ids: string[]) => Object.fromEntries(ids.map((id) => [id, { verdict: undefined, started: undefined }]));
 
-  it('starts with the part holding the first planned feature, before anything is built', () => {
-    expect(line()).toBe('Starting with Part A.');
-    expect(line(withFeatures(undecided('core', 'calls')))).toBe('Starting with Part C.');
+  /** The fixture with no feature being built. */
+  const notStarted = (change: Record<string, Partial<(typeof FEATURES)[number]>> = {}) => withFeatures({ shells: { started: undefined }, ...change });
+
+  it('says the part being built while one is', () => {
+    expect(line()).toBe('Part C is being built.');
+    expect(line(withBuilt('core', 'calls'))).toBe('Part C is being built.');
+  });
+
+  it('starts with the part holding the first decided feature, before anything is built', () => {
+    expect(line(notStarted())).toBe('Starting with Part A.');
+    expect(line(notStarted(undecided('core', 'calls')))).toBe('Starting with Part C.');
   });
 
   it('says what is next once something is built', () => {
-    expect(line(withBuilt('core', 'calls'))).toBe('Part C is next.');
+    expect(line(notStarted(Object.fromEntries(['core', 'calls'].map((id) => [id, { verdict: 'take' as const, built: '2026-11-16' }]))))).toBe('Part C is next.');
   });
 
-  it('says nothing when nothing is planned', () => {
+  it('says nothing when nothing is decided', () => {
     expect(line(withBuilt('core', 'calls', 'shells'))).toBe('');
     expect(line(withFeatures(undecided('core', 'calls', 'shells')))).toBe('');
   });
 
-  it('is never moved by a decision: a taken decision is not a planned feature', () => {
-    expect(line(buildData({ features: FEATURES.filter((feature) => feature.part !== 'part-a') }))).toBe('Starting with Part C.');
+  it('is never moved by a decision: a taken decision is not a decided feature', () => {
+    expect(line(buildData({ features: FEATURES.filter((feature) => feature.part !== 'part-a' && feature.id !== 'shells') }))).toBe('');
+    expect(line(buildData({ features: FEATURES.filter((feature) => feature.part !== 'part-a').map((feature) => (feature.id === 'shells' ? { ...feature, started: undefined } : feature)) }))).toBe('Starting with Part C.');
   });
 });
 
 describe('a replaced decision', () => {
-  const decision = (fields: Partial<Entry>): Entry => ({ id: 'x', kind: 'decision', part: 'p', stage: 's', position: 1, name: 'X?', what: 'Yes.', needs: [], verdict: 'take', replaces: [], replacedBy: null, built: null, notes: false, more: false, history: null, ...fields });
+  const decision = (fields: Partial<Entry>): Entry => ({ id: 'x', kind: 'decision', part: 'p', stage: 's', position: 1, name: 'X?', what: 'Yes.', needs: [], verdict: 'take', replaces: [], replacedBy: null, started: null, built: null, notes: false, more: false, history: null, ...fields });
   const status = (fields: Partial<Entry>) => entryStatuses([decision(fields)]).get('x');
 
   it('has the status replaced once its file names the decision that replaced it, and is decided before', () => {
-    expect(status({})).toBe('planned');
+    expect(status({})).toBe('decided');
     expect(status({ replacedBy: 'y' })).toBe('replaced');
-    // Not planned, not dropped, and no verdict makes it neither.
+    // Not decided, not dropped, and no verdict makes it neither.
     expect(status({ replacedBy: 'y', verdict: 'drop' })).toBe('dropped');
-    expect(status({ replaces: ['y'] })).toBe('planned');
+    expect(status({ replaces: ['y'] })).toBe('decided');
     expect(status({ replaces: ['y'], verdict: null })).toBe('undecided');
   });
 
@@ -291,7 +316,7 @@ describe('a replaced decision', () => {
   it('is a row with the status replaced, which names the decision that replaced it', () => {
     const plan = buildPlan(buildData(), null);
     expect(plan.product.find((row) => row.key === 'entry-plain-logs')).toMatchObject({ status: 'replaced', replacedBy: 'entry-signed-logs', replaces: [] });
-    expect(byPart(plan).get('part-e')!.rows.find((row) => row.key === 'entry-signed-logs')).toMatchObject({ status: 'planned', replacedBy: null, replaces: ['entry-plain-logs'] });
+    expect(byPart(plan).get('part-e')!.rows.find((row) => row.key === 'entry-signed-logs')).toMatchObject({ status: 'decided', replacedBy: null, replaces: ['entry-plain-logs'] });
     expect(byPart(plan).get('part-d')!.rows.find((row) => row.key === 'entry-tamper-proof-logs')).toMatchObject({ status: 'undecided', replaces: ['entry-signed-logs'] });
   });
 

@@ -12,7 +12,7 @@ import { formatHash, placeOf } from './routes';
 export const LATEST_GHOSTS = 10;
 
 function what(item: LatestItem): string {
-  if (item.change) return changeLine(item.change.what, item.row.of);
+  if (item.change) return changeLine(item.change.what);
   return `${item.author}: ${item.text ?? ''}`;
 }
 

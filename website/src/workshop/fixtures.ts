@@ -20,6 +20,7 @@ interface FixtureFeature extends FixtureLists {
   name: string;
   what: string;
   verdict?: 'take' | 'drop';
+  started?: string;
   built?: string;
   suggest?: { verdict: 'take' | 'drop'; why?: string };
   keeps?: string[];
@@ -52,7 +53,7 @@ export const FEATURES: FixtureFeature[] = [
   { id: 'checkpoint', stage: 'third', part: 'part-d', name: 'Save a checkpoint', what: 'Save and go back.', suggest: { verdict: 'take' } },
   { id: 'diff', stage: 'third', part: 'part-d', name: 'See what a fork changed', what: 'The diff.', suggest: { verdict: 'take' } },
   { id: 'install-agent', stage: 'fourth', part: 'part-d', name: 'Install your agent', what: 'Claude Code or Codex.', suggest: { verdict: 'take' } },
-  { id: 'shells', stage: 'fifth', part: 'part-c', name: 'Your shell inside', what: 'Your dotfiles.', verdict: 'take', suggest: { verdict: 'take' } },
+  { id: 'shells', stage: 'fifth', part: 'part-c', name: 'Your shell inside', what: 'Your dotfiles.', verdict: 'take', started: '2026-11-15', suggest: { verdict: 'take' } },
   { id: 'secrets', stage: 'fifth', part: 'part-d', name: 'Secrets you cannot read', what: 'A placeholder inside.', suggest: { verdict: 'take' } },
   { id: 'triggers', stage: 'sixth', part: 'part-e', name: 'Tasks from GitHub events', what: 'A label starts a task.', suggest: { verdict: 'drop' } },
   { id: 'linux', stage: 'seventh', part: 'part-e', name: 'A Linux server', what: 'Run on Linux.', suggest: { verdict: 'drop' } },
@@ -213,6 +214,7 @@ export function planFiles({ features = FEATURES, notes = DEFAULT_NOTES, decision
     // A suggestion always says why; the fixture gives one where its list leaves it out.
     if (feature.suggest) file.suggest = { verdict: feature.suggest.verdict, why: feature.suggest.why ?? 'It fits.' };
     if (feature.verdict) file.verdict = feature.verdict;
+    if (feature.started) file.started = feature.started;
     if (feature.built) file.built = feature.built;
     files.set(`${feature.part}/features/${feature.id}.json`, canonicalText(canonicalFeature(file)));
     if (notes[feature.id]) files.set(`${feature.part}/features/${feature.id}.md`, notes[feature.id]);

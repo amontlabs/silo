@@ -660,10 +660,11 @@ describe('the map layout', () => {
     });
 
     it('fits the longest state line under every title of Silo\'s map, for two-digit counts, at both ends of the map\'s widths', () => {
-      const counts = (built: number, planned: number): Counts => ({ built, planned, undecided: 0, dropped: 0 });
-      const lines = (['done', 'next', 'planned', 'open'] as PartState[]).flatMap((state) => [counts(99, 0), counts(0, 99), counts(10, 89)].map((c) => stateWords({ state, counts: c })));
+      const counts = (built: number, decided: number): Counts => ({ built, building: 0, decided, undecided: 0, dropped: 0 });
+      const lines = (['built', 'building', 'next', 'decided', 'open'] as PartState[]).flatMap((state) => [counts(99, 0), counts(0, 99), counts(10, 89)].map((c) => stateWords({ state, counts: c })));
       const longest = lines.reduce((a, b) => (b.length > a.length ? b : a));
-      expect(longest).toBe('99/99 built');
+      // The font is monospaced: "being built" and "99/99 built" are as wide.
+      expect(new Set(lines.filter((line) => line.length === longest.length))).toEqual(new Set(['10/99 built', '99/99 built', 'being built']));
       const short = Object.entries(SILO_MAP.places).flatMap(([id, place]) => Object.values(MAP_PIXELS).map((px) => [id, px, stateNeeds(longest, place, px), place.full[2]] as const).filter(([, , need, has]) => need > has));
       expect(short).toEqual([]);
     });

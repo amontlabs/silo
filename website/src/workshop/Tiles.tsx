@@ -17,8 +17,8 @@ const number = (n: number) => String(n).padStart(2, '0');
 
 function Tile({ group, on, onOpen }: { group: PartGroup; on: boolean; onOpen: (part: string) => void }) {
   const { counts, state } = group;
-  const partBuilt = state !== 'done' && counts.built > 0;
-  const share = Math.round((100 * counts.built) / Math.max(1, counts.built + counts.planned));
+  const partBuilt = state !== 'built' && counts.built > 0;
+  const share = Math.round((100 * counts.built) / Math.max(1, counts.built + counts.building + counts.decided));
   return (
     <div className={`ws-tile s-${state}${partBuilt ? ' part-built' : ''}${on ? ' on' : ''}`} data-part={group.part.id} style={{ '--p': share } as CSSProperties}>
       <button type="button" className="ws-tile-hit" aria-label={spoken(group)} aria-current={on ? 'true' : undefined} onClick={() => onOpen(group.part.id)}>

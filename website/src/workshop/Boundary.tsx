@@ -23,8 +23,11 @@ export class Boundary extends Component<{ data: BuildData; children: ReactNode }
 
 /** What the list says of a row: its status in the page's words, a decision's own. */
 function plainState(row: Row): string {
-  if (row.of === 'decision') return row.status === 'planned' ? 'decided' : row.status === 'replaced' ? 'replaced' : row.status === 'dropped' ? 'dropped' : 'not decided';
-  return row.status === 'undecided' ? 'not decided' : row.status;
+  switch (row.status) {
+    case 'undecided': return 'not decided';
+    case 'building': return 'being built';
+    default: return row.status;
+  }
 }
 
 function PlainRows({ title, rows, all }: { title: string; rows: Row[]; all: Map<string, Row> }) {

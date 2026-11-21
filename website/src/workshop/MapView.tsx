@@ -7,13 +7,13 @@ import type { Drawing, Glyph, PageLayout } from './map';
 import { stateWords } from './plan';
 import type { PartGroup, PartState } from './plan';
 
-const SPOKEN: Record<PartState, string> = { done: 'done', next: 'next', planned: 'planned', open: 'not decided yet' };
+const SPOKEN: Record<PartState, string> = { building: 'being built', built: 'built', next: 'next', decided: 'decided', open: 'not decided' };
 
 /** What a screen reader hears for a part or a tile. */
 export function spoken(group: PartGroup): string {
-  const features = group.counts.built + group.counts.planned + group.counts.undecided;
+  const features = group.counts.built + group.counts.building + group.counts.decided + group.counts.undecided;
   const decisions = group.decisions.decided + group.decisions.undecided;
-  const state = group.state === 'planned' ? stateWords(group) : SPOKEN[group.state];
+  const state = group.state === 'decided' ? stateWords(group) : SPOKEN[group.state];
   const counted = [`${features} ${features === 1 ? 'feature' : 'features'}`, ...(decisions ? [`${decisions} ${decisions === 1 ? 'decision' : 'decisions'}`] : [])];
   return `${group.part.title}, ${state}, ${counted.join(', ')}. ${group.part.line}`;
 }
