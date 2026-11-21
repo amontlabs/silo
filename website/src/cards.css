@@ -1,0 +1,99 @@
+/* The cards: six features, each a small picture, a label, a title and one sentence. The gaps of the grid are
+   its lines. cards.ts plays one picture at a time by adding a class to a part when its moment comes. */
+.for .title { padding: 24px var(--gutter) 22px; }
+.points { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); background: var(--line); }
+.card { position: relative; background: var(--paper); cursor: pointer; }
+/* The line over a card fills while its picture plays. */
+.card .prog { position: absolute; left: 0; right: 0; top: -1px; height: 2px; overflow: hidden; z-index: 1; }
+.card .prog b { position: absolute; inset: 0; background: var(--accent); transform: scaleX(0); transform-origin: left; }
+.card.playing .prog b { animation: card-fill var(--dur) linear forwards; }
+@keyframes card-fill { to { transform: none; } }
+/* A card that stops or ends: its line fades out from the width it had. */
+.card .prog b.ebb { opacity: 0; transition: opacity var(--fade) linear; }
+/* The line between a picture and its text is lighter than the lines of the grid. */
+.card .txt { padding: 12px var(--gutter) 22px; border-top: 1px solid color-mix(in srgb, var(--line) 50%, var(--paper)); }
+.card .term { font: 12px/1.5 var(--mono); color: var(--accent-ink); }
+.card h3 { margin-top: 7px; font: 20px/1.3 var(--serif); letter-spacing: -0.2px; text-wrap: balance; }
+.card h3 + p { margin-top: 7px; font-size: 14px; line-height: 1.6; color: var(--muted); text-wrap: pretty; }
+
+/* The small pictures. Everything is drawn in a 320 by 140 box. What a computer prints is set in mono, the rest in sans. */
+.mini { width: 100%; max-width: 460px; height: auto; margin: 0 auto; }
+/* A copy of a picture as it was, dissolving over the picture now (cards.ts). It lies on the picture's own box. */
+.card .mini.ghost { position: absolute; max-width: none; margin: 0; background: var(--paper); pointer-events: none; }
+.mini text { font: 10px var(--mono); fill: var(--muted); }
+.mini .sn { font-family: var(--sans); }
+.mini .i { fill: var(--ink); }
+.mini .a { fill: var(--accent-ink); }
+.mini .s9 { font-size: 9px; }
+.mini .pr { fill: var(--muted); }
+.mini .bx { fill: var(--surface); stroke: var(--wire); stroke-width: 1; }
+.mini .rl { fill: none; stroke: var(--line); stroke-width: 1; }
+.mini .gl { fill: none; stroke: var(--muted); stroke-width: 1; }
+.mini .edge { fill: none; stroke: var(--wire); stroke-width: 1; stroke-dasharray: 2 4; opacity: 0.75; }
+/* A part that appears: it fades in, or pops out of its left edge or its centre. */
+.mini .f { opacity: 0; transition: opacity 0.3s; }
+.mini .f.on { opacity: 1; }
+.mini .p { opacity: 0; transform: scale(0.8); transform-box: fill-box; transform-origin: center; transition: opacity 0.25s, transform 0.45s cubic-bezier(0.2, 0.9, 0.25, 1); }
+.mini .p.left { transform-origin: 0% 50%; }
+.mini .p.on { opacity: 1; transform: none; }
+/* A part that gives way is there until it fades out. */
+.mini .g { transition: opacity 0.3s; }
+.mini .g.gone { opacity: 0; }
+.mini .wr { fill: none; stroke: var(--wire); stroke-width: 1; stroke-dasharray: 1; stroke-dashoffset: 1; }
+.mini .wr.on { stroke-dashoffset: 0; transition: stroke-dashoffset 0.4s ease; }
+.mini .wr.acc { stroke: var(--accent); stroke-width: 1.6; }
+/* The site's diamond. A checkpoint is hollow and turns orange when you go back to it. In the record a filled one is a
+   fact and a hollow one a report. */
+.mini .dm { fill: var(--paper); stroke: var(--wire); stroke-width: 1; transition: fill 0.2s, stroke 0.2s; }
+.mini .dm.hot { fill: var(--accent); stroke: var(--accent); }
+.mini .dm.fact { fill: var(--ink); stroke: var(--ink); }
+.mini .ok { fill: none; stroke: var(--accent-ink); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.mini .xx { fill: none; stroke: var(--accent-ink); stroke-width: 1.3; stroke-linecap: round; }
+/* A pointer glides to its place. Yours takes the text colour, an agent's the accent. Its outline is the page's colour. */
+.mini .mv { transition: transform 0.6s cubic-bezier(0.3, 0.6, 0.2, 1), opacity 0.2s; }
+.mini .cur { color: var(--ink); }
+.mini .cur.agentc { color: var(--accent); }
+.cur-edge { stroke: var(--paper); }
+.mini .chip { fill: var(--surface); stroke: var(--line); stroke-width: 1; transition: fill 0.2s, stroke 0.2s; }
+.mini .chip.lit { fill: var(--accent-wash); stroke: var(--accent); }
+.mini .trk { fill: var(--paper); stroke: var(--wire); stroke-width: 1; }
+/* A command is typed one character at a time: the clip opens along the characters the line has. */
+.mini .ty { clip-path: inset(0 100% 0 0); transition: clip-path var(--t) steps(var(--n), end); }
+.mini .ty.on { clip-path: inset(0); }
+/* The boundary: a request is a dot that travels, and the gate is lit when it stops one. */
+.mini .wn { fill: none; stroke: var(--wire); stroke-width: 1; stroke-dasharray: 2 3; }
+.mini .gate rect { fill: var(--paper); stroke: var(--wire); stroke-width: 1; transition: fill 0.2s, stroke 0.2s; }
+.mini .gate path { fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-linecap: round; transition: stroke 0.2s; }
+.mini .gate.lit rect { fill: var(--accent-wash); stroke: var(--accent); }
+.mini .gate.lit path { stroke: var(--accent-ink); }
+.mini .mk { fill: none; stroke: var(--wire); stroke-width: 1.3; transition: fill 0.2s, stroke 0.2s; }
+.mini .mk.got { fill: var(--ink); stroke: var(--ink); }
+.mini .pk { fill: var(--ink); stroke: var(--paper); stroke-width: 1; opacity: 0; }
+.mini .pk.on { opacity: 1; }
+/* Linux and macOS screens. */
+.mini .rlf { fill: var(--line); }
+.mini .fld { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+.mini .btnr { fill: var(--surface); stroke: var(--wire); stroke-width: 1; transition: fill 0.2s, stroke 0.2s; }
+.mini .btnr.on { fill: var(--accent-wash); stroke: var(--accent); }
+
+/* Without its script a picture cannot play. It shows as a still at its end: every part that appears is there, the
+   typed lines are whole, the parts that give way are gone, and what a gesture changed has changed. A pointer is not
+   part of a still. */
+.points:not(.live) .mini :is(.f, .p):not(.mv) { opacity: 1; transform: none; }
+.points:not(.live) .mini .wr { stroke-dashoffset: 0; }
+.points:not(.live) .mini .ty { clip-path: none; }
+.points:not(.live) .mini .g { opacity: 0; }
+.points:not(.live) .card[data-mini="edge"] .m1 { fill: var(--ink); stroke: var(--ink); }
+.points:not(.live) .card[data-mini="edge"] .gate rect { fill: var(--accent-wash); stroke: var(--accent); }
+.points:not(.live) .card[data-mini="edge"] .gate path { stroke: var(--accent-ink); }
+.points:not(.live) .card[data-mini="screen"] .btnr { fill: var(--accent-wash); stroke: var(--accent); }
+.points:not(.live) .card[data-mini="needs"] .r1 { fill: var(--accent-wash); stroke: var(--accent); }
+.points:not(.live) .card[data-mini="back"] .s2 { fill: var(--accent); stroke: var(--accent); }
+
+@media (max-width: 900px) {
+  .points { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 640px) {
+  .points { grid-template-columns: 1fr; }
+  .card .txt { padding-bottom: 20px; }
+}
