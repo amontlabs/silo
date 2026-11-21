@@ -9,13 +9,17 @@ import type { PartGroup, PartState } from './plan';
 
 const SPOKEN: Record<PartState, string> = { building: 'being built', built: 'built', next: 'next', decided: 'decided', open: 'not decided' };
 
-/** What a screen reader hears for a part or a tile. */
-export function spoken(group: PartGroup): string {
+/** The titles of some parts, in the order given, joined by commas. */
+const titlesOf = (ids: string[], titles: Map<string, string>) => ids.map((id) => titles.get(id) ?? id).join(', ');
+
+/** What a screen reader hears for a part or a tile; with `titles` (part titles by id), also the parts it depends on, which it cannot see marked. */
+export function spoken(group: PartGroup, titles?: Map<string, string>): string {
   const features = group.counts.built + group.counts.building + group.counts.decided + group.counts.undecided;
   const decisions = group.decisions.decided + group.decisions.undecided;
   const state = group.state === 'decided' ? stateWords(group) : SPOKEN[group.state];
   const counted = [`${features} ${features === 1 ? 'feature' : 'features'}`, ...(decisions ? [`${decisions} ${decisions === 1 ? 'decision' : 'decisions'}`] : [])];
-  return `${group.part.title}, ${state}, ${counted.join(', ')}. ${group.part.line}`;
+  const depends = titles && group.part.dependsOn.length ? ` Depends on ${titlesOf(group.part.dependsOn, titles)}.` : '';
+  return `${group.part.title}, ${state}, ${counted.join(', ')}. ${group.part.line}${depends}`;
 }
 
 /** A part's glyph, drawn from the layout's paths. */
@@ -52,7 +56,7 @@ function Wires({ wires, height, className, states }: { wires: Drawn[]; height: n
 }
 
 /** What a solid and a dashed line mean, drawn as the wires draw them. */
-function Key({ at: [x, y] }: { at: [number, number] }) {
+function Key({ at: [x, y], marked }: { at: [number, number]; marked: boolean }) {
   const line = (undecided: boolean) => (
     <svg className={marks('ws-wire', { undecided })} viewBox="0 0 24 2"><path d="M0 1H24" /></svg>
   );
@@ -60,6 +64,7 @@ function Key({ at: [x, y] }: { at: [number, number] }) {
     <div className="ws-mapkey" aria-hidden="true" style={style({ '--lx': x, '--ly': y })}>
       <span>{line(false)}decided</span>
       <span>{line(true)}not decided</span>
+      {marked ? <span><i className="ws-ringkey" />it depends on</span> : null}
     </div>
   );
 }
@@ -85,36 +90,48 @@ export interface MapViewProps {
 export function MapView({ layout, groups, folded, current, onOpen }: MapViewProps) {
   const states = new Map(groups.map((group) => [group.part.id, group.state]));
   const byId = new Map(groups.map((group) => [group.part.id, group]));
-  const [tip, setTip] = useState<{ text: string; x: number; y: number } | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const titles = new Map(groups.map((group) => [group.part.id, group.part.title]));
+  // The part under the pointer and the one holding the keyboard's focus. While either is on a part, that part is the active one,
+  // the pointer's winning when they differ: the parts it depends on are marked, and every other part fades.
+  // Only on the full map; the strip marks and fades nothing. The marks go when neither is on a part.
+  const [pointer, setPointer] = useState<string | null>(null);
+  const [focus, setFocus] = useState<string | null>(null);
+  const active = pointer ?? focus;
+  const related = active && !folded ? byId.get(active)?.part : undefined;
+  const [tip, setTip] = useState<{ head: string; x: number; top: number; bottom: number } | null>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);
-  // Centred on its part, and kept 8 px inside the window.
+  // Centred on its part and kept 8 px inside the window. It never covers its part while it fits below it, or else above it;
+  // it is as tall as its lines, and is pulled inside the window only when it fits in neither place.
   useLayoutEffect(() => {
     const node = tipRef.current;
     if (!node || !tip) return;
-    const width = node.offsetWidth;
+    const { offsetWidth: width, offsetHeight: height } = node;
     const left = Math.max(8, Math.min(innerWidth - width - 8, tip.x - width / 2));
-    node.style.transform = `translate(${Math.round(left)}px, ${Math.round(tip.y)}px)`;
+    const lowest = innerHeight - height - 8;
+    const below = tip.bottom + 8;
+    const above = tip.top - height - 8;
+    const top = below <= lowest ? below : above >= 8 ? above : Math.max(8, Math.min(lowest, above));
+    node.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
   }, [tip]);
-  useEffect(() => () => clearTimeout(timer.current), []);
-
-  const showTip = (target: HTMLElement, group: PartGroup) => {
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
-      const box = target.getBoundingClientRect();
-      const text = folded ? `${group.part.title}. ${group.part.line}` : group.part.line;
-      const below = box.height < 200 && box.bottom + 40 < innerHeight;
-      setTip({ text, x: box.left + box.width / 2, y: below ? box.bottom + 8 : box.top - 34 });
-    }, 240);
-  };
-  const hideTip = () => {
-    clearTimeout(timer.current);
+  // The tip of the active part shows after 240 ms, and goes when the active part changes or none is left.
+  useEffect(() => {
     setTip(null);
-  };
+    if (!active) return;
+    const timer = setTimeout(() => {
+      const group = byId.get(active);
+      const target = [...(stageRef.current?.querySelectorAll<HTMLElement>('.ws-part') ?? [])].find((node) => node.dataset.part === active);
+      if (!group || !target) return;
+      const box = target.getBoundingClientRect();
+      const head = folded ? `${group.part.title}. ${group.part.line}` : group.part.line;
+      setTip({ head, x: box.left + box.width / 2, top: box.top, bottom: box.bottom });
+    }, 240);
+    return () => clearTimeout(timer);
+  }, [active, folded]);
 
   return (
     <section className="ws-mapsec" aria-label="Silo, part by part">
-      <div className={['ws-stage', folded ? 'fold' : '', groups.length ? '' : 'ws-stage-empty'].filter(Boolean).join(' ')}>
+      <div ref={stageRef} className={['ws-stage', folded ? 'fold' : '', related ? 'relating' : '', groups.length ? '' : 'ws-stage-empty'].filter(Boolean).join(' ')}>
         {groups.length ? null : <p className="ws-quiet">No part yet.</p>}
         {layout.zones.map((zone) => (
           // A zone with no folded place stays where it is and fades out as the map folds.
@@ -131,7 +148,7 @@ export function MapView({ layout, groups, folded, current, onOpen }: MapViewProp
             <span className={marks(`ws-wl${anchor === 'middle' ? ' mid' : ''}`, wire, states.get(wire.of) ?? 'open')} key={index} aria-hidden="true" style={style({ '--lx': x, '--ly': y })}>{text}</span>
           );
         })}
-        {layout.key ? <Key at={layout.key} /> : null}
+        {layout.key ? <Key at={layout.key} marked={Boolean(related?.dependsOn.length)} /> : null}
         {layout.notes.map((note) => (
           // A text with no folded place stays where it is and fades out as the map folds.
           <div className={marks(`ws-geo ws-node${note.fold ? '' : ' off-fold'}`, note)} key={note.title} style={style(placeStyle(note.full, note.fold ?? note.full))} aria-hidden="true">
@@ -145,14 +162,15 @@ export function MapView({ layout, groups, folded, current, onOpen }: MapViewProp
           const group = byId.get(id);
           if (!group) return null;
           const on = current === id;
-          const classes = ['ws-geo', 'ws-part', `s-${group.state}`, place.inner ? 'inner' : '', place.tall ? 'tall' : '', place.wide ? 'wide' : '', on ? 'on' : ''].filter(Boolean).join(' ');
+          const classes = ['ws-geo', 'ws-part', `s-${group.state}`, place.inner ? 'inner' : '', place.tall ? 'tall' : '', place.wide ? 'wide' : '', on ? 'on' : '',
+            related && related.dependsOn.includes(id) ? 'marked' : '', related && id !== related.id && !related.dependsOn.includes(id) ? 'faint' : ''].filter(Boolean).join(' ');
           return (
             <button
               type="button" key={id} data-part={id} className={classes} style={style(placeStyle(place.full, place.fold, place))}
-              aria-label={spoken(group)} aria-current={on ? 'true' : undefined}
-              onClick={() => { hideTip(); onOpen(id); }}
-              onMouseEnter={(event) => showTip(event.currentTarget, group)} onMouseLeave={hideTip}
-              onFocus={(event) => { if (focusVisible(event.currentTarget)) showTip(event.currentTarget, group); }} onBlur={hideTip}
+              aria-label={spoken(group, titles)} aria-current={on ? 'true' : undefined}
+              onClick={() => { setPointer(null); setFocus(null); onOpen(id); }}
+              onMouseEnter={() => setPointer(id)} onMouseLeave={() => setPointer((now) => (now === id ? null : now))}
+              onFocus={(event) => { if (focusVisible(event.currentTarget)) setFocus(id); }} onBlur={() => setFocus((now) => (now === id ? null : now))}
             >
               <span className="ws-p-ttl">{group.part.title}</span>
               <span className="ws-p-st"><i className="ws-mk" /><span>{stateWords(group)}</span></span>
@@ -161,7 +179,11 @@ export function MapView({ layout, groups, folded, current, onOpen }: MapViewProp
           );
         })}
       </div>
-      {tip ? <div className="ws-tip" ref={tipRef} aria-hidden="true" style={{ transform: `translate(${Math.round(tip.x)}px, ${Math.round(tip.y)}px) translateX(-50%)` }}>{tip.text}</div> : null}
+      {tip ? (
+        <div className="ws-tip" ref={tipRef} aria-hidden="true" style={{ transform: `translate(${Math.round(tip.x)}px, ${Math.round(tip.top)}px) translateX(-50%)` }}>
+          {tip.head}
+        </div>
+      ) : null}
     </section>
   );
 }

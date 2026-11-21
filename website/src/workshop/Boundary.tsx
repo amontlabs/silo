@@ -1,9 +1,9 @@
 import { Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
-import { allRows, buildPlan, statusLine } from './plan';
+import { allRows, buildPlan, splitRows, statusLine } from './plan';
 import type { BuildData, Row } from './plan';
 
-/** If the Workshop fails to render, the plan stays readable from the data built into the page: each part's decisions and features with their state, then the decisions of Product. */
+/** If the Workshop fails to render, the plan stays readable from the data built into the page: each part's features and then its decisions, with their state, then the decisions of Product. */
 export class Boundary extends Component<{ data: BuildData; children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
 
@@ -30,16 +30,29 @@ function plainState(row: Row): string {
   }
 }
 
-function PlainRows({ title, rows, all }: { title: string; rows: Row[]; all: Map<string, Row> }) {
+function PlainList({ rows, all }: { rows: Row[]; all: Map<string, Row> }) {
+  return (
+    <ul>
+      {rows.map((row) => {
+        const by = row.replacedBy === null ? undefined : all.get(row.replacedBy);
+        return <li key={row.key}>{row.name} <small>({row.of === 'decision' ? 'decision' : 'feature'}, {plainState(row)})</small>{by ? <small>{` Replaced by ${by.name}`}</small> : null}</li>;
+      })}
+    </ul>
+  );
+}
+
+/** A part's features under "Features", then its decisions under "Decisions"; a group with no row shows nothing. Product's decisions are one list. */
+function PlainRows({ title, rows, all, headed = true }: { title: string; rows: Row[]; all: Map<string, Row>; headed?: boolean }) {
+  const { features, decisions } = splitRows(rows);
   return (
     <section aria-label={title}>
       <h2>{title}</h2>
-      <ul>
-        {rows.map((row) => {
-          const by = row.replacedBy === null ? undefined : all.get(row.replacedBy);
-          return <li key={row.key}>{row.name} <small>({row.of === 'decision' ? 'decision' : 'feature'}, {plainState(row)})</small>{by ? <small>{` Replaced by ${by.name}`}</small> : null}</li>;
-        })}
-      </ul>
+      {headed ? ([['Features', features], ['Decisions', decisions]] as const).filter(([, group]) => group.length).map(([name, group]) => (
+        <div key={name}>
+          <h3>{name}</h3>
+          <PlainList rows={group} all={all} />
+        </div>
+      )) : <PlainList rows={rows} all={all} />}
     </section>
   );
 }
@@ -61,7 +74,7 @@ function PlainPlan({ data }: { data: BuildData }) {
         </div>
       </div>
       {plan?.parts.map((group) => <PlainRows key={group.part.id} title={group.part.title} rows={group.rows} all={all} />)}
-      {plan?.product.length ? <PlainRows title="Product" rows={plan.product} all={all} /> : null}
+      {plan?.product.length ? <PlainRows title="Product" rows={plan.product} all={all} headed={false} /> : null}
     </div>
   );
 }

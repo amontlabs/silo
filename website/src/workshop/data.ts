@@ -155,6 +155,36 @@ export function toHistories(plan: RawPlan, source: HistorySource | null): Histor
   return histories;
 }
 
+/**
+ * The parts each part depends on, by part id. Part X depends on part Y when an entry of X names an entry of Y in `needs`
+ * and Y starts before X in the plan's order, so that no two parts depend on each other. A part starts at its first feature
+ * in the order of order.json, or at its first entry when it has no feature. An entry of the same part, of no part, or that
+ * a later part holds, says nothing. Each list follows `order`, the order of the map; a part the map does not place comes
+ * after those it does, in the order of plan/parts.json.
+ */
+export function partDepends(parts: { id: string }[], entries: Pick<Entry, 'id' | 'kind' | 'part' | 'position' | 'needs'>[], order: string[]): Map<string, string[]> {
+  const partOf = new Map(entries.map((entry) => [entry.id, entry.part]));
+  const start = new Map<string, number>();
+  for (const part of parts) {
+    const own = entries.filter((entry) => entry.part === part.id);
+    const features = own.filter((entry) => entry.kind === 'feature');
+    const first = features.length ? features : own;
+    if (first.length) start.set(part.id, Math.min(...first.map((entry) => entry.position)));
+  }
+  const rank = (id: string) => { const at = order.indexOf(id); return at === -1 ? order.length : at; };
+  const sorted = parts.map((part) => part.id).sort((a, b) => rank(a) - rank(b));
+  const depends = new Map(parts.map((part) => [part.id, new Set<string>()]));
+  for (const entry of entries) {
+    if (entry.part === null) continue;
+    for (const id of entry.needs) {
+      const other = partOf.get(id);
+      if (other === undefined || other === null || other === entry.part) continue;
+      if ((start.get(other) ?? Infinity) < (start.get(entry.part) ?? -Infinity)) depends.get(entry.part)?.add(other);
+    }
+  }
+  return new Map(parts.map((part) => [part.id, sorted.filter((id) => depends.get(part.id)?.has(id))]));
+}
+
 /** The plan object of tools/plan/read, as the page holds it: decisions and features in the order of order.json. */
 export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null }: BuildOptions = {}): BuildData {
   const entries: Entry[] = ordered(plan).map((raw) => ({
@@ -175,8 +205,9 @@ export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null }: B
     more: hasFacts(raw),
     history: summaryOf(history?.changes.get(raw.id)),
   }));
+  const depends = partDepends(plan.parts, entries, Object.keys(map.places));
   return {
-    parts: plan.parts.map((part) => ({ id: part.id, title: part.title, line: part.line })),
+    parts: plan.parts.map((part) => ({ id: part.id, title: part.title, line: part.line, dependsOn: depends.get(part.id)! })),
     stages: plan.stages.map((stage) => ({ id: stage.id, title: stage.title, line: stage.line })),
     entries,
     map: pageLayout(map, layoutPlanOf(plan)),

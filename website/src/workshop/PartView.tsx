@@ -1,9 +1,9 @@
 // An opened part: its title, line, one dot per feature and the counts on the left, its decisions and features on the
-// right. The same layout holds the decisions of Product, the suggestions, the dropped entries and the latest changes.
+// right: its features first, then its decisions. The same layout holds the decisions of Product, the suggestions, the dropped entries and the latest changes.
 import type { ReactNode } from 'react';
 import { Entry, pipClass } from './Entry';
 import type { EntryContext } from './Entry';
-import { countDecisions, countRows } from './plan';
+import { countDecisions, countRows, splitRows } from './plan';
 import type { Counts, DecisionCounts, PartGroup, Row } from './plan';
 
 export interface BlockProps {
@@ -40,6 +40,22 @@ export function Block({ num, title, line, onBack, children, list, notes, loading
 
 export function Rows({ rows, ctx }: { rows: Row[]; ctx: EntryContext }) {
   return <ul className="ws-rows">{rows.map((row) => <Entry key={row.key} row={row} open={ctx.open.has(row.key)} ctx={ctx} />)}</ul>;
+}
+
+/** A list that holds both kinds of entry: its features under "Features", then its decisions under "Decisions". A group with no row shows nothing. Without `headed`, the rows are one list. */
+export function GroupedRows({ rows, ctx, headed = true }: { rows: Row[]; ctx: EntryContext; headed?: boolean }) {
+  if (!headed) return <Rows rows={rows} ctx={ctx} />;
+  const { features, decisions } = splitRows(rows);
+  return (
+    <>
+      {([['Features', features], ['Decisions', decisions]] as const).filter(([, group]) => group.length).map(([title, group]) => (
+        <section key={title} aria-label={title}>
+          <h3 className="ws-grp">{title}</h3>
+          <Rows rows={group} ctx={ctx} />
+        </section>
+      ))}
+    </>
+  );
 }
 
 /** Each count stays on one line; lines break after a separator. */
@@ -84,7 +100,7 @@ export function PartPlace({ group, ctx, onBack, notes }: { group: PartGroup; ctx
   return (
     <Block
       num={String(group.number).padStart(2, '0')} title={group.part.title} line={group.part.line} onBack={onBack} notes={notes}
-      list={<Rows rows={group.rows} ctx={ctx} />}
+      list={<GroupedRows rows={group.rows} ctx={ctx} />}
     >
       <div className="ws-pips" aria-hidden="true">
         {group.rows.filter((row) => row.of === 'feature' && row.status !== 'dropped').map((row) => <i className={pipClass(row)} key={row.key} />)}
@@ -99,7 +115,7 @@ export function ProductPlace({ rows, ctx, onBack, notes }: { rows: Row[]; ctx: E
   return (
     <Block
       title="Product" line="The decisions that are not about one part." onBack={onBack} notes={notes}
-      list={<Rows rows={rows} ctx={ctx} />}
+      list={<GroupedRows rows={rows} ctx={ctx} headed={false} />}
     >
       <Tallies rows={rows} />
     </Block>
@@ -110,7 +126,7 @@ export function LeftPlace({ rows, ctx, onBack, notes }: { rows: Row[]; ctx: Entr
   return (
     <Block
       title="Left out" onBack={onBack} notes={notes}
-      list={<Rows rows={rows} ctx={ctx} />}
+      list={<GroupedRows rows={rows} ctx={ctx} />}
     >
       <Tallies rows={rows} />
     </Block>

@@ -161,16 +161,17 @@ describe('the Workshop without JavaScript', () => {
   }
   const rowsOf = (section: Element | null) => [...(section?.querySelectorAll('li') ?? [])].map((li) => li.textContent);
 
-  it('lists a part with its decisions and features: id, name and state, in the order of order.json', () => {
+  it('lists a part with its features, then its decisions: id, name and state, each group in the order of order.json', () => {
     const box = noscript();
     expect(box.querySelector('.ws-quiet')?.textContent).toBe(NOSCRIPT_LINE);
     const partA = box.querySelector('section[data-part="part-a"]');
     expect(partA?.querySelector('h2')?.textContent).toBe('Part A');
     expect(rowsOf(partA)).toEqual([
-      'core-in-zig Which language is the core written in? Decided.',
       'core The engine runs on its own Decided.',
       'calls Every call defined once Decided.',
+      'core-in-zig Which language is the core written in? Decided.',
     ]);
+    expect([...partA!.querySelectorAll('h3')].map((heading) => heading.textContent)).toEqual(['Features', 'Decisions']);
     expect(rowsOf(box.querySelector('section[data-part="part-b"]'))).toContain('create Create and delete a computer Not decided.');
     expect(rowsOf(box.querySelector('section[data-part="part-c"]'))).toContain('shells Your shell inside Being built.');
     expect([...box.querySelectorAll('section')].map((section) => section.getAttribute('data-part'))).toEqual([...buildData().parts.map((part) => part.id), 'product']);

@@ -51,6 +51,7 @@
 .ws-noscript section { margin-top: 24px; }
 .ws-noscript h2 { font: 18px/1.3 var(--serif); }
 .ws-noscript section > p { color: var(--muted); margin-top: 4px; }
+.ws-noscript h3 { font: 12px/14px var(--mono); letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); margin-top: 14px; }
 .ws-noscript-rows { list-style: none; margin: 10px 0 0; padding: 0; }
 .ws-noscript-rows li { padding: 4px 0; }
 .ws-noscript-rows code { font: 12px var(--mono); color: var(--faint); margin-right: 6px; }
@@ -173,6 +174,13 @@
 .ws-stage.fold .ws-p-st, .ws-stage.fold .ws-gl { opacity: 0; transition: opacity .1s; }
 /* Unfolding, the words come back once their boxes have grown. */
 .ws-stage:not(.fold) :is(.ws-p-st, .ws-gl) { transition: opacity .18s .24s, color .3s; }
+/* While a part is under the pointer or holds the focus: the parts it depends on get a second, inner outline in the ink, so they are
+   marked in shape as well as in line weight, and every other part fades. Neither touches the state's colours, the accent of a part
+   that is next or being built (it fades with its part), or the ring of the open part. */
+.ws .ws-part.marked { border-style: solid; border-color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--ink); }
+.ws .ws-part.marked.on { box-shadow: 0 0 0 1.5px var(--accent-ink), inset 0 0 0 1.5px var(--ink); }
+.ws-stage.relating .ws-part.faint:not(.on) { opacity: .4; }
+.ws-ringkey { flex: none; width: calc(24 * var(--u)); height: calc(10 * var(--u)); min-height: 8px; box-sizing: border-box; border: 1px solid var(--ink); border-radius: 2px; box-shadow: inset 0 0 0 1.5px var(--ink); }
 .ws-tip { position: fixed; z-index: 30; left: 0; top: 0; max-width: 270px; padding: 5px 9px 6px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface-hover); box-shadow: 0 6px 18px #0000001a, 0 1px 3px #0000000f; font-size: 12.5px; line-height: 1.35; pointer-events: none; animation: ws-appear .12s both; }
 
 /* ---- the sheet: tiles in build order ---- */
@@ -380,6 +388,7 @@
 /* the error boundary's plain list */
 .ws-plain section { padding: 0 24px 18px; }
 .ws-plain h2 { font: 20px var(--serif); margin: 14px 0 6px; }
+.ws-plain h3 { font: 12px/14px var(--mono); letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); margin: 10px 0 4px; }
 
 @keyframes ws-rise { from { opacity: .2; transform: translateY(8px); } }
 @keyframes ws-show { from { opacity: .2; } }

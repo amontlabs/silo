@@ -259,6 +259,34 @@ pip. It has no entry for a part not decided: the map's key says what a dashed
 line means, and a screen reader still hears "not decided" for such a part. With no entry
 it draws nothing and is no list, but its empty box keeps the title row's height.
 
+What a part depends on: part X depends on part Y when an entry of X (a decision
+or a feature) names an entry of Y in `needs`, and Y starts before X in the plan's
+order. A part starts at its first feature in the order of `order.json`, or at its
+first entry when it has no feature. So no two parts depend on each other: when The
+engine and The record name each other, only the one that starts later depends on
+the other. A need inside a part, and a need of a decision of Product, say nothing.
+The build computes it (`partDepends` in `data.ts`) and gives each part `dependsOn`,
+as part ids in the order of the map (`places` of the layout), then the parts the
+map does not place.
+
+On the full map, while the pointer is on a part or the keyboard's focus is, the
+parts it depends on are marked with a second, inner outline in the ink (`marked`),
+a difference in shape and weight that needs no colour, and every other part fades
+to 40 % (`faint`). Nothing is shown for the parts that depend on it. A part stays
+marked while the pointer is on it or the keyboard's focus is; when they are on
+different parts, the pointer's part wins, and the marks go when neither is on a
+part. The colours of the states and the ring of the open part stay as they are,
+and the wires and their words do not change. The fade covers the whole part, the
+accent of one that is next or being built included, since it lasts only while the
+pointer or the focus is on another part. The map's key gains a line, a sample of
+the ring and "it depends on", only while some part is marked. What a screen reader
+hears for a part on the map gains "Depends on A, B." in the order of the map, since
+it cannot see the marks; a part that depends on none gets no sentence. In the folded
+strip nothing is marked or faded. The tip of a part, on the map and in the strip, is
+the part's line (with its title in the strip) and lists no part. It never covers its
+part while it fits below it, or else above it: it goes below when it fits there,
+above otherwise, and is pulled 8 px inside the window only when it fits in neither.
+
 A layout as written (`MapLayout`: `SILO_MAP`, the example, `NO_MAP`) has `rests`
 and no mark of not decided. The page gets the layout from `pageLayout`
 (`PageLayout`): no `rests`, never the layout's `file`, and `undecided: true` on
@@ -309,8 +337,8 @@ signed in, the load pending) and writes it into `dist/workshop/index.html`: the
 title row with its places, the map when there is one and the tiles in
 `#workshop-root`, "Sign in with GitHub" in the header's account slot (with its
 tooltip), and, in the page's `<noscript>`, the line
-that says what needs JavaScript followed by every part with its decisions and
-features and then the decisions of Product, as a plain list (id,
+that says what needs JavaScript followed by every part with its features and
+then its decisions, and then the decisions of Product, as a plain list (id,
 name, state, and "Replaced by" for a replaced decision; `NoScript.tsx`). The root and the slot carry `data-prerendered`
 until the script takes over. A
 prerender that throws fails the build; the dev server does not prerender.
@@ -335,7 +363,7 @@ its script arrives:
   taken over after 4 s, or the page fails to render and shows the plain list),
   `ws-bare` goes on `<html>`: everything the build drew shows, and the drawn
   "Sign in with GitHub" replaces the placeholder, marker or not. The plain list
-  (`Boundary.tsx`) gives each part's decisions and features with their state,
+  (`Boundary.tsx`) gives each part's features and then its decisions with their state,
   then the decisions of Product.
 - Without JavaScript the tiles show and, under them, the line that says what
   needs JavaScript and the plain list of every part's rows and Product's. The list is inside `<noscript>`, so a browser that runs the script
@@ -377,8 +405,12 @@ What a person sees:
   the next one starts from there; Back, Forward and any other move end it at
   once. With
   reduced motion, none of these moves animates.
-- A part's rows are its decisions and features, in the order of `order.json`,
-  drawn by the same row. The page says how far an entry is in one set of
+- A part's rows are its features, under the heading "Features", then its
+  decisions, under "Decisions"; each group keeps the order of `order.json`, and
+  the same row draws both. A group with no row shows nothing, its heading
+  included. "Left out", the page without JavaScript and the plain list shown
+  when the page fails group their rows the same way; Product holds decisions
+  only and has no heading. The page says how far an entry is in one set of
   words: not decided, decided, being built, built (`plan/README.md`, "States").
   A feature is decided (taken, ready or not), being built (its file says
   `started`), built (its file says `built`), dropped, or not decided. A row not
