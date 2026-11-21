@@ -19,6 +19,9 @@ Read this before you build a page or a screen: the site, the Workshop, the app.
   hover, focus, pressed and disabled. No native dropdown and no new colour.
 - Every state is designed before it is built: empty, one result, hundreds, opened, filtered,
   loading, light and dark, wide and narrow.
+- Before a page is designed, write its paths: each kind of person it should interest, what each
+  wants to know, and each thing they look at or press to find it. Then fit the paths together, and
+  decide what a person sees first. A design that serves every path looks obvious afterwards.
 - A view that is new, or that changes how a page is used, is drawn first as a static page with
   real content, by an agent given these rules and nothing to build. The owner looks at the
   picture before anyone builds it.
