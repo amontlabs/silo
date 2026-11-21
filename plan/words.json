@@ -129,5 +129,9 @@
   {
     "word": "panel",
     "means": "A view in the app that an extension creates through a tool, and that the app draws."
+  },
+  {
+    "word": "wakes on",
+    "means": "Said of an extension: what makes its computer run something. \"Triggered\" is kept for a rule or a precaution."
   }
 ]

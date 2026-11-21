@@ -4,20 +4,9 @@
   "needs": [
     "extension-manifest"
   ],
-  "sets": [
-    {
-      "in": "words",
-      "word": "wakes on",
-      "means": "Said of an extension: what makes its computer run something. \"Triggered\" is kept for a rule or a precaution."
-    },
-    {
-      "in": "extensions/properties",
-      "id": "what-wakes-an-extension-is-shown",
-      "says": "The user can always see what wakes the computer of an extension.",
-      "kind": "safety",
-      "check": [
-        "test"
-      ]
-    }
-  ]
+  "adds": [
+    "wakes-on",
+    "what-wakes-an-extension-is-shown"
+  ],
+  "verdict": "take"
 }

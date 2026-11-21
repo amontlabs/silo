@@ -39,5 +39,13 @@
     "check": [
       "hostile test"
     ]
+  },
+  {
+    "id": "what-wakes-an-extension-is-shown",
+    "says": "The user can always see what wakes the computer of an extension.",
+    "kind": "safety",
+    "check": [
+      "test"
+    ]
   }
 ]
