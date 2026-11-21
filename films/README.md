@@ -10,7 +10,9 @@ what a decision sets. A visitor watches one to understand a part.
   texts of the statements it sets or added (in its `sets` before a take, in the plan's lists after
   it), what it removes, what it keeps, its surfaces; or it was dropped, replaced or deleted. A take
   alone does not count, a change undone since does not count, and an entry is found by its id
-  wherever its file is. One rule says it, in `tools/behind.mjs`; the Workshop marks a film behind
+  wherever its file is. An entry the film shows that did not exist at the film's commit makes it
+  behind too; an id that is an entry at neither end (a statement of the plan's lists the film also
+  shows) is not looked at. One rule says it, in `tools/behind.mjs`; the Workshop marks a film behind
   with the same code. `node tools/behind.mjs <id>`, run from `films/`, prints for that film each
   entry it is behind on and what changed in it, or that it is up to date; with no id, every film.
   A film stays behind until a commit touches its folder (see [Changing a film](#changing-a-film)).
