@@ -22,9 +22,10 @@ of the features built so far.
 
 Other work does not need them.
 
-- The old code stays outside this tree. It is frozen at the tag `legacy-2026-11-16` and checked out
-  in `~/code/projects/silo-legacy`. It is read only when needed, through a fresh agent dedicated
-  to that lookup, which brings back only what is relevant.
+- The old code stays outside this tree. It is frozen at the tag `legacy-2026-11-16` of this
+  repository and is not checked out: `git show legacy-2026-11-16:<path>` prints one file, and
+  `git grep <text> legacy-2026-11-16` searches it. It is read only when needed, through a fresh
+  agent dedicated to that lookup, which brings back only what is relevant.
 - Work on MicroSandbox or libkrun itself (a bug we found, an upstream PR) happens in
   `~/code/projects/msb-upstream`. Read its `AGENTS.md` first; other work does not need it.
 
