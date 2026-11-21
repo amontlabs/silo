@@ -13,7 +13,8 @@
 // Exit status: 0 when every film named is up to date (or the check was written), 1 when one is behind, cannot be read,
 // or is not behind for --holds, 2 on wrong use.
 import { execFileSync } from 'node:child_process';
-import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { closeSync, constants, existsSync, lstatSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { wordId } from '../../tools/plan/model/index.js';
@@ -317,10 +318,23 @@ export function filmBehind(repository, name, shows, sources = {}) {
 
 /** @typedef {{ id: string, title: string, line: string, shows: string[], behind: string[] }} FilmInfo */
 
-/** The real folders directly under films/ that hold a film.json, by name. @param {string} dir */
+/**
+ * The real folders directly under films/ that hold a film.json, by name. A folder that cannot be searched (its
+ * film.json cannot be looked for) is kept, so that reading its film.json fails and says why, never dropped silently.
+ * @param {string} dir
+ */
 function filmFolders(dir) {
   if (!existsSync(dir)) return [];
-  return readdirSync(dir).sort().filter((name) => !name.startsWith('.') && lstatSync(join(dir, name)).isDirectory() && existsSync(join(dir, name, 'film.json')));
+  return readdirSync(dir).sort().filter((name) => {
+    if (name.startsWith('.') || !lstatSync(join(dir, name)).isDirectory()) return false;
+    try {
+      lstatSync(join(dir, name, 'film.json'));
+      return true;
+    } catch (error) {
+      const code = /** @type {{ code?: string }} */ (error).code;
+      return code !== 'ENOENT' && code !== 'ENOTDIR';
+    }
+  });
 }
 
 /**
@@ -388,20 +402,27 @@ function readChecked(dir, name) {
   const shown = `films/${name}/checked.md`;
   const of = lstatSync(folder);
   if (of.isSymbolicLink() || !of.isDirectory()) return { refused: `films/${name}: is not a plain folder, so ${shown} is not written. Fix: make the film a real folder directly under films/.` };
-  let fd;
+  const file = join(folder, 'checked.md');
+  // Its kind is read without opening it: opening a named pipe, say, would block.
+  let kind;
   try {
-    // O_NOFOLLOW: a symbolic link named checked.md is refused here, not followed.
-    fd = openSync(join(folder, 'checked.md'), constants.O_RDONLY | constants.O_NOFOLLOW);
+    kind = lstatSync(file);
   } catch (error) {
     const code = /** @type {{ code?: string }} */ (error).code;
     if (code === 'ENOENT') return '';
-    if (code === 'ELOOP' || code === 'EMLINK') return { refused: `${shown}: is a link, so it is not written. Fix: replace it with a plain file, or remove it.` };
+    return { refused: `${shown}: cannot be read (${code ?? String(error)}), so it is not written.` };
+  }
+  if (kind.isSymbolicLink()) return { refused: `${shown}: is a link, so it is not written. Fix: replace it with a plain file, or remove it.` };
+  if (!kind.isFile()) return { refused: `${shown}: is not a plain file, so it is not written. Fix: remove it.` };
+  if (kind.nlink > 1) return { refused: `${shown}: is a hard link, shared with another file, so it is not written. Fix: replace it with a copy of its own.` };
+  let fd;
+  try {
+    fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    const code = /** @type {{ code?: string }} */ (error).code;
     return { refused: `${shown}: cannot be read (${code ?? String(error)}), so it is not written.` };
   }
   try {
-    const stat = fstatSync(fd);
-    if (!stat.isFile()) return { refused: `${shown}: is not a plain file, so it is not written. Fix: remove it.` };
-    if (stat.nlink > 1) return { refused: `${shown}: is a hard link, shared with another file, so it is not written. Fix: replace it with a copy of its own.` };
     return readFileSync(fd, 'utf8');
   } finally {
     closeSync(fd);
@@ -414,15 +435,20 @@ function readChecked(dir, name) {
  * @param {string} dir films/
  * @param {string} name
  * @param {string} text
+ * @param {string} [tempName] the name of the new file, random by default
  */
-function writeChecked(dir, name, text) {
+export function writeChecked(dir, name, text, tempName = `.checked.md.${randomBytes(12).toString('hex')}.tmp`) {
+  // A link put in place of checked.md, of the film's folder or of films/ while this runs is not guarded against: the
+  // command runs in the person's own checkout, and whoever can change it during the run can already write anywhere in it.
   const folder = join(dir, name);
-  const temp = join(folder, `.checked.md.${process.pid}.tmp`);
+  const temp = join(folder, tempName);
+  // 'wx' fails on a file already there; only a file this run made is ever removed.
+  writeFileSync(temp, text, { flag: 'wx' });
   try {
-    writeFileSync(temp, text, { flag: 'wx' });
     renameSync(temp, join(folder, 'checked.md'));
-  } finally {
+  } catch (error) {
     rmSync(temp, { force: true });
+    throw error;
   }
 }
 
@@ -463,8 +489,9 @@ export function main(args, repository = resolve(dirname(fileURLToPath(import.met
     console.error(`${names[0]}: --holds needs the reason the film still holds, quoting what the film says.\n${USAGE}`);
     return 2;
   }
-  if (holds && (/[\r\n]/.test(why ?? '') || (why ?? '').includes('```'))) {
-    console.error(`${names[0]}: the reason is one line of plain text: no line break and no three backticks in a row. Write it as one or two sentences, and quote what the film says between double quotes.`);
+  // No control character (CR, LF, tab, NEL…), no line or paragraph separator (U+2028, U+2029), no code fence.
+  if (holds && (/[\p{Cc}\p{Zl}\p{Zp}]/u.test(why ?? '') || (why ?? '').includes('```'))) {
+    console.error(`${names[0]}: the reason is one line of plain text: no line break or other control character, and no three backticks in a row. Write it as one or two sentences, and quote what the film says between double quotes.`);
     return 2;
   }
   const dir = join(repository, 'films');

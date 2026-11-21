@@ -1,10 +1,10 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { canonicalText } from '../../../tools/plan/model/index.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { main as behindCommand } from '../../../films/tools/behind.mjs';
+import { main as behindCommand, writeChecked } from '../../../films/tools/behind.mjs';
 import { loadDir } from '../../../tools/plan/read/index.js';
 import { buildDataFrom, factsFrom, filmOrder, historiesFrom, historyFromGit, layoutPlanFrom, notesFrom, planDir, readBuildData, readFilms, readHistories, readHistory, printedChanged, printedChanges, unshallow } from './data';
 import type { Git } from './data';
@@ -984,6 +984,58 @@ describe('the films', () => {
       expect(lines.some((line) => line.startsWith('one: behind the plan'))).toBe(true);
       expect(behindCommand(['bad', '--holds', 'Still.'], root)).toBe(1);
       expect(existsSync(join(root, 'films/bad/checked.md'))).toBe(false);
+    });
+  });
+
+  it('write a check by a new file of its own, and remove only a file this run made', () => {
+    behindRepository((root, write) => {
+      const films = join(root, 'films');
+      write('films/one/checked.md', 'Before.\n');
+      // A file already there under the name asked for: the write fails, and that file and checked.md stay as they were.
+      write('films/one/.taken.tmp', 'Not ours.\n');
+      expect(() => writeChecked(films, 'one', 'After.\n', '.taken.tmp')).toThrow();
+      expect(readFileSync(join(films, 'one/.taken.tmp'), 'utf8')).toBe('Not ours.\n');
+      expect(readFileSync(join(films, 'one/checked.md'), 'utf8')).toBe('Before.\n');
+      // By default the name is random: two runs leave only checked.md.
+      rmSync(join(films, 'one/.taken.tmp'));
+      writeChecked(films, 'one', 'First.\n');
+      writeChecked(films, 'one', 'Second.\n');
+      expect(readFileSync(join(films, 'one/checked.md'), 'utf8')).toBe('Second.\n');
+      expect(execFileSync('ls', ['-a', join(films, 'one')], { encoding: 'utf8' }).split('\n').filter(Boolean)).toEqual(['.', '..', 'checked.md', 'film.json']);
+    });
+  });
+
+  it('refuse a checked.md that is a named pipe without opening it', () => {
+    behindRepository((root) => {
+      execFileSync('mkfifo', [join(root, 'films/one/checked.md')]);
+      // Opening the pipe would block here for ever.
+      expect(behindCommand(['one', '--holds', 'Still.'], root)).toBe(1);
+      expect(lstatSync(join(root, 'films/one/checked.md')).isFIFO()).toBe(true);
+    });
+  });
+
+  it('take no line or paragraph separator and no control character in a reason', () => {
+    behindRepository((root) => {
+      for (const why of ['Still.\u2028Again.', 'Still.\u2029Again.', 'Still.\u0085Again.', 'Still.\tAgain.', 'Still.\u0007', 'Still.\u000bAgain.']) {
+        expect(behindCommand(['one', '--holds', why], root)).toBe(2);
+      }
+      expect(existsSync(join(root, 'films/one/checked.md'))).toBe(false);
+    });
+  });
+
+  it('name a film whose folder cannot be searched as a film that cannot be read', () => {
+    behindRepository((root, write) => {
+      write('films/locked/film.json', JSON.stringify({ id: 'locked', title: 'Locked', line: 'L.', shows: [] }));
+      chmodSync(join(root, 'films/locked'), 0o600);
+      try {
+        const log = vi.mocked(console.log);
+        expect(behindCommand([], root)).toBe(1);
+        const lines = log.mock.calls.map((call) => String(call[0]));
+        expect(lines.some((line) => line.startsWith('locked: cannot be read: films/locked/film.json: '))).toBe(true);
+        expect(lines.some((line) => line.startsWith('one: behind the plan'))).toBe(true);
+      } finally {
+        chmodSync(join(root, 'films/locked'), 0o755);
+      }
     });
   });
 
