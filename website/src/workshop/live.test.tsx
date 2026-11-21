@@ -475,7 +475,8 @@ describe('`me`', () => {
     expect(screen.getByText('polarzero')).toBeInTheDocument();
     expect(await screen.findByText('mara-k')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Decisions' })).not.toBeInTheDocument();
-    expect(JSON.parse(localStorage.getItem(PERSON) ?? '{}').login).toBe('mara-k');
+    // The page writes the person it now shows from an effect, which runs after the name is on screen.
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(PERSON) ?? '{}').login).toBe('mara-k'));
   });
 });
 
