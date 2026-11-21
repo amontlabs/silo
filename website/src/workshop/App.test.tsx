@@ -310,6 +310,18 @@ describe('the places of the title row', () => {
       await waitFor(() => expect(screen.getByRole('link', { name })).toHaveFocus());
     }
   });
+
+  it('returns to the link of the place being closed, not to the one that opened an earlier place', async () => {
+    mockApi({ me: owner });
+    await renderApp();
+    await userEvent.click(screen.getByRole('link', { name: 'Product' }));
+    // The address changed by hand: Latest is reached by its address, with no opener of its own.
+    act(() => { location.hash = '#latest'; });
+    await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Latest' })).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: /← Full map/ }));
+    await waitFor(() => expect(location.hash).toBe(''));
+    await waitFor(() => expect(screen.getByRole('link', { name: 'Latest' })).toHaveFocus());
+  });
 });
 
 describe('text written on GitHub', () => {

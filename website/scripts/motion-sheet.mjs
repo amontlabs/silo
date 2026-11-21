@@ -9,7 +9,9 @@
 // It exits non-zero when, in any move,
 // - a box it follows turns back: its top or its height goes more than 2 px one way, then more than 2 px the other;
 // - a box that stays in the document goes from an opacity above 0.9 to one below 0.1 between two frames;
-// a flow where one of these is meant names it in MEANT, with its reason. And it exits non-zero when
+// a move where one of these is meant for some boxes names the check and those boxes in MEANT, with its reason. Each
+// check counts from the last sample before the action, so a change in the first frame counts too. And it exits
+// non-zero when
 // - in a move between the plain view and a place, the scroll position takes more than one new value;
 // - `.ws-detail` runs `ws-rise` while a `::view-transition-*(detail)` animation runs, or a group named `hero` animates;
 // - a move between two places runs any `::view-transition-*` animation;
@@ -17,7 +19,7 @@
 // - a comment's height or the comment box's top changes when the comment is confirmed;
 // - a row's opening or closing covers more than 16% of its way in its first frame;
 // - Map to Order or back, with a place open: the place or the footer goes under an opacity of 0.95, or the place's top
-//   takes one step of more than 30 px.
+//   takes one step of more than 30 px, or the place or the footer is missing from a frame.
 // On a page with a map, the moves on the tiles run in Order, where the tiles are; the flows named map-* run on the map, at
 // 1440 x 900: the map to a part and back, a scrolled map to a part and back from a scrolled part, Map to Order and back
 // on the plain view and with a part and a row open.
@@ -95,6 +97,9 @@ const MEASURES = { top: 1, height: 3 };
 /** How far a box may go one way, then the other, before it counts as turning back, in px. */
 const TURN = 2;
 
+/** The samples from the last one before the action on. */
+const fromAction = (rows, t0) => rows.slice(Math.max(0, rows.findIndex((row) => row.t >= t0) - 1));
+
 /**
  * The boxes in `keys` that turn back after the action: for each, its top or its height as a list of runs, a run being
  * the sum of the changes of one sign in a row; two runs in a row of more than TURN px each are a turn. A box is read
@@ -105,7 +110,7 @@ function turnsOf(rows, t0, keys) {
   for (const key of keys) {
     for (const [measure, index] of Object.entries(MEASURES)) {
       const drawn = (box) => box && (box[2] > 0 || box[3] > 0);
-      const series = rows.filter((row) => row.t >= t0 && drawn(row[key])).map((row) => ({ t: row.t - t0, v: row[key][index] }));
+      const series = fromAction(rows, t0).filter((row) => drawn(row[key])).map((row) => ({ t: row.t - t0, v: row[key][index] }));
       const runs = [];
       for (let i = 1; i < series.length; i += 1) {
         const d = series[i].v - series[i - 1].v;
@@ -125,26 +130,34 @@ function turnsOf(rows, t0, keys) {
   return found;
 }
 
-/** The boxes in `keys` that go from an opacity above 0.9 to one below 0.1 between two frames, staying in the document. */
+/**
+ * The boxes in `keys` that go from an opacity above 0.9 to one below 0.1 from one frame where they are found to the next
+ * one, missing frames in between or not.
+ */
 function dropsOf(rows, t0, keys) {
   const found = [];
   for (const key of keys) {
-    for (let i = 1; i < rows.length; i += 1) {
-      const [a, b] = [rows[i - 1][key], rows[i][key]];
-      if (rows[i].t < t0 || !a || !b || !(a[4] > 0.9 && b[4] < 0.1)) continue;
-      found.push(`${key} goes from opacity ${a[4]} to ${b[4]} in one frame (+${rows[i].t - t0} ms)`);
-      break;
+    let last = null;
+    for (const row of fromAction(rows, t0)) {
+      const box = row[key];
+      if (!box) continue;
+      if (last && last[4] > 0.9 && box[4] < 0.1) {
+        found.push(`${key} goes from opacity ${last[4]} to ${box[4]} in one frame (+${row.t - t0} ms)`);
+        break;
+      }
+      last = box;
     }
   }
   return found;
 }
 
-/** The problems of a move, from what was sampled after the action; `meant` names the checks the move skips. */
+/** The problems of a move, from what was sampled around the action; `meant` names, per check, the boxes it skips. */
 function problemsOf(kind, rows, t0, keys, meant = {}) {
   const after = rows.filter((row) => row.t >= t0);
   const problems = [];
-  if (!meant.turns) problems.push(...turnsOf(rows, t0, keys));
-  if (!meant.drops) problems.push(...dropsOf(rows, t0, keys));
+  const checked = (check) => keys.filter((key) => !meant[check]?.boxes.includes(key));
+  problems.push(...turnsOf(rows, t0, checked('turns')));
+  problems.push(...dropsOf(rows, t0, checked('drops')));
   const any = (test) => after.some((row) => row.running.some(test));
   if (any((id) => id.includes('(hero)'))) problems.push('a group named hero animates');
   const overlap = after.find((row) => row.running.some((id) => id.includes('|ws-detail|ws-rise')) && row.running.some((id) => /^::view-transition-[a-z-]+\(detail\)/.test(id)));
@@ -181,10 +194,12 @@ function problemsOf(kind, rows, t0, keys, meant = {}) {
   if (kind === 'swap') {
     // With a place open, Map and Order swap the strip only: the place and the footer stay, the place slides.
     for (const key of ['detail', 'foot']) {
+      const missing = after.find((row) => !row[key]);
+      if (missing) problems.push(`${key} is missing (+${missing.t - t0} ms)`);
       const low = after.find((row) => row[key] && row[key][4] < 0.95);
       if (low) problems.push(`${key}'s opacity goes to ${low[key][4]} (+${low.t - t0} ms)`);
     }
-    const tops = after.filter((row) => row.detail).map((row) => ({ t: row.t - t0, v: row.detail[1] }));
+    const tops = fromAction(rows, t0).filter((row) => row.detail).map((row) => ({ t: row.t - t0, v: row.detail[1] }));
     const step = tops.slice(1).find((top, i) => Math.abs(top.v - tops[i].v) > 30);
     if (step) problems.push(`the place's top takes a step of ${Math.round(step.v - tops[tops.indexOf(step) - 1].v)} px (+${step.t} ms)`);
   }
@@ -231,7 +246,7 @@ async function capture(out, page, name, action, { selectors = ROWS, kind = null,
   await client.detach().catch(() => {});
 
   const problems = problemsOf(kind, data.rows, t0, Object.keys(selectors), meant);
-  const skipped = Object.entries(meant).map(([check, why]) => `${check} not checked: ${why}`);
+  const skipped = Object.entries(meant).map(([check, { boxes, why }]) => `${check} not checked for ${boxes.join(', ')}: ${why}`);
   const lines = [`## ${name}  ${frames.length} frames${kind ? `  checked as: ${kind}` : ''}`, ...skipped];
   for (const key of ['y', 'sx', ...Object.keys(selectors)]) {
     let last;
@@ -272,11 +287,17 @@ const ROWS = { title: '#ws-part-title', back: '.ws-back', board: '.ws-board', de
 /** What the map's moves read: the stage, the part opened, a part inside another, a wire's word, the back control and the detail. */
 const MAP_ROWS = { stage: '.ws-stage', opened: '.ws-part.on', inner: '.ws-part.inner', views: '.ws-part[data-part="views"]', word: '.ws-wl', back: '.ws-back', detail: '.ws-detail', places: '.ws-places' };
 /**
- * The moves where a check is meant to fail, by the sheet's name: the check (`turns` or `drops`) and why. A move between
- * the plain view and a place replaces what the selectors find, so a box named the same can be another one.
+ * The moves where a check is meant to fail for some boxes, by the sheet's name: per check (`turns` or `drops`), the
+ * boxes it skips and why. Every other box of the move is checked. A move between places replaces what the selectors
+ * find, so a box named the same can be another one.
  */
 const MEANT = {
-  'part-to-part': { turns: 'the new place replaces the old one at once and rises 8 px into its place (ws-rise), as a place opened after the first frames does; the boxes followed are the new place\'s, which start 8 px lower' },
+  'part-to-part': {
+    turns: {
+      boxes: ['title', 'back', 'detail', 'row1', 'row2'],
+      why: 'the new place replaces the old one at once and rises 8 px into its place (ws-rise), as a place opened after the first frames does; these boxes are the new place\'s, which start 8 px lower',
+    },
+  },
 };
 const click = (selector) => async (page) => { await page.locator(selector).first().click({ noWaitAfter: true }); };
 const tileOf = (part) => `.ws-tile[data-part="${part}"] .ws-tile-hit`;

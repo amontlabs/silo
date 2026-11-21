@@ -82,14 +82,6 @@ const still = () => media('(prefers-reduced-motion: reduce)', true);
 /** The width from which the map shows; narrower, the tiles. */
 const wide = () => media('(min-width: 1200px)', true);
 
-/** A selector that finds the same control again after the page re-renders. */
-function selectorOf(node: Element | null): string | null {
-  if (!(node instanceof HTMLElement)) return null;
-  const href = node.getAttribute('href');
-  const name = [...node.classList][0];
-  if (href && name) return `a.${name}[href="${href}"]`;
-  return null;
-}
 
 /** Scrolls the page the least needed for the element to be in view under the sticky header, at once. */
 function reveal(node: Element) {
@@ -190,10 +182,9 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   const [openings, setOpenings] = useState(0);
   const [view, setViewState] = useState<View>(initialView);
   const [leaving, setLeaving] = useState(false);
-  // Map and Order swapping: on the plain view everything under the title row (`swap`); with a place open, the strip
-  // alone (`strip`).
+  // Map and Order swapping. What swaps is read from what is shown at each render: on the plain view everything under the
+  // title row (`swap-*`), with a place open the strip alone (`strip-*`).
   const [swap, setSwap] = useState<'out' | 'in' | null>(null);
-  const [strip, setStrip] = useState<'out' | 'in' | null>(null);
   // After going back from a scrolled part on the map, the map stays pinned under the header until the scroll to the top
   // has brought its own place below that line: unpinned sooner, it would jump up, then come down with the scroll.
   const [pinned, setPinned] = useState(false);
@@ -213,8 +204,6 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   const wantedHash = useRef<string | null>(null);
   /** A row named by the address while the live state loads; it opens once the state is there. */
   const heldOpen = useRef<string | null>(null);
-  /** The link of the title row that opened a place that is not a part, to return focus to. */
-  const opener = useRef<string | null>(null);
   const foldedAt = useRef(0);
   /** The scroll driven by the fold, from a scrolled full map. */
   const lift = useRef<{ frame: number; from: number; full: number } | null>(null);
@@ -234,7 +223,8 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   const transition = useRef<ViewTransitionLike | null>(null);
   /** Where the place and the footer were on screen before Map and Order swapped with a place open, to slide from. */
   const slideFrom = useRef<{ node: HTMLElement; top: number }[] | null>(null);
-  const slideTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  /** The slides of the place and the footer under way. */
+  const slides = useRef<Animation[]>([]);
   // Once who is signed in is known, the account slot takes the width of what it holds (see workshop.css).
   useEffect(() => {
     if (!accountSlot) return;
@@ -263,7 +253,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   useEffect(() => () => {
     [...timers.current, ...swapTimers.current].forEach(clearTimeout);
     clearTimeout(heldHeight.current);
-    clearTimeout(slideTimer.current);
+    endSlide();
     if (lift.current) cancelAnimationFrame(lift.current.frame);
     clearMark();
   }, []);
@@ -281,6 +271,9 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
 
   const shown: Place = place;
   const isHome = shown.kind === 'home';
+  /** Whether the plain view is shown, for what runs later than this render (the swap when it applies). */
+  const homeRef = useRef(isHome);
+  homeRef.current = isHome;
   const onMap = () => view === 'map' && wide();
 
   /** Moves to a place, with at most the one row open. */
@@ -319,9 +312,30 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   }
 
   /**
+   * Ends the slide of the place and the footer at once, and drops one about to start. `hold` leaves them where they are
+   * on screen, for the next swap to slide from there; otherwise they land where the page puts them. Whatever ends a
+   * swap calls it: Back and Forward, a new move, another press of Map or Order. It only touches refs and the page.
+   */
+  function endSlide(hold = false) {
+    slideFrom.current = null;
+    for (const animation of slides.current) {
+      if (hold) {
+        try {
+          animation.commitStyles();
+        } catch {
+          // Not rendered: nothing to hold.
+        }
+      }
+      animation.cancel();
+    }
+    slides.current = [];
+    if (!hold) document.querySelectorAll<HTMLElement>('.ws-detail, .ws-foot').forEach((node) => { node.style.translate = ''; });
+  }
+
+  /**
    * A new move starts: what an earlier one left waiting (the end of going back, a view transition's update) never
-   * lands after it, its view transition ends at once with its mark, so no picture of it covers this move, and the
-   * height a going-back kept is let go at once. Returns this move's count.
+   * lands after it, its view transition ends at once with its mark, so no picture of it covers this move, the slide
+   * of a swap ends, and the height a going-back kept is let go at once. Returns this move's count.
    */
   function moveStarts(): number {
     // Counted first: the update of the transition skipped here, if the browser runs it now, finds it was overtaken.
@@ -330,6 +344,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     transition.current = null;
     overtaken?.skipTransition?.();
     clearMark();
+    endSlide();
     timers.current.forEach(clearTimeout);
     timers.current = [];
     clearTimeout(heldHeight.current);
@@ -423,11 +438,11 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   function back() {
     // A going-back under way lands at its time: a second one (the button pressed twice, Escape again) changes nothing.
     if (isHome || backUnderWay()) return;
-    // A place reached by its address has no opener: the link of the title row that leads to it takes the focus, or the
-    // page's title when there is none.
+    // The link of the title row that leads to the place being closed takes the focus, however the place was reached, or
+    // the page's title when there is none.
     // Off the map, with a view transition or without one, it is brought into view; the map has its own going-back.
     const bring = !onMap();
-    const focus: Focus = shown.kind === 'part' ? { kind: 'part', part: shown.part, bring } : { kind: 'selector', selector: opener.current ?? `.ws-places a[href="${formatHash(shown)}"]`, bring };
+    const focus: Focus = shown.kind === 'part' ? { kind: 'part', part: shown.part, bring } : { kind: 'selector', selector: `.ws-places a[href="${formatHash(shown)}"]`, bring };
     const finish = () => go(HOME, null, { push: true, focus, announce: '' });
     if (still()) {
       finish();
@@ -467,7 +482,6 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     // From a scrolled full map, the fold drives the scroll back to the top: each frame the page is scrolled in
     // proportion to how far the map has folded, so every box travels one way during the fold.
     if (isHome && onMap() && scrollY > 0 && !still()) startLift();
-    if (next.kind !== 'part') opener.current = selectorOf(document.activeElement);
     const title = next.kind === 'part' ? plan.parts.find((group) => group.part.id === next.part)?.part.title : null;
     travel(() => go(next, null, { push: true, focus: { kind: 'title' }, announce: title ? `${title}, open` : '' }), isHome ? 'open' : null);
   }
@@ -532,7 +546,6 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
       swapTimers.current.forEach(clearTimeout);
       swapTimers.current = [];
       setSwap(null);
-      setStrip(null);
       const next = initialView();
       // On a wide screen the other view's panel is taken out of sight: the focus in it goes to the same part in the view
       // now shown, else to the title, rather than to the page itself.
@@ -655,25 +668,23 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   }, [pinned]);
 
   // Map and Order swapped with a place open: the place and the footer slide from where they were to where the new strip
-  // puts them, in one move. Measured with any slide under way, so a second swap starts from where it is.
+  // puts them, in one move. The slide is an animation of `translate` of its own, so it leaves every transition of the
+  // place and the footer (the fade of going back) as it is.
   useLayoutEffect(() => {
     const from = slideFrom.current;
     if (!from) return;
     slideFrom.current = null;
-    clearTimeout(slideTimer.current);
-    const moving = from.filter(({ node }) => node.isConnected).map(({ node, top }) => {
-      node.style.transition = 'none';
-      node.style.transform = '';
-      return { node, by: top - node.getBoundingClientRect().top };
-    }).filter(({ by }) => Math.abs(by) >= 1);
-    for (const { node, by } of moving) node.style.transform = `translateY(${by}px)`;
-    if (!moving.length) return;
-    moving[0].node.getBoundingClientRect();
-    for (const { node } of moving) {
-      node.style.transition = `transform ${SLIDE_MS}ms var(--ease)`;
-      node.style.transform = '';
+    const ease = getComputedStyle(document.documentElement).getPropertyValue('--ease').trim() || 'cubic-bezier(.3, .7, .2, 1)';
+    for (const { node, top } of from) {
+      // Where a held slide left it, until it slides from there.
+      node.style.translate = '';
+      if (!node.isConnected || typeof node.animate !== 'function') continue;
+      const by = top - node.getBoundingClientRect().top;
+      if (Math.abs(by) < 1) continue;
+      const animation = node.animate([{ translate: `0 ${by}px` }, { translate: '0 0' }], { duration: SLIDE_MS, easing: ease });
+      slides.current.push(animation);
+      animation.finished.then(() => { slides.current = slides.current.filter((one) => one !== animation); }, () => {});
     }
-    slideTimer.current = setTimeout(() => moving.forEach(({ node }) => { node.style.transition = ''; }), SLIDE_MS + 40);
   }, [view]);
 
   // Map or Order. The swap runs on its own timers: a navigation in the middle never leaves it half done.
@@ -688,21 +699,24 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
       history.replaceState(history.state, '', `${location.pathname}${search ? `?${search}` : ''}${location.hash}`);
     };
     swapTimers.current.forEach(clearTimeout);
+    // A swap under way ends here: its slide stops where it is, and the next one starts from there.
+    endSlide(true);
     setSwap(null);
-    setStrip(null);
     if (still() || !wide()) {
+      endSlide();
       apply();
       return;
     }
     // On the plain view, everything under the title row swaps. With a place open, only the strip does: the place and
-    // the footer stay and slide to their new height.
-    const set = isHome ? setSwap : setStrip;
-    set('out');
+    // the footer stay and slide to their new height. Which one is read when it applies, from what is shown then.
+    setSwap('out');
     swapTimers.current = [setTimeout(() => {
-      slideFrom.current = isHome ? null : [...document.querySelectorAll<HTMLElement>('.ws-detail, .ws-foot')].map((node) => ({ node, top: node.getBoundingClientRect().top }));
+      const from = homeRef.current ? null : [...document.querySelectorAll<HTMLElement>('.ws-detail, .ws-foot')].map((node) => ({ node, top: node.getBoundingClientRect().top }));
+      endSlide(from !== null);
+      slideFrom.current = from;
       apply();
-      set('in');
-      swapTimers.current.push(setTimeout(() => set(null), 300));
+      setSwap('in');
+      swapTimers.current.push(setTimeout(() => setSwap(null), 300));
     }, SWAP_MS)];
   }
 
@@ -774,7 +788,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   if (isHome) entrance.current = null;
   else if (entrance.current?.place !== formatHash(shown)) entrance.current = { place: formatHash(shown), fade: openKey !== null };
   const detailClass = formatHash(shown) === firstPlace.current ? 'ws-detail ws-still' : entrance.current?.fade ? 'ws-detail ws-fade' : 'ws-detail';
-  const classes = ['ws', isHome ? 'is-sheet' : 'is-open', `v-${view}`, leaving ? 'ws-leaving' : '', swap ? `swap-${swap}` : '', strip ? `strip-${strip}` : '', boot ? 'ws-boot' : '', lifting ? 'ws-lifting' : '', held ? 'ws-keeping' : '', pinned ? 'ws-pinned' : '',
+  const classes = ['ws', isHome ? 'is-sheet' : 'is-open', `v-${view}`, leaving ? 'ws-leaving' : '', swap && isHome ? `swap-${swap}` : '', swap && !isHome ? `strip-${swap}` : '', boot ? 'ws-boot' : '', lifting ? 'ws-lifting' : '', held ? 'ws-keeping' : '', pinned ? 'ws-pinned' : '',
     arrivedState ? 'ws-arr-s' : '', arrivedPerson ? 'ws-arr-p' : ''].filter(Boolean).join(' ');
   return (
     <>

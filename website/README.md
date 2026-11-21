@@ -144,16 +144,18 @@ of the scroll and of each element's box and opacity, the animations that ran
 and the layout shifts. It exits with an error when, in any move, a box it
 follows turns back (its top or its height goes more than 2 px one way, then
 more than 2 px the other) or goes from an opacity above 0.9 to one below 0.1
-between two frames while it stays in the page. A move where one of these is
-meant is named in the script's `MEANT`, with its reason: from one part to
-another, the new place rises 8 px into place. It also exits with an error when
+from one frame where it is found to the next. These checks count from the last
+frame before the action. A move where one of them is meant for some boxes names
+those boxes in the script's `MEANT`, with its reason, and every other box is
+still checked: from one part to another, the new place rises 8 px into place.
+It also exits with an error when
 a move between the plain view and a place scrolls the page more than once,
 when a move between two places runs a view transition, when Notes opening
 grows its panel in fewer than four steps, when a comment changes height as it
 is confirmed, when a row's opening or closing covers more than 16% of its way
 in its first frame, or when Map and Order swap with a place open and the place
-or the footer goes under an opacity of 0.95 or the place's top takes one step
-of more than 30 px; the full list is at the top of `scripts/motion-sheet.mjs`.
+or the footer goes under an opacity of 0.95 or is missing from a frame, or the
+place's top takes one step of more than 30 px; the full list is at the top of `scripts/motion-sheet.mjs`.
 `npm test` does not run it either.
 
 To build and check the page on another plan than `plan/` (the real plan may be
@@ -304,7 +306,10 @@ What a person sees:
   title row, then fading it in 8 px low as it rises. With a place open, only
   the strip changes: the one that leaves fades out, the other fades in, and
   the place and the footer, which stay in sight, slide to their new height in
-  one move of 260 ms. A second press meanwhile starts from where they are. With
+  one move of 260 ms. Which of the two swaps runs is read when it applies, from
+  what is shown then. A second press meanwhile stops the slide where it is and
+  the next one starts from there; Back, Forward and any other move end it at
+  once. With
   reduced motion, none of these moves animates.
 - A part's rows are its decisions and features, in the order of `order.json`,
   drawn by the same row. A feature is planned (taken, ready or not), built (its
@@ -503,8 +508,8 @@ What a person sees:
   (`#suggested`). Under 1200 px they sit under the title, wrapping when they
   must. They are there on the plain view and in every place. The open one is in
   the ink colour and `aria-current`; pressed again, it goes back to the plain
-  view. Going back from such a place gives its link the focus, also when the
-  place was reached by its address. On the plain view, "Votes and comments are
+  view. Going back from such a place gives its own link the focus, however it
+  was reached (the row, its address, Back or Forward). On the plain view, "Votes and comments are
   offline." and "Sign-in did not complete." follow the text of the line under
   the title; in a place, they sit under its counts. The map or the tiles end on
   the footer's line. Latest (`#latest`) lists the newest 30

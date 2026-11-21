@@ -720,29 +720,48 @@ describe('going back off the map without a view transition', () => {
 });
 
 describe('Map and Order with a place open', () => {
+  /** The slides the page starts, through the browser's `animate`, which jsdom lacks. */
+  type Slide = { node: HTMLElement; keyframes: Keyframe[]; cancel: ReturnType<typeof vi.fn>; commitStyles: ReturnType<typeof vi.fn> };
+  let slides: Slide[] = [];
+  function slideRecorder() {
+    slides = [];
+    Object.defineProperty(HTMLElement.prototype, 'animate', {
+      configurable: true,
+      value(this: HTMLElement, keyframes: Keyframe[]) {
+        const slide = { node: this, keyframes, cancel: vi.fn(), commitStyles: vi.fn(), finished: new Promise(() => {}) };
+        slides.push(slide);
+        return slide;
+      },
+    });
+  }
+  /** The folded map is 93 px taller than the strip of tiles: the place is that much lower in Map. */
+  function placeAt() {
+    const plain = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (!this.matches('.ws-detail')) return plain.call(this);
+      const top = rootOf().classList.contains('v-map') ? 353 : 260;
+      return { x: 0, y: top, top, left: 0, right: 1000, bottom: top + 900, width: 1000, height: 900, toJSON() {} } as DOMRect;
+    });
+  }
+  const slideOf = (node: Element | null) => slides.filter((slide) => slide.node === node);
+  async function openPart() {
+    screenOf({ motion: true, wide: true, mode: 'absent' });
+    slideRecorder();
+    await mount();
+    act(() => { fireEvent.click(part('part-b')); });
+    await elapse(600);
+    placeAt();
+    return document.querySelector<HTMLElement>('.ws-detail')!;
+  }
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
     vi.restoreAllMocks();
+    delete (HTMLElement.prototype as Partial<HTMLElement>).animate;
   });
 
   it('swaps the strip alone: the place stays in sight and slides from where it was to its new height', async () => {
-    screenOf({ motion: true, wide: true, mode: 'absent' });
-    await mount();
-    act(() => { fireEvent.click(part('part-b')); });
-    await elapse(600);
-    // The folded map is 93 px taller than the strip of tiles: the place is that much lower in Map.
-    const plain = HTMLElement.prototype.getBoundingClientRect;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      if (!this.matches('.ws-detail')) return plain.call(this);
-      const shift = Number(this.style.transform.match(/translateY\((-?[\d.]+)px\)/)?.[1] ?? 0);
-      const top = (rootOf().classList.contains('v-map') ? 353 : 260) + shift;
-      return { x: 0, y: top, top, left: 0, right: 1000, bottom: top + 900, width: 1000, height: 900, toJSON() {} } as DOMRect;
-    });
-    const detail = document.querySelector<HTMLElement>('.ws-detail')!;
-    const styles: string[] = [];
-    const observer = new MutationObserver((records) => records.forEach((record) => styles.push(record.oldValue ?? '')));
-    observer.observe(detail, { attributes: true, attributeFilter: ['style'], attributeOldValue: true });
+    const detail = await openPart();
     act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
     // The strip fades out; the place is not part of the swap.
     expect(classesOf()).toContain('strip-out');
@@ -751,25 +770,75 @@ describe('Map and Order with a place open', () => {
     expect(shownView()).toBe('order');
     expect(classesOf()).toContain('strip-in');
     expect(document.querySelector('.ws-detail')).toBe(detail);
-    await act(async () => { await Promise.resolve(); });
-    // It started 93 px lower, where it was, and slides to its place.
-    expect([...styles, detail.getAttribute('style') ?? '']).toContainEqual(expect.stringContaining('translateY(93px)'));
+    // It starts 93 px lower, where it was, and slides to its place.
+    expect(slideOf(detail).map((slide) => slide.keyframes)).toEqual([[{ translate: '0 93px' }, { translate: '0 0' }]]);
     await elapse(300);
     expect(classesOf()).not.toContain('strip-in');
-    expect(detail.style.transform).toBe('');
-    expect(detail.style.transition).toBe('');
-    // Pressed again in the middle of the slide, the swap back starts from where the place is.
-    styles.length = 0;
-    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Map' })); });
-    await elapse(130);
+  });
+
+  it('slides without taking the place\'s own transitions: Escape meanwhile ends the slide and lets the place fade', async () => {
+    const detail = await openPart();
     act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
     await elapse(130);
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Map' })); });
+    await elapse(130);
+    expect(shownView()).toBe('map');
+    expect(slideOf(detail)).toHaveLength(2);
+    // Under way: nothing is written over the stylesheet's transitions.
+    expect(detail.style.transition).toBe('');
+    act(() => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
+    expect(classesOf()).toContain('ws-leaving');
+    expect(slideOf(detail)[1].cancel).toHaveBeenCalled();
+    expect(detail.style.transition).toBe('');
+    expect(detail.style.translate).toBe('');
+  });
+
+  it('decides what swaps when it applies: a place opened meanwhile slides, a place closed meanwhile gets the whole swap', async () => {
+    screenOf({ motion: true, wide: true, mode: 'absent' });
+    slideRecorder();
+    await mount();
+    placeAt();
+    // On the plain view, Order pressed, then Product at once: the place is open when the swap applies.
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
+    expect(classesOf()).toContain('swap-out');
+    act(() => { fireEvent.click(screen.getByRole('link', { name: 'Product' })); });
+    expect(location.hash).toBe('#product');
+    expect(classesOf()).toContain('strip-out');
+    expect(classesOf()).not.toContain('swap-out');
+    await elapse(130);
+    expect(classesOf()).toContain('strip-in');
+    expect(slideOf(document.querySelector('.ws-detail'))).toHaveLength(1);
     await elapse(400);
-    expect(shownView()).toBe('order');
-    expect(location.search).toBe('?view=order');
-    expect(detail.style.transform).toBe('');
-    expect(classesOf().filter((name) => /^(strip|swap)-/.test(name))).toEqual([]);
-    observer.disconnect();
+    // With the place open, Map pressed, then the place closed at once: the plain view swaps whole, nothing slides.
+    slides = [];
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Map' })); });
+    expect(classesOf()).toContain('strip-out');
+    act(() => { fireEvent.click(screen.getByRole('link', { name: 'Product' })); });
+    await elapse(130);
+    expect(shownPart()).toBe('');
+    expect(classesOf()).toContain('swap-in');
+    expect(classesOf()).not.toContain('strip-in');
+    expect(slides).toEqual([]);
+  });
+
+  it('ends the slide at once on Back or Forward, and holds it where it is for a second press', async () => {
+    const detail = await openPart();
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
+    await elapse(130);
+    const first = slideOf(detail)[0];
+    // A second press during the slide: it stops where it is (held), and the next slide starts from there.
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Map' })); });
+    expect(first.commitStyles).toHaveBeenCalled();
+    expect(first.cancel).toHaveBeenCalled();
+    await elapse(130);
+    const second = slideOf(detail)[1];
+    expect(second).toBeDefined();
+    // Back of the browser during that slide: it ends at once, and the place stays where the page puts it.
+    act(() => history.back());
+    await elapse(1);
+    expect(second.cancel).toHaveBeenCalled();
+    expect(second.commitStyles).not.toHaveBeenCalled();
+    expect(document.querySelector<HTMLElement>('.ws-detail')?.style.translate ?? '').toBe('');
   });
 
   it('keeps the whole swap on the plain view', async () => {
