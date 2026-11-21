@@ -16,11 +16,11 @@ Vite. It has two pages:
 - **Workshop** (`workshop/index.html`, `src/workshop/`), at
   [silo.amontlabs.com/workshop](https://silo.amontlabs.com/workshop): Silo's
   plan, the parts of the product as tiles, each with its decisions and
-  features, the decisions of the whole product, and the features people
-  suggest. Anyone signed in with GitHub can suggest a feature, and vote and
+  features, Product (the decisions about the whole product), and the features
+  people suggest. Anyone signed in with GitHub can suggest a feature, and vote and
   comment on a suggestion, a decision or a feature. Its API lives under `/api/workshop/` (`server/`,
-  `api/`). While the plan holds no part, it is the same page with no tile but
-  "Suggest a feature".
+  `api/`). While the plan holds no part, it is the same page with no tile; the
+  title row keeps its links and "Suggest a feature".
 
 Shared files: `src/site.css` (tokens, the gutter, the frame and its diamonds,
 the header, buttons, the theme switch and the drawn arrow and check icons),
@@ -86,8 +86,8 @@ The first command downloads Playwright's own Chromium once; the check never
 uses an installed Chrome. It opens `http://127.0.0.1:4174/workshop` (pass
 another URL after `--` to check another server) at 1440 × 900, 1440 × 1100,
 2560 × 1440, 1024 × 1366 and 390 × 844, on the plain view, the first part
-that has rows, `#product` when the whole product has rows, `#latest`
-and `#suggested`. The parts and the whole product's
+that has rows, `#product` when Product has rows, `#latest`
+and `#suggested`. The parts and Product's
 rows are read from the page's data
 (`window.__workshopData`, set by `main.tsx`), and the places to visit are chosen
 from its counts of rows (`placesOf`, tested in `load-check.test.mjs`); whether
@@ -96,9 +96,9 @@ from the page. For each load it prints when the page first
 painted, when the account, the votes and "Suggest a
 feature" appeared, what the page's first frame held, and every layout shift
 with their total. Every one of these loads is a first visit: its first frame
-must hold the sign-in button (unless `--signed-in`), "Suggest a feature" on the
-plain view, and on the first place with rows (the first part that has rows,
-else the whole product) a vote placeholder on every row. Then, in one browser profile at 1440 × 900, that
+must hold the sign-in button (unless `--signed-in`), "Suggest a feature" in the
+title row, and on the first place with rows (the first part that has rows,
+else Product) a vote placeholder on every row. Then, in one browser profile at 1440 × 900, that
 place (the plain view when the plan has no row) is visited twice (the second
 visit must have the votes in its first frame), and a person signs
 in through the fake GitHub's page as `owner-fake` (so the session cookie, its
@@ -136,15 +136,27 @@ To see the page's moves frame by frame, with the same server running,
 `npm --prefix website run motion-sheet` (a URL, `--out <dir>` and flow names
 after `--`). For each move, such as the plain view to a part and back at
 1440 × 900 and 390 × 844, or on the map at 1440 × 900 the map to a part and
-back, a scrolled map to a part and back, and Map to Order and back (the flows
-named `map-*`), it writes to `website/.motion/` a contact sheet of
+back, a scrolled map to a part and back, Map to Order and back on the plain
+view, and Map to Order and back with a part and a row open (the flows named
+`map-*`), it writes to `website/.motion/` a contact sheet of
 the frames at fixed times after the action and a text file with each change
 of the scroll and of each element's box and opacity, the animations that ran
-and the layout shifts. It exits with an error when a move between the plain view and
-a place scrolls the page more than once, when a move between two places runs a
-view transition, when Notes opening grows its panel in fewer than four steps,
-or when a comment changes height as it is confirmed; the full list is at the
-top of `scripts/motion-sheet.mjs`. `npm test` does not run it either.
+and the layout shifts. It exits with an error when, in any move, a box it
+follows turns back (its top or its height goes more than 2 px one way, then
+more than 2 px the other) or goes from an opacity above 0.9 to one below 0.1
+from one frame where it is found to the next. These checks count from the last
+frame before the action. A move where one of them is meant for some boxes names
+those boxes in the script's `MEANT`, with its reason, and every other box is
+still checked: from one part to another, the new place rises 8 px into place.
+It also exits with an error when
+a move between the plain view and a place scrolls the page more than once,
+when a move between two places runs a view transition, when Notes opening
+grows its panel in fewer than four steps, when a comment changes height as it
+is confirmed, when a row's opening or closing covers more than 16% of its way
+in its first frame, or when Map and Order swap with a place open and the place
+or the footer goes under an opacity of 0.95 or is missing from a frame, or the
+place's top takes one step of more than 30 px; the full list is at the top of `scripts/motion-sheet.mjs`.
+`npm test` does not run it either.
 
 To build and check the page on another plan than `plan/` (the real plan may be
 in the middle of a change), name its folder in `WORKSHOP_PLAN` for the build
@@ -228,11 +240,11 @@ decisions and features are taken or dropped with `plan take` and `plan drop`.
 `npm run build` then runs `scripts/prerender.mjs`, which renders the plain
 address `/workshop` (`src/workshop/prerender.tsx`: nothing remembered, nobody
 signed in, the load pending) and writes it into `dist/workshop/index.html`: the
-title row, the map when there is one, the tiles and the row under them in
+title row with its places, the map when there is one and the tiles in
 `#workshop-root`, "Sign in with GitHub" in the header's account slot (with its
 tooltip), and, in the page's `<noscript>`, the line
 that says what needs JavaScript followed by every part with its decisions and
-features and then the decisions of the whole product, as a plain list (id,
+features and then the decisions of Product, as a plain list (id,
 name, state, and "Replaced by" for a replaced decision; `NoScript.tsx`). The root and the slot carry `data-prerendered`
 until the script takes over. A
 prerender that throws fails the build; the dev server does not prerender.
@@ -258,10 +270,9 @@ its script arrives:
   `ws-bare` goes on `<html>`: everything the build drew shows, and the drawn
   "Sign in with GitHub" replaces the placeholder, marker or not. The plain list
   (`Boundary.tsx`) gives each part's decisions and features with their state,
-  then the decisions of the whole product.
+  then the decisions of Product.
 - Without JavaScript the tiles show and, under them, the line that says what
-  needs JavaScript and the plain list of every part's rows and the whole
-  product's. The list is inside `<noscript>`, so a browser that runs the script
+  needs JavaScript and the plain list of every part's rows and Product's. The list is inside `<noscript>`, so a browser that runs the script
   never draws it and the first paint with JavaScript is unchanged.
 - The page preloads every face it waits for and shows as soon as they are in
   (at most 1.2 s), without waiting for its own script: the check runs right
@@ -282,7 +293,24 @@ What a person sees:
   A move from one place to another (a name in the strip, a link to an entry
   that lives elsewhere, a line of Latest) shows the new place at once. In the
   strip, the name under the pointer turns to the ink colour; the lighter ground
-  and the line under it mark the open part alone.
+  and the line under it mark the open part alone. The strip holds the parts
+  only.
+- A place opened after the first frames rises 8 px into place as it fades in.
+  One that opens with a row open (a line of Latest, a link to an entry, an
+  address) fades in where it stands, so the rows under that row only move down
+  as its panel grows. Going back on the map, the place fades out over 130 ms
+  while the map unfolds. Going back from a scrolled part, the map stays pinned
+  under the header until the scroll to the top has brought it to its own
+  place, so it never jumps up.
+- Map and Order swap on the plain view by fading out everything under the
+  title row, then fading it in 8 px low as it rises. With a place open, only
+  the strip changes: the one that leaves fades out, the other fades in, and
+  the place and the footer, which stay in sight, slide to their new height in
+  one move of 260 ms. Which of the two swaps runs is read when it applies, from
+  what is shown then. A second press meanwhile stops the slide where it is and
+  the next one starts from there; Back, Forward and any other move end it at
+  once. With
+  reduced motion, none of these moves animates.
 - A part's rows are its decisions and features, in the order of `order.json`,
   drawn by the same row. A feature is planned (taken, ready or not), built (its
   file says `built`), dropped, or not decided. A decision's name is its `asks`
@@ -312,8 +340,9 @@ What a person sees:
   row with no thread yet loads nothing);
   it shows itself open at once, its panel grows when the comments are in or
   after 180 ms, and while they still load each one the count announces holds
-  its place. The panel also grows or shrinks over 200 ms when Notes or History
-  opens or closes, and when their text arrives after its placeholder. A comment
+  its place. The panel opens and closes over 260 ms, and grows or shrinks over
+  the same time and on the same curve (`--ease`) when Notes or History opens
+  or closes, and when their text arrives after its placeholder. A comment
   being sent shows its 👍 disabled, so it keeps its height once confirmed, and
   "GitHub #N" next to the box keeps at least the room of "GitHub #000 ↗". An entry named by the address
   waits closed until the first answer when no live state is shown yet. An
@@ -359,7 +388,7 @@ What a person sees:
   and the suggest form; notes have their own while their chunk loads. They
   pulse slowly (not with reduced motion), are `aria-hidden`, and their region
   is `aria-busy`. Nothing has a placeholder that may not come (comment counts,
-  "N suggested", the link to an issue). What arrives after the first frames (numbers, the account, a new
+  the link to an issue). What arrives after the first frames (numbers, the account, a new
   item of the key) fades in over 150 ms where it stands;
   nothing fades on navigation or when a row opens, or with reduced motion.
 - An open entry shows, in this order, each part only when it has something: its
@@ -472,9 +501,18 @@ What a person sees:
   the count shown, so a newer `state` moves the count under it. The count the server answers replaces it.
 - A refusal takes back the page's own change, one up or one down from the count shown by then, and says
   "Vote: not saved." with the server's words. A thread found closed (403 `closed`) takes it back too.
-- The strip under the tiles links to what is left out (every dropped decision
-  and feature of the parts), to "The whole product" (`#product`: the decisions
-  of `plan/decisions/`, with their own counts), to Latest, and to the suggestions. Latest (`#latest`) lists the newest 30
+- The title row links to the places that are not parts, before Map and Order:
+  "Product" (`#product`: the decisions of `plan/decisions/`, with their own
+  counts), "Latest", "Left out · N" (every dropped decision and feature of the
+  parts, when there is one) and the small button "Suggest a feature"
+  (`#suggested`). Under 1200 px they sit under the title, wrapping when they
+  must. They are there on the plain view and in every place. The open one is in
+  the ink colour and `aria-current`; pressed again, it goes back to the plain
+  view. Going back from such a place gives its own link the focus, however it
+  was reached (the row, its address, Back or Forward). On the plain view, "Votes and comments are
+  offline." and "Sign-in did not complete." follow the text of the line under
+  the title; in a place, they sit under its counts. The map or the tiles end on
+  the footer's line. Latest (`#latest`) lists the newest 30
   comments and changes (from the history chunk) across the entries, merged by
   time, newest first, each opening its entry (a click with a modifier key, or a middle click, is left to the
   browser). While it loads, ten one-line placeholders hold its place and
@@ -506,7 +544,7 @@ Back and Forward move between places; opening a row replaces the address.
 | `App.tsx` | Places, addresses, focus, keyboard, the layout. |
 | `useWorkshop.ts` | Live state and every write: the load, pending writes. |
 | `MapView.tsx`, `Tiles.tsx` | The map and the tiles. |
-| `PartView.tsx`, `Suggest.tsx`, `Latest.tsx` | An opened part, the whole product's decisions and what is left out; the suggestions; the latest changes. |
+| `PartView.tsx`, `Suggest.tsx`, `Latest.tsx` | An opened part, Product's decisions and what is left out; the suggestions; the latest changes. |
 | `Entry.tsx` | One row and what it shows open: the text, what the entry says of the plan's lists and what it needs, its id and the button that copies it, the state, notes, history, and the thread with the votes on its comments. |
 | `routes.ts`, `plan.ts`, `map.ts`, `data.ts` | Addresses; the rows, statuses, parts' counts and states on top of the plan's model; the drawing; the build-time reader. |
 | `api.ts`, `writes.ts`, `memory.ts`, `RichText.tsx`, `Markdown.tsx`, `Boundary.tsx` | The API client, the page's own writes (a list of values set, kept a day; its comments six minutes), the remembered answer and person, text from GitHub, notes, the fallback list. |

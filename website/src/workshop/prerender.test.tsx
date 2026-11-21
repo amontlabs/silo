@@ -102,7 +102,7 @@ describe('the prerendered Workshop', () => {
     const data = buildData();
     const { root, slot } = page(data);
     expect(root.querySelector('.ws.is-sheet .ws-top h1')?.textContent).toBe('Workshop');
-    expect(root.querySelector('.ws-suggest')?.textContent).toBe('Suggest a feature');
+    expect([...root.querySelectorAll('.ws-top .ws-places a')].map((a) => a.textContent)).toEqual(['Product', 'Latest', 'Left out · 3', 'Suggest a feature']);
     for (const part of data.parts) {
       expect(root.querySelector(`.ws-part[data-part="${part.id}"]`)).not.toBeNull();
       expect(root.querySelector(`.ws-tile[data-part="${part.id}"]`)).not.toBeNull();
@@ -175,10 +175,10 @@ describe('the Workshop without JavaScript', () => {
     expect([...box.querySelectorAll('section')].map((section) => section.getAttribute('data-part'))).toEqual([...buildData().parts.map((part) => part.id), 'product']);
   });
 
-  it('lists the decisions of the whole product, and keeps them on a plan with no part', () => {
+  it('lists the decisions of Product, and keeps them on a plan with no part', () => {
     for (const [data, ids] of [[buildData(), ['security-properly', 'one-host', 'plain-logs']], [buildDataFrom(emptyPlanFiles(), { map: NO_MAP }), ['security-properly', 'one-host']]] as const) {
       const product = noscript(data).querySelector('section[data-part="product"]');
-      expect(product?.querySelector('h2')?.textContent).toBe('The whole product');
+      expect(product?.querySelector('h2')?.textContent).toBe('Product');
       expect(rowsOf(product)?.map((row) => row?.split(' ')[0])).toEqual(ids);
     }
   });

@@ -1,6 +1,8 @@
 // The Workshop: the drawing of Silo (tiles on narrow screens), an opened part under it, and its entries
-// opening in place. Addresses follow routes.ts; the live state and every write live in useWorkshop.ts.
+// opening in place. The places that are not parts (Product, Latest, Left out, the suggestions) are a row of links in
+// the title row. Addresses follow routes.ts; the live state and every write live in useWorkshop.ts.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { loginUrl } from './api';
 import type { Me } from './api';
@@ -62,6 +64,10 @@ const LEAVE_MS = 140;
 const ARRIVE_MS = 400;
 const ACCOUNT_WIDTH = 'silo-workshop-account-width';
 const SWAP_MS = 130;
+/** How long the place takes to slide to its new height when Map and Order swap with it open. */
+const SLIDE_MS = 260;
+/** At most how long the map stays pinned under the header after going back from a scrolled part. */
+const PIN_MS = 1500;
 /** How long the map takes to fold, and an entry to open. */
 const FOLD_MS = 440;
 const KEY: [PartState, string, string][] = [
@@ -76,16 +82,6 @@ const still = () => media('(prefers-reduced-motion: reduce)', true);
 /** The width from which the map shows; narrower, the tiles. */
 const wide = () => media('(min-width: 1200px)', true);
 
-/** A selector that finds the same control again after the page re-renders. */
-function selectorOf(node: Element | null): string | null {
-  if (!(node instanceof HTMLElement)) return null;
-  const href = node.getAttribute('href');
-  const name = [...node.classList][0];
-  if (href && name) return `a.${name}[href="${href}"]`;
-  const tile = node.closest<HTMLElement>('.ws-tile');
-  if (tile?.dataset.part) return `.ws-tile[data-part="${tile.dataset.part}"] .ws-tile-hit`;
-  return null;
-}
 
 /** Scrolls the page the least needed for the element to be in view under the sticky header, at once. */
 function reveal(node: Element) {
@@ -129,10 +125,13 @@ function KeyItem({ mark, label, boot }: { mark: string; label: string; boot: boo
   return <li className={fade ? 'ws-in' : undefined}><i className={mark} />{label}</li>;
 }
 
-/** The line under the title; a line that appears or changes after the first frames fades in. */
-function Status({ text, boot }: { text: string; boot: boolean }) {
+/**
+ * The line under the title; a line that appears or changes after the first frames fades in. On the plain view it also
+ * holds the notes (offline, sign-in failed), after the text.
+ */
+function Status({ text, boot, children }: { text: string; boot: boolean; children?: ReactNode }) {
   const [fade] = useState(!boot);
-  return <p className={fade ? 'ws-status ws-in' : 'ws-status'}>{text}</p>;
+  return <p className={fade ? 'ws-status ws-in' : 'ws-status'}>{text}{children}</p>;
 }
 
 const SignInLabel = () => <span>Sign in{' '}<span className="ws-wide">with GitHub</span></span>;
@@ -183,7 +182,12 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   const [openings, setOpenings] = useState(0);
   const [view, setViewState] = useState<View>(initialView);
   const [leaving, setLeaving] = useState(false);
+  // Map and Order swapping. What swaps is read from what is shown at each render: on the plain view everything under the
+  // title row (`swap-*`), with a place open the strip alone (`strip-*`).
   const [swap, setSwap] = useState<'out' | 'in' | null>(null);
+  // After going back from a scrolled part on the map, the map stays pinned under the header until the scroll to the top
+  // has brought its own place below that line: unpinned sooner, it would jump up, then come down with the scroll.
+  const [pinned, setPinned] = useState(false);
   // While the fold drives the scroll, the folded map is not pinned yet: pinned, it would jump down first.
   const [lifting, setLifting] = useState(false);
   // While the page keeps its height after going back, the footer waits hidden; it fades in at its place.
@@ -200,8 +204,6 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   const wantedHash = useRef<string | null>(null);
   /** A row named by the address while the live state loads; it opens once the state is there. */
   const heldOpen = useRef<string | null>(null);
-  /** The control that opened the suggestions, the left-out list or the decisions, to return focus to. */
-  const opener = useRef<string | null>(null);
   const foldedAt = useRef(0);
   /** The scroll driven by the fold, from a scrolled full map. */
   const lift = useRef<{ frame: number; from: number; full: number } | null>(null);
@@ -213,15 +215,16 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   const goingBack = useRef(-1);
   /** The control to focus once Back or Forward has shown the other view, when the focus was in the one hidden. */
   const viewFocus = useRef<string | null>(null);
-  // A link under the map that held the focus when Back or Forward moved: if the move takes it off the page, the title
-  // takes the focus.
-  const underFocus = useRef<Element | null>(null);
   /** The move whose view transition set the mark on `<html>` (`vt-open`, `vt-back`); -1 when none is set. */
   const markOwner = useRef(-1);
   /** True while a view transition's update runs: what it scrolls is set at once, before the new view is captured. */
   const inTransition = useRef(false);
   /** The browser's view transition of the last move that started one, until it ends or another move starts. */
   const transition = useRef<ViewTransitionLike | null>(null);
+  /** Where the place and the footer were on screen before Map and Order swapped with a place open, to slide from. */
+  const slideFrom = useRef<{ node: HTMLElement; top: number }[] | null>(null);
+  /** The slides of the place and the footer under way. */
+  const slides = useRef<Animation[]>([]);
   // Once who is signed in is known, the account slot takes the width of what it holds (see workshop.css).
   useEffect(() => {
     if (!accountSlot) return;
@@ -250,6 +253,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   useEffect(() => () => {
     [...timers.current, ...swapTimers.current].forEach(clearTimeout);
     clearTimeout(heldHeight.current);
+    endSlide();
     if (lift.current) cancelAnimationFrame(lift.current.frame);
     clearMark();
   }, []);
@@ -267,6 +271,9 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
 
   const shown: Place = place;
   const isHome = shown.kind === 'home';
+  /** Whether the plain view is shown, for what runs later than this render (the swap when it applies). */
+  const homeRef = useRef(isHome);
+  homeRef.current = isHome;
   const onMap = () => view === 'map' && wide();
 
   /** Moves to a place, with at most the one row open. */
@@ -305,9 +312,30 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   }
 
   /**
+   * Ends the slide of the place and the footer at once, and drops one about to start. `hold` leaves them where they are
+   * on screen, for the next swap to slide from there; otherwise they land where the page puts them. Whatever ends a
+   * swap calls it: Back and Forward, a new move, another press of Map or Order. It only touches refs and the page.
+   */
+  function endSlide(hold = false) {
+    slideFrom.current = null;
+    for (const animation of slides.current) {
+      if (hold) {
+        try {
+          animation.commitStyles();
+        } catch {
+          // Not rendered: nothing to hold.
+        }
+      }
+      animation.cancel();
+    }
+    slides.current = [];
+    if (!hold) document.querySelectorAll<HTMLElement>('.ws-detail, .ws-foot').forEach((node) => { node.style.translate = ''; });
+  }
+
+  /**
    * A new move starts: what an earlier one left waiting (the end of going back, a view transition's update) never
-   * lands after it, its view transition ends at once with its mark, so no picture of it covers this move, and the
-   * height a going-back kept is let go at once. Returns this move's count.
+   * lands after it, its view transition ends at once with its mark, so no picture of it covers this move, the slide
+   * of a swap ends, and the height a going-back kept is let go at once. Returns this move's count.
    */
   function moveStarts(): number {
     // Counted first: the update of the transition skipped here, if the browser runs it now, finds it was overtaken.
@@ -316,12 +344,14 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     transition.current = null;
     overtaken?.skipTransition?.();
     clearMark();
+    endSlide();
     timers.current.forEach(clearTimeout);
     timers.current = [];
     clearTimeout(heldHeight.current);
     if (mainRef.current) mainRef.current.style.minHeight = '';
     setHeld(false);
     setLeaving(false);
+    setPinned(false);
     return mine;
   }
 
@@ -408,11 +438,11 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   function back() {
     // A going-back under way lands at its time: a second one (the button pressed twice, Escape again) changes nothing.
     if (isHome || backUnderWay()) return;
-    // A place reached by its address has no opener: the link under the tiles that leads to it takes the focus, or the
-    // page's title when there is none.
+    // The link of the title row that leads to the place being closed takes the focus, however the place was reached, or
+    // the page's title when there is none.
     // Off the map, with a view transition or without one, it is brought into view; the map has its own going-back.
     const bring = !onMap();
-    const focus: Focus = shown.kind === 'part' ? { kind: 'part', part: shown.part, bring } : opener.current ? { kind: 'selector', selector: opener.current, bring } : shown.kind === 'suggested' ? { kind: 'part', part: 'suggested', bring } : { kind: 'selector', selector: `a.ws-fold-link[href="${formatHash(shown)}"]`, bring };
+    const focus: Focus = shown.kind === 'part' ? { kind: 'part', part: shown.part, bring } : { kind: 'selector', selector: `.ws-places a[href="${formatHash(shown)}"]`, bring };
     const finish = () => go(HOME, null, { push: true, focus, announce: '' });
     if (still()) {
       finish();
@@ -434,7 +464,10 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
         setHeld(false);
       }, LEAVE_MS + 420);
     }
-    if (scrollY > 0) scrollTo({ top: 0, behavior: 'smooth' });
+    if (scrollY > 0) {
+      setPinned(true);
+      scrollTo({ top: 0, behavior: 'smooth' });
+    }
     setLeaving(true);
     later(finish, LEAVE_MS);
   }
@@ -449,7 +482,6 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     // From a scrolled full map, the fold drives the scroll back to the top: each frame the page is scrolled in
     // proportion to how far the map has folded, so every box travels one way during the fold.
     if (isHome && onMap() && scrollY > 0 && !still()) startLift();
-    if (next.kind !== 'part') opener.current = selectorOf(document.activeElement);
     const title = next.kind === 'part' ? plan.parts.find((group) => group.part.id === next.part)?.part.title : null;
     travel(() => go(next, null, { push: true, focus: { kind: 'title' }, announce: title ? `${title}, open` : '' }), isHome ? 'open' : null);
   }
@@ -515,14 +547,11 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
       swapTimers.current = [];
       setSwap(null);
       const next = initialView();
-      // On a wide screen the other view's panel is taken out of sight, and Order also hides "Suggest a feature" under
-      // the map: the focus on what gets hidden goes to the same part in the view now shown, else to the title, rather
-      // than to the page itself.
+      // On a wide screen the other view's panel is taken out of sight: the focus in it goes to the same part in the view
+      // now shown, else to the title, rather than to the page itself.
       const hidden = document.querySelector(`.ws-swap-${viewRef.current}`);
       const focused = document.activeElement;
-      const hides = !!focused && (!!hidden?.contains(focused) || (next === 'order' && focused.matches('.ws-under .ws-suggest')));
-      underFocus.current = focused?.closest('.ws-under') ? focused : null;
-      if (next !== viewRef.current && wide() && focused && hides) {
+      if (next !== viewRef.current && wide() && focused && hidden?.contains(focused)) {
         const part = focused.closest<HTMLElement>('[data-part]');
         const id = part?.dataset.part;
         viewFocus.current = !id ? '' : next === 'map' ? `.ws-part[data-part="${id}"]` : `.ws-tile[data-part="${id}"] .ws-tile-hit`;
@@ -561,12 +590,8 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     openKeyRef.current = key;
     focusNext.current = { kind: 'reveal', key };
   }, [holding, rowByKey]);
-  // After Back or Forward showed the other view, the focus that was in the hidden one lands in the one shown; a link
-  // under the map that the move took off the page hands the focus to the title.
+  // After Back or Forward showed the other view, the focus that was in the hidden one lands in the one shown.
   useLayoutEffect(() => {
-    const under = underFocus.current;
-    underFocus.current = null;
-    if (under && !under.isConnected && viewFocus.current === null) viewFocus.current = '';
     const selector = viewFocus.current;
     if (selector === null) return;
     viewFocus.current = null;
@@ -600,7 +625,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     } else {
       let selector: string;
       if (target.kind === 'selector') selector = target.selector;
-      else selector = onMap() && target.part !== 'suggested' ? `.ws-part[data-part="${target.part}"]` : `.ws-tile[data-part="${target.part}"] .ws-tile-hit`;
+      else selector = onMap() ? `.ws-part[data-part="${target.part}"]` : `.ws-tile[data-part="${target.part}"] .ws-tile-hit`;
       const node = document.querySelector<HTMLElement>(selector) ?? (target.kind === 'selector' ? document.querySelector<HTMLElement>('.ws-top h1') : null);
       if (node && !node.hasAttribute('tabindex') && node.tagName === 'H1') node.setAttribute('tabindex', '-1');
       node?.focus({ preventScroll: true });
@@ -626,6 +651,42 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     return () => observer.disconnect();
   }, []);
 
+  // The map pinned after going back stays so until its own place is below the header, at most PIN_MS.
+  useEffect(() => {
+    if (!pinned) return;
+    const check = () => {
+      const top = document.querySelector<HTMLElement>('.ws-top');
+      const header = document.querySelector<HTMLElement>('.site-header')?.offsetHeight ?? 0;
+      if (!top || scrollY <= top.offsetTop + top.offsetHeight - header) setPinned(false);
+    };
+    addEventListener('scroll', check, { passive: true });
+    const timer = setTimeout(() => setPinned(false), PIN_MS);
+    return () => {
+      removeEventListener('scroll', check);
+      clearTimeout(timer);
+    };
+  }, [pinned]);
+
+  // Map and Order swapped with a place open: the place and the footer slide from where they were to where the new strip
+  // puts them, in one move. The slide is an animation of `translate` of its own, so it leaves every transition of the
+  // place and the footer (the fade of going back) as it is.
+  useLayoutEffect(() => {
+    const from = slideFrom.current;
+    if (!from) return;
+    slideFrom.current = null;
+    const ease = getComputedStyle(document.documentElement).getPropertyValue('--ease').trim() || 'cubic-bezier(.3, .7, .2, 1)';
+    for (const { node, top } of from) {
+      // Where a held slide left it, until it slides from there.
+      node.style.translate = '';
+      if (!node.isConnected || typeof node.animate !== 'function') continue;
+      const by = top - node.getBoundingClientRect().top;
+      if (Math.abs(by) < 1) continue;
+      const animation = node.animate([{ translate: `0 ${by}px` }, { translate: '0 0' }], { duration: SLIDE_MS, easing: ease });
+      slides.current.push(animation);
+      animation.finished.then(() => { slides.current = slides.current.filter((one) => one !== animation); }, () => {});
+    }
+  }, [view]);
+
   // Map or Order. The swap runs on its own timers: a navigation in the middle never leaves it half done.
   function setView(next: View) {
     if (next === view || !mapped) return;
@@ -638,13 +699,21 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
       history.replaceState(history.state, '', `${location.pathname}${search ? `?${search}` : ''}${location.hash}`);
     };
     swapTimers.current.forEach(clearTimeout);
+    // A swap under way ends here: its slide stops where it is, and the next one starts from there.
+    endSlide(true);
+    setSwap(null);
     if (still() || !wide()) {
-      setSwap(null);
+      endSlide();
       apply();
       return;
     }
+    // On the plain view, everything under the title row swaps. With a place open, only the strip does: the place and
+    // the footer stay and slide to their new height. Which one is read when it applies, from what is shown then.
     setSwap('out');
     swapTimers.current = [setTimeout(() => {
+      const from = homeRef.current ? null : [...document.querySelectorAll<HTMLElement>('.ws-detail, .ws-foot')].map((node) => ({ node, top: node.getBoundingClientRect().top }));
+      endSlide(from !== null);
+      slideFrom.current = from;
       apply();
       setSwap('in');
       swapTimers.current.push(setTimeout(() => setSwap(null), 300));
@@ -671,23 +740,33 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   };
   const account = <Account me={w.me} signIn={signIn} onSignOut={() => void w.signOut()} />;
 
-  const notes = (
-    <>
-      {w.offline ? (
-        <p className="ws-quiet ws-note ws-offline">
-          <span>Votes and comments are offline.</span>
-          <button type="button" className="ws-link ws-retry" disabled={live.load === 'pending'} onClick={w.retry}>Try again</button>
-        </p>
-      ) : null}
-      {w.signinFailed ? <p className="ws-quiet ws-note">Sign-in did not complete.</p> : null}
-    </>
-  );
+  // Offline, with a way to try again, and sign-in failed: in a place, under its counts; on the plain view, on the line
+  // under the title (`inline`), where they are spans of the paragraph.
+  const notesOf = (inline: boolean) => {
+    const Note = inline ? 'span' : 'p';
+    return (
+      <>
+        {w.offline ? (
+          <Note className="ws-quiet ws-note ws-offline">
+            <span>Votes and comments are offline.</span>
+            <button type="button" className="ws-link ws-retry" disabled={live.load === 'pending'} onClick={w.retry}>Try again</button>
+          </Note>
+        ) : null}
+        {w.signinFailed ? <Note className="ws-quiet ws-note">Sign-in did not complete.</Note> : null}
+      </>
+    );
+  };
+  const notes = notesOf(false);
   const present = new Set(plan.parts.map((group) => group.state));
-  const suggested = plan.suggestions.filter((row) => row.status !== 'dropped').length;
-  const current = shown.kind === 'part' ? shown.part : shown.kind === 'suggested' ? 'suggested' : null;
+  const current = shown.kind === 'part' ? shown.part : null;
   const link = (target: Place) => (event: { preventDefault: () => void }) => {
     event.preventDefault();
     openPlace(target);
+  };
+  /** A link of the title row: marked while its place is open, where pressing it again goes back. */
+  const placeLink = (target: Place, label: string, className = 'ws-place') => {
+    const on = samePlace(target, shown);
+    return <a className={on ? `${className} on` : className} href={formatHash(target)} aria-current={on ? 'true' : undefined} onClick={link(target)}>{label}</a>;
   };
 
   let detail = null;
@@ -700,11 +779,16 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   else if (shown.kind === 'latest') detail = <LatestPlace ctx={ctx} onBack={back} notes={notes} />;
 
   // The place in the first frame is drawn where it stands: it never runs its entrance afterwards. A place opened
-  // later rises in as before.
+  // later rises in as before; one that opens with a row open fades in where it stands, so that the rows under that row
+  // only move down as its panel grows. Its entrance is chosen once, when it opens.
   const firstPlace = useRef<string | null>(null);
   if (boot && !isHome) firstPlace.current = formatHash(shown);
   else if (!boot && firstPlace.current !== null && firstPlace.current !== formatHash(shown)) firstPlace.current = null;
-  const classes = ['ws', isHome ? 'is-sheet' : 'is-open', `v-${view}`, leaving ? 'ws-leaving' : '', swap ? `swap-${swap}` : '', boot ? 'ws-boot' : '', lifting ? 'ws-lifting' : '', held ? 'ws-keeping' : '',
+  const entrance = useRef<{ place: string; fade: boolean } | null>(null);
+  if (isHome) entrance.current = null;
+  else if (entrance.current?.place !== formatHash(shown)) entrance.current = { place: formatHash(shown), fade: openKey !== null };
+  const detailClass = formatHash(shown) === firstPlace.current ? 'ws-detail ws-still' : entrance.current?.fade ? 'ws-detail ws-fade' : 'ws-detail';
+  const classes = ['ws', isHome ? 'is-sheet' : 'is-open', `v-${view}`, leaving ? 'ws-leaving' : '', swap && isHome ? `swap-${swap}` : '', swap && !isHome ? `strip-${swap}` : '', boot ? 'ws-boot' : '', lifting ? 'ws-lifting' : '', held ? 'ws-keeping' : '', pinned ? 'ws-pinned' : '',
     arrivedState ? 'ws-arr-s' : '', arrivedPerson ? 'ws-arr-p' : ''].filter(Boolean).join(' ');
   return (
     <>
@@ -713,10 +797,16 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
         <section className="ws-top joint">
           <div className="ws-head">
             <h1>Workshop</h1>
-            <Status key={statusLine(plan.parts)} text={statusLine(plan.parts)} boot={boot} />
+            <Status key={statusLine(plan.parts)} text={statusLine(plan.parts)} boot={boot}>{isHome ? notesOf(true) : null}</Status>
           </div>
           <div className="ws-top-side">
             <div className="ws-tools">
+              <nav className="ws-places" aria-label="Places">
+                {plan.product.length ? placeLink({ kind: 'product' }, 'Product') : null}
+                {placeLink({ kind: 'latest' }, 'Latest')}
+                {plan.left.length ? placeLink({ kind: 'left' }, `Left out · ${plan.left.length}`) : null}
+                {placeLink({ kind: 'suggested' }, 'Suggest a feature', 'ws-btn ws-suggest')}
+              </nav>
               {mapped ? (
                 <div className="ws-seg" role="group" aria-label="Arrangement">
                   <button type="button" aria-pressed={view === 'map'} onClick={() => setView('map')}>Map</button>
@@ -735,21 +825,10 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
           </div>
         ) : null}
         <div className="ws-swap ws-swap-order">
-          <Tiles groups={plan.parts} current={current} suggested={suggested} onOpen={(part) => openPlace({ kind: 'part', part })} onSuggest={() => openPlace({ kind: 'suggested' })} />
+          <Tiles groups={plan.parts} current={current} onOpen={(part) => openPlace({ kind: 'part', part })} />
         </div>
-        {isHome ? (
-          <div className="ws-under">
-            <div className="ws-under-left">
-              {plan.left.length ? <a className="ws-fold-link" href="#left" onClick={link({ kind: 'left' })}>Left out · {plan.left.length}</a> : null}
-              {plan.product.length ? <a className="ws-fold-link" href="#product" onClick={link({ kind: 'product' })}>The whole product</a> : null}
-              <a className="ws-fold-link" href="#latest" onClick={link({ kind: 'latest' })}>Latest</a>
-              {suggested ? <a className="ws-fold-link ws-late-s" href="#suggested" onClick={link({ kind: 'suggested' })}>{suggested} suggested</a> : null}
-              {notes}
-            </div>
-            <a className="ws-btn ws-suggest" href="#suggested" onClick={link({ kind: 'suggested' })}>Suggest a feature</a>
-          </div>
-        ) : (
-          <section className={formatHash(shown) === firstPlace.current ? 'ws-detail ws-still' : 'ws-detail'} key={formatHash(shown)} aria-labelledby="ws-part-title">{detail}</section>
+        {isHome ? null : (
+          <section className={detailClass} key={formatHash(shown)} aria-labelledby="ws-part-title">{detail}</section>
         )}
         <p className="sr-only" aria-live="polite">{w.announce}</p>
         {w.notice ? <p className="ws-notice" role="alert">{w.notice}</p> : null}

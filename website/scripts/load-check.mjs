@@ -382,7 +382,7 @@ async function sideways(browser, url, part, mapped) {
 /**
  * Records, on every frame from the first one shown (fonts in) until the script has taken over: whether the
  * markup the build drew is still there, whether the plain map, sign-in and an opened part are visible, and the
- * boxes of the title row, the map, the footer and the account slot.
+ * boxes of the title row, its places, the map or the tiles, the footer and the account slot.
  */
 function recordFrames() {
   const state = { firstShown: null, lastDrawn: null, firstMounted: null, plainView: [] };
@@ -392,7 +392,7 @@ function recordFrames() {
     return box.width > 0 && box.height > 0 && getComputedStyle(node).visibility === 'visible';
   };
   // To the hundredth of a pixel, so a move of half a pixel shows.
-  const boxes = () => Object.fromEntries(['.ws-top', '.ws-swap-map', '.ws-swap-order', '.ws-under', '.ws-foot', '#workshop-account'].map((selector) => {
+  const boxes = () => Object.fromEntries(['.ws-top', '.ws-places', '.ws-swap-map', '.ws-swap-order', '.ws-foot', '#workshop-account'].map((selector) => {
     const box = document.querySelector(selector)?.getBoundingClientRect();
     return [selector, box ? [box.top + scrollY, box.left, box.width, box.height].map((value) => Math.round(value * 100) / 100) : null];
   }));
@@ -468,7 +468,7 @@ async function drawnSecondVisit(browser, options) {
     await context.close();
     const problems = [];
     if (!r.prerendered) problems.push('the page holds no prerendered markup');
-    const moves = r.lastDrawn && r.firstMounted ? boxMoves(r.lastDrawn.boxes, r.firstMounted.boxes, ['.ws-swap-map', '.ws-swap-order', '.ws-under', '.ws-foot']) : ['no frame before the takeover'];
+    const moves = r.lastDrawn && r.firstMounted ? boxMoves(r.lastDrawn.boxes, r.firstMounted.boxes, ['.ws-places', '.ws-swap-map', '.ws-swap-order', '.ws-foot']) : ['no frame before the takeover'];
     const top = r.lastDrawn && r.firstMounted ? [r.lastDrawn.boxes['.ws-top'], r.firstMounted.boxes['.ws-top']] : null;
     if (top && Math.abs(top[0][0] + top[0][3] - (top[1][0] + top[1][3])) >= HALF) moves.unshift(`the title row's bottom ${top[0][0] + top[0][3]} → ${top[1][0] + top[1][3]}`);
     if (moves.length) problems.push(`moved at the takeover: ${moves.join(', ')}`);
@@ -527,10 +527,10 @@ async function main() {
     console.log(`${options.url}, API held ${options.slowApi} ms, script held ${options.slowScript} ms${options.signedIn ? ', signed in' : ''}`);
     for (const size of SIZES) {
       for (const place of list) {
-        // Every run here is a first visit: nothing is remembered, so the first frame has the placeholders and, signed
-        // out, the sign-in button and "Suggest a feature".
+        // Every run here is a first visit: nothing is remembered, so the first frame has the placeholders, "Suggest a
+        // feature" in the title row and, signed out, the sign-in button.
         const rows = Boolean(place.rows);
-        const wants = { signIn: !options.signedIn, suggest: place.hash === '', placeholders: rows };
+        const wants = { signIn: !options.signedIn, suggest: true, placeholders: rows };
         passed = report(await run(browser, options, size, place), wants) && passed;
       }
     }

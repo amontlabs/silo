@@ -13,12 +13,12 @@ import { formatHash, placeOf } from './routes';
 import type { Comment } from './api';
 import type { Detail, Workshop } from './useWorkshop';
 
+/** How long a panel takes to open, to close and to follow what it holds (workshop.css: `.ws-more`). */
+const GROW_MS = 260;
 /** How long the closing body stays in place for its animation. */
-const CLOSE_MS = 240;
+const CLOSE_MS = GROW_MS + 40;
 /** How long an opening panel waits for its comments, so it opens at its final size. */
 export const HOLD_MS = 180;
-/** How long a panel takes to open, and to follow its comments. */
-const GROW_MS = 220;
 
 export interface EntryContext {
   w: Workshop;
@@ -152,7 +152,7 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
     animating.current = true;
     node.style.height = `${from}px`;
     node.getBoundingClientRect();
-    node.style.transition = 'height .2s cubic-bezier(.45, 0, .25, 1), opacity .18s';
+    node.style.transition = `height ${GROW_MS}ms var(--ease), opacity .18s`;
     node.style.height = `${to}px`;
     const done = () => {
       node.style.height = '';

@@ -15,9 +15,13 @@
   --hatch: #ff9f0a26;
   --no: #ee7d70;
 }
-/* The last block of the page takes the height the window leaves over: the plain view's links, or the opened place. */
+/* The page takes the height the window leaves over, and so does an opened place, its list's line running down to the
+   footer. On the plain view the footer's line ends the map or the tiles: the map has no line of its own there, and the
+   tiles' last line sits on the footer's. */
 #workshop-root, .ws { flex: 1 0 auto; display: flex; flex-direction: column; }
-.ws > :is(.ws-under, .ws-detail) { flex: 1 0 auto; }
+.ws > .ws-detail { flex: 1 0 auto; }
+.ws.is-sheet .ws-mapsec { border-bottom-color: transparent; }
+.ws.is-sheet > .ws-swap-order { margin-bottom: -1px; }
 .ws { font-size: 15px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
 :where(.ws) :is(h1, h2, h3, p, ul) { margin: 0; padding: 0; font-weight: 400; }
 :where(.ws) ul { list-style: none; }
@@ -53,7 +57,15 @@
 .ws-noscript-state { color: var(--muted); margin-left: 6px; }
 .ws-top-side { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
 .ws-top { position: relative; }
-.ws-tools { display: flex; align-items: center; gap: 16px; min-height: 28px; }
+.ws-tools { display: flex; align-items: center; gap: 22px; min-height: 28px; }
+/* The places that are not parts: links, then "Suggest a feature" as a small button, the height of Map and Order.
+   The open one is in ink. */
+.ws-places { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; }
+.ws-place { padding: 5px 0; margin: -5px 0; font: 12px/18px var(--mono); color: var(--muted); white-space: nowrap; }
+.ws-place:hover { color: var(--accent-ink); }
+.ws-place.on { color: var(--ink); }
+.ws .ws-suggest { min-height: 28px; padding: 4px 11px; font-size: 13px; color: var(--muted); }
+.ws .ws-suggest.on { border-color: var(--ink); color: var(--ink); }
 .ws-seg { display: flex; border: 1px solid var(--line); border-radius: 3px; background: var(--surface); }
 .ws .ws-seg button { padding: 4px 11px; font: 12px/18px var(--mono); color: var(--muted); border-radius: 2px; transition: background-color .16s, color .16s; }
 .ws .ws-seg button:hover { color: var(--ink); }
@@ -190,8 +202,6 @@
 .is-sheet .ws-tile.s-next .ws-lab { color: var(--accent-ink); }
 .is-sheet .ws-tile.s-open .ws-title { color: var(--muted); }
 .is-sheet .ws-tile.s-open:hover .ws-title { color: var(--accent-ink); }
-.is-sheet .ws-suggest-tile .ws-title { color: var(--muted); }
-.is-sheet .ws-suggest-tile .ws-num { font-size: 15px; color: var(--accent-ink); }
 .ws-cut { position: relative; padding: 9px 20px 8px; font: 12px/12px var(--mono); letter-spacing: 1.3px; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); margin-right: 1px; }
 
 /* a part is open from the sheet: the tiles fold into a strip of names */
@@ -203,7 +213,6 @@
 .is-open .ws-board :is(.ws-tile-top, .ws-tline, .ws-pips) { display: none; }
 .is-open .ws-board .ws-title { display: flex; align-items: center; gap: 8px; margin: 0; font: 13.5px/1.35 var(--sans); letter-spacing: 0; color: var(--muted); white-space: nowrap; }
 .is-open .ws-board .ws-mark { display: block; }
-.is-open .ws-suggest-tile .ws-title::before { content: "+"; font: 13px var(--mono); color: var(--accent-ink); }
 /* A chip under the pointer takes the ink only: the lighter ground and the line under it mark the open chip alone. */
 .is-open .ws-tile:hover .ws-title, .is-open .ws-tile.on .ws-title { color: var(--ink); }
 .is-open .ws-tile.on { background-color: var(--surface-hover); box-shadow: inset 0 -2px 0 var(--accent), 0 1px 0 var(--line); }
@@ -212,24 +221,26 @@
 @media (min-width: 1200px) {
   .v-map .ws-swap-order { display: none; }
   .v-order .ws-swap-map { display: none; }
-  .ws.v-order .ws-under .ws-suggest { display: none; }
   .v-order .lbl-map, .v-map .lbl-order { display: none; }
 }
 @media (max-width: 1199.98px) {
-  .ws-swap-map, .ws .ws-seg, .ws .ws-under .ws-suggest, .lbl-map { display: none; }
+  .ws-swap-map, .ws .ws-seg, .lbl-map { display: none; }
 }
-/* Map and Order swap with everything under them, so nothing below jumps on its own. */
-.ws.swap-out :is(.ws-swap, .ws-under, .ws-detail), .workshop-shell:has(.ws.swap-out) .ws-foot { opacity: 0; transition: opacity .13s; }
-.ws.swap-in :is(.ws-swap, .ws-under, .ws-detail), .workshop-shell:has(.ws.swap-in) .ws-foot { animation: ws-swap-in .26s var(--ease) both; }
+/* On the plain view, Map and Order swap with everything under them, so nothing below jumps on its own. With a place
+   open, only the strip swaps: it fades out, and the other fades in while the place and the footer slide to their new
+   height (App.tsx, SLIDE_MS). */
+.ws.swap-out .ws-swap, .workshop-shell:has(.ws.swap-out) .ws-foot { opacity: 0; transition: opacity .13s; }
+.ws.swap-in .ws-swap, .workshop-shell:has(.ws.swap-in) .ws-foot { animation: ws-swap-in .26s var(--ease) both; }
+.ws.strip-out .ws-swap { opacity: 0; transition: opacity .13s; }
+.ws.strip-in .ws-swap { animation: ws-appear .26s var(--ease) both; }
 
-.ws-under { display: flex; align-items: flex-start; gap: 20px; padding: 14px 24px 44px; }
-.ws-under-left { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 22px; padding-top: 8px; }
-.ws-fold-link { font: 12px var(--mono); color: var(--muted); }
-.ws-fold-link:hover { color: var(--accent-ink); }
-.ws-note { flex-basis: 100%; }
+/* On the plain view, the notes follow the status text on its line. */
+.ws-status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 12px; }
 
 /* ---- an opened place ---- */
-.ws-detail { display: grid; grid-template-columns: 304px minmax(0, 1fr); animation: ws-rise .24s var(--ease-out) both; view-transition-name: detail; }
+/* Its entrance fills backwards only: once over, it leaves the opacity to the fade of going back. */
+.ws-detail { display: grid; grid-template-columns: 304px minmax(0, 1fr); animation: ws-rise .24s var(--ease-out) backwards; view-transition-name: detail; }
+.ws-detail.ws-fade { animation-name: ws-show; }
 .ws-detail.ws-still { animation: none; }
 .ws.ws-leaving .ws-detail { opacity: 0; transition: opacity .13s; pointer-events: none; }
 .ws-block { position: sticky; top: var(--header-height); align-self: start; padding: 20px 24px 28px; min-width: 0; }
@@ -276,7 +287,8 @@
 .ws .ws-vote:hover { color: var(--accent-ink); border-color: var(--accent-ink); }
 .ws .ws-vote.on { color: var(--accent-ink); border-color: var(--accent-ink); background: var(--accent-wash); }
 .ws .ws-vote:focus-visible { outline-offset: 2px; }
-.ws-more { position: relative; display: grid; grid-template-rows: 0fr; transition: grid-template-rows .2s var(--ease-out); }
+/* Opening, closing and later growth (Entry.tsx, GROW_MS) share one curve and one time. */
+.ws-more { position: relative; display: grid; grid-template-rows: 0fr; transition: grid-template-rows .26s var(--ease); }
 .ws-more.open { grid-template-rows: 1fr; }
 .ws-more-in { min-height: 0; overflow: hidden; opacity: 0; transition: opacity .18s var(--ease-out); }
 .ws-more.open > .ws-more-in { opacity: 1; }
@@ -352,6 +364,7 @@
 .ws-plain h2 { font: 20px var(--serif); margin: 14px 0 6px; }
 
 @keyframes ws-rise { from { opacity: .2; transform: translateY(8px); } }
+@keyframes ws-show { from { opacity: .2; } }
 @keyframes ws-appear { from { opacity: 0; } }
 @keyframes ws-swap-in { from { opacity: 0; transform: translateY(8px); } }
 
@@ -379,7 +392,7 @@ html.vt-back::view-transition-new(board) { animation: ws-appear .2s ease both; }
 
 /* ---- narrower ---- */
 @media (min-width: 1200px) and (min-height: 760px) {
-  .ws.is-open.v-map:not(.ws-lifting) .ws-swap-map { position: sticky; top: var(--header-height); z-index: 6; }
+  .ws.is-open.v-map:not(.ws-lifting) .ws-swap-map, .ws.ws-pinned.v-map .ws-swap-map { position: sticky; top: var(--header-height); z-index: 6; }
   .ws.is-open.v-map .ws-block { top: calc(var(--header-height) + 1px + var(--ws-foldh, 180px)); }
 }
 @media (max-width: 1199.98px) {
@@ -393,7 +406,7 @@ html.vt-back::view-transition-new(board) { animation: ws-appear .2s ease both; }
 @media (max-width: 1199.98px) {
   .ws-top { flex-wrap: wrap; gap: 14px; }
   .ws-top-side { margin-left: 0; width: 100%; align-items: flex-start; gap: 8px; }
-  .ws-tools { display: none; }
+  .ws-tools { min-height: 0; }
   .is-sheet .ws-tile .ws-pips { margin-right: 0; }
   .ws-key { justify-content: flex-start; }
 }
@@ -417,7 +430,6 @@ html.vt-back::view-transition-new(board) { animation: ws-appear .2s ease both; }
   .is-open .ws-board::-webkit-scrollbar { display: none; }
   .is-open .ws-tile { flex: 0 0 auto; }
   .is-open .ws-tile-hit { padding: 12px 14px 11px; }
-  .ws-under { padding: 12px 16px 40px; }
   .ws-detail { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
   .ws-block { position: static; padding: 14px 16px 6px; }
   .ws-block .ws-num { margin-top: 12px; }
@@ -456,9 +468,6 @@ html.vt-back::view-transition-new(board) { animation: ws-appear .2s ease both; }
 /* The footer is the site's own (site.css); here it only gets the line above it and its fade. */
 .ws-foot { transition: opacity .2s; border-top: 1px solid var(--line); }
 @media (max-width: 480px) { .ws-wide { display: none; } }
-/* Room kept for what the live state fills in, so nothing below moves when it arrives. */
-.ws-under { min-height: 92px; }
-@media (max-width: 1199.98px) { .ws-under { min-height: 0; } }
 @media (max-width: 760px) { .ws-block .ws-tally { min-height: calc(2 * 1.7em); } }
 
 /* Followed up after the design review. */
@@ -478,7 +487,6 @@ html.vt-back::view-transition-new(board) { animation: ws-appear .2s ease both; }
 .ws .ws-vote { position: relative; }
 .ws .ws-vote::after { content: ""; position: absolute; inset: -8px -5px; }
 .ws .ws-back { padding: 12px 0; margin: -8px 0; }
-.ws-fold-link { display: inline-block; padding: 8px 0; margin: -8px 0; }
 @media (max-width: 640px) { .workshop-shell .site-header .ws-account-slot .button.small { font-size: 12px; } }
 .ws-account .ws-link { padding: 8px 0; margin: -8px 0; }
 /* For a visitor who would rather not sign in here: the entry's issue, right under the sign-in box. */

@@ -37,7 +37,7 @@ await run(process.execPath, [join(website, 'scripts', 'prerender.mjs'), dist], {
 const html = await readFile(join(dist, 'workshop', 'index.html'), 'utf8');
 const between = (open, close) => html.slice(html.indexOf(open) + open.length, html.indexOf(close, html.indexOf(open)));
 
-test('the built page holds the plain view: the title row, a tile for every part, and the row under them', () => {
+test('the built page holds the plain view: the title row with its places, and a tile for every part', () => {
   const root = between('<div id="workshop-root" data-prerendered>', '<noscript');
   // Silo's map has no place yet: the tiles alone, with no Map and Order control and no drawing.
   assert.match(root, /^<div class="ws is-sheet v-order ws-boot" data-live="pending">/);
@@ -48,10 +48,9 @@ test('the built page holds the plain view: the title row, a tile for every part,
     assert.match(root, new RegExp(`class="ws-tile[^"]*" data-part="${part.id}"`), `the tile for ${part.id}`);
     assert.ok(root.includes(escape(part.title)), `the title of ${part.id}`);
   }
-  assert.match(root, /class="ws-under"/);
-  // The sample has decisions of the whole product; Latest is always there.
-  assert.match(root, /href="#product">The whole product</);
-  assert.match(root, /href="#latest">Latest</);
+  assert.doesNotMatch(root, /ws-under|data-part="suggested"/);
+  // The sample has decisions of the whole product; Latest and "Suggest a feature" are always there.
+  assert.match(root, /<nav class="ws-places" aria-label="Places"><a class="ws-place" href="#product">Product<\/a><a class="ws-place" href="#latest">Latest<\/a>/);
   assert.match(root, /class="ws-btn ws-suggest" href="#suggested">Suggest a feature</);
   // Nothing of the account is drawn inside the root: it has its place in the header.
   assert.doesNotMatch(root, /ws-account-inline|Sign in/);
@@ -64,7 +63,7 @@ test('the header holds sign-in, returning to the plain address, with its tooltip
   assert.equal(html.match(/Sign in/g).length, 1, 'one sign-in button');
 });
 
-test('without JavaScript every part shows its rows and the whole product its own, after the line that says what needs JavaScript', async () => {
+test('without JavaScript every part shows its rows and Product its own, after the line that says what needs JavaScript', async () => {
   const noscript = between('<noscript id="workshop-noscript">', '</noscript>');
   assert.match(noscript, /^<div class="ws-noscript"><p class="ws-quiet">Reading an entry&#x27;s notes, seeing the suggestions, suggesting a feature, voting and commenting, and choosing a color theme need JavaScript.<\/p>/);
   const section = (id) => noscript.slice(noscript.indexOf(`<section data-part="${id}">`), noscript.indexOf('</section>', noscript.indexOf(`<section data-part="${id}">`)));
@@ -76,7 +75,7 @@ test('without JavaScript every part shows its rows and the whole product its own
     for (const id of ids) assert.match(rows, new RegExp(`<li><code>${id}</code> [^<]+ <span class="ws-noscript-state">(Decided|Planned|Not decided yet|Dropped|Built[^<]*)\\.</span></li>`), `${id} in ${part.id}`);
   }
   const product = section('product');
-  assert.match(product, /<h2>The whole product<\/h2>/);
+  assert.match(product, /<h2>Product<\/h2>/);
   for (const id of await idsIn('.', ['decisions'])) assert.match(product, new RegExp(`<li><code>${id}</code> `), `${id} in the whole product`);
   // The list sits in the <noscript> alone: what the script takes over is the root, which holds none of it.
   assert.doesNotMatch(between('<div id="workshop-root" data-prerendered>', '<noscript'), /ws-noscript/);

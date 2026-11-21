@@ -8,11 +8,9 @@ import type { PartGroup } from './plan';
 
 export interface TilesProps {
   groups: PartGroup[];
-  /** The open part, or 'suggested'. */
+  /** The open part. */
   current: string | null;
-  suggested: number;
   onOpen: (part: string) => void;
-  onSuggest: () => void;
 }
 
 const number = (n: number) => String(n).padStart(2, '0');
@@ -38,25 +36,16 @@ function Tile({ group, on, onOpen }: { group: PartGroup; on: boolean; onOpen: (p
   );
 }
 
-export function Tiles({ groups, current, suggested, onOpen, onSuggest }: TilesProps) {
+export function Tiles({ groups, current, onOpen }: TilesProps) {
+  if (!groups.length) return null;
   const first = groups.filter((group) => group.first);
   const after = groups.filter((group) => !group.first);
   const tile = (group: PartGroup) => <Tile key={group.part.id} group={group} on={current === group.part.id} onOpen={onOpen} />;
-  const on = current === 'suggested';
   return (
     <nav className="ws-board" aria-label="Parts, in build order">
-      <div className="ws-band ws-band-first">{first.map(tile)}</div>
+      {first.length ? <div className="ws-band ws-band-first">{first.map(tile)}</div> : null}
       {after.length && first.length ? <p className="ws-cut">After that</p> : null}
-      <div className="ws-band ws-band-after">
-        {after.map(tile)}
-        <div className={`ws-tile ws-suggest-tile${on ? ' on' : ''}`} data-part="suggested">
-          <button type="button" className="ws-tile-hit" aria-current={on ? 'true' : undefined} onClick={onSuggest}>
-            <span className="ws-tile-top"><span className="ws-num">+</span></span>
-            <span className="ws-title">Suggest a feature</span>
-            <span className="ws-tline">{suggested ? `${suggested} from people.` : 'Something Silo should do.'}</span>
-          </button>
-        </div>
-      </div>
+      {after.length ? <div className="ws-band ws-band-after">{after.map(tile)}</div> : null}
     </nav>
   );
 }

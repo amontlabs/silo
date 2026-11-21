@@ -6,14 +6,23 @@
 // For each move it writes <name>.jpg, a contact sheet of the frames on screen at fixed times after the action, and
 // <name>.txt: every change of the page's scroll and of each element's box and opacity, read at each animation
 // frame and never cut, the animations that ran and the layout shifts.
-// It exits non-zero when
+// It exits non-zero when, in any move,
+// - a box it follows turns back: its top or its height goes more than 2 px one way, then more than 2 px the other;
+// - a box that stays in the document goes from an opacity above 0.9 to one below 0.1 between two frames;
+// a move where one of these is meant for some boxes names the check and those boxes in MEANT, with its reason. Each
+// check counts from the last sample before the action, so a change in the first frame counts too. And it exits
+// non-zero when
 // - in a move between the plain view and a place, the scroll position takes more than one new value;
 // - `.ws-detail` runs `ws-rise` while a `::view-transition-*(detail)` animation runs, or a group named `hero` animates;
 // - a move between two places runs any `::view-transition-*` animation;
 // - Notes opening changes the panel's height in fewer than four steps;
-// - a comment's height or the comment box's top changes when the comment is confirmed.
+// - a comment's height or the comment box's top changes when the comment is confirmed;
+// - a row's opening or closing covers more than 16% of its way in its first frame;
+// - Map to Order or back, with a place open: the place or the footer goes under an opacity of 0.95, or the place's top
+//   takes one step of more than 30 px, or the place or the footer is missing from a frame.
 // On a page with a map, the moves on the tiles run in Order, where the tiles are; the flows named map-* run on the map, at
-// 1440 x 900: the map to a part and back, a scrolled map to a part and back from a scrolled part, Map to Order and back.
+// 1440 x 900: the map to a part and back, a scrolled map to a part and back from a scrolled part, Map to Order and back
+// on the plain view and with a part and a row open.
 // Each flow sets the view it needs, whatever view the url names.
 // It drives Playwright's own browser: `npx playwright-core install chromium-headless-shell` once.
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -83,10 +92,72 @@ async function sample(page, selectors) {
   }, selectors);
 }
 
-/** The problems of a move, from what was sampled after the action. */
-function problemsOf(kind, rows, t0) {
+/** A box's top and height, read from a sample: `[left, top, width, height, opacity]`. */
+const MEASURES = { top: 1, height: 3 };
+/** How far a box may go one way, then the other, before it counts as turning back, in px. */
+const TURN = 2;
+
+/** The samples from the last one before the action on. */
+const fromAction = (rows, t0) => rows.slice(Math.max(0, rows.findIndex((row) => row.t >= t0) - 1));
+
+/**
+ * The boxes in `keys` that turn back after the action: for each, its top or its height as a list of runs, a run being
+ * the sum of the changes of one sign in a row; two runs in a row of more than TURN px each are a turn. A box is read
+ * only while it is drawn: one that is not (`display: none`, a box of no size) appears and leaves without moving.
+ */
+function turnsOf(rows, t0, keys) {
+  const found = [];
+  for (const key of keys) {
+    for (const [measure, index] of Object.entries(MEASURES)) {
+      const drawn = (box) => box && (box[2] > 0 || box[3] > 0);
+      const series = fromAction(rows, t0).filter((row) => drawn(row[key])).map((row) => ({ t: row.t - t0, v: row[key][index] }));
+      const runs = [];
+      for (let i = 1; i < series.length; i += 1) {
+        const d = series[i].v - series[i - 1].v;
+        if (!d) continue;
+        const last = runs[runs.length - 1];
+        if (last && Math.sign(last.sum) === Math.sign(d)) last.sum += d;
+        else runs.push({ t: series[i].t, sum: d });
+      }
+      for (let i = 1; i < runs.length; i += 1) {
+        if (Math.abs(runs[i - 1].sum) > TURN && Math.abs(runs[i].sum) > TURN) {
+          found.push(`${key}'s ${measure} turns back: ${runs[i - 1].sum.toFixed(1)} px from +${runs[i - 1].t} ms, then ${runs[i].sum.toFixed(1)} px from +${runs[i].t} ms`);
+          break;
+        }
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * The boxes in `keys` that go from an opacity above 0.9 to one below 0.1 from one frame where they are found to the next
+ * one, missing frames in between or not.
+ */
+function dropsOf(rows, t0, keys) {
+  const found = [];
+  for (const key of keys) {
+    let last = null;
+    for (const row of fromAction(rows, t0)) {
+      const box = row[key];
+      if (!box) continue;
+      if (last && last[4] > 0.9 && box[4] < 0.1) {
+        found.push(`${key} goes from opacity ${last[4]} to ${box[4]} in one frame (+${row.t - t0} ms)`);
+        break;
+      }
+      last = box;
+    }
+  }
+  return found;
+}
+
+/** The problems of a move, from what was sampled around the action; `meant` names, per check, the boxes it skips. */
+function problemsOf(kind, rows, t0, keys, meant = {}) {
   const after = rows.filter((row) => row.t >= t0);
   const problems = [];
+  const checked = (check) => keys.filter((key) => !meant[check]?.boxes.includes(key));
+  problems.push(...turnsOf(rows, t0, checked('turns')));
+  problems.push(...dropsOf(rows, t0, checked('drops')));
   const any = (test) => after.some((row) => row.running.some(test));
   if (any((id) => id.includes('(hero)'))) problems.push('a group named hero animates');
   const overlap = after.find((row) => row.running.some((id) => id.includes('|ws-detail|ws-rise')) && row.running.some((id) => /^::view-transition-[a-z-]+\(detail\)/.test(id)));
@@ -107,6 +178,30 @@ function problemsOf(kind, rows, t0) {
     const heights = [];
     for (const row of after) if (row.panel && heights[heights.length - 1] !== row.panel[3]) heights.push(row.panel[3]);
     if (heights.length - 1 < 4) problems.push(`the panel's height changes in ${heights.length - 1} steps: ${heights.join(' → ')}`);
+  }
+  if (kind === 'row') {
+    // From the height before the action to the last one: the share of that way covered at the first frame that moves.
+    const before = rows.filter((row) => row.t < t0 && row.more).at(-1)?.more[3];
+    const heights = after.filter((row) => row.more).map((row) => row.more[3]);
+    const end = heights.at(-1);
+    const first = heights.find((height) => height !== before);
+    if (before === undefined || end === undefined || first === undefined || end === before) problems.push('the row never moved');
+    else {
+      const share = Math.abs(first - before) / Math.abs(end - before);
+      if (share > 0.16) problems.push(`the row covers ${Math.round(share * 100)}% of its way in its first frame (${before} → ${first} of ${end})`);
+    }
+  }
+  if (kind === 'swap') {
+    // With a place open, Map and Order swap the strip only: the place and the footer stay, the place slides.
+    for (const key of ['detail', 'foot']) {
+      const missing = after.find((row) => !row[key]);
+      if (missing) problems.push(`${key} is missing (+${missing.t - t0} ms)`);
+      const low = after.find((row) => row[key] && row[key][4] < 0.95);
+      if (low) problems.push(`${key}'s opacity goes to ${low[key][4]} (+${low.t - t0} ms)`);
+    }
+    const tops = fromAction(rows, t0).filter((row) => row.detail).map((row) => ({ t: row.t - t0, v: row.detail[1] }));
+    const step = tops.slice(1).find((top, i) => Math.abs(top.v - tops[i].v) > 30);
+    if (step) problems.push(`the place's top takes a step of ${Math.round(step.v - tops[tops.indexOf(step) - 1].v)} px (+${step.t} ms)`);
   }
   if (kind === 'comment') {
     // The comment is the one with the text sent; its classes say whether it is being sent.
@@ -130,6 +225,7 @@ function problemsOf(kind, rows, t0) {
 
 /** Runs one action, writes its sheet and its text, and returns its problems. */
 async function capture(out, page, name, action, { selectors = ROWS, kind = null, ms = 1500 } = {}) {
+  const meant = MEANT[name] ?? {};
   const client = await page.context().newCDPSession(page);
   const frames = [];
   client.on('Page.screencastFrame', (frame) => {
@@ -149,8 +245,9 @@ async function capture(out, page, name, action, { selectors = ROWS, kind = null,
   });
   await client.detach().catch(() => {});
 
-  const problems = problemsOf(kind, data.rows, t0);
-  const lines = [`## ${name}  ${frames.length} frames${kind ? `  checked as: ${kind}` : ''}`];
+  const problems = problemsOf(kind, data.rows, t0, Object.keys(selectors), meant);
+  const skipped = Object.entries(meant).map(([check, { boxes, why }]) => `${check} not checked for ${boxes.join(', ')}: ${why}`);
+  const lines = [`## ${name}  ${frames.length} frames${kind ? `  checked as: ${kind}` : ''}`, ...skipped];
   for (const key of ['y', 'sx', ...Object.keys(selectors)]) {
     let last;
     const changes = [];
@@ -186,9 +283,22 @@ async function capture(out, page, name, action, { selectors = ROWS, kind = null,
   return problems;
 }
 
-const ROWS = { title: '#ws-part-title', back: '.ws-back', board: '.ws-board', detail: '.ws-detail', under: '.ws-under', row1: '.ws-item:nth-of-type(1)', row2: '.ws-item:nth-of-type(2)' };
+const ROWS = { title: '#ws-part-title', back: '.ws-back', board: '.ws-board', detail: '.ws-detail', places: '.ws-places', row1: '.ws-item:nth-of-type(1)', row2: '.ws-item:nth-of-type(2)' };
 /** What the map's moves read: the stage, the part opened, a part inside another, a wire's word, the back control and the detail. */
-const MAP_ROWS = { stage: '.ws-stage', opened: '.ws-part.on', inner: '.ws-part.inner', views: '.ws-part[data-part="views"]', word: '.ws-wl', back: '.ws-back', detail: '.ws-detail', under: '.ws-under' };
+const MAP_ROWS = { stage: '.ws-stage', opened: '.ws-part.on', inner: '.ws-part.inner', views: '.ws-part[data-part="views"]', word: '.ws-wl', back: '.ws-back', detail: '.ws-detail', places: '.ws-places' };
+/**
+ * The moves where a check is meant to fail for some boxes, by the sheet's name: per check (`turns` or `drops`), the
+ * boxes it skips and why. Every other box of the move is checked. A move between places replaces what the selectors
+ * find, so a box named the same can be another one.
+ */
+const MEANT = {
+  'part-to-part': {
+    turns: {
+      boxes: ['title', 'back', 'detail', 'row1', 'row2'],
+      why: 'the new place replaces the old one at once and rises 8 px into its place (ws-rise), as a place opened after the first frames does; these boxes are the new place\'s, which start 8 px lower',
+    },
+  },
+};
 const click = (selector) => async (page) => { await page.locator(selector).first().click({ noWaitAfter: true }); };
 const tileOf = (part) => `.ws-tile[data-part="${part}"] .ws-tile-hit`;
 
@@ -259,6 +369,17 @@ const FLOWS = {
     await wait(300);
     return [...problems, ...await capture(s.out, page, 'order-to-map', click('.ws-seg button:has-text("Map")'), { selectors: { ...MAP_ROWS, tile: '.ws-tile' } })];
   },
+  // A part and a row open on the map, then Order, then the map again: the strip swaps, the place slides.
+  'map-order-open': async (s) => {
+    if (!s.site.mapped) return [];
+    const page = await s.open({ map: true, hash: `#${s.site.withRows[0]}` });
+    await click('.ws-item:nth-of-type(1) .ws-row')(page);
+    await wait(800);
+    const selectors = { ...MAP_ROWS, board: '.ws-board', row1: '.ws-item:nth-of-type(1)', row2: '.ws-item:nth-of-type(2)', more: '.ws-item.open .ws-more', foot: '.ws-foot' };
+    const problems = await capture(s.out, page, 'map-to-order-open', click('.ws-seg button:has-text("Order")'), { kind: 'swap', selectors });
+    await wait(300);
+    return [...problems, ...await capture(s.out, page, 'order-to-map-open', click('.ws-seg button:has-text("Map")'), { kind: 'swap', selectors })];
+  },
   // The plain view to a part and back, on a desk and on a phone.
   'open-and-back': (s) => openAndBack(s, DESK, ''),
   'phone-open-and-back': (s) => openAndBack(s, PHONE, 'phone-'),
@@ -270,8 +391,9 @@ const FLOWS = {
   // A row opens and closes.
   rows: async (s) => {
     const page = await s.open({ hash: `#${s.site.withRows[0]}` });
-    const problems = await capture(s.out, page, 'row-open', click('.ws-item:nth-of-type(1) .ws-row'), { ms: 900 });
-    return [...problems, ...await capture(s.out, page, 'row-close', click('.ws-item:nth-of-type(1) .ws-row'), { ms: 900 })];
+    const selectors = { ...ROWS, more: '.ws-item:nth-of-type(1) .ws-more' };
+    const problems = await capture(s.out, page, 'row-open', click('.ws-item:nth-of-type(1) .ws-row'), { kind: 'row', ms: 900, selectors });
+    return [...problems, ...await capture(s.out, page, 'row-close', click('.ws-item:nth-of-type(1) .ws-row'), { kind: 'row', ms: 900, selectors })];
   },
   // The Notes of an open row, their chunk loaded on the click.
   notes: async (s) => {
@@ -305,7 +427,7 @@ const FLOWS = {
   latest: async (s) => {
     const page = await s.open({});
     // In view before the capture, so that the only scroll in it is the page's.
-    const link = 'a.ws-fold-link[href="#latest"]';
+    const link = '.ws-places a[href="#latest"]';
     await page.locator(link).scrollIntoViewIfNeeded();
     await wait(200);
     const problems = await capture(s.out, page, 'open-latest', click(link), { kind: 'blind', selectors: { ...ROWS, latest: '.ws-latest' } });

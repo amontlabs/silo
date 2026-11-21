@@ -324,13 +324,13 @@ describe('Back, Forward and Escape', () => {
     await elapse(1);
     expect(shownView()).toBe('order');
     expect(document.activeElement).toBe(tile('part-b'));
-    // A tile with no part on the map: the title takes the focus.
-    act(() => tile('suggested').focus());
+    // The focus outside the panel that is hidden stays where it is: a link of the title row, the Order button.
+    const latest = screen.getByRole('link', { name: 'Latest' });
+    act(() => latest.focus());
     act(() => history.back());
     await elapse(1);
     expect(shownView()).toBe('map');
-    expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Workshop' }));
-    // The focus outside the panel that is hidden stays where it is.
+    expect(document.activeElement).toBe(latest);
     const order = screen.getByRole('button', { name: 'Order' });
     act(() => order.focus());
     act(() => history.forward());
@@ -339,10 +339,9 @@ describe('Back, Forward and Escape', () => {
     expect(document.activeElement).toBe(order);
   });
 
-  it('gives the title the focus of a link under the map that Back or Forward hides or takes away', async () => {
+  it('keeps the focus on a link of the title row that Back or Forward leaves on the page', async () => {
     screenOf({ motion: false, wide: true, mode: 'absent' });
     await mount();
-    const title = () => screen.getByRole('heading', { level: 1, name: 'Workshop' });
     // The full map in Map, a part in Order, then the full map again in Order.
     act(() => { fireEvent.click(part('part-b')); });
     act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
@@ -350,27 +349,28 @@ describe('Back, Forward and Escape', () => {
     await elapse(1);
     expect(location.hash).toBe('');
     expect(shownView()).toBe('order');
-    // Back to the full map in Map, then Forward to the full map in Order: Order hides "Suggest a feature".
+    // Back to the full map in Map, then Forward to the full map in Order: "Suggest a feature" shows in both.
     act(() => history.go(-2));
     await elapse(1);
     expect(shownView()).toBe('map');
-    act(() => screen.getByRole('link', { name: 'Suggest a feature' }).focus());
+    const suggest = screen.getByRole('link', { name: 'Suggest a feature' });
+    act(() => suggest.focus());
     act(() => history.go(2));
     await elapse(1);
     expect(location.hash).toBe('');
     expect(shownView()).toBe('order');
-    expect(document.activeElement).toBe(title());
-    // Back to the full map in Map with the focus on Latest; Forward to the part takes the links under the map off the
-    // page.
+    expect(document.activeElement).toBe(suggest);
+    // Back to the full map in Map with the focus on Latest; Forward to the part keeps the row on the page.
     act(() => history.go(-2));
     await elapse(1);
     expect(location.hash).toBe('');
     expect(shownView()).toBe('map');
-    act(() => screen.getByRole('link', { name: 'Latest' }).focus());
+    const latest = screen.getByRole('link', { name: 'Latest' });
+    act(() => latest.focus());
     act(() => history.forward());
     await elapse(1);
     expect(location.hash).toBe('#part-b');
-    expect(document.activeElement).toBe(title());
+    expect(document.activeElement).toBe(latest);
   });
 
   it('drops a going-back when Back leads to an address that is not known yet', async () => {
@@ -631,7 +631,7 @@ describe('going back from a place reached by its address', () => {
     document.documentElement.classList.remove('vt-open', 'vt-back');
   });
 
-  it.each([['#latest', 'Latest'], ['#product', 'The whole product'], ['#left', /^Left out/]] as const)('from %s gives the focus to the link under the tiles that leads there, brought into view at once', async (hash, name) => {
+  it.each([['#latest', 'Latest'], ['#product', 'Product'], ['#left', /^Left out/], ['#suggested', 'Suggest a feature']] as const)('from %s gives the focus to the link of the title row that leads there, brought into view at once', async (hash, name) => {
     narrow();
     let update: () => void = () => {};
     (document as unknown as { startViewTransition: unknown }).startViewTransition = (run: () => void) => {
@@ -646,7 +646,7 @@ describe('going back from a place reached by its address', () => {
     Object.defineProperty(window, 'scrollY', { value: 0, configurable: true });
     const plain = HTMLElement.prototype.getBoundingClientRect;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      if (this.matches('a.ws-fold-link')) return { x: 0, y: 1200, top: 1200, left: 0, right: 80, bottom: 1220, width: 80, height: 20, toJSON() {} } as DOMRect;
+      if (this.matches('.ws-places a')) return { x: 0, y: 1200, top: 1200, left: 0, right: 80, bottom: 1220, width: 80, height: 20, toJSON() {} } as DOMRect;
       return plain.call(this);
     });
     await userEvent.click(document.querySelector<HTMLElement>('.ws-back')!);
@@ -669,7 +669,7 @@ describe('going back from a place reached by its address', () => {
     await userEvent.click(document.querySelector<HTMLElement>('.ws-back')!);
     // The plain view the update draws has no link to Latest.
     const find = document.querySelector.bind(document);
-    vi.spyOn(document, 'querySelector').mockImplementation(((selector: string) => (selector === 'a.ws-fold-link[href="#latest"]' ? null : find(selector))) as typeof document.querySelector);
+    vi.spyOn(document, 'querySelector').mockImplementation(((selector: string) => (selector === '.ws-places a[href="#latest"]' ? null : find(selector))) as typeof document.querySelector);
     act(() => update());
     expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Workshop' }));
   });
@@ -697,7 +697,7 @@ describe('going back off the map without a view transition', () => {
     const plain = HTMLElement.prototype.getBoundingClientRect;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       if (this.matches('.ws-tile[data-part="part-b"]')) return { x: 0, y: -200, top: -200, left: 0, right: 200, bottom: -120, width: 200, height: 80, toJSON() {} } as DOMRect;
-      if (this.matches('a.ws-fold-link[href="#latest"]')) return { x: 0, y: 1200, top: 1200, left: 0, right: 80, bottom: 1218, width: 80, height: 18, toJSON() {} } as DOMRect;
+      if (this.matches('.ws-places a[href="#latest"]')) return { x: 0, y: 1200, top: 1200, left: 0, right: 80, bottom: 1218, width: 80, height: 18, toJSON() {} } as DOMRect;
       return plain.call(this);
     });
     await userEvent.click(tile('part-b'));
@@ -707,7 +707,7 @@ describe('going back off the map without a view transition', () => {
     expect(shownPart()).toBe('');
     expect(document.activeElement).toBe(tile('part-b'));
     expect(scrolls).toEqual([{ top: 300, behavior: 'instant' }]);
-    // A place reached by its address: the link under the tiles that leads to it.
+    // A place reached by its address: the link of the title row that leads to it.
     history.replaceState(null, '', '/workshop#latest');
     act(() => { dispatchEvent(new PopStateEvent('popstate')); });
     expect(shownPart()).not.toBe('');
@@ -716,5 +716,214 @@ describe('going back off the map without a view transition', () => {
     expect(document.activeElement).toBe(screen.getByRole('link', { name: 'Latest' }));
     expect(scrolls).toEqual([{ top: 500 + 1218 - innerHeight, behavior: 'instant' }]);
     expect(started).toEqual([]);
+  });
+});
+
+describe('Map and Order with a place open', () => {
+  /** The slides the page starts, through the browser's `animate`, which jsdom lacks. */
+  type Slide = { node: HTMLElement; keyframes: Keyframe[]; cancel: ReturnType<typeof vi.fn>; commitStyles: ReturnType<typeof vi.fn> };
+  let slides: Slide[] = [];
+  function slideRecorder() {
+    slides = [];
+    Object.defineProperty(HTMLElement.prototype, 'animate', {
+      configurable: true,
+      value(this: HTMLElement, keyframes: Keyframe[]) {
+        const slide = { node: this, keyframes, cancel: vi.fn(), commitStyles: vi.fn(), finished: new Promise(() => {}) };
+        slides.push(slide);
+        return slide;
+      },
+    });
+  }
+  /** The folded map is 93 px taller than the strip of tiles: the place is that much lower in Map. */
+  function placeAt() {
+    const plain = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (!this.matches('.ws-detail')) return plain.call(this);
+      const top = rootOf().classList.contains('v-map') ? 353 : 260;
+      return { x: 0, y: top, top, left: 0, right: 1000, bottom: top + 900, width: 1000, height: 900, toJSON() {} } as DOMRect;
+    });
+  }
+  const slideOf = (node: Element | null) => slides.filter((slide) => slide.node === node);
+  async function openPart() {
+    screenOf({ motion: true, wide: true, mode: 'absent' });
+    slideRecorder();
+    await mount();
+    act(() => { fireEvent.click(part('part-b')); });
+    await elapse(600);
+    placeAt();
+    return document.querySelector<HTMLElement>('.ws-detail')!;
+  }
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    delete (HTMLElement.prototype as Partial<HTMLElement>).animate;
+  });
+
+  it('swaps the strip alone: the place stays in sight and slides from where it was to its new height', async () => {
+    const detail = await openPart();
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
+    // The strip fades out; the place is not part of the swap.
+    expect(classesOf()).toContain('strip-out');
+    expect(classesOf()).not.toContain('swap-out');
+    await elapse(130);
+    expect(shownView()).toBe('order');
+    expect(classesOf()).toContain('strip-in');
+    expect(document.querySelector('.ws-detail')).toBe(detail);
+    // It starts 93 px lower, where it was, and slides to its place.
+    expect(slideOf(detail).map((slide) => slide.keyframes)).toEqual([[{ translate: '0 93px' }, { translate: '0 0' }]]);
+    await elapse(300);
+    expect(classesOf()).not.toContain('strip-in');
+  });
+
+  it('slides without taking the place\'s own transitions: Escape meanwhile ends the slide and lets the place fade', async () => {
+    const detail = await openPart();
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
+    await elapse(130);
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Map' })); });
+    await elapse(130);
+    expect(shownView()).toBe('map');
+    expect(slideOf(detail)).toHaveLength(2);
+    // Under way: nothing is written over the stylesheet's transitions.
+    expect(detail.style.transition).toBe('');
+    act(() => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
+    expect(classesOf()).toContain('ws-leaving');
+    expect(slideOf(detail)[1].cancel).toHaveBeenCalled();
+    expect(detail.style.transition).toBe('');
+    expect(detail.style.translate).toBe('');
+  });
+
+  it('decides what swaps when it applies: a place opened meanwhile slides, a place closed meanwhile gets the whole swap', async () => {
+    screenOf({ motion: true, wide: true, mode: 'absent' });
+    slideRecorder();
+    await mount();
+    placeAt();
+    // On the plain view, Order pressed, then Product at once: the place is open when the swap applies.
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
+    expect(classesOf()).toContain('swap-out');
+    act(() => { fireEvent.click(screen.getByRole('link', { name: 'Product' })); });
+    expect(location.hash).toBe('#product');
+    expect(classesOf()).toContain('strip-out');
+    expect(classesOf()).not.toContain('swap-out');
+    await elapse(130);
+    expect(classesOf()).toContain('strip-in');
+    expect(slideOf(document.querySelector('.ws-detail'))).toHaveLength(1);
+    await elapse(400);
+    // With the place open, Map pressed, then the place closed at once: the plain view swaps whole, nothing slides.
+    slides = [];
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Map' })); });
+    expect(classesOf()).toContain('strip-out');
+    act(() => { fireEvent.click(screen.getByRole('link', { name: 'Product' })); });
+    await elapse(130);
+    expect(shownPart()).toBe('');
+    expect(classesOf()).toContain('swap-in');
+    expect(classesOf()).not.toContain('strip-in');
+    expect(slides).toEqual([]);
+  });
+
+  it('ends the slide at once on Back or Forward, and holds it where it is for a second press', async () => {
+    const detail = await openPart();
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
+    await elapse(130);
+    const first = slideOf(detail)[0];
+    // A second press during the slide: it stops where it is (held), and the next slide starts from there.
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Map' })); });
+    expect(first.commitStyles).toHaveBeenCalled();
+    expect(first.cancel).toHaveBeenCalled();
+    await elapse(130);
+    const second = slideOf(detail)[1];
+    expect(second).toBeDefined();
+    // Back of the browser during that slide: it ends at once, and the place stays where the page puts it.
+    act(() => history.back());
+    await elapse(1);
+    expect(second.cancel).toHaveBeenCalled();
+    expect(second.commitStyles).not.toHaveBeenCalled();
+    expect(document.querySelector<HTMLElement>('.ws-detail')?.style.translate ?? '').toBe('');
+  });
+
+  it('keeps the whole swap on the plain view', async () => {
+    screenOf({ motion: true, wide: true, mode: 'absent' });
+    await mount();
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
+    expect(classesOf()).toContain('swap-out');
+    expect(classesOf()).not.toContain('strip-out');
+    await elapse(130);
+    expect(classesOf()).toContain('swap-in');
+  });
+});
+
+describe('going back from a scrolled part on the map', () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    restoreScrollY();
+  });
+
+  it('keeps the map pinned until the scroll has brought its place below the header, and never on the plain view after', async () => {
+    screenOf({ motion: true, wide: true, mode: 'absent' });
+    vi.spyOn(window, 'scrollTo').mockImplementation((() => {}) as typeof window.scrollTo);
+    await mount();
+    act(() => { fireEvent.click(part('part-b')); });
+    await elapse(600);
+    Object.defineProperty(window, 'scrollY', { value: 500, configurable: true });
+    act(() => { fireEvent.click(document.querySelector<HTMLElement>('.ws-back')!); });
+    await elapse(200);
+    expect(shownPart()).toBe('');
+    expect(classesOf()).toContain('ws-pinned');
+    // The page is still scrolled past the map's place (here: the title row's bottom, 0 px in this document).
+    Object.defineProperty(window, 'scrollY', { value: 40, configurable: true });
+    act(() => { dispatchEvent(new Event('scroll')); });
+    expect(classesOf()).toContain('ws-pinned');
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true });
+    act(() => { dispatchEvent(new Event('scroll')); });
+    expect(classesOf()).not.toContain('ws-pinned');
+  });
+
+  it('lets the map go after a while even if the scroll never gets there, and does not pin it from the top', async () => {
+    screenOf({ motion: true, wide: true, mode: 'absent' });
+    vi.spyOn(window, 'scrollTo').mockImplementation((() => {}) as typeof window.scrollTo);
+    await mount();
+    act(() => { fireEvent.click(part('part-b')); });
+    await elapse(600);
+    Object.defineProperty(window, 'scrollY', { value: 500, configurable: true });
+    act(() => { fireEvent.click(document.querySelector<HTMLElement>('.ws-back')!); });
+    await elapse(1600);
+    expect(classesOf()).not.toContain('ws-pinned');
+    // From the top of the page, nothing needs pinning.
+    act(() => { fireEvent.click(part('part-b')); });
+    await elapse(600);
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true });
+    act(() => { fireEvent.click(document.querySelector<HTMLElement>('.ws-back')!); });
+    expect(classesOf()).not.toContain('ws-pinned');
+  });
+});
+
+describe('a place that opens with a row open', () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('fades in where it stands; a place opened alone rises in, and the first place drawn does neither', async () => {
+    screenOf({ motion: true, wide: true, mode: 'absent' });
+    await mount();
+    act(() => { fireEvent.click(part('part-b')); });
+    expect(document.querySelector('.ws-detail')?.className).toBe('ws-detail');
+    act(() => { history.pushState(null, '', '/workshop#part-d/fork'); dispatchEvent(new PopStateEvent('popstate')); });
+    await elapse(10);
+    expect(document.querySelector('.ws-detail')?.className).toBe('ws-detail ws-fade');
+    // Closing the row later does not change its entrance.
+    act(() => { fireEvent.click(rowButton('Fork a computer')); });
+    expect(document.querySelector('.ws-detail')?.className).toBe('ws-detail ws-fade');
+    cleanup();
+    vi.useRealTimers();
+    history.replaceState(null, '', '/workshop#part-d/fork');
+    vi.useFakeTimers();
+    mockApi();
+    render(<App data={buildData()} />);
+    await elapse(600);
+    expect(document.querySelector('.ws-detail')?.className).toBe('ws-detail ws-still');
   });
 });

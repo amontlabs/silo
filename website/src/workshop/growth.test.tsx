@@ -1,4 +1,4 @@
-// An open row's panel grows and shrinks over the same 200 ms when Notes or History opens or closes, and when their
+// An open row's panel grows and shrinks over the same 260 ms when Notes or History opens or closes, and when their
 // chunk arrives after its placeholder: the rows below never jump.
 import { act, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -9,7 +9,7 @@ import type { HistorySource } from './data';
 import { itemOf, mockApi, owner, renderApp, rowButton, wait } from './test-support';
 
 /** A little over the time the panel takes to open, during which it has no growth of its own. */
-const GROW_MS = 260;
+const GROW_MS = 300;
 
 const CORE = 'The engine runs on its own';
 /** Three changes of `core`, so its row has a History. */

@@ -81,13 +81,13 @@ describe('Latest', () => {
     { n: 14, entry: 'fork', author: 'devin-oss', bot: false, createdAt: at(30), text: 'Fork what, exactly?' },
   ];
 
-  it('is reachable from the strip under the map, and lists the newest first, each linking to its entry', async () => {
+  it('is reachable from the title row, and lists the newest first, each linking to its entry', async () => {
     fixedNow();
     mockApi({ state: () => ok(liveState({}, latest)) });
     await renderApp();
-    const strip = document.querySelector('.ws-fold-link[href="#latest"]') as HTMLAnchorElement;
-    expect(strip).toHaveTextContent('Latest');
-    await userEvent.click(strip);
+    const link = document.querySelector('.ws-top .ws-places a[href="#latest"]') as HTMLAnchorElement;
+    expect(link).toHaveTextContent('Latest');
+    await userEvent.click(link);
     expect(location.hash).toBe('#latest');
     expect(screen.getByRole('heading', { level: 2, name: 'Latest' })).toHaveFocus();
     const rows = [...document.querySelectorAll<HTMLAnchorElement>('.ws-latest a.ws-row')];
