@@ -244,7 +244,13 @@ dashed outline or line has one source for each kind of thing:
   changes nothing there, and the page gets no mark for either.
 
 A key on the full map (class `ws-mapkey`, not the header's `ws-key`) says what a
-solid and a dashed line mean ("decided", "not decided"). The page's data gets
+solid and a dashed line mean ("decided", "not decided"). The header's key, at the
+end of the title row in the Map and the Order view, has an entry only for a
+state a part is in: "done", "next" and "planned", each with its pip. It has no
+entry for a part not decided yet: the map's key says what a dashed line means,
+and a screen reader still hears "not decided yet" for such a part. With no
+entry it draws nothing and is no list, but its empty box keeps the title row's
+height. The page's data gets
 `undecided: true` on a wire, a zone or a text that is not decided and nothing
 else of `rests`, and never the layout's `file`. A wire's word is in the second
 ink, never the faint one (2.53:1 on the light ground), whatever its part's state

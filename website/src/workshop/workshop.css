@@ -73,7 +73,6 @@
 .ws .ws-seg button:focus-visible { outline-offset: 2px; }
 .ws-key { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 16px; font: 12px/16px var(--mono); color: var(--muted); min-height: 16px; }
 .ws-key li { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
-.ws-dash { width: 14px; height: 9px; margin: 0 2px 0 1px; border: 1px dashed var(--faint); border-radius: 2px; }
 
 /* ---- pips: one per entry ---- */
 .ws-pip { flex: none; width: 14px; height: 16px; display: grid; place-items: center; font-style: normal; }

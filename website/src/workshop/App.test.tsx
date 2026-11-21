@@ -28,7 +28,7 @@ describe('the map', () => {
     expect(part('part-c')).toHaveAccessibleName('Part C, 1 planned, 1 feature. A part inside Part B.');
     expect(part('part-d')).toHaveAccessibleName('Part D, not decided yet, 7 features, 2 decisions. A part with copies behind it.');
     const key = screen.getByRole('list', { name: 'Key' });
-    expect(within(key).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['next', 'planned', 'not decided yet']);
+    expect(within(key).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['next', 'planned']);
   });
 
   it('shows built and next parts, on the map and the tiles alike', async () => {
@@ -42,7 +42,7 @@ describe('the map', () => {
       expect(tile(id).parentElement).toHaveClass(state);
     }
     expect(tile('part-c')).toHaveTextContent('1 planned');
-    expect(within(screen.getByRole('list', { name: 'Key' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['done', 'next', 'planned', 'not decided yet']);
+    expect(within(screen.getByRole('list', { name: 'Key' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['done', 'next', 'planned']);
   });
 
   it('switches to the tiles in build order and back', async () => {
