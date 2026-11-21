@@ -8,5 +8,5 @@ an answer that belongs to a tool.
 
 `what-makes-a-classifier`, proposed, makes a classifier an extension. An extension acts only
 through the tools of `extension-tools`, which read, show or protect, and none of them writes an
-opinion beside the record. So how the opinions of a classifier that is an extension reach this
-store is not said.
+opinion beside the record. How the opinions of a classifier that is an extension reach this store
+is the open question `extension-gives-an-opinion`.

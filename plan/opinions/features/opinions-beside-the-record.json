@@ -11,7 +11,8 @@
     "how-an-opinion-is-shown",
     "opinions-computed-again",
     "classifier-mechanics",
-    "opinions-stored-apart"
+    "opinions-stored-apart",
+    "extension-gives-an-opinion"
   ],
   "keeps": [
     "opinion-stored-apart",
