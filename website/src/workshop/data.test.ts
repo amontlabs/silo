@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { canonicalText } from '../../../tools/plan/model/index.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadDir } from '../../../tools/plan/read/index.js';
-import { buildDataFrom, factsFrom, filmOrder, historiesFrom, historyFromGit, layoutPlanFrom, notesFrom, planDir, readBuildData, readFilms, readHistories, readHistory, printedChanged, unshallow } from './data';
+import { buildDataFrom, factsFrom, filmOrder, historiesFrom, historyFromGit, layoutPlanFrom, notesFrom, planDir, readBuildData, readFilms, readHistories, readHistory, printedChanged, printedChanges, unshallow } from './data';
 import type { Git } from './data';
 import { made } from '../../scripts/films-test-support.mjs';
 import { buildData, CORE_NOTES, DECISIONS, emptyPlanFiles, FEATURES, PARTS, planFiles, withLists, ZIG_NOTES } from './fixtures';
@@ -802,6 +802,35 @@ describe('the films', () => {
     expect(printedChanged(entry({ sets: [set] }), entry({ adds: ['twin', 'more'], verdict: 'take' }))).toBe(true);
     // A word of `sets` has no id: it is named by its word, as the lists name it.
     expect(printedChanged(entry({ sets: [{ in: 'words', word: 'Pause point', means: 'A stop.' }] }), entry({ adds: ['pause-point'], verdict: 'take' }))).toBe(false);
+  });
+
+  it('name what changed in an entry, field by field and statement by statement, and nothing for a take alone', () => {
+    const set = { in: 'words', word: 'twin', means: 'A copy.' };
+    expect(printedChanges(entry({ sets: [set] }), entry({ adds: ['twin'], verdict: 'take' }))).toEqual([]);
+    expect(printedChanges(entry({ answer: 'Yes.', sets: [set] }), entry({ answer: 'No.', sets: [{ ...set, means: 'Another copy.' }] }))).toEqual([
+      'answer: was "Yes.", now "No."',
+      'statement twin, means: was "A copy.", now "Another copy."',
+    ]);
+    expect(printedChanges(entry({}), entry({ verdict: 'drop' }))).toEqual(['dropped']);
+    expect(printedChanges(entry({}), null)).toEqual(['its file was deleted']);
+  });
+
+  it('are told behind by the films\' command exactly as by the Workshop, on the real repository', () => {
+    const out = (() => {
+      try {
+        return execFileSync('node', [join(REPOSITORY, 'films/tools/behind.mjs')], { encoding: 'utf8' });
+      } catch (error) {
+        return (error as { stdout: string }).stdout;
+      }
+    })();
+    const told = new Map<string, string[]>();
+    let film = '';
+    for (const line of out.split('\n')) {
+      const head = /^([a-z0-9-]+): /.exec(line);
+      if (head) told.set((film = head[1]), []);
+      else if (/^  [a-z0-9-]+$/.test(line)) told.get(film)!.push(line.trim());
+    }
+    expect(Object.fromEntries(told)).toEqual(Object.fromEntries(readFilms(REPOSITORY, false).map((info) => [info.id, info.behind])));
   });
 
   it('compare the texts of an entry\'s statements wherever they live at each end: in its sets before a take, in the lists after', () => {
