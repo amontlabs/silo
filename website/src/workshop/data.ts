@@ -8,7 +8,7 @@ import { entryStatus, listKind, replacedBy, wordId } from '../../../tools/plan/m
 import { repoAddress } from '../../../tools/workshop/model/index.js';
 import { entryHistory, readSteps } from '../../../tools/plan/history/index.js';
 import { loadDir, parsePlan } from '../../../tools/plan/read/index.js';
-import { checkLayout, LayoutError, NO_MAP, SILO_MAP, withoutRests } from './map.ts';
+import { checkLayout, LayoutError, NO_MAP, pageLayout, SILO_MAP } from './map.ts';
 import type { LayoutPlan, MapLayout } from './map.ts';
 import { RESERVED_ADDRESSES } from './routes.ts';
 import type { BuildData, Change, Entry, EntryFacts, Facts, Histories, Notes, Statement, Verdict } from './plan.ts';
@@ -177,7 +177,7 @@ export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null }: B
     parts: plan.parts.map((part) => ({ id: part.id, title: part.title, line: part.line })),
     stages: plan.stages.map((stage) => ({ id: stage.id, title: stage.title, line: stage.line })),
     entries,
-    map: withoutRests(map),
+    map: pageLayout(map),
     shallow: history?.shallow === true,
   };
 }

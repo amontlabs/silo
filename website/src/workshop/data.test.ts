@@ -8,7 +8,7 @@ import { loadDir } from '../../../tools/plan/read/index.js';
 import { buildDataFrom, factsFrom, historiesFrom, historyFromGit, layoutPlanFrom, notesFrom, planDir, readBuildData, readHistories, readHistory, unshallow } from './data';
 import type { Git } from './data';
 import { buildData, CORE_NOTES, DECISIONS, emptyPlanFiles, FEATURES, PARTS, planFiles, withLists, ZIG_NOTES } from './fixtures';
-import { checkLayout, LayoutError, MAP_HEIGHT, NO_MAP, SILO_MAP, withoutRests } from './map';
+import { checkLayout, LayoutError, MAP_HEIGHT, NO_MAP, SILO_MAP, pageLayout } from './map';
 import type { Box, MapLayout } from './map';
 import { EXAMPLE_MAP } from './map-example';
 import { MAP_PIXELS, MONO_ADVANCE, SERIF_WIDTHS, shownTitle, stateNeeds, TITLE_FACE, TITLE_STYLE, titleEms, unknownCharacters } from './map-fit';
@@ -132,7 +132,7 @@ describe('a plan with an error', () => {
 
   it('stops on a part the map has no place for; a layout that places nothing draws no map and takes any plan', () => {
     const files = planFiles({ parts: [...PARTS, { id: 'billing', title: 'Billing', line: 'Money.' }] });
-    expect(() => buildDataFrom(files, { map: EXAMPLE_MAP })).toThrow('The map has no place for the part "billing" of plan/parts.json. Add it to website/src/workshop/map.ts.');
+    expect(() => buildDataFrom(files, { map: EXAMPLE_MAP })).toThrow('The map has no place for the part "billing" of plan/parts.json. Add it to website/src/workshop/map-example.ts.');
     expect(() => buildDataFrom(files)).toThrow('The map has no place for the part "part-a" of plan/parts.json.');
     expect(buildDataFrom(files, { map: NO_MAP }).map).toBe(NO_MAP);
   });
@@ -305,10 +305,10 @@ describe('the map layout', () => {
   };
 
   it('draws the fixture plan with the example, and Silo\'s plan with its own map', () => {
-    expect(buildData().map).toEqual(withoutRests(EXAMPLE_MAP));
+    expect(buildData().map).toEqual(pageLayout(EXAMPLE_MAP));
     expect(Object.keys(EXAMPLE_MAP.places)).toEqual(ids);
     // The real plan passes every check of Silo's map: its parts, what each wire rests on, and its titles.
-    expect(readBuildData(REPOSITORY).map).toEqual(withoutRests(SILO_MAP));
+    expect(readBuildData(REPOSITORY).map).toEqual(pageLayout(SILO_MAP));
     expect(() => checkLayout(plan(['engine', 'record']))).toThrow(LayoutError);
     // A layout that places nothing takes every plan, and the page shows the tiles alone.
     expect(() => checkLayout(plan(['engine', 'record']), NO_MAP)).not.toThrow();
@@ -317,11 +317,11 @@ describe('the map layout', () => {
   it('places exactly the parts of the plan', () => {
     expect(() => checkLayout(plan(), EXAMPLE_MAP)).not.toThrow();
     expect(() => checkLayout(plan([...ids, 'billing']), EXAMPLE_MAP)).toThrow(LayoutError);
-    expect(() => checkLayout(plan(ids.filter((id) => id !== 'part-c')), EXAMPLE_MAP)).toThrow('website/src/workshop/map.ts places the part "part-c", which plan/parts.json does not have.');
+    expect(() => checkLayout(plan(ids.filter((id) => id !== 'part-c')), EXAMPLE_MAP)).toThrow('website/src/workshop/map-example.ts places the part "part-c", which plan/parts.json does not have.');
     const without = (id: string): MapLayout => ({ ...EXAMPLE_MAP, places: Object.fromEntries(Object.entries(EXAMPLE_MAP.places).filter(([place]) => place !== id)) });
-    expect(() => checkLayout(plan(ids.filter((id) => id !== 'part-b')), without('part-b'))).toThrow('website/src/workshop/map.ts draws a wire for the part "part-b", which plan/parts.json does not have.');
+    expect(() => checkLayout(plan(ids.filter((id) => id !== 'part-b')), without('part-b'))).toThrow('website/src/workshop/map-example.ts draws a wire for the part "part-b", which plan/parts.json does not have.');
     const noWires = { ...without('part-d'), wires: { full: EXAMPLE_MAP.wires.full.filter((wire) => wire.of !== 'part-d'), fold: EXAMPLE_MAP.wires.fold.filter((wire) => wire.of !== 'part-d') } };
-    expect(() => checkLayout(plan(ids.filter((id) => id !== 'part-d')), noWires)).toThrow('website/src/workshop/map.ts stacks a copy behind the part "part-d", which plan/parts.json does not have.');
+    expect(() => checkLayout(plan(ids.filter((id) => id !== 'part-d')), noWires)).toThrow('website/src/workshop/map-example.ts stacks a copy behind the part "part-d", which plan/parts.json does not have.');
   });
 
   describe('what a wire or a zone rests on', () => {
@@ -332,7 +332,17 @@ describe('the map layout', () => {
 
     it('keeps what each thing rests on out of the page\'s data', () => {
       expect(JSON.stringify(buildData().map)).not.toContain('rests');
-      expect(withoutRests(NO_MAP)).toBe(NO_MAP);
+      expect(buildData().map).not.toHaveProperty('file');
+      expect(pageLayout(NO_MAP)).toBe(NO_MAP);
+    });
+
+    it('names in each message the file of the layout it checked', () => {
+      expect(build(uses(undefined))).toThrow('website/src/workshop/map-example.ts: the wire "uses" rests on nothing.');
+      const real = layoutPlanFrom(loadDir(join(REPOSITORY, 'plan')));
+      const silo = { ...SILO_MAP, zones: SILO_MAP.zones.map((zone) => ({ ...zone, rests: [] })) };
+      expect(() => checkLayout(real, silo)).toThrow('website/src/workshop/map.ts: the zone "YOUR MAC" rests on nothing.');
+      const { file: _, ...unnamed } = uses(undefined);
+      expect(() => checkLayout(plan(), unnamed)).toThrow('the map\'s layout: the wire "uses" rests on nothing.');
     });
 
     it('passes a taken decision, a word of the list and a part, and asks nothing of the fold\'s wires', () => {
@@ -344,35 +354,35 @@ describe('the map layout', () => {
     });
 
     it('stops on a wire of the full map that rests on nothing, named by its word or, with none, by its path', () => {
-      expect(build(uses(undefined))).toThrow('website/src/workshop/map.ts: the wire "uses" rests on nothing. Fix: give it `rests`: the decisions of the plan it draws, words as word:<id>, or part:<id> for what only a part\'s line says.');
+      expect(build(uses(undefined))).toThrow('website/src/workshop/map-example.ts: the wire "uses" rests on nothing. Fix: give it `rests`: the decisions of the plan it draws, words as word:<id>, or part:<id> for what only a part\'s line says.');
       expect(build(uses([]))).toThrow('the wire "uses" rests on nothing.');
       const bare = { ...EXAMPLE_MAP, wires: { ...EXAMPLE_MAP.wires, full: EXAMPLE_MAP.wires.full.map((wire) => (wire.label ? wire : { ...wire, rests: undefined })) } };
-      expect(build(bare)).toThrow('website/src/workshop/map.ts: the wire with no word, drawn "M784 178H932" rests on nothing.');
+      expect(build(bare)).toThrow('website/src/workshop/map-example.ts: the wire with no word, drawn "M784 178H932" rests on nothing.');
     });
 
     it('stops on a zone that rests on nothing', () => {
       const zones = EXAMPLE_MAP.zones.map((zone, index) => (index === 1 ? { ...zone, rests: [] } : zone));
-      expect(build({ ...EXAMPLE_MAP, zones })).toThrow('website/src/workshop/map.ts: the zone "ZONE TWO" rests on nothing.');
+      expect(build({ ...EXAMPLE_MAP, zones })).toThrow('website/src/workshop/map-example.ts: the zone "ZONE TWO" rests on nothing.');
     });
 
     it('stops on an id that is no decision of the plan, a feature\'s included', () => {
-      expect(build(uses(['no-such-decision']))).toThrow(`website/src/workshop/map.ts: the wire "uses" rests on "no-such-decision", which is no decision of the plan. ${LOOK}`);
+      expect(build(uses(['no-such-decision']))).toThrow(`website/src/workshop/map-example.ts: the wire "uses" rests on "no-such-decision", which is no decision of the plan. ${LOOK}`);
       expect(build(uses(['core']))).toThrow(`the wire "uses" rests on "core", which is no decision of the plan. ${LOOK}`);
     });
 
     it('stops on a decision that is not decided: open, or answered and not taken', () => {
-      expect(build(uses(['one-host']))).toThrow(`website/src/workshop/map.ts: the wire "uses" rests on the decision "one-host", which is open: nobody has answered it. ${LOOK}`);
-      expect(build(uses(['one-way']))).toThrow(`website/src/workshop/map.ts: the wire "uses" rests on the decision "one-way", which is answered and not taken. ${LOOK}`);
+      expect(build(uses(['one-host']))).toThrow(`website/src/workshop/map-example.ts: the wire "uses" rests on the decision "one-host", which is open: nobody has answered it. ${LOOK}`);
+      expect(build(uses(['one-way']))).toThrow(`website/src/workshop/map-example.ts: the wire "uses" rests on the decision "one-way", which is answered and not taken. ${LOOK}`);
     });
 
     it('stops on a dropped decision, and on a replaced one with the decision that replaced it', () => {
-      expect(build(uses(['old-format']))).toThrow(`website/src/workshop/map.ts: the wire "uses" rests on the decision "old-format", which was dropped. ${LOOK}`);
-      expect(build(uses(['plain-logs']))).toThrow(`website/src/workshop/map.ts: the wire "uses" rests on the decision "plain-logs", which was replaced by "signed-logs". ${LOOK}`);
+      expect(build(uses(['old-format']))).toThrow(`website/src/workshop/map-example.ts: the wire "uses" rests on the decision "old-format", which was dropped. ${LOOK}`);
+      expect(build(uses(['plain-logs']))).toThrow(`website/src/workshop/map-example.ts: the wire "uses" rests on the decision "plain-logs", which was replaced by "signed-logs". ${LOOK}`);
     });
 
     it('stops on a word that is not in the list, and on a part that does not exist', () => {
-      expect(build(uses(['word:twin']))).toThrow(`website/src/workshop/map.ts: the wire "uses" rests on the word "word:twin", which plan/words.json does not have. ${LOOK}`);
-      expect(build(uses(['part:billing']))).toThrow(`website/src/workshop/map.ts: the wire "uses" rests on the part "part:billing", which plan/parts.json does not have. ${LOOK}`);
+      expect(build(uses(['word:twin']))).toThrow(`website/src/workshop/map-example.ts: the wire "uses" rests on the word "word:twin", which plan/words.json does not have. ${LOOK}`);
+      expect(build(uses(['part:billing']))).toThrow(`website/src/workshop/map-example.ts: the wire "uses" rests on the part "part:billing", which plan/parts.json does not have. ${LOOK}`);
     });
 
     it('reads the rests of a zone, a place, a text and a copy when they have some, and names each problem once', () => {
@@ -390,10 +400,10 @@ describe('the map layout', () => {
         message = (error as Error).message;
       }
       expect(message.split('\n')).toEqual([
-        'website/src/workshop/map.ts: the zone "ZONE ONE" rests on the decision "one-host", which is open: nobody has answered it. Fix: look at the zone, then name what it rests on now.',
-        'website/src/workshop/map.ts: the place of the part "part-a" rests on the decision "old-format", which was dropped. Fix: look at the place, then name what it rests on now.',
-        'website/src/workshop/map.ts: the text "Outside" rests on the part "part:billing", which plan/parts.json does not have. Fix: look at the text, then name what it rests on now.',
-        'website/src/workshop/map.ts: copy 2 behind the part "part-d" rests on the word "word:scrap", which plan/words.json does not have. Fix: look at the copy, then name what it rests on now.',
+        'website/src/workshop/map-example.ts: the zone "ZONE ONE" rests on the decision "one-host", which is open: nobody has answered it. Fix: look at the zone, then name what it rests on now.',
+        'website/src/workshop/map-example.ts: the place of the part "part-a" rests on the decision "old-format", which was dropped. Fix: look at the place, then name what it rests on now.',
+        'website/src/workshop/map-example.ts: the text "Outside" rests on the part "part:billing", which plan/parts.json does not have. Fix: look at the text, then name what it rests on now.',
+        'website/src/workshop/map-example.ts: copy 2 behind the part "part-d" rests on the word "word:scrap", which plan/words.json does not have. Fix: look at the copy, then name what it rests on now.',
       ]);
     });
   });
@@ -410,7 +420,7 @@ describe('the map layout', () => {
       }
       const lines = message.split('\n');
       expect(lines).toHaveLength(2);
-      const [full, fold] = lines.map((line) => /^website\/src\/workshop\/map\.ts: the title of the part "part-c", "A part with a title far too long for it", needs a box (\d+) map units wide on the (full|folded) map, and its box there is (\d+)\. Fix: widen its box in map\.ts, or shorten the title in plan\/parts\.json\.$/.exec(line));
+      const [full, fold] = lines.map((line) => /^website\/src\/workshop\/map-example\.ts: the title of the part "part-c", "A part with a title far too long for it", needs a box (\d+) map units wide on the (full|folded) map, and its box there is (\d+)\. Fix: widen its box in website\/src\/workshop\/map-example\.ts, or shorten the title in plan\/parts\.json\.$/.exec(line));
       expect([full?.[2], full?.[3], fold?.[2], fold?.[3]]).toEqual(['full', '120', 'folded', '104']);
       expect(Number(full?.[1])).toBeGreaterThan(120);
       expect(Number(fold?.[1])).toBeGreaterThan(104);
@@ -425,7 +435,7 @@ describe('the map layout', () => {
       } catch (error) {
         message = (error as Error).message;
       }
-      expect(message).toBe('website/src/workshop/map.ts: the title of the part "part-d", "Part D, a bit longer", needs a box 122 map units wide on the folded map, and its box there is 120. Fix: widen its box in map.ts, or shorten the title in plan/parts.json.');
+      expect(message).toBe('website/src/workshop/map-example.ts: the title of the part "part-d", "Part D, a bit longer", needs a box 122 map units wide on the folded map, and its box there is 120. Fix: widen its box in website/src/workshop/map-example.ts, or shorten the title in plan/parts.json.');
     });
 
     it('stops on a character the width table lacks, naming it and the command that prints its width', () => {
@@ -438,7 +448,7 @@ describe('the map layout', () => {
 
     it('stops on a part named like a property every object has, with no place, as on any part with no place', () => {
       const files = planFiles({ parts: [...PARTS, { id: 'constructor', title: 'Constructor', line: 'A part named like a property of every object.' }] });
-      expect(() => buildDataFrom(files, { map: EXAMPLE_MAP })).toThrow('The map has no place for the part "constructor" of plan/parts.json. Add it to website/src/workshop/map.ts.');
+      expect(() => buildDataFrom(files, { map: EXAMPLE_MAP })).toThrow('The map has no place for the part "constructor" of plan/parts.json. Add it to website/src/workshop/map-example.ts.');
       for (const id of ['toString', '__proto__', 'hasOwnProperty']) {
         expect(() => checkLayout({ ...plan(), parts: [...plan().parts, { id, title: id }] }, EXAMPLE_MAP)).toThrow(`The map has no place for the part "${id}" of plan/parts.json.`);
       }
@@ -465,7 +475,7 @@ describe('the map layout', () => {
         message = (error as Error).message;
       }
       // Computers is 216 units wide on the fold, and Agent programs begins 84 units in, across the title's line.
-      expect(message).toMatch(/^website\/src\/workshop\/map\.ts: the title of the part "computers", "Virtual computers", runs under the part "agent-programs", drawn inside its box on the folded map: the title needs (\d+) map units from the box's left edge, and "agent-programs" begins 84 units in\. Fix: move "agent-programs" right or off the title's line in map\.ts, or shorten the title in plan\/parts\.json\.$/);
+      expect(message).toMatch(/^website\/src\/workshop\/map\.ts: the title of the part "computers", "Virtual computers", runs under the part "agent-programs", drawn inside its box on the folded map: the title needs (\d+) map units from the box's left edge, and "agent-programs" begins 84 units in\. Fix: move "agent-programs" right or off the title's line in website\/src\/workshop\/map\.ts, or shorten the title in plan\/parts\.json\.$/);
       expect(Number(/needs (\d+)/.exec(message)?.[1])).toBeGreaterThan(84);
     });
 

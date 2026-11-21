@@ -117,10 +117,10 @@ export function titleProblems(parts: { id: string; title: string }[], layout: Ma
       }
       const map = view === 'full' ? 'full map' : 'folded map';
       if (need > box[2]) {
-        problems.push(`${where}: the title of the part "${part.id}", "${part.title}", needs a box ${need} map units wide on the ${map}, and its box there is ${box[2]}. Fix: widen its box in map.ts, or shorten the title in plan/parts.json.`);
+        problems.push(`${where}: the title of the part "${part.id}", "${part.title}", needs a box ${need} map units wide on the ${map}, and its box there is ${box[2]}. Fix: widen its box in ${where}, or shorten the title in plan/parts.json.`);
       }
       for (const [id, { need: width, room }] of under) {
-        problems.push(`${where}: the title of the part "${part.id}", "${part.title}", runs under the part "${id}", drawn inside its box on the ${map}: the title needs ${width} map units from the box's left edge, and "${id}" begins ${room} units in. Fix: move "${id}" right or off the title's line in map.ts, or shorten the title in plan/parts.json.`);
+        problems.push(`${where}: the title of the part "${part.id}", "${part.title}", runs under the part "${id}", drawn inside its box on the ${map}: the title needs ${width} map units from the box's left edge, and "${id}" begins ${room} units in. Fix: move "${id}" right or off the title's line in ${where}, or shorten the title in plan/parts.json.`);
       }
     }
   }

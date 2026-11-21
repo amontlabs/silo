@@ -82,6 +82,8 @@ export interface Wire {
 }
 
 export interface MapLayout {
+  /** The file that holds the layout, as the build's messages name it. */
+  file?: string;
   /** Every part of plan/parts.json by id, in Tab order: roughly left to right, then top to bottom. */
   places: Record<string, Place>;
   zones: Zone[];
@@ -101,6 +103,7 @@ export const NO_MAP: MapLayout = { places: {}, zones: [], notes: [], ghosts: [],
  * the record, what the record triggers back at the boundary, and the record shown in the app.
  */
 export const SILO_MAP: MapLayout = {
+  file: 'website/src/workshop/map.ts',
   places: {
     views: { full: [48, 114, 136, 144], fold: [36, 30, 120, 30] },
     plugins: { full: [48, 418, 160, 64], fold: [36, 136, 128, 26], ty: 13, sy: 36 },
@@ -181,10 +184,10 @@ export function placeStyle(full: Box, fold: Box, place?: Pick<Place, 'ty' | 'sy'
   };
 }
 
-/** The layout as the page gets it: what each thing rests on is the build's alone. A layout with none is returned as it is. */
-export function withoutRests(layout: MapLayout): MapLayout {
+/** The layout as the page gets it: its file and what each thing rests on are the build's alone. A layout with neither is returned as it is. */
+export function pageLayout(layout: MapLayout): MapLayout {
   const things = [...layout.wires.full, ...layout.wires.fold, ...layout.zones, ...layout.notes, ...layout.ghosts, ...Object.values(layout.places)];
-  if (!things.some((thing) => thing.rests)) return layout;
+  if (layout.file === undefined && !things.some((thing) => thing.rests)) return layout;
   const bare = <T extends { rests?: Rests }>({ rests: _, ...rest }: T): Omit<T, 'rests'> => rest;
   return {
     places: Object.fromEntries(Object.entries(layout.places).map(([id, place]) => [id, bare(place)])),
@@ -209,7 +212,6 @@ export interface LayoutPlan {
   words: string[];
 }
 
-const WHERE = 'website/src/workshop/map.ts';
 
 /** What an id of `rests` names, or why it names nothing in force: null when it rests on something in force. */
 function restProblem(id: string, plan: LayoutPlan, words: Set<string>, parts: Set<string>): string | null {
@@ -243,35 +245,37 @@ function restingThings(layout: MapLayout): { name: string; noun: string; rests: 
  * every part's title fits its box. Throws a LayoutError that names each problem and its fix.
  */
 export function checkLayout(plan: LayoutPlan, layout: MapLayout = SILO_MAP): void {
+  // The messages name the file of the layout checked: Silo's map, or the tests' example.
+  const where = layout.file ?? 'the map\'s layout';
   const partIds = plan.parts.map((part) => part.id);
   const known = new Set(partIds);
   // An empty layout is no map at all: the page shows the tiles alone, and any plan passes.
   if (!hasMap(layout) && !layout.zones.length && !layout.notes.length && !layout.ghosts.length && !layout.wires.full.length && !layout.wires.fold.length) return;
   for (const id of partIds) {
     // Own keys only: a part named like a property every object has (`constructor`) has no place unless the layout gives it one.
-    if (!Object.hasOwn(layout.places, id)) throw new LayoutError(`The map has no place for the part "${id}" of plan/parts.json. Add it to ${WHERE}.`);
+    if (!Object.hasOwn(layout.places, id)) throw new LayoutError(`The map has no place for the part "${id}" of plan/parts.json. Add it to ${where}.`);
   }
   for (const id of Object.keys(layout.places)) {
-    if (!known.has(id)) throw new LayoutError(`${WHERE} places the part "${id}", which plan/parts.json does not have.`);
+    if (!known.has(id)) throw new LayoutError(`${where} places the part "${id}", which plan/parts.json does not have.`);
   }
   for (const wire of [...layout.wires.full, ...layout.wires.fold]) {
-    if (!known.has(wire.of)) throw new LayoutError(`${WHERE} draws a wire for the part "${wire.of}", which plan/parts.json does not have.`);
+    if (!known.has(wire.of)) throw new LayoutError(`${where} draws a wire for the part "${wire.of}", which plan/parts.json does not have.`);
   }
   for (const ghost of layout.ghosts) {
-    if (!known.has(ghost.of)) throw new LayoutError(`${WHERE} stacks a copy behind the part "${ghost.of}", which plan/parts.json does not have.`);
+    if (!known.has(ghost.of)) throw new LayoutError(`${where} stacks a copy behind the part "${ghost.of}", which plan/parts.json does not have.`);
   }
   const words = new Set(plan.words);
   const problems: string[] = [];
   for (const thing of restingThings(layout)) {
     if (thing.must && !thing.rests?.length) {
-      problems.push(`${WHERE}: ${thing.name} rests on nothing. Fix: give it \`rests\`: the decisions of the plan it draws, words as word:<id>, or part:<id> for what only a part's line says.`);
+      problems.push(`${where}: ${thing.name} rests on nothing. Fix: give it \`rests\`: the decisions of the plan it draws, words as word:<id>, or part:<id> for what only a part's line says.`);
       continue;
     }
     for (const id of thing.rests ?? []) {
       const problem = restProblem(id, plan, words, known);
-      if (problem) problems.push(`${WHERE}: ${thing.name} rests on ${problem}. Fix: look at the ${thing.noun}, then name what it rests on now.`);
+      if (problem) problems.push(`${where}: ${thing.name} rests on ${problem}. Fix: look at the ${thing.noun}, then name what it rests on now.`);
     }
   }
-  problems.push(...titleProblems(plan.parts, layout, WHERE));
+  problems.push(...titleProblems(plan.parts, layout, where));
   if (problems.length) throw new LayoutError(problems.join('\n'));
 }
