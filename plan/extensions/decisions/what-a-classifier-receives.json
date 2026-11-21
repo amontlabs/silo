@@ -4,5 +4,6 @@
   "needs": [
     "reading-is-a-grant"
   ],
-  "verdict": "take"
+  "verdict": "take",
+  "replaced_by": "what-reading-the-record-gives"
 }
