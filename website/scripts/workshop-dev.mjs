@@ -10,6 +10,7 @@ import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readConfig } from '../server/config.mjs';
 import { createNodeHandler, FRAME_HEADERS } from '../server/node.mjs';
+import { FILM_FRAME_HEADERS } from './prepare-vercel.mjs';
 import { createWorkshop } from '../server/workshop.mjs';
 import { readPlan } from '../../tools/plan/read/index.js';
 import { createFakeGitHub, seedDemo } from './fake-github.mjs';
@@ -23,6 +24,7 @@ const TYPES = {
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.woff2': 'font/woff2', '.woff': 'font/woff',
   '.mp4': 'video/mp4', '.webm': 'video/webm', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8',
+  '.mp3': 'audio/mpeg', '.otf': 'font/otf', '.ttf': 'font/ttf',
 };
 
 async function file(path) {
@@ -87,7 +89,8 @@ export async function startDev({ fake = false, planDir = PLAN, port = 4174, host
       pathname = null;
     }
     if (pathname?.startsWith('/api/workshop/')) return api(req, res);
-    for (const [name, value] of Object.entries(FRAME_HEADERS)) res.setHeader(name, value);
+    // As deployed: only a film's page may be framed, by a page of the site.
+    for (const [name, value] of Object.entries(pathname?.startsWith('/films/') ? FILM_FRAME_HEADERS : FRAME_HEADERS)) res.setHeader(name, value);
     if (pathname === null) {
       res.writeHead(400);
       return res.end();

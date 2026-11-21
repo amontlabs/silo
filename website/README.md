@@ -36,6 +36,10 @@ Vite. It has two pages:
   `api/`). While the plan holds no part, it is the same page with no tile; the
   title row keeps its links and "Suggest a feature".
 
+- **Films** (`/films/<id>/`, made by `scripts/films.mjs`): each film of
+  `films/` played by itself, with its voice and its subtitles, so that the
+  Workshop can offer "Watch". See [Films](#films).
+
 Shared files: `src/site.css` (tokens, the gutter, the frame and its diamonds,
 the header, buttons, the theme switch and the drawn arrow and check icons),
 `public/theme.js` (first-paint light, dark or System theme,
@@ -1141,6 +1145,8 @@ snapshots catch up when the hour resets.
 | `website/server/node.mjs` | Adapter for Node's `req`/`res`, used by Vercel and the local server. |
 | `website/api/workshop.cjs` | Vercel's entry point. |
 | `website/scripts/prepare-vercel.mjs` | Writes the Build Output (static site, function, routes). |
+| `website/scripts/films.mjs` | Makes each film's page and the player they share, into `dist/films/` (see [Films](#films)). |
+| `website/scripts/films.test.mjs` | The films' pages on a small made-up film: what is written, and the films and folders refused. |
 | `website/scripts/plan-entries.mjs` | Makes the list of the plan's entries from `plan/`, for `prepare-vercel.mjs` and the local server. |
 | `website/scripts/workshop-dev.mjs` | Local server for the site and the API. |
 | `website/scripts/fake-github.mjs` | Fake GitHub used by the tests and by `--fake`. |
@@ -1157,6 +1163,56 @@ All of them run with the website's `npm test`.
 The server uses Node's standard library (`crypto`, `fetch`, `http`) and no
 package. `prepare-vercel.mjs` refuses a file the function would load from
 `website/node_modules/`, and the whole function is 15 files, about 170 KB, of which 70 KB are `plan-entries.json`.
+
+## Films
+
+A film of `films/` is code and sound, not a video: its `explainer.js`, drawn by
+the player of `films/player/` and the kit of `films/kit/`, and its clips in
+`voice/` as `voice.json` names them. The `films` plugin of `vite.config.ts`
+calls `scripts/films.mjs` after `vite build` has written the site, and writes
+into `dist/films/`:
+
+- `<id>/index.html`: the page of `films/player/page.html` with nothing of the
+  films' review page: no title or line above the film, no entries, no
+  questions, no copy button, and no `page.js`. The tab bears the film's title.
+  `voice.json` is inlined, each clip's source pointing at `/films/<id>/voice/`.
+  It opens paused on its Play control: no sound starts without a press. It
+  takes the site's theme from `/theme.js` (light, dark or the system's, as the
+  home page and the Workshop keep it), and follows a change made in another
+  tab; `?theme=light|dark` wins, and the player's other query parameters work
+  as in `films/README.md`.
+- `<id>/explainer.js` and the clips `voice.json` names (a clip it no longer
+  names is left out).
+- `player/`: what the pages share, loaded as files: `voice.js` and `kit.js` of
+  `films/player/`, `page.css`, the kit's `player.css`, its vendor scripts and
+  fonts, and `licences/`, the texts the icons' and the fonts' licences ask to
+  go with every copy (`films/kit/NOTICE.md`). Each page names them in a
+  comment at its end.
+
+The pages name every file by its absolute path under `/films/`, so a film's
+address works with or without its closing slash. A folder directly under
+`films/` that holds a `film.json` is a film; any other folder is left out. A
+film whose files are not complete stops the build with the film, the file and
+the fix, the way the plan's errors read: a `film.json` whose `id` is not the
+folder's, no title, no `explainer.js`, no `voice.json`, or a clip that is
+missing, a link or outside the film's `voice/`. A film's folder that is a link
+is refused too. The step uses Node only and reads only tracked files of the
+repository; nothing it makes is committed.
+
+The Workshop's build data says which films the site plays: `films`, one
+`{ id, playable }` per film, `playable` true for a film whose page the build
+writes (`readBuildData` in `src/workshop/data.ts`).
+
+A film's page may be framed by a page of the site, and by nothing else:
+`/films/` answers `frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN`,
+where every other path refuses any frame (see [Build and deploy](#build-and-deploy)).
+The dev server serves the same files at the same addresses, read from
+`films/` on each request; the local server (`workshop-dev.mjs`) serves them
+from `dist/` with the same headers as deployed.
+
+After a film changes in `films/`, run `npm --prefix website run build` (or
+`build:vercel`) again: the site has no copy of a film of its own. Five films
+weigh about 4.2 MB in `dist/films/`, about 0.7 MB of it the shared player.
 
 ## Build and deploy
 
@@ -1190,9 +1246,12 @@ following Vercel's
   allows. An unknown endpoint is Vercel's 404.
 - `config.json`: `version: 3` and its routes. The first adds
   `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY`
-  to every path and continues. The second,
+  to every path but the films' and continues. The second adds
+  `frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN` under `/films/`,
+  so the Workshop can show a film in a frame, and continues. The third,
   `{ "src": "^/workshop/?$", "dest": "/workshop/index.html" }`, serves the
-  Workshop page at both `/workshop` and `/workshop/`. `{ "handle": "filesystem" }`
+  Workshop page at both `/workshop` and `/workshop/`. The fourth serves a
+  film's page at `/films/<id>` and `/films/<id>/`. `{ "handle": "filesystem" }`
   hands every other path to the filesystem. After `{ "handle": "hit" }`, so only
   for a file that exists, the last route adds
   `Cache-Control: public, max-age=31536000, immutable` to Vite's hashed files
@@ -1374,7 +1433,9 @@ services:
   remote), until a deploy has shown it;
 - that GitHub answers `304` to the conditional issue and comment list pages as
   documented, and that the reaction summary in the issue list moves the page's
-  ETag when a vote changes.
+  ETag when a vote changes;
+- that Vercel's routes take the lookahead of `^/(?!films/).*$`, so a film's
+  page carries only the headers that let the Workshop frame it.
 
 ## Why built this way
 

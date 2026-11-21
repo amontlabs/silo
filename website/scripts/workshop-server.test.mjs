@@ -707,19 +707,27 @@ test('Build Output layout: static site, one Node.js function at every endpoint, 
     await prepareVercel({ siteDir: website, distDir: join(site, 'dist'), outputDir });
     const config = JSON.parse(await readFile(join(outputDir, 'config.json'), 'utf8'));
     assert.deepEqual(config, { version: 3, routes: [
-      { src: '^/(.*)$', headers: { 'Content-Security-Policy': "frame-ancestors 'none'", 'X-Frame-Options': 'DENY' }, continue: true },
+      { src: '^/(?!films/).*$', headers: { 'Content-Security-Policy': "frame-ancestors 'none'", 'X-Frame-Options': 'DENY' }, continue: true },
+      { src: '^/films/.*$', headers: { 'Content-Security-Policy': "frame-ancestors 'self'", 'X-Frame-Options': 'SAMEORIGIN' }, continue: true },
       { src: '^/workshop/?$', dest: '/workshop/index.html' },
+      { src: '^/films/([a-z0-9][a-z0-9-]*)/?$', dest: '/films/$1/index.html' },
       { handle: 'filesystem' },
       { handle: 'hit' },
       { src: '^/(assets/.*|fonts/.*\\.woff2)$', headers: { 'Cache-Control': 'public, max-age=31536000, immutable' }, continue: true },
     ] });
-    for (const path of ['/', '/workshop', '/assets/x.js', '/api/workshop/state']) assert.match(path, new RegExp(config.routes[0].src));
-    for (const path of ['/workshop', '/workshop/']) assert.match(path, new RegExp(config.routes[1].src));
-    for (const path of ['/workshops', '/workshop/x', '/api/workshop/state']) assert.doesNotMatch(path, new RegExp(config.routes[1].src));
+    // No page may be framed but a film's, and that one only by a page of the site.
+    for (const path of ['/', '/workshop', '/assets/x.js', '/api/workshop/state', '/films', '/x/films/a/']) assert.match(path, new RegExp(config.routes[0].src));
+    for (const path of ['/films/a/', '/films/a/index.html', '/films/player/kit.js']) assert.doesNotMatch(path, new RegExp(config.routes[0].src));
+    for (const path of ['/films/a/', '/films/player/kit.js']) assert.match(path, new RegExp(config.routes[1].src));
+    for (const path of ['/', '/films', '/workshop']) assert.doesNotMatch(path, new RegExp(config.routes[1].src));
+    for (const path of ['/workshop', '/workshop/']) assert.match(path, new RegExp(config.routes[2].src));
+    for (const path of ['/workshops', '/workshop/x', '/api/workshop/state']) assert.doesNotMatch(path, new RegExp(config.routes[2].src));
+    for (const path of ['/films/engine-one-call', '/films/engine-one-call/']) assert.equal(path.replace(new RegExp(config.routes[3].src), config.routes[3].dest), '/films/engine-one-call/index.html');
+    for (const path of ['/films/', '/films/a/voice/b.mp3', '/films/a/explainer.js', '/films/A/']) assert.doesNotMatch(path, new RegExp(config.routes[3].src));
     // Only what never changes under its name is kept by the browser: hashed assets and font files, and
     // only when the file exists (the `hit` phase).
-    for (const path of ['/assets/main-2DSE1Vge.js', '/assets/main-DpTBd47T.css', '/fonts/ibm-plex-sans-400-normal.woff2']) assert.match(path, new RegExp(config.routes[4].src));
-    for (const path of ['/', '/workshop', '/workshop/index.html', '/theme.js', '/og.png', '/favicon.svg', '/fonts/fonts.css', '/fonts/OFL.txt', '/api/workshop/state', '/x/assets/y.js']) assert.doesNotMatch(path, new RegExp(config.routes[4].src));
+    for (const path of ['/assets/main-2DSE1Vge.js', '/assets/main-DpTBd47T.css', '/fonts/ibm-plex-sans-400-normal.woff2']) assert.match(path, new RegExp(config.routes[6].src));
+    for (const path of ['/', '/workshop', '/workshop/index.html', '/theme.js', '/og.png', '/favicon.svg', '/fonts/fonts.css', '/fonts/OFL.txt', '/api/workshop/state', '/x/assets/y.js']) assert.doesNotMatch(path, new RegExp(config.routes[6].src));
     assert.equal(await readFile(join(outputDir, 'static', 'workshop', 'index.html'), 'utf8'), '<!doctype html><title>Workshop</title>');
     assert.ok((await lstat(join(outputDir, 'static', 'index.html'))).isFile());
 
@@ -787,7 +795,7 @@ test('Build Output layout: static site, one Node.js function at every endpoint, 
     const flat = await fixtureSite('workshop.html');
     try {
       const result = await prepareVercel({ siteDir: website, distDir: join(flat, 'dist'), outputDir: join(flat, '.vercel', 'output') });
-      assert.equal(result.config.routes[1].dest, '/workshop.html');
+      assert.equal(result.config.routes[2].dest, '/workshop.html');
     } finally { await rm(flat, { recursive: true, force: true }); }
     const none = await fixtureSite(null);
     try {

@@ -2,7 +2,10 @@ import { fileURLToPath, URL } from 'node:url';
 import react from '@vitejs/plugin-react';
 import type { Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
+import { createReadStream } from 'node:fs';
+import { extname, resolve } from 'node:path';
 import { planDir, readBuildData, readFacts, readHistories, readNotes } from './src/workshop/data.ts';
+import { FILMS_URL, filmFileFor, filmFiles, writeFilms } from './scripts/films.mjs';
 
 const repository = fileURLToPath(new URL('..', import.meta.url));
 // plan/, or the plan WORKSHOP_PLAN names: a fixture plan proves the page without the real one.
@@ -78,8 +81,40 @@ function planWatch(): Plugin {
   };
 }
 
+const FILM_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.mp3': 'audio/mpeg', '.otf': 'font/otf', '.ttf': 'font/ttf', '.txt': 'text/plain; charset=utf-8',
+};
+
+/** The films of films/ at /films/<id>/ (scripts/films.mjs): written beside the built site, and served as they are while developing. */
+function films(): Plugin {
+  let outDir = '';
+  return {
+    name: 'films',
+    configResolved(config) {
+      outDir = resolve(config.root, config.build.outDir);
+    },
+    async writeBundle() {
+      const ids = await writeFilms(outDir);
+      this.info(`wrote ${ids.length} films into ${outDir}/films`);
+    },
+    configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        const pathname = (request.url ?? '').split('?')[0];
+        if (!pathname.startsWith(FILMS_URL)) return next();
+        const file = filmFileFor(filmFiles().files, decodeURIComponent(pathname));
+        if (!file) return next();
+        const type = 'text' in file ? FILM_TYPES['.html'] : FILM_TYPES[extname(file.from)] ?? 'application/octet-stream';
+        response.setHeader('Content-Type', type);
+        if ('text' in file) response.end(file.text);
+        else createReadStream(file.from).pipe(response);
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), workshopData(), workshopNotes(), workshopFacts(), workshopHistory(), planWatch()],
+  plugins: [react(), workshopData(), workshopNotes(), workshopFacts(), workshopHistory(), planWatch(), films()],
   // The page imports the plan's model from tools/plan/model, outside website/.
   server: { fs: { allow: [repository] } },
   build: {

@@ -9,7 +9,7 @@ import { planDir as defaultPlanDir, planEntries } from './plan-entries.mjs';
 // Packages the built site and the Workshop API with Vercel's Build Output API v3:
 // static files in static/, one Node.js function served at every
 // /api/workshop/<endpoint> path (the other paths are symlinks to it), and the
-// routes that serve the Workshop page at /workshop and /workshop/.
+// routes that serve the Workshop page at /workshop and /workshop/, and each film's page at /films/<id>/.
 //
 // The function holds the files it loads at the paths they have in the
 // repository: website/api/ and website/server/ at any depth, and
@@ -74,8 +74,10 @@ function functionFiles(siteDir) {
   return { root, files: [...files].sort() };
 }
 
-// Response headers for every path, static pages included: no page of the site may be framed.
+// Response headers for every path, static pages included: no page of the site may be framed, except a
+// film's (/films/), which the Workshop shows in a frame of its own origin.
 export const FRAME_HEADERS = { 'Content-Security-Policy': "frame-ancestors 'none'", 'X-Frame-Options': 'DENY' };
+export const FILM_FRAME_HEADERS = { 'Content-Security-Policy': "frame-ancestors 'self'", 'X-Frame-Options': 'SAMEORIGIN' };
 
 // Files whose name changes when their content does (Vite's hashed assets), and the font files, which are
 // never edited in place: a new font gets a new name. A browser keeps them and does not ask again. The
@@ -122,8 +124,11 @@ export async function prepareVercel({ siteDir = website, distDir = join(siteDir,
   const config = {
     version: 3,
     routes: [
-      { src: '^/(.*)$', headers: FRAME_HEADERS, continue: true },
+      { src: '^/(?!films/).*$', headers: FRAME_HEADERS, continue: true },
+      { src: '^/films/.*$', headers: FILM_FRAME_HEADERS, continue: true },
       { src: '^/workshop/?$', dest: page },
+      // A film's page (scripts/films.mjs), with or without the closing slash: it names its files by absolute paths.
+      { src: '^/films/([a-z0-9][a-z0-9-]*)/?$', dest: '/films/$1/index.html' },
       { handle: 'filesystem' },
       { handle: 'hit' },
       { src: KEPT_FILES, headers: KEPT_HEADERS, continue: true },

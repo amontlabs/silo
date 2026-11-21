@@ -11,6 +11,7 @@ import { loadDir, parsePlan } from '../../../tools/plan/read/index.js';
 import { checkLayout, LayoutError, NO_MAP, pageLayout, SILO_MAP } from './map.ts';
 import type { LayoutPlan, MapLayout } from './map.ts';
 import { RESERVED_ADDRESSES } from './routes.ts';
+import { playableFilms } from '../../scripts/films.mjs';
 import type { BuildData, Change, Entry, EntryFacts, Facts, Histories, Notes, Statement, Verdict } from './plan.ts';
 
 export const PLAN_DIR = 'plan';
@@ -61,6 +62,8 @@ export interface HistorySource {
 export interface BuildOptions {
   map?: MapLayout;
   history?: HistorySource | null;
+  /** The films whose page the build writes (scripts/films.mjs); none by default. */
+  films?: string[];
 }
 
 const hasNotes = (raw: RawEntry) => typeof raw.notes === 'string' && raw.notes.trim() !== '';
@@ -186,7 +189,7 @@ export function partDepends(parts: { id: string }[], entries: Pick<Entry, 'id' |
 }
 
 /** The plan object of tools/plan/read, as the page holds it: decisions and features in the order of order.json. */
-export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null }: BuildOptions = {}): BuildData {
+export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null, films = [] }: BuildOptions = {}): BuildData {
   const entries: Entry[] = ordered(plan).map((raw) => ({
     id: raw.id,
     kind: raw.kind,
@@ -212,6 +215,7 @@ export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null }: B
     entries,
     map: pageLayout(map, layoutPlanOf(plan)),
     shallow: history?.shallow === true,
+    films: films.map((id) => ({ id, playable: true })),
   };
 }
 
@@ -346,7 +350,8 @@ export function readHistory(repository: string): HistorySource | null {
 
 /** Reads the plan of `repository` and returns the page's data for the real build. Silo's map draws plan/; another plan has none. */
 export function readBuildData(repository: string, map: MapLayout = planDir(repository) === join(repository, PLAN_DIR) ? SILO_MAP : NO_MAP): BuildData {
-  return buildDataFrom(planFilesIn(planDir(repository)), { map, history: readHistory(repository) }, (path) => existsSync(join(repository, path)));
+  const films = playableFilms(join(repository, 'films'));
+  return buildDataFrom(planFilesIn(planDir(repository)), { map, history: readHistory(repository), films }, (path) => existsSync(join(repository, path)));
 }
 
 /** Reads the plan of `repository` and returns its facts, or throws. */
