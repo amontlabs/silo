@@ -369,7 +369,8 @@ describe('the map layout', () => {
     it('stops on a wire of the full map that rests on nothing, named by its word or, with none, by its path', () => {
       expect(build(uses(undefined))).toThrow('website/src/workshop/map-example.ts: the wire "uses" rests on nothing. Fix: give it `rests`: the decisions and features of the plan it draws, words as word:<id>, or part:<id> for what only a part\'s line says.');
       expect(build(uses([]))).toThrow('the wire "uses" rests on nothing.');
-      const bare = { ...EXAMPLE_MAP, wires: EXAMPLE_MAP.wires.map((wire) => (wire.label ? wire : { ...wire, rests: undefined })) };
+      // The example's last wire, with its word taken off and what it rests on too.
+      const bare = { ...EXAMPLE_MAP, wires: EXAMPLE_MAP.wires.map((wire, index, wires) => (index === wires.length - 1 ? { ...wire, label: undefined, rests: undefined } : wire)) };
       expect(build(bare)).toThrow('website/src/workshop/map-example.ts: the wire with no word, drawn "M784 178H932" rests on nothing.');
     });
 
@@ -461,7 +462,7 @@ describe('the map layout', () => {
       expect(drawn(uses(['core-in-zig', 'part:part-a'])).wires[0]).not.toHaveProperty('undecided');
     });
 
-    it('marks a zone, a place, a text and a copy that rest on a proposal, and draws one with no rests as decided', () => {
+    it('marks a zone and a text that rest on a proposal, and leaves a place and a copy that rest on one unmarked', () => {
       const layout: MapLayout = {
         ...EXAMPLE_MAP,
         zones: EXAMPLE_MAP.zones.map((zone, index) => (index === 1 ? { ...zone, rests: ['export'] } : zone)),
@@ -471,24 +472,40 @@ describe('the map layout', () => {
       };
       const map = drawn(layout);
       expect(map.zones.map((zone) => zone.undecided === true)).toEqual([false, true]);
-      expect(map.places['part-a'].undecided).toBe(true);
+      // A part's box and a copy behind it are drawn by the part's state alone: the page gets no mark and no rests for them.
+      expect(map.places['part-a']).not.toHaveProperty('undecided');
+      expect(map.places['part-a']).not.toHaveProperty('rests');
       expect(map.places['part-b']).not.toHaveProperty('undecided');
       // The second text has no rests: it is drawn as decided.
       expect(map.notes.map((note) => note.undecided === true)).toEqual([true, false]);
-      expect(map.ghosts.map((ghost) => ghost.undecided === true)).toEqual([true, false]);
+      for (const ghost of map.ghosts) {
+        expect(ghost).not.toHaveProperty('undecided');
+        expect(ghost).not.toHaveProperty('rests');
+      }
     });
 
     it('draws on Silo\'s map the channels, SSH and the servers and clouds as not decided, and the way to the internet as decided', () => {
       const map = readBuildData(REPOSITORY).map;
-      const wire = (word: string) => map.wires.find((one) => one.label?.[2] === word);
-      expect(wire('requests')?.undecided).toBeUndefined();
-      expect(wire('calls')?.undecided).toBeUndefined();
-      expect(wire('SSH')?.undecided).toBe(true);
-      const note = (title: string) => map.notes.find((one) => one.title === title);
-      expect(note('The internet')?.undecided).toBeUndefined();
-      expect(note('The boundary\'s channels')?.undecided).toBe(true);
-      expect(note('Your terminal')?.undecided).toBe(true);
-      expect(note('A server or a cloud')?.undecided).toBeUndefined();
+      // Each thing must exist first: a missing one would give the `undefined` that a decided thing gives.
+      const wires = (word: string) => map.wires.filter((one) => one.label?.[2] === word);
+      const wire = (word: string, count = 1) => {
+        expect(wires(word)).toHaveLength(count);
+        return wires(word);
+      };
+      expect(wire('requests')[0].undecided).toBeUndefined();
+      expect(wire('calls')[0].undecided).toBeUndefined();
+      expect(wire('SSH')[0].undecided).toBe(true);
+      // The first "runs" is the engine to the computers; the second goes to a server or a cloud.
+      expect(wire('runs', 2).map((one) => one.undecided)).toEqual([undefined, true]);
+      const note = (title: string) => {
+        const found = map.notes.filter((one) => one.title === title);
+        expect(found).toHaveLength(1);
+        return found[0];
+      };
+      expect(note('The internet').undecided).toBeUndefined();
+      expect(note('The boundary\'s channels').undecided).toBe(true);
+      expect(note('Your terminal').undecided).toBe(true);
+      expect(note('A server or a cloud').undecided).toBeUndefined();
     });
   });
 

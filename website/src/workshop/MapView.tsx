@@ -35,7 +35,7 @@ interface Drawn {
   undecided?: boolean;
 }
 
-/** The classes a thing of the map takes: its part's state when it has one, and `undecided` when it is not decided. */
+/** The classes of a wire, a wire's word, a zone or a text: its part's state when it has one, and `undecided` when its `rests` say it is not decided. */
 const marks = (base: string, thing: { undecided?: boolean }, state?: PartState) => [base, state ? `s-${state}` : '', thing.undecided ? 'undecided' : ''].filter(Boolean).join(' ');
 
 function Wires({ wires, height, className, states }: { wires: Drawn[]; height: number; className: string; states: Map<string, PartState> }) {
@@ -57,7 +57,7 @@ function Key({ at: [x, y] }: { at: [number, number] }) {
     <svg className={marks('ws-wire', { undecided })} viewBox="0 0 24 2"><path d="M0 1H24" /></svg>
   );
   return (
-    <div className="ws-key" aria-hidden="true" style={style({ '--lx': x, '--ly': y })}>
+    <div className="ws-mapkey" aria-hidden="true" style={style({ '--lx': x, '--ly': y })}>
       <span>{line(false)}decided</span>
       <span>{line(true)}not decided</span>
     </div>
@@ -138,13 +138,13 @@ export function MapView({ layout, groups, folded, current, onOpen }: MapViewProp
           </div>
         ))}
         {layout.ghosts.map((ghost, index) => (
-          <i className={marks('ws-geo ws-ghost', ghost, states.get(ghost.of) ?? 'open')} key={index} style={style(placeStyle(ghost.full, ghost.fold))} aria-hidden="true" />
+          <i className={`ws-geo ws-ghost s-${states.get(ghost.of) ?? 'open'}`} key={index} style={style(placeStyle(ghost.full, ghost.fold))} aria-hidden="true" />
         ))}
         {Object.entries(layout.places).map(([id, place]) => {
           const group = byId.get(id);
           if (!group) return null;
           const on = current === id;
-          const classes = ['ws-geo', 'ws-part', `s-${group.state}`, place.inner ? 'inner' : '', place.tall ? 'tall' : '', place.wide ? 'wide' : '', on ? 'on' : '', place.undecided ? 'undecided' : ''].filter(Boolean).join(' ');
+          const classes = ['ws-geo', 'ws-part', `s-${group.state}`, place.inner ? 'inner' : '', place.tall ? 'tall' : '', place.wide ? 'wide' : '', on ? 'on' : ''].filter(Boolean).join(' ');
           return (
             <button
               type="button" key={id} data-part={id} className={classes} style={style(placeStyle(place.full, place.fold, place))}

@@ -209,22 +209,32 @@ folded place fades out as the map folds.
 Each wire and each zone says in `rests` what in the plan it draws. An entry of
 `rests` is the id of a decision or a feature, `word:<id>` for a word of
 `plan/words.json`, or `part:<id>` for what only a part's line says. The wire
-"facts" rests on `how-silo-knows`. A place, a text or a copy behind a part may
-have `rests` too; one with none is drawn as decided.
+"facts" rests on `how-silo-knows`. A text may have `rests` too; one with none is
+drawn as decided. A place and a copy behind a part may have them too, and the
+build checks them as it checks the others, but they change nothing drawn.
 
-The map shows the plan as it proposes it, and says which of it is decided:
+The map shows the plan as it proposes it, and says which of it is decided. A
+dashed outline or line has one source for each kind of thing:
 
-- In force: a taken decision, a taken or built feature, a word, a part.
-- Proposed: a decision with an answer or `sets` and no verdict, a feature with
-  no verdict.
+- A wire, a zone and a text rest on the plan: they are not decided when at
+  least one id in their `rests` is proposed. A decision with an answer or `sets`
+  and no verdict, and a feature with no verdict, are proposed; a taken
+  decision, a taken or built feature, a word and a part are in force. A wire
+  not decided is a dashed line, its word in the second ink; a zone is a dashed
+  outline; a text has its title in the second ink. A wire keeps the colour its
+  part's state gives it. The day the owner takes the entry, the same thing is
+  drawn decided, with no change to the layout.
+- A part's box and a copy behind a part are drawn by the part's state alone,
+  as the map has always drawn them: dashed while the part is "not decided yet",
+  solid once it is planned, next or done. What a place or a copy rests on
+  changes nothing there, and the page gets no mark for either.
 
-A thing that rests on at least one proposed id is not decided: a dashed line
-for a wire and for an outline (a zone, a copy, a part's box), and the lighter ink for a wire's word or a text.
-A wire keeps the colour its part's state gives it. The day the owner takes the
-entry, the same thing is drawn decided, with no change to the layout. A key on
-the full map says what a solid and a dashed line mean ("decided", "not
-decided"). The page's data gets `undecided: true` on such a thing and nothing
-else of `rests`, and never the layout's `file`.
+A key on the full map (class `ws-mapkey`, not the header's `ws-key`) says what a
+solid and a dashed line mean ("decided", "not decided"). The page's data gets
+`undecided: true` on a wire, a zone or a text that is not decided and nothing
+else of `rests`, and never the layout's `file`. The words of a thing that is not
+decided keep an ink that reaches 4.5:1 on the page's ground in both themes: the
+faint ink does not.
 
 The build checks the drawing against the plan. It stops, with the problem and
 the fix, when:

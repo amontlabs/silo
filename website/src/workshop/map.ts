@@ -35,8 +35,8 @@ export interface Place {
   ty?: number;
   sy?: number;
   glyph?: Glyph;
+  /** Read by the build only; it changes nothing drawn. A part's box is dashed by the part's own state. */
   rests?: Rests;
-  undecided?: boolean;
 }
 
 export const MAP_WIDTH = 1136;
@@ -72,8 +72,8 @@ export interface Ghost {
   of: string;
   full: Box;
   fold: Box;
+  /** Read by the build only; it changes nothing drawn. A copy is dashed by its part's state. */
   rests?: Rests;
-  undecided?: boolean;
 }
 
 export type Arrow = [x: number, y: number, dir: 'r' | 'l' | 'u' | 'd'];
@@ -269,20 +269,21 @@ function undecided(rests: Rests | undefined, plan: LayoutPlan): boolean {
 }
 
 /**
- * The layout as the page gets it: its file and what each thing rests on are the build's alone. A thing that rests on
- * something proposed gets `undecided`; nothing else of `rests` is kept. A layout with no file and no `rests` is
- * returned as it is.
+ * The layout as the page gets it: its file and what each thing rests on are the build's alone. A wire, a zone and a
+ * text that rest on something proposed get `undecided`; a place and a copy get nothing, since the part's state draws
+ * them. Nothing else of `rests` is kept. A layout with no file and no `rests` is returned as it is.
  */
 export function pageLayout(layout: MapLayout, plan: LayoutPlan): MapLayout {
   const things = [...layout.wires, ...layout.zones, ...layout.notes, ...layout.ghosts, ...Object.values(layout.places)];
   if (layout.file === undefined && !things.some((thing) => thing.rests)) return layout;
-  const drawn = <T extends { rests?: Rests; undecided?: boolean }>({ rests, undecided: _, ...rest }: T): Omit<T, 'rests'> =>
+  const drawn = <T extends { rests?: Rests }>({ rests, ...rest }: T): Omit<T, 'rests'> =>
     (undecided(rests, plan) ? { ...rest, undecided: true } : rest) as Omit<T, 'rests'>;
+  const plain = <T extends { rests?: Rests }>({ rests: _, ...rest }: T): Omit<T, 'rests'> => rest;
   return {
-    places: Object.fromEntries(Object.entries(layout.places).map(([id, place]) => [id, drawn(place)])),
+    places: Object.fromEntries(Object.entries(layout.places).map(([id, place]) => [id, plain(place)])),
     zones: layout.zones.map(drawn),
     notes: layout.notes.map(drawn),
-    ghosts: layout.ghosts.map(drawn),
+    ghosts: layout.ghosts.map(plain),
     wires: layout.wires.map(drawn),
     ...(layout.key ? { key: layout.key } : {}),
   };
