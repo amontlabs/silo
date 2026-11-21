@@ -121,7 +121,7 @@ export function Panel({ row, open, ctx, id, lead, vote = false }: PanelProps) {
   const { wantFacts } = w;
   // A row with something to show from the facts asks for them as it opens, if no pointer or focus did before.
   useEffect(() => {
-    if (open && row.more) wantFacts();
+    if (open && row.more) wantFacts(true);
   }, [open, row.more, wantFacts]);
 
   // Comments that arrive while the panel is opening wait, on their placeholders, until the opening has ended.
@@ -524,12 +524,23 @@ function HistoryList({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const repo = w.live.state?.repo ?? DEFAULT_REPO;
   const shallow = w.plan.shallow ? <p className="ws-quiet">Earlier changes are not available in this build.</p> : null;
   if (changes) return <>{changes.map((change) => <HistoryLine key={change.commit} change={change} row={row} ctx={ctx} repo={repo} />)}{shallow}</>;
-  if (w.histories === 'error') return <p className="ws-quiet">History could not load.</p>;
+  if (w.histories === 'error' || w.histories === 'changed') return <ChunkFailed what="History" state={w.histories} />;
   return (
     <div aria-busy="true">
       {Array.from({ length: Math.min(row.history?.count ?? 1, HISTORY_GHOSTS) }, (_, i) => <div className="ws-h-ghost" key={i} aria-hidden="true" />)}
       {w.plan.shallow ? <div className="ws-h-ghost" aria-hidden="true" /> : null}
     </div>
+  );
+}
+
+/** What shows in place of a chunk that did not load: that it failed, or that the page must be reloaded to reach it. */
+function ChunkFailed({ what, state }: { what: string; state: 'error' | 'changed' }) {
+  if (state === 'error') return <p className="ws-quiet">{what} could not load.</p>;
+  return (
+    <p className="ws-quiet">
+      The Workshop has changed since this page opened.{' '}
+      <button type="button" className="ws-link" onClick={() => location.reload()}>Reload</button>
+    </p>
   );
 }
 
@@ -554,21 +565,21 @@ function Extras({ row, ctx, onMove }: { row: Row; ctx: EntryContext; onMove: () 
         {row.notes ? (
           <button
             type="button" className="ws-disc" aria-expanded={shown} aria-controls={`${row.key}-notes`}
-            onPointerEnter={w.wantNotes} onPointerDown={w.wantNotes} onTouchStart={w.wantNotes} onFocus={w.wantNotes}
-            onClick={() => { w.wantNotes(); setShown((current) => !current); onMove(); }}
+            onPointerEnter={() => w.wantNotes()} onPointerDown={() => w.wantNotes()} onTouchStart={() => w.wantNotes()} onFocus={() => w.wantNotes()}
+            onClick={() => { w.wantNotes(!shown); setShown((current) => !current); onMove(); }}
           >Notes</button>
         ) : null}
         {row.history ? (
           <button
             type="button" className="ws-disc ws-disc-history" aria-expanded={history} aria-controls={`${row.key}-history`}
-            onPointerEnter={w.wantHistory} onPointerDown={w.wantHistory} onTouchStart={w.wantHistory} onFocus={w.wantHistory}
-            onClick={() => { w.wantHistory(); setHistory((current) => !current); onMove(); }}
+            onPointerEnter={() => w.wantHistory()} onPointerDown={() => w.wantHistory()} onTouchStart={() => w.wantHistory()} onFocus={() => w.wantHistory()}
+            onClick={() => { w.wantHistory(!history); setHistory((current) => !current); onMove(); }}
           >History<span> · {historySummary(row)}</span></button>
         ) : null}
       </div>
       {row.notes && shown ? (
         <div className="ws-extras-in" id={`${row.key}-notes`}>
-          {notes ? <Markdown text={notes} /> : w.notes === 'error' ? <p className="ws-quiet">Notes could not load.</p> : typeof w.notes === 'object' ? null : (
+          {notes ? <Markdown text={notes} /> : w.notes === 'error' || w.notes === 'changed' ? <ChunkFailed what="Notes" state={w.notes} /> : typeof w.notes === 'object' ? null : (
             <div className="ws-ph-notes" aria-busy="true">
               <i className="ws-ph" aria-hidden="true" /><i className="ws-ph" aria-hidden="true" /><i className="ws-ph" aria-hidden="true" />
             </div>
@@ -660,7 +671,7 @@ function OpenFacts({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const id = planId(row);
   const facts = typeof w.facts === 'object' ? w.facts : null;
   const own = facts && id !== null ? facts.entries[id] : undefined;
-  const waiting = row.more && !facts && w.facts !== 'error';
+  const waiting = row.more && !facts && w.facts !== 'error' && w.facts !== 'changed';
   const open = row.verdict === null;
   const taken = row.verdict === 'take';
   const adds = taken && own?.adds ? own.adds.map((statementId) => facts?.statements[statementId]).filter((statement): statement is Statement => statement !== undefined) : [];

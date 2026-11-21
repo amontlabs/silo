@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from './App';
+import { SiteChanged } from './chunks';
 import { buildDataFrom } from './data';
 import type { HistorySource } from './data';
 import { buildData, planFiles } from './fixtures';
@@ -242,6 +243,27 @@ describe('the chunk of changes', () => {
     fireEvent.click(historyButton(item));
     await waitFor(() => expect(lines(item)).toHaveLength(2));
     expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a failure as it is under a pointer passing over, and asks again only at an opening', async () => {
+    const load = vi.fn().mockRejectedValue(new Error('offline'));
+    const { item } = await open('#part-a/core', CORE, only, load);
+    fireEvent.click(historyButton(item));
+    expect(await within(item).findByText('History could not load.')).toBeInTheDocument();
+    for (const fire of [fireEvent.pointerEnter, fireEvent.pointerDown, fireEvent.touchStart, fireEvent.focus]) fire(historyButton(item));
+    fireEvent.click(historyButton(item));
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('says the Workshop has changed when the site was deployed again, offers to reload, and never asks again', async () => {
+    const load = vi.fn().mockRejectedValue(new SiteChanged());
+    const { item } = await open('#part-a/core', CORE, only, load);
+    fireEvent.click(historyButton(item));
+    expect(await within(item).findByText(/The Workshop has changed since this page opened/)).toBeInTheDocument();
+    expect(within(item).getByRole('button', { name: 'Reload' })).toBeInTheDocument();
+    fireEvent.click(historyButton(item));
+    fireEvent.click(historyButton(item));
+    expect(load).toHaveBeenCalledTimes(1);
   });
 });
 

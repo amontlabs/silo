@@ -620,6 +620,16 @@ What a person sees:
   loaded the first time a pointer, a press or focus reaches a History, with one
   placeholder line per change meanwhile; if it cannot load,
   the list says so and the next time tries again.
+- A chunk that failed (facts, notes, history) is tried again only when its
+  row, Notes or History opens; a pointer, press or focus that only passes over
+  leaves the failure as it is, so nothing flickers under it (`useChunk` in
+  `useWorkshop.ts`). Each deployment names its chunks after their content and
+  the site serves only the newest, so a page opened before a deployment finds
+  its chunks gone. When a chunk fails, the page fetches its own address again;
+  if that no longer names the page's script, the site has changed (`chunks.ts`,
+  `SiteChanged`): Notes and History say "The Workshop has changed since this
+  page opened." with a Reload button, the facts are left out, and the chunk is
+  not asked for again.
 - An open row, a decision, a feature or a suggestion, shows its thread and a box
   to add a comment. A comment of the Workshop's App is an ordinary
   comment. While the thread loads, each comment the live state counts holds
