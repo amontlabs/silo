@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { startFake } from './fake-github.js';
 import { run, sandbox } from './setup-helpers.js';
 
-test('decline closes a suggestion as not planned with the reason as the bot\'s comment, once', async (t) => {
+test('decline drops a suggestion, closed with GitHub\'s own reason "not planned", with the reason as the bot\'s comment, once', async (t) => {
   const fake = await startFake();
   t.after(fake.stop);
   const box = sandbox(t);
@@ -13,7 +13,7 @@ test('decline closes a suggestion as not planned with the reason as the bot\'s c
 
   const result = await run(['decline', `#${suggestion.number}`, '--why', 'Out of scope for Silo.'], { fake, box });
   assert.equal(result.code, 0, result.stderr);
-  assert.equal(result.stdout, `Closed #${suggestion.number} as not planned.\n`);
+  assert.equal(result.stdout, `Dropped #${suggestion.number}: closed with GitHub's own reason "not planned".\n`);
   assert.deepEqual([suggestion.state, suggestion.state_reason], ['closed', 'not_planned']);
   assert.deepEqual(fake.commentsOn(suggestion.number).map((c) => [c.user.login, c.body]), [[fake.bot.login, 'Out of scope for Silo.']]);
 
