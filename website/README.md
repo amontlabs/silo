@@ -715,7 +715,9 @@ What a person sees:
   answer or what, the ids of the statements it sets or added and their texts
   (wherever they live at each end: in its `sets` before a take, in the plan's lists
   after it), what it removes, what it keeps, its surfaces; or it was dropped,
-  replaced or deleted (`readFilms` and `printedChanged` in `data.ts`). The two
+  replaced or deleted. The rule lives in one place, `films/tools/behind.mjs`
+  (`readFilms` and `printedChanges`), which `data.ts` uses and which is also the
+  films' own command, `node tools/behind.mjs <id>`. The two
   ends are compared, not the commits between them, so a change undone since does
   not count; an entry is found by its id, its file's name, wherever its file is, and
   one that did not exist at the film's commit makes the film behind. A take that
@@ -1342,7 +1344,8 @@ The Workshop's build data holds every film of `films/`, in the order
 `films/README.md` gives, each with its `id`, `title`, `line` and `shows` from its
 `film.json`, `behind` (the entries it shows that changed after it, see "What a
 person sees") and `playable`, true for a film whose page the build writes
-(`readBuildData` and `readFilms` in `src/workshop/data.ts`).
+(`readBuildData` in `src/workshop/data.ts`, `readFilms` in
+`films/tools/behind.mjs`).
 
 A film's page may be framed by a page of the site, and by nothing else:
 `/films/` answers `frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN`,

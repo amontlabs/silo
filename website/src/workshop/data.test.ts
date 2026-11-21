@@ -1,11 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { canonicalText } from '../../../tools/plan/model/index.js';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { main as behindCommand, writeChecked } from '../../../films/tools/behind.mjs';
 import { loadDir } from '../../../tools/plan/read/index.js';
-import { buildDataFrom, factsFrom, filmOrder, historiesFrom, historyFromGit, layoutPlanFrom, notesFrom, planDir, readBuildData, readFilms, readHistories, readHistory, printedChanged, unshallow } from './data';
+import { buildDataFrom, factsFrom, filmOrder, historiesFrom, historyFromGit, layoutPlanFrom, notesFrom, planDir, readBuildData, readFilms, readHistories, readHistory, printedChanged, printedChanges, unshallow } from './data';
 import type { Git } from './data';
 import { made } from '../../scripts/films-test-support.mjs';
 import { buildData, CORE_NOTES, DECISIONS, emptyPlanFiles, FEATURES, PARTS, planFiles, withLists, ZIG_NOTES } from './fixtures';
@@ -802,6 +803,240 @@ describe('the films', () => {
     expect(printedChanged(entry({ sets: [set] }), entry({ adds: ['twin', 'more'], verdict: 'take' }))).toBe(true);
     // A word of `sets` has no id: it is named by its word, as the lists name it.
     expect(printedChanged(entry({ sets: [{ in: 'words', word: 'Pause point', means: 'A stop.' }] }), entry({ adds: ['pause-point'], verdict: 'take' }))).toBe(false);
+  });
+
+  it('name what changed in an entry, field by field and statement by statement, and nothing for a take alone', () => {
+    const set = { in: 'words', word: 'twin', means: 'A copy.' };
+    expect(printedChanges(entry({ sets: [set] }), entry({ adds: ['twin'], verdict: 'take' }))).toEqual([]);
+    expect(printedChanges(entry({ answer: 'Yes.', sets: [set] }), entry({ answer: 'No.', sets: [{ ...set, means: 'Another copy.' }] }))).toEqual([
+      'answer: was "Yes.", now "No."',
+      'statement twin, means: was "A copy.", now "Another copy."',
+    ]);
+    expect(printedChanges(entry({}), entry({ verdict: 'drop' }))).toEqual(['dropped']);
+    expect(printedChanges(entry({}), null)).toEqual(['its file was deleted']);
+  });
+
+  it('are told behind by the films\' command exactly as the Workshop\'s build gives them to the page, on the real repository', () => {
+    // The build first: it fetches the whole history of a shallow clone when it can.
+    const page = readBuildData(REPOSITORY).films;
+    const shallow = execFileSync('git', ['-C', REPOSITORY, 'rev-parse', '--is-shallow-repository'], { encoding: 'utf8' }).trim() === 'true';
+    let status = 0;
+    let out = '';
+    let err = '';
+    try {
+      out = execFileSync('node', [join(REPOSITORY, 'films/tools/behind.mjs')], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (error) {
+      ({ status, stdout: out, stderr: err } = error as { status: number; stdout: string; stderr: string });
+    }
+    if (shallow) {
+      // A shallow clone: the command refuses by design, and the build marks no film behind.
+      expect(status).toBe(1);
+      expect(err).toContain('This clone is shallow');
+      expect(page.every((film) => film.behind.length === 0)).toBe(true);
+      return;
+    }
+    expect(out).not.toContain('cannot tell');
+    expect(out).not.toContain('cannot be read');
+    const told = new Map<string, string[]>();
+    let film = '';
+    for (const line of out.split('\n')) {
+      const head = /^([a-z0-9-]+): /.exec(line);
+      if (head) told.set((film = head[1]), []);
+      else if (/^  [a-z0-9-]+$/.test(line)) told.get(film)!.push(line.trim());
+    }
+    const given = page.map((info) => [info.id, info.behind]);
+    expect([...told]).toEqual(given);
+    expect(status).toBe(given.some(([, behind]) => behind.length) ? 1 : 0);
+  });
+
+  it('take a check that a film still holds into its checked.md, only while it is behind and only with a reason, and are up to date once it is committed', () => {
+    const root = mkdtempSync(join(tmpdir(), 'workshop-films-'));
+    const git = (args: string[]) => execFileSync('git', ['-C', root, ...args], { env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }, stdio: 'ignore' });
+    const write = (path: string, text: string) => {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), text);
+    };
+    const checked = join(root, 'films/one/checked.md');
+    const quiet = [vi.spyOn(console, 'log').mockImplementation(() => {}), vi.spyOn(console, 'error').mockImplementation(() => {})];
+    try {
+      git(['init', '-q', '-b', 'main']);
+      write('plan/p/decisions/word-a.json', entry({ asks: 'A?', answer: 'Old.' }));
+      write('plan/p/decisions/word-b.json', entry({ asks: 'B?', answer: 'Same.' }));
+      write('films/one/film.json', JSON.stringify({ id: 'one', title: 'One', line: 'L.', shows: ['word-a', 'word-b'] }));
+      write('films/two/film.json', JSON.stringify({ id: 'two', title: 'Two', line: 'L.', shows: ['word-b'] }));
+      git(['add', '.']);
+      git(['commit', '-q', '-m', 'the films']);
+      // Not behind: nothing to check, nothing written.
+      expect(behindCommand(['one', '--holds', 'It still holds.'], root, '2026-11-21')).toBe(1);
+      expect(existsSync(checked)).toBe(false);
+      write('plan/p/decisions/word-a.json', entry({ asks: 'A?', answer: 'New.' }));
+      git(['commit', '-q', '-am', 'redefined']);
+      expect(behindCommand(['one'], root)).toBe(1);
+      // No reason, an empty one, or more than one film: wrong use, nothing written.
+      expect(behindCommand(['one', '--holds'], root)).toBe(2);
+      expect(behindCommand(['one', '--holds', '  '], root)).toBe(2);
+      expect(behindCommand(['one', 'two', '--holds', 'Why.'], root)).toBe(2);
+      expect(behindCommand(['--holds', 'Why.'], root)).toBe(2);
+      expect(existsSync(checked)).toBe(false);
+      expect(behindCommand(['one', '--holds', 'It says "old" nowhere.'], root, '2026-11-21')).toBe(0);
+      const text = readFileSync(checked, 'utf8');
+      expect(text).toMatch(/^# Checks of one\n/);
+      expect(text).toContain('## 2026-11-21\n\nBehind on: `word-a`.\n\nIt says "old" nowhere.\n');
+      // Written, not committed: the film is behind until the commit that records the check.
+      expect(readFilms(root, false).find((film) => film.id === 'one')?.behind).toEqual(['word-a']);
+      git(['add', 'films/one/checked.md']);
+      git(['commit', '-q', '-m', 'checked']);
+      expect(readFilms(root, false).map((film) => film.behind)).toEqual([[], []]);
+      expect(behindCommand([], root)).toBe(0);
+      // A second check appends after the first.
+      write('plan/p/decisions/word-a.json', entry({ asks: 'A?', answer: 'Newer.' }));
+      write('plan/p/decisions/word-b.json', entry({ asks: 'B?', answer: 'Changed.' }));
+      git(['commit', '-q', '-am', 'again']);
+      expect(behindCommand(['one', '--holds', 'Still.'], root, '2026-11-22')).toBe(0);
+      expect(readFileSync(checked, 'utf8')).toBe(`${text}\n## 2026-11-22\n\nBehind on: \`word-a\`, \`word-b\`.\n\nStill.\n`);
+    } finally {
+      for (const spy of quiet) spy.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  /** A repository whose film `one` is behind on `word-a`, run with the console quiet; removed after. */
+  const behindRepository = (run: (root: string, write: (path: string, text: string) => void, git: (args: string[]) => void) => void) => {
+    const root = mkdtempSync(join(tmpdir(), 'workshop-films-'));
+    const git = (args: string[]) => execFileSync('git', ['-C', root, ...args], { env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }, stdio: 'ignore' });
+    const write = (path: string, text: string) => {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), text);
+    };
+    const quiet = [vi.spyOn(console, 'log').mockImplementation(() => {}), vi.spyOn(console, 'error').mockImplementation(() => {})];
+    try {
+      git(['init', '-q', '-b', 'main']);
+      write('plan/p/decisions/word-a.json', entry({ asks: 'A?', answer: 'Old.' }));
+      write('films/one/film.json', JSON.stringify({ id: 'one', title: 'One', line: 'L.', shows: ['word-a'] }));
+      git(['add', '.']);
+      git(['commit', '-q', '-m', 'the film']);
+      write('plan/p/decisions/word-a.json', entry({ asks: 'A?', answer: 'New.' }));
+      git(['commit', '-q', '-am', 'redefined']);
+      run(root, write, git);
+    } finally {
+      for (const spy of quiet) spy.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
+  };
+
+  it('write a check only into a plain checked.md of a plain film folder, never through a link', () => {
+    behindRepository((root, write) => {
+      const checked = join(root, 'films/one/checked.md');
+      const outside = join(root, 'plan/README.md');
+      write('plan/README.md', 'The plan.\n');
+      // A symbolic link to a file outside the film.
+      symlinkSync('../../plan/README.md', checked);
+      expect(behindCommand(['one', '--holds', 'Still.'], root)).toBe(1);
+      expect(readFileSync(outside, 'utf8')).toBe('The plan.\n');
+      expect(lstatSync(checked).isSymbolicLink()).toBe(true);
+      rmSync(checked);
+      // A symbolic link that leads nowhere: its target is not made.
+      symlinkSync('../../plan/made.md', checked);
+      expect(behindCommand(['one', '--holds', 'Still.'], root)).toBe(1);
+      expect(existsSync(join(root, 'plan/made.md'))).toBe(false);
+      rmSync(checked);
+      // A hard link: the other name's file is left as it is.
+      linkSync(outside, checked);
+      expect(behindCommand(['one', '--holds', 'Still.'], root)).toBe(1);
+      expect(readFileSync(outside, 'utf8')).toBe('The plan.\n');
+      rmSync(checked);
+      // Not a plain file.
+      mkdirSync(checked);
+      expect(behindCommand(['one', '--holds', 'Still.'], root)).toBe(1);
+      rmSync(checked, { recursive: true });
+      // A film folder that is a link, to a film elsewhere.
+      write('elsewhere/two/film.json', JSON.stringify({ id: 'two', title: 'Two', line: 'L.', shows: ['word-a'] }));
+      symlinkSync('../elsewhere/two', join(root, 'films/two'));
+      expect(behindCommand(['two', '--holds', 'Still.'], root)).toBe(2);
+      expect(existsSync(join(root, 'elsewhere/two/checked.md'))).toBe(false);
+      // A plain file is written, by a new file renamed into place, and nothing is left beside it.
+      write('films/one/checked.md', '# Checks of one\n');
+      expect(behindCommand(['one', '--holds', 'Still.'], root, '2026-11-21')).toBe(0);
+      expect(readFileSync(checked, 'utf8')).toBe('# Checks of one\n\n## 2026-11-21\n\nBehind on: `word-a`.\n\nStill.\n');
+      expect(execFileSync('ls', ['-a', join(root, 'films/one')], { encoding: 'utf8' }).split('\n').filter(Boolean)).toEqual(['.', '..', 'checked.md', 'film.json']);
+    });
+  });
+
+  it('take a reason only as one line of plain text: no line break, no three backticks', () => {
+    behindRepository((root) => {
+      for (const why of ['Still.\n```\nrm -rf', 'Still.\n## 2026-11-22', 'Still.\r\nAgain.', 'It says ```one```.']) {
+        expect(behindCommand(['one', '--holds', why], root)).toBe(2);
+      }
+      expect(existsSync(join(root, 'films/one/checked.md'))).toBe(false);
+      expect(behindCommand(['one', '--holds', 'It says "one" and `two`.'], root)).toBe(0);
+    });
+  });
+
+  it('say of a film whose film.json cannot be read that it cannot be, and go on with the others', () => {
+    behindRepository((root, write, git) => {
+      write('films/bad/film.json', '{ "id": "bad", ');
+      git(['add', '.']);
+      git(['commit', '-q', '-m', 'a broken film']);
+      const log = vi.mocked(console.log);
+      expect(behindCommand([], root)).toBe(1);
+      const lines = log.mock.calls.map((call) => String(call[0]));
+      expect(lines.some((line) => line.startsWith('bad: cannot be read: films/bad/film.json: '))).toBe(true);
+      expect(lines.some((line) => line.startsWith('one: behind the plan'))).toBe(true);
+      expect(behindCommand(['bad', '--holds', 'Still.'], root)).toBe(1);
+      expect(existsSync(join(root, 'films/bad/checked.md'))).toBe(false);
+    });
+  });
+
+  it('write a check by a new file of its own, and remove only a file this run made', () => {
+    behindRepository((root, write) => {
+      const films = join(root, 'films');
+      write('films/one/checked.md', 'Before.\n');
+      // A file already there under the name asked for: the write fails, and that file and checked.md stay as they were.
+      write('films/one/.taken.tmp', 'Not ours.\n');
+      expect(() => writeChecked(films, 'one', 'After.\n', '.taken.tmp')).toThrow();
+      expect(readFileSync(join(films, 'one/.taken.tmp'), 'utf8')).toBe('Not ours.\n');
+      expect(readFileSync(join(films, 'one/checked.md'), 'utf8')).toBe('Before.\n');
+      // By default the name is random: two runs leave only checked.md.
+      rmSync(join(films, 'one/.taken.tmp'));
+      writeChecked(films, 'one', 'First.\n');
+      writeChecked(films, 'one', 'Second.\n');
+      expect(readFileSync(join(films, 'one/checked.md'), 'utf8')).toBe('Second.\n');
+      expect(execFileSync('ls', ['-a', join(films, 'one')], { encoding: 'utf8' }).split('\n').filter(Boolean)).toEqual(['.', '..', 'checked.md', 'film.json']);
+    });
+  });
+
+  it('refuse a checked.md that is a named pipe without opening it', () => {
+    behindRepository((root) => {
+      execFileSync('mkfifo', [join(root, 'films/one/checked.md')]);
+      // Opening the pipe would block here for ever.
+      expect(behindCommand(['one', '--holds', 'Still.'], root)).toBe(1);
+      expect(lstatSync(join(root, 'films/one/checked.md')).isFIFO()).toBe(true);
+    });
+  });
+
+  it('take no line or paragraph separator and no control character in a reason', () => {
+    behindRepository((root) => {
+      for (const why of ['Still.\u2028Again.', 'Still.\u2029Again.', 'Still.\u0085Again.', 'Still.\tAgain.', 'Still.\u0007', 'Still.\u000bAgain.']) {
+        expect(behindCommand(['one', '--holds', why], root)).toBe(2);
+      }
+      expect(existsSync(join(root, 'films/one/checked.md'))).toBe(false);
+    });
+  });
+
+  it('name a film whose folder cannot be searched as a film that cannot be read', () => {
+    behindRepository((root, write) => {
+      write('films/locked/film.json', JSON.stringify({ id: 'locked', title: 'Locked', line: 'L.', shows: [] }));
+      chmodSync(join(root, 'films/locked'), 0o600);
+      try {
+        const log = vi.mocked(console.log);
+        expect(behindCommand([], root)).toBe(1);
+        const lines = log.mock.calls.map((call) => String(call[0]));
+        expect(lines.some((line) => line.startsWith('locked: cannot be read: films/locked/film.json: '))).toBe(true);
+        expect(lines.some((line) => line.startsWith('one: behind the plan'))).toBe(true);
+      } finally {
+        chmodSync(join(root, 'films/locked'), 0o755);
+      }
+    });
   });
 
   it('compare the texts of an entry\'s statements wherever they live at each end: in its sets before a take, in the lists after', () => {
