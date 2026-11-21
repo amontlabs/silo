@@ -1,0 +1,11 @@
+[
+  {
+    "id": "core-forgets-no-case",
+    "says": "In the core, code that forgets a state or a failure is refused, by the compiler or by a test.",
+    "kind": "safety",
+    "check": [
+      "types",
+      "test"
+    ]
+  }
+]
