@@ -102,7 +102,14 @@ function films(): Plugin {
       server.middlewares.use((request, response, next) => {
         const pathname = (request.url ?? '').split('?')[0];
         if (!pathname.startsWith(FILMS_URL)) return next();
-        const file = filmFileFor(filmFiles().files, decodeURIComponent(pathname));
+        let decoded: string;
+        try {
+          decoded = decodeURIComponent(pathname);
+        } catch {
+          response.statusCode = 400;
+          return response.end();
+        }
+        const file = filmFileFor(filmFiles().files, decoded);
         if (!file) return next();
         const type = 'text' in file ? FILM_TYPES['.html'] : FILM_TYPES[extname(file.from)] ?? 'application/octet-stream';
         response.setHeader('Content-Type', type);

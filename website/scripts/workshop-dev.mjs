@@ -4,7 +4,7 @@
 //   node scripts/workshop-dev.mjs [--port 4174]          against GitHub, from WORKSHOP_* variables
 // Run `npm run build` first. The site's origin is http://127.0.0.1:<port>.
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { realpath, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -43,6 +43,19 @@ export async function staticFile(distDir, pathname) {
   const target = normalize(join(distDir, decoded));
   if (target !== distDir && !target.startsWith(distDir.endsWith(sep) ? distDir : distDir + sep)) return null;
   return (await file(target)) || file(join(target, 'index.html'));
+}
+
+// Whether `path`, a file staticFile gives, is really served from distDir/films/: its normalised path is under
+// it, letter for letter, and so is its real path. Only such a file may be framed (FILM_FRAME_HEADERS).
+export async function servedFromFilms(distDir, path) {
+  const films = join(distDir, 'films');
+  if (!normalize(path).startsWith(films + sep)) return false;
+  try {
+    const [real, realFilms] = await Promise.all([realpath(path), realpath(films)]);
+    return real.startsWith(realFilms + sep);
+  } catch {
+    return false;
+  }
 }
 
 // plan/, or the plan WORKSHOP_PLAN names, as the build reads it.
@@ -89,17 +102,21 @@ export async function startDev({ fake = false, planDir = PLAN, port = 4174, host
       pathname = null;
     }
     if (pathname?.startsWith('/api/workshop/')) return api(req, res);
-    // As deployed: only a film's page may be framed, by a page of the site.
-    for (const [name, value] of Object.entries(pathname?.startsWith('/films/') ? FILM_FRAME_HEADERS : FRAME_HEADERS)) res.setHeader(name, value);
+    const readable = pathname !== null && (req.method === 'GET' || req.method === 'HEAD');
+    const path = readable ? await staticFile(distDir, pathname) : null;
+    // As deployed: only a file really served from dist/films/ may be framed, by a page of the site. The
+    // choice follows the file served, after the address is decoded and normalised, never the address as
+    // typed; an error keeps the strict headers.
+    const frame = path && (await servedFromFilms(distDir, path)) ? FILM_FRAME_HEADERS : FRAME_HEADERS;
+    for (const [name, value] of Object.entries(frame)) res.setHeader(name, value);
     if (pathname === null) {
       res.writeHead(400);
       return res.end();
     }
-    if (req.method !== 'GET' && req.method !== 'HEAD') {
+    if (!readable) {
       res.writeHead(405);
       return res.end();
     }
-    const path = await staticFile(distDir, pathname);
     if (!path) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
       return res.end('Not found');

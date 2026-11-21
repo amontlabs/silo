@@ -1217,9 +1217,14 @@ writes (`readBuildData` in `src/workshop/data.ts`).
 A film's page may be framed by a page of the site, and by nothing else:
 `/films/` answers `frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN`,
 where every other path refuses any frame (see [Build and deploy](#build-and-deploy)).
-The dev server serves the same files at the same addresses, read from
-`films/` on each request; the local server (`workshop-dev.mjs`) serves them
-from `dist/` with the same headers as deployed.
+The local server (`workshop-dev.mjs`) serves the films from `dist/` and gives
+the looser headers only to a file it really serves from `dist/films/`: it
+chooses them from the file's path once the address is decoded and normalised,
+not from the address as typed. So `/films/..%2findex.html` (the home page),
+`/FILMS/<id>/`, a 404 and an error keep the strict headers. The dev server
+serves the same files at the same addresses, read from `films/` on each
+request, and answers 400 to a malformed `%` escape under `/films/`; like
+`vite preview`, it sets no frame header on any page.
 
 After a film changes in `films/`, run `npm --prefix website run build` (or
 `build:vercel`) again: the site has no copy of a film of its own. Five films
@@ -1259,7 +1264,10 @@ following Vercel's
   `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY`
   to every path but the films' and continues. The second adds
   `frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN` under `/films/`,
-  so the Workshop can show a film in a frame, and continues. The third,
+  so the Workshop can show a film in a frame, and continues. Both, and the
+  route of a film's page, are `caseSensitive`: Vercel matches a route's `src`
+  without regard to case by default, and `/FILMS/` would get the looser rule.
+  Vercel documents `src` as PCRE-compatible, the negative lookahead included. The third,
   `{ "src": "^/workshop/?$", "dest": "/workshop/index.html" }`, serves the
   Workshop page at both `/workshop` and `/workshop/`. The fourth serves a
   film's page at `/films/<id>` and `/films/<id>/`. `{ "handle": "filesystem" }`
@@ -1444,9 +1452,7 @@ services:
   remote), until a deploy has shown it;
 - that GitHub answers `304` to the conditional issue and comment list pages as
   documented, and that the reaction summary in the issue list moves the page's
-  ETag when a vote changes;
-- that Vercel's routes take the lookahead of `^/(?!films/).*$`, so a film's
-  page carries only the headers that let the Workshop frame it.
+  ETag when a vote changes.
 
 ## Why built this way
 

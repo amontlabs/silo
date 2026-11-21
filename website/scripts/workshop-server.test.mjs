@@ -707,10 +707,10 @@ test('Build Output layout: static site, one Node.js function at every endpoint, 
     await prepareVercel({ siteDir: website, distDir: join(site, 'dist'), outputDir });
     const config = JSON.parse(await readFile(join(outputDir, 'config.json'), 'utf8'));
     assert.deepEqual(config, { version: 3, routes: [
-      { src: '^/(?!films/).*$', headers: { 'Content-Security-Policy': "frame-ancestors 'none'", 'X-Frame-Options': 'DENY' }, continue: true },
-      { src: '^/films/.*$', headers: { 'Content-Security-Policy': "frame-ancestors 'self'", 'X-Frame-Options': 'SAMEORIGIN' }, continue: true },
+      { src: '^/(?!films/).*$', caseSensitive: true, headers: { 'Content-Security-Policy': "frame-ancestors 'none'", 'X-Frame-Options': 'DENY' }, continue: true },
+      { src: '^/films/.*$', caseSensitive: true, headers: { 'Content-Security-Policy': "frame-ancestors 'self'", 'X-Frame-Options': 'SAMEORIGIN' }, continue: true },
       { src: '^/workshop/?$', dest: '/workshop/index.html' },
-      { src: '^/films/([a-z0-9][a-z0-9-]*)/?$', dest: '/films/$1/index.html' },
+      { src: '^/films/([a-z0-9][a-z0-9-]*)/?$', caseSensitive: true, dest: '/films/$1/index.html' },
       { handle: 'filesystem' },
       { handle: 'hit' },
       { src: '^/(assets/.*|fonts/.*\\.woff2)$', headers: { 'Cache-Control': 'public, max-age=31536000, immutable' }, continue: true },

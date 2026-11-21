@@ -124,11 +124,12 @@ export async function prepareVercel({ siteDir = website, distDir = join(siteDir,
   const config = {
     version: 3,
     routes: [
-      { src: '^/(?!films/).*$', headers: FRAME_HEADERS, continue: true },
-      { src: '^/films/.*$', headers: FILM_FRAME_HEADERS, continue: true },
+      // A route's src matches without regard to case unless caseSensitive is set: /FILMS/ must not get the looser rule.
+      { src: '^/(?!films/).*$', caseSensitive: true, headers: FRAME_HEADERS, continue: true },
+      { src: '^/films/.*$', caseSensitive: true, headers: FILM_FRAME_HEADERS, continue: true },
       { src: '^/workshop/?$', dest: page },
       // A film's page (scripts/films.mjs), with or without the closing slash: it names its files by absolute paths.
-      { src: '^/films/([a-z0-9][a-z0-9-]*)/?$', dest: '/films/$1/index.html' },
+      { src: '^/films/([a-z0-9][a-z0-9-]*)/?$', caseSensitive: true, dest: '/films/$1/index.html' },
       { handle: 'filesystem' },
       { handle: 'hit' },
       { src: KEPT_FILES, headers: KEPT_HEADERS, continue: true },
