@@ -2,11 +2,11 @@
 
 /** @typedef {'take' | 'drop'} Verdict */
 /** @typedef {'dropped' | 'replaced' | 'taken' | 'answered' | 'open'} DecisionStatus */
-/** @typedef {'built' | 'dropped' | 'ready' | 'taken' | 'undecided'} FeatureStatus */
-/** @typedef {{ kind: 'decision' | 'feature', verdict?: Verdict, answer?: string, sets?: unknown, built?: string, needs?: string[], replaced_by?: unknown }} Entry */
+/** @typedef {'built' | 'dropped' | 'building' | 'ready' | 'taken' | 'undecided'} FeatureStatus */
+/** @typedef {{ kind: 'decision' | 'feature', verdict?: Verdict, answer?: string, sets?: unknown, started?: string, built?: string, needs?: string[], replaced_by?: unknown }} Entry */
 
 export const DECISION_STATUSES = Object.freeze(['dropped', 'replaced', 'taken', 'answered', 'open']);
-export const FEATURE_STATUSES = Object.freeze(['built', 'dropped', 'ready', 'taken', 'undecided']);
+export const FEATURE_STATUSES = Object.freeze(['built', 'dropped', 'building', 'ready', 'taken', 'undecided']);
 
 /**
  * Whether an entry puts forward statements: a `sets` that is a list of one item or more. A decision
@@ -49,8 +49,9 @@ export function waitingFor(entry, entries) {
 }
 
 /**
- * Decision: dropped, replaced (a `replaced_by`), taken, answered (an `answer` or a `sets`), open. Feature: built, dropped, ready (taken and every need
- * done), taken, undecided.
+ * Decision: dropped, replaced (a `replaced_by`), taken, answered (an `answer` or a `sets`), open.
+ * Feature: built, dropped, building (taken, with `started`), ready (taken and every need done),
+ * taken, undecided.
  * @param {Entry} entry @param {Record<string, Entry>} entries the plan's entries, by id
  * @returns {DecisionStatus | FeatureStatus}
  */
@@ -64,6 +65,7 @@ export function entryStatus(entry, entries) {
   }
   if (entry.built) return 'built';
   if (entry.verdict === 'drop') return 'dropped';
+  if (entry.verdict === 'take' && entry.started) return 'building';
   if (entry.verdict === 'take') return waitingFor(entry, entries).length ? 'taken' : 'ready';
   return 'undecided';
 }

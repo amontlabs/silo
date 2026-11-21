@@ -34,6 +34,7 @@ test('each name, alone', () => {
     taken: [{ ...base, verdict: 'take' }, ['taken']],
     dropped: [{ ...base, verdict: 'drop' }, ['dropped']],
     replaced: [{ ...base, replaced_by: 'other' }, ['replaced']],
+    started: [{ ...base, started: '2026-10-30' }, ['started']],
     built: [{ ...base, built: '2026-11-01' }, ['built']],
   };
   for (const [name, [after, what]] of Object.entries(cases)) {
@@ -41,7 +42,7 @@ test('each name, alone', () => {
     assert.deepEqual(names(history, 'x'), [what, ['added']], name);
   }
   // Every name is covered, either above or below.
-  assert.deepEqual(WHAT, ['added', 'moved', 'text', 'sets', 'needs', 'keeps', 'surfaces', 'suggest', 'notes', 'taken', 'dropped', 'cleared', 'replaced', 'built']);
+  assert.deepEqual(WHAT, ['added', 'moved', 'text', 'sets', 'needs', 'keeps', 'surfaces', 'suggest', 'notes', 'taken', 'dropped', 'cleared', 'replaced', 'started', 'built']);
   assert.equal(Object.isFrozen(WHAT), true);
 });
 
@@ -285,6 +286,7 @@ test('each name of the list, through git', () => {
     ['surfaces', { surfaces: { cli: '1' } }],
     ['suggest', { suggest: { verdict: 'drop', why: 'w' } }],
     ['taken', { verdict: 'take' }],
+    ['started', { started: '2026-11-01' }],
     ['built', { built: '2026-11-02' }],
     ['replaced', { replaced_by: 'z' }],
     ['cleared', { verdict: undefined }],

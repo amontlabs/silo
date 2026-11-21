@@ -210,7 +210,7 @@ export function drop(files, id, options = {}) {
   }
   if (entry.verdict === 'take') {
     const waiting = Object.values(plan.entries).filter((other) => other.kind === 'decision' && other.verdict === undefined && Array.isArray(other.replaces) && other.replaces.includes(id)).map((other) => other.id);
-    if (waiting.length) return refused(`${id} is named in the replaces of ${waiting.join(', ')}, not decided yet: take or drop ${waiting.length === 1 ? 'it' : 'them'} first, or remove ${id} from ${waiting.length === 1 ? 'its' : 'their'} replaces`);
+    if (waiting.length) return refused(`${id} is named in the replaces of ${waiting.join(', ')}, not decided: take or drop ${waiting.length === 1 ? 'it' : 'them'} first, or remove ${id} from ${waiting.length === 1 ? 'its' : 'their'} replaces`);
   }
   const data = structuredClone(json.get(file));
   data.verdict = 'drop';

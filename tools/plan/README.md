@@ -11,8 +11,8 @@ Node 26, no dependency, no network call. `npm test` runs the tests, which use th
 
 | Command | What it does |
 |---|---|
-| `plan` | Shows the first entry in the order with no verdict (its kind, its question or its name, and `suggest`; for a decision its `answer`, or when it has none the statements it sets, and each decision it names in `replaces` with its `answer`, or the ids it adds when it has none), the features ready to build, and the features that wait and for what. |
-| `plan show <id>` | For an entry: first the entry whole (its keys, its `sets` in full, its stage and position, each need with its status, what needs it, its notes), then what binds it, compact: every principle and the properties of the root, of its part and in `keeps` (id and `says`); the taken decisions in force of its part and in `needs` (id and `answer`, or the ids it adds when it has none); the other taken decisions in force of the root as ids only, which `--all` prints in full. A decision in force is taken and not replaced. A replaced decision, one that has `replaced_by`, prints `Replaced by: <id>` first. A need that is replaced prints `replaced by <id>`. Each decision named in `replaces` prints with its `answer`, or the ids it adds. For a part: its title and line (and the word of the same id with its meaning, when there is one), its taken entries in force (and its replaced and dropped ones) as a count and their ids, then each entry with no verdict in the order of `order.json` (id, kind, status, and its `asks` or `name`), the first marked `next`, then its properties (id and `says`). For a statement: the statement, the entry whose `adds` brought it, the features that keep it, and the entries that would replace or remove it. `--json` gives everything, whatever `--all`. |
+| `plan` | Shows the first entry in the order with no verdict (its kind, its question or its name, and `suggest`; for a decision its `answer`, or when it has none the statements it sets, and each decision it names in `replaces` with its `answer`, or the ids it adds when it has none), the features being built, the features ready to build, and the features that wait and for what. |
+| `plan show <id>` | For an entry: first its state, then the entry whole (its keys, its `sets` in full, its stage and position, each need with its status, what needs it, its notes), then what binds it, compact: every principle and the properties of the root, of its part and in `keeps` (id and `says`); the taken decisions in force of its part and in `needs` (id and `answer`, or the ids it adds when it has none); the other taken decisions in force of the root as ids only, which `--all` prints in full. A decision in force is taken and not replaced. A replaced decision, one that has `replaced_by`, prints `Replaced by: <id>` first. A need that is replaced prints `replaced by <id>`. Each decision named in `replaces` prints with its `answer`, or the ids it adds. For a part: its title and line (and the word of the same id with its meaning, when there is one), its taken entries in force (and its replaced and dropped ones) as a count and their ids, then each entry with no verdict in the order of `order.json` (id, kind, status, and its `asks` or `name`), the first marked `next`, then its properties (id and `says`). For a statement: the statement, the entry whose `adds` brought it, the features that keep it, and the entries that would replace or remove it. `--json` gives everything, whatever `--all`. |
 | `plan take <id>` | The owner's yes. It writes what is listed under the table, in one commit named `Owner: take <id>`. |
 | `plan drop <id>` | The owner's no. Writes `"verdict": "drop"`, keeps `sets`, `removes` and `replaces`, and commits `Owner: drop <id>`. |
 | `plan check` | Checks the plan. The merge gate and the site's build run it. |
@@ -93,6 +93,8 @@ Each problem names the file, the field, what is wrong and the fix.
   (which also refuses cycles), or an entry that needs a dropped one while not dropped itself.
 - A `built` that is not a real calendar day (`YYYY-MM-DD`), or set on a feature that is not taken,
   whose needs are not all done, or whose added properties lack an `at`.
+- A `started` that is not a real calendar day, or set on a feature that is not taken, whose needs
+  are not all done, or whose `built` is an earlier day. A `built` needs no `started`.
 - A path of an `at` that is not relative to the top of the repository (absolute, with an empty,
   `.` or `..` part), or that does not name a regular file there: a directory, a missing file, or a
   link that leads outside the repository. Without the repository, only the file test is left out,
@@ -156,6 +158,7 @@ A change is `{ commit, date, what }`, with `text` or `by` when `what` names them
 | `taken`, `dropped` | gives the entry that verdict. |
 | `cleared` | takes the verdict `take` or `drop` away. |
 | `replaced` | adds `replaced_by`. `by` is its value. |
+| `started` | adds `started`. |
 | `built` | adds `built`. |
 
 A step that changes none of these gives no change: `adds`, `suggested_in`, the order of keys and white space are not changes, because values are compared as parsed JSON. A step where the entry's file is not a JSON object is skipped for that entry, and the next step is compared with the last version that parsed. A step that deletes the file gives no change.

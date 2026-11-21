@@ -90,6 +90,21 @@ test('plan: a feature whose needs are all done is ready', async () => {
   }, files);
 });
 
+test('plan: a feature being built is listed before those ready, and plan show says its state', async () => {
+  const files = basePlan();
+  files['engine/decisions/linux-vm-engine.json'] = { ...files['engine/decisions/linux-vm-engine.json'], verdict: 'take' };
+  files['engine/features/start-computer.json'] = { ...files['engine/features/start-computer.json'], started: '2026-11-18' };
+  await withRepo(async (root) => {
+    const json = JSON.parse((await run(root, ['--json'])).out);
+    assert.deepEqual(json.building, [{ id: 'start-computer', name: 'Start a computer' }]);
+    assert.deepEqual(json.ready, []);
+    const { out } = await run(root, []);
+    assert.match(out, /^Being built:\n {2}start-computer {2}Start a computer\n\nReady to build: none\.$/m);
+    assert.match((await run(root, ['show', 'start-computer'])).out, /^feature start-computer \(engine\): building, /);
+    assert.equal(JSON.parse((await run(root, ['show', 'start-computer', '--json'])).out).status, 'building');
+  }, files);
+});
+
 test('plan: the first entry with no verdict, the features ready and those that wait', async () => {
   await withRepo(async (root) => {
     const { code, out } = await run(join(root, 'plan'), []);
@@ -100,6 +115,8 @@ test('plan: the first entry with no verdict, the features ready and those that w
     assert.equal(json.next.id, 'nothing-without-a-reason');
     assert.equal(json.next.kind, 'decision');
     assert.equal(json.next.asks, basePlan()['decisions/nothing-without-a-reason.json'].asks);
+    assert.deepEqual(json.building, []);
+    assert.match(out, /^Being built: none\.$/m);
     assert.deepEqual(json.ready, []);
     assert.deepEqual(json.waiting, [{ id: 'start-computer', name: 'Start a computer', for: ['linux-vm-engine'] }]);
   });

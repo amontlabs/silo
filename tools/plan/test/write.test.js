@@ -342,7 +342,7 @@ test('drop refuses a taken decision that a decision with no verdict would replac
   assert.deepEqual(checkFiles(waiting).errors, []);
   const refusedDrop = drop(waiting, 'engine-colour');
   assert.equal(refusedDrop.status, 'refused');
-  assert.equal(refusedDrop.message, 'engine-colour is named in the replaces of nothing-without-a-reason, not decided yet: take or drop it first, or remove engine-colour from its replaces');
+  assert.equal(refusedDrop.message, 'engine-colour is named in the replaces of nothing-without-a-reason, not decided: take or drop it first, or remove engine-colour from its replaces');
   assert.equal(refusedDrop.changed.size, 0);
 
   const skipped = apply(waiting, drop(waiting, 'nothing-without-a-reason'));

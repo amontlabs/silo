@@ -262,6 +262,7 @@ export function checkFiles(files, { exists } = {}) {
         for (const key of SURFACES_KEYS) textKey(file, 'surfaces', data.surfaces, key);
       }
     }
+    if (Object.hasOwn(data, 'started') && !isDate(data.started)) add(file, 'started', `"${shown(data.started)}" is not a date`, 'write the day its build started, YYYY-MM-DD');
     if (Object.hasOwn(data, 'built') && !isDate(data.built)) add(file, 'built', `"${shown(data.built)}" is not a date`, 'write the day it was built, YYYY-MM-DD');
     // Rule 5: sets and removes only before take, adds only with it. `replaces` stays after a take.
     // `replaced_by` is checked with `replaces`, below.
@@ -518,7 +519,15 @@ export function checkFiles(files, { exists } = {}) {
     }
   }
 
-  // Rule 9: built, and the files of every at.
+  // Rule 9: started, built, and the files of every at. A build starts on a taken feature whose
+  // needs are all done; `built` does not need `started`.
+  for (const entry of entries.values()) {
+    if (entry.kind !== 'feature' || !Object.hasOwn(entry, 'started')) continue;
+    if (entry.verdict !== 'take') add(entry.file, 'started', 'started without the verdict take', 'take the feature first, or remove started');
+    const waiting = (Array.isArray(entry.needs) ? entry.needs : []).filter((id) => !isDone(entries.get(id)));
+    if (waiting.length) add(entry.file, 'started', `started while ${waiting.map(shown).join(', ')} ${waiting.length > 1 ? 'are' : 'is'} not done`, 'finish what it needs first, or remove started');
+    if (isDate(entry.started) && isDate(entry.built) && entry.started > entry.built) add(entry.file, 'started', `started on ${entry.started}, after it was built on ${entry.built}`, 'write the day its build started, on or before built');
+  }
   for (const entry of entries.values()) {
     if (!Object.hasOwn(entry, 'built')) continue;
     if (entry.verdict !== 'take') add(entry.file, 'built', 'built without the verdict take', 'take the feature first, or remove built');

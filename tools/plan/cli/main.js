@@ -11,7 +11,7 @@ import { Refused, UsageError, parseArgs } from './args.js';
 import { baseFiles, existsIn, findRoot, git, planFiles, ruledByOwner, uncommitted, unwatched } from './repo.js';
 
 export const COMMANDS = [
-  { name: '', usage: 'plan', what: 'What is next: the first entry with no verdict, the features ready to build, the features that wait and for what.' },
+  { name: '', usage: 'plan', what: 'What is next: the first entry with no verdict, the features being built, those ready to build, the features that wait and for what.' },
   { name: 'show', usage: 'plan show <id>', what: 'One entry, part or statement. An entry with what it links to and what binds it (--all: the whole product\'s decisions in full); a part with what is next in it.' },
   { name: 'take', usage: 'plan take <id>', what: "The owner's yes: writes what the entry sets into the lists and commits \"Owner: take <id>\"." },
   { name: 'drop', usage: 'plan drop <id>', what: "The owner's no: commits \"Owner: drop <id>\"." },
@@ -136,6 +136,7 @@ function next(ctx, argv) {
   const entries = ordered(plan);
   const first = entries.find((entry) => entry.verdict === undefined);
   const features = entries.filter((entry) => entry.kind === 'feature');
+  const building = features.filter((entry) => entryStatus(entry, plan.entries) === 'building').map(({ id, name }) => ({ id, name }));
   const ready = features.filter((entry) => entryStatus(entry, plan.entries) === 'ready').map(({ id, name }) => ({ id, name }));
   const waiting = features.filter((entry) => entryStatus(entry, plan.entries) === 'taken').map(({ id, name }) => ({ id, name, for: waitingFor(plan.entries[id], plan.entries) }));
   const nextOne = first && {
@@ -149,7 +150,7 @@ function next(ctx, argv) {
     ...(first.suggest ? { suggest: first.suggest } : {}),
   };
   if (flags.has('json')) {
-    ctx.out(JSON.stringify({ next: nextOne ?? null, ready, waiting }, null, 2));
+    ctx.out(JSON.stringify({ next: nextOne ?? null, building, ready, waiting }, null, 2));
     return 0;
   }
   const lines = [];
@@ -172,6 +173,8 @@ function next(ctx, argv) {
     } else lines.push(`  ${nextOne.name}: ${nextOne.what}`);
     if (nextOne.suggest) lines.push(`  suggest: ${nextOne.suggest.verdict}. ${nextOne.suggest.why}`);
   }
+  lines.push('', building.length ? 'Being built:' : 'Being built: none.');
+  for (const feature of building) lines.push(`  ${feature.id}  ${feature.name}`);
   lines.push('', ready.length ? 'Ready to build:' : 'Ready to build: none.');
   for (const feature of ready) lines.push(`  ${feature.id}  ${feature.name}`);
   lines.push('', waiting.length ? 'Waiting:' : 'Waiting: none.');

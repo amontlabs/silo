@@ -151,9 +151,14 @@ and a feature when it is built. A replaced decision still counts as done.
 
 - A decision can be taken only after the decisions it needs.
 - A feature can be taken before what it needs is done. It then waits to be built.
+- A feature is being built when `started` holds the day its build started. The check accepts
+  that only when the feature is taken, everything it needs is done, and the day is not later than
+  `built`.
 - A feature is built when `built` holds the date. The check accepts that only when the feature is
   taken, everything it needs is done, and each property it added has an `at` that names an
-  existing file.
+  existing file. `built` does not need `started`.
+- Whoever starts the build of a feature writes `started` by hand, and whoever finishes it writes
+  `built` by hand. No command writes them.
 
 ## The order
 
@@ -216,7 +221,7 @@ Keys are written in this order. A key in brackets is optional: when it has no va
 | Principle | `id`, `says`, `asks`, [`known_as`], [`why`] |
 | Property | `id`, `says`, `kind`, [`from`], `check`, [`at`] |
 | Decision | `asks`, [`answer`], [`needs`], [`replaces`], [`sets`], [`removes`], [`adds`], [`suggest`], [`suggested_in`], [`verdict`], [`replaced_by`] |
-| Feature | `name`, `what`, [`needs`], [`sets`], [`removes`], [`adds`], [`keeps`], [`surfaces`], [`suggest`], [`suggested_in`], [`verdict`], [`built`] |
+| Feature | `name`, `what`, [`needs`], [`sets`], [`removes`], [`adds`], [`keeps`], [`surfaces`], [`suggest`], [`suggested_in`], [`verdict`], [`started`], [`built`] |
 
 - `not`: the words not to write when you mean this word. A writer would naturally reach for them,
   and they would be wrong there. No check looks for them, so a listed word keeps its everyday
@@ -251,20 +256,22 @@ These keys hold ids of other items, or paths. The check refuses an id that does 
 
 ### States
 
-The tool gives each entry a state.
+The tool gives each entry a state. The Workshop says how far an entry is in one set of words:
+not decided, decided, being built, built.
 
-| Kind | State | When |
-|---|---|---|
-| Decision | `open` | No verdict, no `answer` and nothing under `sets`. |
-| | `answered` | No verdict, and an `answer` or something under `sets`. |
-| | `taken` | Taken, and not replaced. |
-| | `replaced` | Taken, and `replaced_by` names the decision that replaced it. It is no longer in force. |
-| | `dropped` | The verdict. |
-| Feature | `undecided` | No verdict. |
-| | `taken` | Taken, and something it needs is not done. |
-| | `ready` | Taken, and everything it needs is done. |
-| | `built` | `built` holds the date. |
-| | `dropped` | The verdict. |
+| Kind | State | When | The Workshop says |
+|---|---|---|---|
+| Decision | `open` | No verdict, no `answer` and nothing under `sets`. | not decided |
+| | `answered` | No verdict, and an `answer` or something under `sets`. | not decided |
+| | `taken` | Taken, and not replaced. | decided |
+| | `replaced` | Taken, and `replaced_by` names the decision that replaced it. It is no longer in force. | replaced |
+| | `dropped` | The verdict. | dropped |
+| Feature | `undecided` | No verdict. | not decided |
+| | `taken` | Taken, not started, and something it needs is not done. | decided |
+| | `ready` | Taken, not started, and everything it needs is done. | decided |
+| | `building` | Taken, and `started` holds the date. | being built |
+| | `built` | `built` holds the date. | built |
+| | `dropped` | The verdict. | dropped |
 
 ### The tool
 
@@ -272,7 +279,7 @@ The tool gives each entry a state.
 
 | Command | What it does |
 |---|---|
-| `plan` | Prints what is next: the first entry with no verdict, the features ready to build, and the features that wait, each with what it waits for. |
+| `plan` | Prints what is next: the first entry with no verdict, the features being built, the features ready to build, and the features that wait, each with what it waits for. |
 | `plan show <id>` | Prints one entry or one statement, with what it links to and what applies to it. This is the brief for whoever works on it. With the id of a part, it prints what is next in that part. |
 | `plan take <id>` | Writes the owner's yes. |
 | `plan drop <id>` | Writes the owner's no. |
