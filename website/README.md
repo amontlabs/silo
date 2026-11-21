@@ -695,15 +695,20 @@ What a person sees:
   that part's place too. An entry a film shows has the film's mark after its
   name ("Has a film"), and an opened row shows the film first, with its title,
   its line and its number of entries, which lists them in All. A film is behind
-  when an entry it shows changed in what it says (its question, answer, name,
-  text or what it would set) or was dropped or replaced after the last commit
-  that is not a merge and touched the film's folder (`readFilms` in `data.ts`);
-  its frame is dashed then, on the control and on that entry's mark ("Film is
-  behind the plan"). A verdict alone does not make a film behind.
+  when a commit that is not a merge and comes after the last one that touched the
+  film's folder (in the order of the commits, not their times) changed what the
+  Workshop prints of an entry it shows: its question or name, its answer or what,
+  the ids or the texts of the statements it sets or added, what it removes, what it
+  keeps, its surfaces; or dropped, replaced or deleted it (`readFilms` and
+  `printedChanged` in `data.ts`). A take alone changes none of these. A
+  film behind has its frame dashed, on its control and on that entry's mark
+  ("Film is behind the plan").
 - A film plays in a frame of its own page, `/films/<id>/?in=workshop`, loaded
   only when its place or its row is open; a placeholder of the frame's size
   stands there until it has loaded. The page opens paused on a picture of the
-  film with its Play control, says how tall it is, and the frame follows: the
+  film with its Play control, says how tall it is, and the frame follows (a
+  height is taken only from that frame, on the site's origin, in a message that
+  names that film's own path): the
   stage alone at the top of an opened row (its caption and bar show once it
   plays), the stage with its caption, subtitle and bar in a film's place. A film
   the site does not play shows its title and line with no frame.

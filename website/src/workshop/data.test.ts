@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { canonicalText } from '../../../tools/plan/model/index.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadDir } from '../../../tools/plan/read/index.js';
-import { buildDataFrom, factsFrom, filmOrder, historiesFrom, historyFromGit, layoutPlanFrom, notesFrom, planDir, readBuildData, readFilms, readHistories, readHistory, sayingChanged, unshallow } from './data';
+import { buildDataFrom, factsFrom, filmOrder, historiesFrom, historyFromGit, layoutPlanFrom, notesFrom, planDir, readBuildData, readFilms, readHistories, readHistory, printedChanged, unshallow } from './data';
 import type { Git } from './data';
 import { made } from '../../scripts/films-test-support.mjs';
 import { buildData, CORE_NOTES, DECISIONS, emptyPlanFiles, FEATURES, PARTS, planFiles, withLists, ZIG_NOTES } from './fixtures';
@@ -781,33 +781,55 @@ describe('the films', () => {
     }
   });
 
-  it('are behind on an entry whose question, answer, name, text or what it would set changed after them, or that was dropped or replaced; never for a verdict alone', () => {
-    expect(sayingChanged(entry({}), entry({ verdict: 'take' }))).toBe(false);
-    expect(sayingChanged(entry({}), entry({ suggest: { verdict: 'take' } }))).toBe(false);
-    expect(sayingChanged(entry({}), entry({ what: 'Copy a whole computer.' }))).toBe(true);
-    expect(sayingChanged(entry({ asks: 'A?' }), entry({ asks: 'B?' }))).toBe(true);
-    expect(sayingChanged(entry({ answer: 'Yes.' }), entry({ answer: 'No.' }))).toBe(true);
-    expect(sayingChanged(entry({ sets: [] }), entry({ sets: [{ id: 'x' }] }))).toBe(true);
-    expect(sayingChanged(entry({}), entry({ verdict: 'drop' }))).toBe(true);
-    expect(sayingChanged(entry({ verdict: 'take' }), entry({ verdict: 'take', replaced_by: 'other' }))).toBe(true);
-    expect(sayingChanged(null, entry({}))).toBe(false);
+  it('are behind on an entry whose printed part changed after them, or that was dropped or replaced; never for a take alone', () => {
+    const set = { in: 'words', id: 'twin', word: 'twin', means: 'A copy.' };
+    expect(printedChanged(entry({}), entry({ suggest: { verdict: 'take' } }))).toBe(false);
+    expect(printedChanged(entry({}), entry({ what: 'Copy a whole computer.' }))).toBe(true);
+    expect(printedChanged(entry({ name: 'Fork' }), entry({ name: 'Forks' }))).toBe(true);
+    expect(printedChanged(entry({ asks: 'A?' }), entry({ asks: 'B?' }))).toBe(true);
+    expect(printedChanged(entry({ answer: 'Yes.' }), entry({ answer: 'No.' }))).toBe(true);
+    expect(printedChanged(entry({ sets: [set] }), entry({ sets: [{ ...set, means: 'Another copy.' }] }))).toBe(true);
+    expect(printedChanged(entry({ sets: [] }), entry({ sets: [set] }))).toBe(true);
+    expect(printedChanged(entry({ removes: ['a'] }), entry({ removes: ['b'] }))).toBe(true);
+    expect(printedChanged(entry({ keeps: ['a'] }), entry({ keeps: ['a', 'b'] }))).toBe(true);
+    expect(printedChanged(entry({ surfaces: { cli: 'silo fork' } }), entry({ surfaces: { cli: 'silo copy' } }))).toBe(true);
+    expect(printedChanged(entry({}), entry({ verdict: 'drop' }))).toBe(true);
+    expect(printedChanged(entry({ verdict: 'take' }), entry({ verdict: 'take', replaced_by: 'other' }))).toBe(true);
+    expect(printedChanged(entry({}), null)).toBe(true);
+    expect(printedChanged(null, entry({}))).toBe(false);
+    // A take writes the ids of `sets` as `adds` and deletes `sets` and `removes`: the same statements stand.
+    expect(printedChanged(entry({ sets: [set], removes: ['scrap'] }), entry({ adds: ['twin'], verdict: 'take' }))).toBe(false);
+    expect(printedChanged(entry({ sets: [set] }), entry({ adds: ['twin', 'more'], verdict: 'take' }))).toBe(true);
   });
 
-  it('count only the changes after the film\'s own last change, and none from a history cut short', () => {
+  it('count the commits after the film\'s last one in their order, two in the same second told apart, and none from a history cut short', () => {
     const root = mkdtempSync(join(tmpdir(), 'workshop-films-'));
+    const git = (args: string[]) => execFileSync('git', ['-C', root, ...args], { env: { ...process.env, GIT_AUTHOR_DATE: '2026-11-20T12:00:00Z', GIT_COMMITTER_DATE: '2026-11-20T12:00:00Z', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }, stdio: 'ignore' });
+    const write = (path: string, text: string) => {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), text);
+    };
     try {
-      mkdirSync(join(root, 'films', 'one'), { recursive: true });
-      writeFileSync(join(root, 'films', 'one', 'film.json'), JSON.stringify({ id: 'one', title: 'One', line: 'L.', shows: ['fork', 'copy', 'later'] }));
-      const changes = [
-        { id: 'fork', time: 50, before: entry({}), after: entry({ what: 'Changed before the film.' }) },
-        { id: 'copy', time: 150, before: entry({}), after: entry({ verdict: 'take' }) },
-        { id: 'later', time: 200, before: entry({}), after: entry({ what: 'Changed after the film.' }) },
-      ];
-      const read = (shallow: boolean) => readFilms(root, shallow, () => 100, (since) => changes.filter((change) => change.time > since));
-      expect(read(false)).toEqual([{ id: 'one', title: 'One', line: 'L.', shows: ['fork', 'copy', 'later'], behind: ['later'] }]);
-      expect(read(true)[0].behind).toEqual([]);
+      git(['init', '-q', '-b', 'main']);
+      write('plan/p/features/early.json', entry({ name: 'Early' }));
+      write('plan/p/features/late.json', entry({ name: 'Late' }));
+      write('plan/p/features/taken.json', entry({ name: 'Taken' }));
+      git(['add', '.']);
+      git(['commit', '-q', '-m', 'plan']);
+      write('plan/p/features/early.json', entry({ name: 'Early, changed before the film' }));
+      git(['commit', '-q', '-am', 'before']);
+      write('films/one/film.json', JSON.stringify({ id: 'one', title: 'One', line: 'L.', shows: ['early', 'late', 'taken'] }));
+      git(['add', '.']);
+      git(['commit', '-q', '-m', 'film']);
+      // The same second as the film's commit: told apart by their order.
+      write('plan/p/features/late.json', entry({ name: 'Late, changed after the film' }));
+      write('plan/p/features/taken.json', entry({ name: 'Taken', verdict: 'take' }));
+      git(['commit', '-q', '-am', 'after']);
+      expect(readFilms(root, false)).toEqual([{ id: 'one', title: 'One', line: 'L.', shows: ['early', 'late', 'taken'], behind: ['late'] }]);
+      expect(readFilms(root, true)[0].behind).toEqual([]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
 });

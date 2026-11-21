@@ -34,8 +34,11 @@ export function FilmFrame({ film }: { film: FilmItem }) {
   const frame = useRef<HTMLIFrameElement>(null);
   useEffect(() => {
     const listener = (event: MessageEvent) => {
-      if (event.source !== frame.current?.contentWindow || event.origin !== location.origin) return;
-      const told = (event.data as { height?: unknown } | null)?.height;
+      // Only the frame this page made, on the site's own origin, speaking for this film's own page.
+      if (!frame.current || event.source !== frame.current.contentWindow || event.origin !== location.origin) return;
+      const data = event.data as { film?: unknown; height?: unknown } | null;
+      if (data?.film !== new URL(frame.current.src, location.href).pathname) return;
+      const told = data.height;
       if (typeof told === 'number' && told > 0 && told < 4000) setHeight(Math.ceil(told));
     };
     addEventListener('message', listener);

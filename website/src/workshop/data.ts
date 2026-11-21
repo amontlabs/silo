@@ -366,54 +366,73 @@ export function filmOrder(readme: string): string[] {
   return ids;
 }
 
-/** Whether an entry file, before and after a commit, changed in what the entry says: its question, answer, name, text or what it would set, or it was dropped or replaced. A verdict alone does not count. */
-export function sayingChanged(before: string | null, after: string | null): boolean {
-  if (before === null || after === null) return before !== after && after === null;
-  let was: Record<string, unknown>;
-  let now: Record<string, unknown>;
+type EntryFile = Record<string, unknown>;
+
+/** The statements an entry sets or added: each id, with the text of its `sets` item, or null for an id of `adds` (its text is in the lists). */
+function setOrAdded(entry: EntryFile): Map<string, string | null> {
+  const statements = new Map<string, string | null>();
+  for (const id of list(entry.adds)) statements.set(id, null);
+  if (Array.isArray(entry.sets)) {
+    for (const item of entry.sets as Record<string, unknown>[]) if (typeof item?.id === 'string') statements.set(item.id, JSON.stringify(item));
+  }
+  return statements;
+}
+
+/**
+ * Whether an entry file, before and after a commit, changed in what the Workshop prints of it: its question or name,
+ * its answer or what, the ids or the texts of the statements it sets or added, what it removes, what it keeps, its
+ * surfaces; or it was dropped, replaced or deleted. A take alone changes none of these: it writes the ids of `sets` as
+ * `adds` and deletes `sets` and `removes`, so the same statements stand, by id, and the texts are compared where both
+ * sides hold them. A file that did not exist before is new, not changed.
+ */
+export function printedChanged(before: string | null, after: string | null): boolean {
+  if (before === null) return false;
+  if (after === null) return true;
+  let was: EntryFile;
+  let now: EntryFile;
   try {
-    was = JSON.parse(before) as Record<string, unknown>;
-    now = JSON.parse(after) as Record<string, unknown>;
+    was = JSON.parse(before) as EntryFile;
+    now = JSON.parse(after) as EntryFile;
   } catch {
     return false;
   }
-  const says = (entry: Record<string, unknown>) => JSON.stringify([entry.name, entry.what, entry.asks, entry.answer, entry.sets ?? null]);
-  return says(was) !== says(now) || (now.verdict === 'drop' && was.verdict !== 'drop') || (typeof now.replaced_by === 'string' && was.replaced_by !== now.replaced_by);
+  if (now.verdict === 'drop' && was.verdict !== 'drop') return true;
+  if (typeof now.replaced_by === 'string' && was.replaced_by !== now.replaced_by) return true;
+  const took = now.verdict === 'take' && was.verdict !== 'take';
+  const printed = (entry: EntryFile) => JSON.stringify([
+    entry.name ?? null, entry.asks ?? null, entry.what ?? null, entry.answer ?? null,
+    took ? [] : [...list(entry.removes)].sort(), [...list(entry.keeps)].sort(), entry.surfaces ?? null,
+  ]);
+  if (printed(was) !== printed(now)) return true;
+  const a = setOrAdded(was);
+  const b = setOrAdded(now);
+  if (a.size !== b.size || [...a.keys()].some((id) => !b.has(id))) return true;
+  return [...a].some(([id, text]) => text !== null && b.get(id) !== null && b.get(id) !== text);
 }
 
 /** One change of an entry's file in a commit that is not a merge: its text before and after (null where the file did not exist). */
 export interface FileChange {
   id: string;
-  /** The commit time, in seconds. */
-  time: number;
   before: string | null;
   after: string | null;
 }
 
-/** The changes to the files of `ids` under plan/ after `since` (seconds), one per commit that is not a merge. */
-export function entryFileChanges(repository: string, since: number, ids: ReadonlySet<string>): FileChange[] {
+/** The changes to the files of `ids` under plan/ in the commits that are not merges and come after `commit` (`commit..HEAD`), oldest last. */
+export function entryFileChanges(repository: string, commit: string, ids: ReadonlySet<string>): FileChange[] {
   const git = (args: string[], input?: string) => execFileSync('git', ['-C', repository, ...args], { input, maxBuffer: 512 * 1024 * 1024, timeout: 120_000, stdio: ['pipe', 'pipe', 'ignore'] });
   try {
-    const log = git(['log', '--no-merges', '--raw', '-z', '--no-abbrev', '--no-renames', '--format=%x01%ct', '--', PLAN_DIR]).toString('utf8');
-    const found: { id: string; time: number; old: string; now: string }[] = [];
-    let time = 0;
+    const log = git(['log', '--no-merges', '--raw', '-z', '--no-abbrev', '--no-renames', '--format=%x01%H', `${commit}..HEAD`, '--', PLAN_DIR]).toString('utf8');
+    const found: { id: string; old: string; now: string }[] = [];
     const tokens = log.split('\0');
     for (let i = 0; i < tokens.length; i += 1) {
-      const token = tokens[i].replace(/^\n/, '');
+      let token = tokens[i].replace(/^\n/, '');
       const head = token.indexOf('\x01');
-      if (head !== -1) {
-        time = Number(token.slice(head + 1).trim().split(/\s/)[0]);
-        const rest = token.slice(head + 1).replace(/^\d+\s*/, '');
-        if (!rest.startsWith(':')) continue;
-        tokens[i] = rest;
-        i -= 1;
-        continue;
-      }
+      if (head !== -1) token = token.slice(head + 1).replace(/^[0-9a-f]+\s*/, '');
       if (!token.startsWith(':')) continue;
       const [, , old, now] = token.slice(1).split(' ');
       const path = tokens[(i += 1)] ?? '';
       const id = /(?:^|\/)(?:decisions|features)\/([^/]+)\.json$/.exec(path)?.[1];
-      if (id && ids.has(id) && time > since) found.push({ id, time, old, now });
+      if (id && ids.has(id)) found.push({ id, old, now });
     }
     const none = (oid: string) => /^0+$/.test(oid);
     const blobs = new Map<string, string>();
@@ -433,17 +452,16 @@ export function entryFileChanges(repository: string, since: number, ids: Readonl
         at = end + 1 + Number(size) + 1;
       }
     }
-    return found.map(({ id, time: when, old, now }) => ({ id, time: when, before: none(old) ? null : blobs.get(old) ?? null, after: none(now) ? null : blobs.get(now) ?? null }));
+    return found.map(({ id, old, now }) => ({ id, before: none(old) ? null : blobs.get(old) ?? null, after: none(now) ? null : blobs.get(now) ?? null }));
   } catch {
     return [];
   }
 }
 
-/** When a folder of the repository last changed, in seconds: its newest commit that is not a merge; null when git cannot say. */
-function folderTime(repository: string, folder: string): number | null {
+/** The last commit that is not a merge and touched a folder of the repository; null when git cannot say. */
+function folderCommit(repository: string, folder: string): string | null {
   try {
-    const out = execFileSync('git', ['-C', repository, 'log', '-1', '--no-merges', '--format=%ct', '--', folder], { encoding: 'utf8', timeout: 60_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    return out ? Number(out) : null;
+    return execFileSync('git', ['-C', repository, 'log', '-1', '--no-merges', '--format=%H', '--', folder], { encoding: 'utf8', timeout: 60_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null;
   } catch {
     return null;
   }
@@ -451,33 +469,33 @@ function folderTime(repository: string, folder: string): number | null {
 
 /**
  * The films of `repository`: each real folder directly under films/ that holds a film.json, in the order films/README.md
- * gives (one it does not name comes after, by id). A film is behind on an entry it shows when that entry's file changed in
- * what it says after the last commit that is not a merge and touched the film's folder. A shallow history says nothing is behind.
+ * gives (one it does not name comes after, by id). A film is behind on an entry it shows when a commit that is not a
+ * merge and comes after the film's last one (in the order of the commits, not their times) changed what the Workshop
+ * prints of that entry (`printedChanged`). A shallow history says nothing is behind.
  */
 export function readFilms(
   repository: string,
   shallow: boolean,
-  lastChange: (folder: string) => number | null = (folder) => folderTime(repository, folder),
-  changesAfter: (since: number, ids: ReadonlySet<string>) => FileChange[] = (since, ids) => entryFileChanges(repository, since, ids),
+  lastCommit: (folder: string) => string | null = (folder) => folderCommit(repository, folder),
+  changesAfter: (commit: string, ids: ReadonlySet<string>) => FileChange[] = (commit, ids) => entryFileChanges(repository, commit, ids),
 ): FilmInfo[] {
   const dir = join(repository, 'films');
   if (!existsSync(dir)) return [];
-  const films: (FilmInfo & { since: number | null })[] = [];
+  const films: FilmInfo[] = [];
   for (const name of readdirSync(dir).sort()) {
     const file = join(dir, name, 'film.json');
     if (name.startsWith('.') || !lstatSync(join(dir, name)).isDirectory() || !existsSync(file)) continue;
-    const raw = JSON.parse(readFileSync(file, 'utf8')) as { id?: unknown; title?: unknown; line?: unknown; shows?: unknown };
-    const shows = Array.isArray(raw.shows) ? raw.shows.filter((id): id is string => typeof id === 'string') : [];
-    films.push({ id: name, title: typeof raw.title === 'string' ? raw.title : name, line: typeof raw.line === 'string' ? raw.line : '', shows, behind: [], since: lastChange(`films/${name}`) });
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as { title?: unknown; line?: unknown; shows?: unknown };
+    const shows = list(raw.shows);
+    const commit = shallow ? null : lastCommit(`films/${name}`);
+    const changes = commit ? changesAfter(commit, new Set(shows)) : [];
+    const behind = shows.filter((id) => changes.some((change) => change.id === id && printedChanged(change.before, change.after)));
+    films.push({ id: name, title: typeof raw.title === 'string' ? raw.title : name, line: typeof raw.line === 'string' ? raw.line : '', shows, behind });
   }
-  const known = films.flatMap((film) => (film.since === null ? [] : [film.since]));
-  const changes = !shallow && known.length ? changesAfter(Math.min(...known), new Set(films.flatMap((film) => film.shows))) : [];
   const readme = join(dir, 'README.md');
   const order = existsSync(readme) ? filmOrder(readFileSync(readme, 'utf8')) : [];
   const rank = (id: string) => (order.includes(id) ? order.indexOf(id) : order.length);
-  return films
-    .map(({ since, ...film }) => ({ ...film, behind: since === null ? [] : film.shows.filter((id) => changes.some((change) => change.id === id && change.time > since && sayingChanged(change.before, change.after))) }))
-    .sort((a, b) => rank(a.id) - rank(b.id) || a.id.localeCompare(b.id));
+  return films.sort((a, b) => rank(a.id) - rank(b.id) || a.id.localeCompare(b.id));
 }
 
 /** Reads the plan of `repository` and returns the page's data for the real build. Silo's map draws plan/; another plan has none. */

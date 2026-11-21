@@ -361,6 +361,21 @@ describe('the films', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /^Across the parts/ })).toHaveFocus());
   });
 
+  it('take a height only from the frame they made, on the site\'s origin, for their own film', async () => {
+    mockApi();
+    history.replaceState(null, '', '/workshop#films/across');
+    await renderApp(withNeeds(FILMS));
+    const frame = document.querySelector<HTMLIFrameElement>('.wa-player iframe') as HTMLIFrameElement;
+    const box = frame.closest('.wa-poster') as HTMLElement;
+    const tell = (data: unknown, source: MessageEventSource | null = frame.contentWindow, origin = location.origin) => act(() => { dispatchEvent(new MessageEvent('message', { data, source, origin })); });
+    tell({ film: '/films/across/', height: 500 }, window);
+    tell({ film: '/films/across/', height: 500 }, frame.contentWindow, 'https://elsewhere.example');
+    tell({ film: '/films/engine-only/', height: 500 });
+    expect(box.style.height).toBe('');
+    tell({ film: '/films/across/', height: 500 });
+    expect(box.style.height).toBe('500px');
+  });
+
   it('keep the control of a film of one part in that part\'s place', async () => {
     mockApi();
     history.replaceState(null, '', '/workshop#part-a');
