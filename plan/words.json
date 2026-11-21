@@ -117,5 +117,17 @@
   {
     "word": "engine",
     "means": "The core piece of Silo. The app, the command line and every tool only talk to it."
+  },
+  {
+    "word": "extension",
+    "means": "Rules, a computer, or both, added to Silo through a manifest."
+  },
+  {
+    "word": "manifest",
+    "means": "What an extension says of itself: the rules it adds, the recipe of its computer, what wakes that computer and the tools it may use."
+  },
+  {
+    "word": "panel",
+    "means": "A view in the app that an extension creates through a tool, and that the app draws."
   }
 ]
