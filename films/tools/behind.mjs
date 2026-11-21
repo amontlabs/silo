@@ -452,6 +452,10 @@ export function main(args, repository = resolve(dirname(fileURLToPath(import.met
     console.error(`${names[0]}: --holds needs the reason the film still holds, quoting what the film says.\n${USAGE}`);
     return 2;
   }
+  if (holds && (/[\r\n]/.test(why ?? '') || (why ?? '').includes('```'))) {
+    console.error(`${names[0]}: the reason is one line of plain text: no line break and no three backticks in a row. Write it as one or two sentences, and quote what the film says between double quotes.`);
+    return 2;
+  }
   const dir = join(repository, 'films');
   const known = filmFolders(dir);
   for (const name of names) {

@@ -947,6 +947,16 @@ describe('the films', () => {
     });
   });
 
+  it('take a reason only as one line of plain text: no line break, no three backticks', () => {
+    behindRepository((root) => {
+      for (const why of ['Still.\n```\nrm -rf', 'Still.\n## 2026-11-22', 'Still.\r\nAgain.', 'It says ```one```.']) {
+        expect(behindCommand(['one', '--holds', why], root)).toBe(2);
+      }
+      expect(existsSync(join(root, 'films/one/checked.md'))).toBe(false);
+      expect(behindCommand(['one', '--holds', 'It says "one" and `two`.'], root)).toBe(0);
+    });
+  });
+
   it('compare the texts of an entry\'s statements wherever they live at each end: in its sets before a take, in the lists after', () => {
     const root = mkdtempSync(join(tmpdir(), 'workshop-films-'));
     const git = (args: string[]) => execFileSync('git', ['-C', root, ...args], { env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }, stdio: 'ignore' });
