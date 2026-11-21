@@ -7,8 +7,5 @@
     "as-sure-as-least-sure",
     "kinds-of-lines",
     "hosts-reached-and-denied"
-  ],
-  "keeps": [
-    "classifier-never-acts"
   ]
 }

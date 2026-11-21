@@ -4,7 +4,6 @@
   "needs": [
     "model-calls-in-the-record",
     "rule-on-a-tool-calls-text",
-    "denied-call-in-the-reply",
     "denied-tool-call",
     "denied-tool-call-mechanism",
     "each-call-on-its-own",

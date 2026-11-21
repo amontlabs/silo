@@ -4,7 +4,7 @@
   "needs": [
     "classifier-of-your-own",
     "panels-are-data",
-    "plugin-calls",
+    "extension-tools",
     "extended-from-outside",
     "mac-app-language"
   ]

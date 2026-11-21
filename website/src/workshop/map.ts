@@ -150,7 +150,7 @@ export const SILO_MAP: MapLayout = {
   file: 'website/src/workshop/map.ts',
   places: {
     views: { full: [48, 114, 136, 144], fold: [36, 30, 120, 30] },
-    plugins: { full: [48, 418, 160, 64], fold: [36, 136, 128, 26], ty: 13, sy: 36 },
+    extensions: { full: [48, 418, 160, 64], fold: [36, 136, 128, 26], ty: 13, sy: 36 },
     engine: { full: [204, 114, 112, 272], fold: [172, 30, 96, 96], tall: true },
     opinions: { full: [232, 418, 204, 64], fold: [180, 136, 172, 26], ty: 13, sy: 36 },
     recipes: { full: [456, 42, 168, 44], fold: [420, 14, 132, 26], ty: 6, sy: 26 },
@@ -209,7 +209,7 @@ export const SILO_MAP: MapLayout = {
     { of: 'record', d: 'M620 226V411', arrows: [[620, 418, 'd']], label: [578, 330, 'facts'], rests: ['how-silo-knows'], fold: { d: 'M544 90V129', arrows: [[544, 136, 'd']] } },
     { of: 'opinions', d: 'M480 450H443', arrows: [[436, 450, 'l']], label: [458, 442, 'read', 'middle'], rests: ['what-the-record-holds'], fold: { d: 'M456 149H359', arrows: [[352, 149, 'l']] } },
     // A rule is triggered by a fact, a precaution by an opinion.
-    { of: 'rules', d: 'M640 450H681M334 482V510H720V489', arrows: [[688, 450, 'r'], [720, 482, 'u']], label: [527, 528, 'triggers', 'middle'], rests: ['word:rule', 'word:precaution', 'how-an-opinion-acts'], fold: { d: 'M556 149H573', arrows: [[580, 149, 'r']] } },
+    { of: 'rules', d: 'M640 450H681M334 482V510H720V489', arrows: [[688, 450, 'r'], [720, 482, 'u']], label: [527, 528, 'triggers', 'middle'], rests: ['word:rule', 'word:precaution', 'opinion-acts-through-a-precaution'], fold: { d: 'M556 149H573', arrows: [[580, 149, 'r']] } },
     { of: 'rules', d: 'M760 418V344H680V233', arrows: [[680, 226, 'u']], label: [769, 384, 'decides'], rests: ['where-limits-are-set', 'what-a-precaution-may-do'], fold: { d: 'M600 136V97', arrows: [[600, 90, 'u']] } },
     // The app shows facts, reports and opinions, each as what it is; facts and reports are the record.
     { of: 'views', d: 'M500 418V400H150V265', arrows: [[150, 258, 'u']], label: [159, 330, 'shown'], rests: ['kinds-look-different', 'word:record'] },

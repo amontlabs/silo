@@ -8,8 +8,5 @@
     "file-changes-in-the-record",
     "what-traffic-gives",
     "model-calls-in-the-record"
-  ],
-  "keeps": [
-    "classifier-never-acts"
   ]
 }
