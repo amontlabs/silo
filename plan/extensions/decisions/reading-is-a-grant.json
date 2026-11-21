@@ -1,5 +1,6 @@
 {
   "asks": "What is a classifier's access to the record?",
   "answer": "What a classifier may read is a grant, and rules set in advance can give it, so nothing is held while it works. Like any grant it is made by you or by a rule you set, and it states its worst case: the classifier can read everything recorded about the computers you name and send it wherever its own network rules allow.",
-  "verdict": "take"
+  "verdict": "take",
+  "replaced_by": "extension-tools"
 }

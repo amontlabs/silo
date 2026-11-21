@@ -7,19 +7,12 @@
   "replaces": [
     "reading-is-a-grant"
   ],
-  "sets": [
-    {
-      "in": "extensions/properties",
-      "id": "extension-uses-only-named-tools",
-      "says": "An extension can use only the tools its manifest names, and installing it grants them.",
-      "kind": "safety",
-      "check": [
-        "hostile test"
-      ]
-    }
+  "adds": [
+    "extension-uses-only-named-tools"
   ],
   "suggest": {
     "verdict": "take",
     "why": "The owner agreed to the first sentence on 21 November 2026, when it said \"declares\"."
-  }
+  },
+  "verdict": "take"
 }

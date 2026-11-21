@@ -31,5 +31,13 @@
     "check": [
       "model"
     ]
+  },
+  {
+    "id": "extension-uses-only-named-tools",
+    "says": "An extension can use only the tools its manifest names, and installing it grants them.",
+    "kind": "safety",
+    "check": [
+      "hostile test"
+    ]
   }
 ]
