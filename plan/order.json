@@ -227,6 +227,7 @@
         "manifest-is-enforced",
         "extension-tools",
         "extension-may-protect",
+        "recipe-names-its-needs",
         "extension-secrets",
         "what-wakes-an-extension",
         "shipped-extensions-use-the-manifest",

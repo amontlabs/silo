@@ -1,8 +1,14 @@
 # The secrets of an extension
 
-The owner, on 21 November 2026: an extension should be able to declare secrets that the user has
-to give, and it then just uses Silo's mechanism for secrets.
+The owner, on 21 November 2026:
+
+- An extension should be able to say which secrets the user has to give, and it then just uses
+  Silo's mechanism for secrets.
+- Naming them in the manifest would be weird if an ordinary computer names its secrets somewhere
+  else: "I think that's more of a recipe thing."
+
+So the manifest names no secret. Whether a recipe names them is `recipe-names-its-needs` in the
+part `recipes`.
 
 How a computer uses a secret is in the part `boundary`: `secret-placeholder`, `secret-entry`,
-`secret-values`. The hosts the extension's computer may reach are rules of that computer, shown
-when the extension is imported.
+`secret-values`.

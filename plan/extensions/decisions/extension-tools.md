@@ -11,29 +11,33 @@
 - What an extension shows in the app uses components the app already has, such as questions and
   alerts. Silo offers a tool that creates a panel.
 - A tool is not a rule: "rules are actually kind of different and sit at a different layer."
-- "Read" is the word for the first kind, not "see". The owner asked for better words than "show"
-  and "protect" if there are any.
+- "Read" is the word for the first kind, not "see".
+- An alert, a question and a panel do not read as protective to the owner. Denying, holding and
+  pausing clearly are. The first three are "more informative".
+- Where an extension can pause, the user selects the computers it can pause: all of them, or
+  specific ones.
 - No tool is settled now and no example of an interface is written: "Trying to have idiomatic
   examples here can only have us write poor API decisions that we should just think of later."
 
-## Two kinds, and no new word
+## Three kinds
 
 The list is organised like a token's scopes: the target first, then what the extension may do to
 it.
 
-| Target | What the extension may do | Kind | Worst case |
+| A tool | Target | What the extension may do | Worst case |
 |---|---|---|---|
-| `/work` on main | read | reads | what it reads can leave by the network rules of the extension's own computer |
-| the record of main | read | reads | the same |
-| the network requests of main | deny, hold | protective | the user loses time |
-| main | pause | protective | the user loses time |
-| the app | alert, question, panel | protective | it wastes the user's attention |
+| reads | a path on a computer; the record of a computer | read | what it reads can leave by the network rules of the extension's own computer |
+| shows | the app | alert, question, panel | it wastes the user's attention |
+| protects | the requests of a computer; a computer | deny, hold; pause | the user loses time |
 
-"Protective" is the word in force for an action that grants nothing and destroys nothing. An
-alert already is one. A question and a panel are filed under it here. So "show" and "protect" are
-not needed as words.
-
-The record is as exact as a path, because Silo writes it itself from outside.
+- "Shows" and not "informs": a question asks, and a panel can hold buttons. All three put
+  something in the app.
+- In the kinds of action, an alert is filed as protective, since it grants nothing and destroys
+  nothing (`kinds-of-action` in the part `rules`). That stays true. The kinds here say what a tool
+  costs the user, which is another question.
+- Choosing the computers at install is how a GitHub app is installed: on all repositories, or on
+  selected ones.
+- The record is as exact as a path, because Silo writes it itself from outside.
 
 ## What it replaces
 

@@ -1,6 +1,6 @@
 {
   "asks": "What do importing and installing an extension do?",
-  "answer": "Importing an extension changes nothing: it shows the rules it adds, the computer it would make, the tools it may use and the secrets it needs. Installing it switches them on.",
+  "answer": "Importing an extension changes nothing: it shows the rules it adds, the computer it would make, what wakes that computer and the tools it may use. Installing it switches them on.",
   "needs": [
     "extension-manifest"
   ],
@@ -8,7 +8,7 @@
     {
       "in": "extensions/properties",
       "id": "importing-changes-nothing",
-      "says": "Importing an extension changes nothing: it shows the rules it adds, the computer it would make, the tools it may use and the secrets it needs.",
+      "says": "Importing an extension changes nothing: it shows the rules it adds, the computer it would make, what wakes that computer and the tools it may use.",
       "kind": "safety",
       "check": [
         "model"

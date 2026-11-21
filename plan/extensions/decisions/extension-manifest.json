@@ -1,6 +1,6 @@
 {
   "asks": "What is an extension?",
-  "answer": "An extension adds rules, a computer, or both. Its manifest lists the rules, the recipe of the computer, what wakes that computer, the tools it may use and the secrets it needs.",
+  "answer": "An extension adds rules, a computer, or both. Its manifest lists the rules, the recipe of the computer, what wakes that computer and the tools it may use.",
   "replaces": [
     "added-classifier",
     "what-defines-a-classifier"
@@ -14,7 +14,7 @@
     {
       "in": "words",
       "word": "manifest",
-      "means": "What an extension says of itself: the rules it adds, the recipe of its computer, what wakes that computer, the tools it may use and the secrets it needs."
+      "means": "What an extension says of itself: the rules it adds, the recipe of its computer, what wakes that computer and the tools it may use."
     },
     {
       "in": "words",

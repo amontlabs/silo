@@ -21,21 +21,24 @@ picture as a whole.
 - What an extension shows in the app uses components the app already has: an alert, a question,
   and a tool that creates a panel. Owner.
 - An extension can use only the tools its manifest names, and installing it grants them. Owner. A
-  tool reads or takes a protective action (`extension-tools`). No tool is named beyond the
-  examples, and no interface is shown. Owner.
+  tool reads, shows or protects (`extension-tools`). Where a tool applies to computers, the user
+  chooses which ones when installing. Owner. No tool is named beyond the examples, and no
+  interface is shown. Owner.
 - No tool an extension can use grants or destroys (`what-an-extension-never-does`).
+- An extension may deny, hold or pause by itself when its manifest names that tool
+  (`extension-may-protect`).
 - Importing an extension changes nothing and shows what it needs. Installing it switches that on.
   Owner (`import-then-install`).
-- A manifest names the secrets the extension needs, and its computer uses Silo's mechanism for
-  secrets. Owner (`extension-secrets`).
-- A classifier is one case of an extension: it gives a value from a fixed list. Owner
-  (`what-makes-a-classifier`). The film does not present classifiers as the whole feature.
+- The user can always see what wakes an extension's computer, and under which conditions. Owner
+  (`what-wakes-an-extension`).
 - What ships with Silo uses the same manifest as what people add. Owner
   (`shipped-extensions-use-the-manifest`).
 - Examples of what an extension may use are generic and exact, such as a path. Owner.
+- The film does not use the word "classifier". The owner is not clear on it yet, and the third
+  example shows the case without the word (`what-makes-a-classifier`).
 - Three tiers of classifiers, a trial on the recorded past and how an extension is installed are
   features for the Workshop stage, later, and not ground work. Owner. They are not in the film,
   and no issue is created now.
 
-That an extension may deny, hold or pause by itself (`extension-may-protect`): the owner said yes
-if it means protective tools. The third example rests on it.
+Not settled: where the secrets an extension needs are named. The owner leans to the recipe
+(`recipe-names-its-needs`, `extension-secrets`). The film says nothing of secrets until it is.

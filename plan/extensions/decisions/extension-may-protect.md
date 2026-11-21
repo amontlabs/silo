@@ -28,3 +28,4 @@ answer still says a classifier is whatever gives an opinion.
 "If you're saying that an extension can use rules that are protective, then yes, if I understand
 correctly, but maybe I'm confusing stuff." What is meant here is tools, not rules: the extension's
 computer asks Silo to deny, hold or pause. The verdict waits for the owner's word on that reading.
+The owner agreed to that reading the same day.

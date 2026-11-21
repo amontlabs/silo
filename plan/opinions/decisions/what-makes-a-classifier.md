@@ -21,3 +21,12 @@
   is both standard and plainer.
 - `what-a-classifier-is` still says a classifier is whatever gives an opinion. `opinion-is-a-value`
   notes the three shapes the plan calls an opinion.
+
+## Still unclear to the owner (21 November 2026)
+
+"I still don't know what the output is, like how it works."
+
+An agent's note. The only output an extension has is its answer about one waiting request: one of
+three words that Silo fixes (`what-wakes-an-extension`). Everything else goes through tools.
+Nothing in the part `extensions` needs the word "classifier", so this decision can wait, and the
+fifth film can show the case without the word.

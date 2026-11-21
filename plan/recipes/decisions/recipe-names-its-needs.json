@@ -1,0 +1,4 @@
+{
+  "asks": "Does a recipe say what its computer needs from outside?",
+  "answer": "A recipe names the secrets its computer needs and the hosts it reaches. Naming them grants nothing: the user gives each secret and accepts each host."
+}
