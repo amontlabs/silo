@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { createAppJwt } from '../server/app-auth.mjs';
 import { readConfig } from '../server/config.mjs';
-import { DEFAULT_TIMEOUT } from '../server/github.mjs';
+import { createGitHub, DEFAULT_TIMEOUT, GitHubError } from '../server/github.mjs';
 import { createNodeHandler, MAX_BODY, readRequest, waitUntil } from '../server/node.mjs';
 import { seal, unseal } from '../server/session.mjs';
 import { BUDGET, createWorkshop, LABELS } from '../server/workshop.mjs';
@@ -87,7 +87,7 @@ test('GitHub failing answers 502 when nothing is cached, and an unconfigured ser
 });
 
 test('a hung or failing token refresh answers 502 and keeps the session; only an invalid refresh token signs out', async () => {
-  const t = await setup({ timeoutMs: 150 });
+  const t = await setup({ limit: { path: '/login/oauth/access_token', ms: 150 } });
   try {
     const c = t.client();
     await c.signIn('visitor-fake');
@@ -122,6 +122,18 @@ test('a hung or failing token refresh answers 502 and keeps the session; only an
     assert.equal(invalid.status, 401);
     assert.equal(c.jar.has(SESSION), false);
     assert.equal(c.jar.has('workshop-hint'), false);
+  } finally { t.fake.state.hook = null; await t.close(); }
+});
+
+test('a call GitHub does not answer within the limit fails as a timeout, and only that call is cut', async () => {
+  const t = await setup();
+  try {
+    const github = createGitHub({ apiBase: t.fake.url, timeoutMs: 100 });
+    await t.client().signIn('visitor-fake');
+    const user = [...t.fake.state.tokens].find(([, entry]) => entry.kind === 'user')[0];
+    t.fake.state.hook = (r) => (r.path === '/repos/amontlabs/silo' ? { delay: 600 } : null);
+    await assert.rejects(github.request('GET', '/repos/amontlabs/silo', { token: user, as: 'user' }), (error) => error instanceof GitHubError && error.timeout === true && error.network === true);
+    assert.equal((await github.request('GET', '/user', { token: user, as: 'user' })).status, 200);
   } finally { t.fake.state.hook = null; await t.close(); }
 });
 

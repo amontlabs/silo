@@ -29,7 +29,9 @@ export const PLAN_ENTRIES = [
   { id: 'share-link', kind: 'feature', title: 'Share a computer with a link', part: 'computers', suggestedIn: 6 },
 ];
 
-export async function setup({ configured = true, seed = true, timeoutMs, entries = PLAN_ENTRIES } = {}) {
+// `limit: { path, ms }` cuts short only the calls to `path`: the workshop keeps its own limit for every other
+// call, so a sign-in or a read on a busy machine is never cut. A call that is cut fails as a call that timed out does.
+export async function setup({ configured = true, seed = true, limit, entries = PLAN_ENTRIES } = {}) {
   const clock = { t: START };
   const now = () => clock.t;
   const fake = createFakeGitHub({ now });
@@ -39,7 +41,10 @@ export async function setup({ configured = true, seed = true, timeoutMs, entries
   const outputs = [];
   const env = configured ? fake.workshopEnv(ORIGIN) : { WORKSHOP_SITE_ORIGIN: ORIGIN };
   const config = readConfig(env, { apiBase: fake.url, webBase: fake.url });
-  const workshop = createWorkshop({ config, entries: readPlanEntries(entries), now, log: (entry) => logs.push(JSON.stringify(entry)), ...(timeoutMs ? { timeoutMs } : {}) });
+  const limited = limit
+    ? (url, init) => (new URL(url).pathname === limit.path ? fetch(url, { ...init, signal: AbortSignal.any([init.signal, AbortSignal.timeout(limit.ms)]) }) : fetch(url, init))
+    : fetch;
+  const workshop = createWorkshop({ config, entries: readPlanEntries(entries), now, log: (entry) => logs.push(JSON.stringify(entry)), fetch: limited });
   const secrets = () => [...fake.issuedTokens, fake.clientSecret, env.WORKSHOP_SESSION_SECRET, ...[...fake.state.codes.keys()]].filter(Boolean);
 
   // A client of `target`, this setup's workshop unless another instance is given.
