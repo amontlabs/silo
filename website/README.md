@@ -1178,9 +1178,9 @@ into `dist/films/`:
   `voice.json` is inlined, each clip's source pointing at `/films/<id>/voice/`.
   It opens paused on its Play control: no sound starts without a press. It
   takes the site's theme from `/theme.js` (light, dark or the system's, as the
-  home page and the Workshop keep it), and follows a change made in another
-  tab; `?theme=light|dark` wins, and the player's other query parameters work
-  as in `films/README.md`.
+  home page and the Workshop keep it), as every page of the site does, and
+  follows a change made in another tab; `?theme=` is not promised there. The
+  player's other query parameters work as in `films/README.md`.
 - `<id>/explainer.js` and the clips `voice.json` names (a clip it no longer
   names is left out).
 - `player/`: what the pages share, loaded as files: `voice.js` and `kit.js` of

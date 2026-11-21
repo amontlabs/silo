@@ -214,7 +214,7 @@ export function filmPage(filmsDir, film) {
   const script = (path) => `<script src="${at(path)}"></script>`;
   let page = readFileSync(requiredFile(filmsDir, TEMPLATE, 'restore it from git'), 'utf8');
   page = swap(page, '<title><!--TITLE--></title>', `<title>${escapeHtml(film.title)}</title>`);
-  // The site's theme (light, dark or the system's), kept by the home page and the Workshop; `?theme=` wins.
+  // The site's theme (light, dark or the system's), kept by the home page and the Workshop, as on every page.
   page = swap(page, '<style><!--STYLE--></style>', [
     '<script src="/theme.js"></script>',
     `<link rel="stylesheet" href="${at(`${PLAYER}/player.css`)}">`,
