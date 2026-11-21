@@ -25,11 +25,9 @@ without its reason. Each item of the list grants or destroys, so the law covers 
 
 That an extension may protect by itself is put forward apart: `extension-may-protect`.
 
-## Still to reword
+## The same correction elsewhere
 
-These taken decisions say "classifier" for the program someone adds. Each is reworded by a
-decision that takes its place, shown to the owner first:
-
-- `classifier-spend`: who chooses what it spends;
-- `what-a-classifier-receives`: what it receives;
-- `what-a-classifier-gives-back`: what it gives back.
+Three taken decisions still say "classifier" for what is added. Each has a decision that takes its
+place, put forward and not yet seen by the owner: `extension-spend`,
+`what-reading-the-record-gives`, `extension-points-at-the-record`. In the part `rules`,
+`opinion-acts-through-a-precaution` does the same for "A classifier never acts".

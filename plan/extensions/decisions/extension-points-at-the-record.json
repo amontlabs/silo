@@ -1,0 +1,14 @@
+{
+  "asks": "What does an extension give with an answer or an alert?",
+  "answer": "An answer or an alert from an extension points at the lines of the record that led to it, so that it opens on what triggered it, and on the turn that led to it when there is one.",
+  "needs": [
+    "extension-tools"
+  ],
+  "replaces": [
+    "what-a-classifier-gives-back"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It keeps what what-a-classifier-gives-back required of an opinion. Questions to the user are now a tool."
+  }
+}
