@@ -7,7 +7,9 @@
 // the device scales 1, 2 and 3 (--quick: 1440 px light at 2 and 390 px dark at 3), each soft shape is shown alone on the
 // page's colour, cut out, and read on the four lines its tiles meet along: by how many levels (of 255) the line stands
 // out from the pixels 3 device px to either side, along its whole length (the median, so a crossing shape is not
-// counted). It exits non-zero when a line stands out by more than LIMIT levels.
+// counted). It exits non-zero when a line stands out by more than LIMIT levels, and when a film gave no line to read.
+// The pictures are of the film at rest (its first picture and the ends of scenes), where the lines are on whole pixels;
+// while the film moves the tiles are drawn as they are, and in WebKit the seams may show.
 // It drives Playwright's own browsers: `npx playwright-core install webkit firefox chromium-headless-shell` once,
 // and `npx playwright-core uninstall --all` removes them again.
 import { fileURLToPath } from 'node:url';
@@ -143,6 +145,7 @@ export async function check({ base, browser: name, films = FILMS, combos = ALL, 
   const browser = await ENGINES[name].launch();
   const reader = await (await browser.newContext()).newPage();
   const bad = [];
+  const read = Object.fromEntries(films.map((film) => [film, 0]));
   try {
     for (const combo of combos) {
       const context = await browser.newContext({ viewport: { width: combo.width, height: combo.width > 600 ? 900 : 844 }, deviceScaleFactor: combo.scale, colorScheme: combo.scheme });
@@ -153,6 +156,7 @@ export async function check({ base, browser: name, films = FILMS, combos = ALL, 
         const page = await context.newPage();
         for (const f of await readFilm(page, reader, base, film, combo.scale)) {
           lines += 1;
+          read[film] += 1;
           light = Math.max(light, f.d);
           dark = Math.min(dark, f.d);
           if (Math.abs(f.d) > LIMIT) bad.push({ ...combo, ...f });
@@ -165,7 +169,8 @@ export async function check({ base, browser: name, films = FILMS, combos = ALL, 
   } finally {
     await browser.close();
   }
-  return bad;
+  // A film in which no line was read at all proves nothing: it passes nothing.
+  return { bad, unread: films.filter((film) => !read[film]) };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -176,10 +181,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const films = option('--films')?.split(',') || FILMS;
   let failed = false;
   for (const browser of browsers) {
-    const bad = await check({ base, browser, films, combos: args.includes('--quick') ? QUICK : ALL, log: console.log });
+    const { bad, unread } = await check({ base, browser, films, combos: args.includes('--quick') ? QUICK : ALL, log: console.log });
     for (const b of bad.slice(0, 10)) console.log(`  SEAM ${b.d.toFixed(1)} levels: ${browser} ${b.width} px ${b.scheme} x${b.scale}, ${b.film}, picture ${b.moment}, shape ${b.shape}`);
-    if (bad.length) failed = true;
+    for (const film of unread) console.log(`  NOTHING READ: ${browser}, ${film}: no soft shape was found to read a line on`);
+    if (bad.length || unread.length) failed = true;
   }
-  console.log(failed ? `FAIL: a seam stands out by more than ${LIMIT} levels` : `ok: no seam stands out by more than ${LIMIT} levels`);
+  console.log(failed ? `FAIL: a seam stands out by more than ${LIMIT} levels, or a film was not read` : `ok: no seam stands out by more than ${LIMIT} levels`);
   process.exit(failed ? 1 : 0);
 }

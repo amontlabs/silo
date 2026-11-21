@@ -351,17 +351,17 @@ The kit's own files are unchanged. These are the differences, so they can be sen
 7. A window row's `meta` (the small words at its right, used for a record row's mark such as
    `fact · disk`) is size 14 in the muted tone, not 13 in the faint tone: it has to be read in a
    held frame.
-8. A soft shape (a shadow, a glow: `soft()`) is nine gradient tiles that meet along four lines. The kit
-   drew them with `shape-rendering: crispEdges`, which rounds each tile's edges to whole pixels, but
-   WebKit rounds them outwards, so neighbours overlap by a pixel and add their alpha: a dark hairline
-   along every line, running out from the corners of each card. Now `soft()` leaves the tiles
-   anti-aliased and `snapSofts()` puts each line on a whole device pixel of the stage's own grid (the
-   engines place the stage on whole pixels; the tiles' other edges lie where the alpha is 0). It runs
-   after every frame of the film, when the stage changes size and when the window changes scale. The
-   same drawing, in every engine, has no seam, and in Chromium it differs from before by at most a few
-   levels of 255 along some edges. `fit` moves the shape's width in an object, not the tiles'
-   attributes, so that the snapping owns them. `website/scripts/film-seams.mjs` reads the seams in
-   WebKit, Chromium and Firefox.
+8. A soft shape (a shadow, a glow: `soft()`) is nine gradient tiles that meet along four lines, drawn
+   with `shape-rendering: crispEdges`. WebKit rounds a crisp tile's edges outwards, so where a line falls
+   inside a device pixel the neighbours overlap by a pixel and add their alpha: a dark hairline along
+   every line, running out from the corners of each card. While the film moves the tiles are drawn as the
+   kit draws them, so WebKit may still show those seams then. When the stage is at rest (`restSofts()`:
+   after a seek, on a paused film or its first picture, when a camera move or a piece's move ends, and
+   when the stage changes size or the screen its density) each line goes on a whole device pixel of the
+   stage's own grid, and nothing is left to overlap. The times of the film's motions are read once, from
+   its timeline, and nothing of this reads the layout while it moves; a shape that leaves the stage
+   leaves the list. `fit` moves the shape's width in an object, not the tiles' attributes, so that the
+   placing owns them. `website/scripts/film-seams.mjs` reads the seams in WebKit, Chromium and Firefox.
 
 New files:
 - `player/voice.js`: the voice layer. It provides `V`, the subtitles, the sound synced through

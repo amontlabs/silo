@@ -74,14 +74,15 @@
   // corners, four edges and a middle. It is as smooth as a blur and costs almost nothing to redraw, so a camera move
   // over twenty pieces stays smooth. `fall` px of falloff around the shape shrunk by `inset`, dropped by `dy`.
   //
-  // The tiles meet along four lines. A line that falls inside a device pixel leaves each tile a part of it, and the two
-  // parts together cover less than the whole (a faint seam); `crispEdges` rounds a tile's edges, but WebKit rounds
-  // them outwards, so the neighbours overlap by a pixel and add their alpha (a dark seam). So every tile edge on a
-  // line is put on a whole device pixel (`snapSofts`), and no tile covers part of a pixel along the lines.
+  // The tiles meet along four lines, and `crispEdges` rounds their edges to whole device pixels. WebKit rounds them
+  // outwards, so where a line falls inside a pixel the neighbours overlap by one and add their alpha (a dark seam).
+  // While the film moves, the tiles are drawn as they are. When the stage is at rest (`restSofts`) each line is put on a
+  // whole device pixel, where there is nothing to round and nothing overlaps. Nothing of this reads the layout while
+  // the film moves.
   const FALL = [1, 0.94, 0.78, 0.55, 0.32, 0.14, 0.04, 0];
   let softs = [];
   function soft(parent, w, h, rx, { color, alpha, fall, inset = 0, dy = 0 }) {
-    const g = make("g", {}, parent);
+    const g = make("g", { "shape-rendering": "crispEdges" }, parent);
     const rc0 = Math.max(rx - inset, 2);
     // The shape `w2` wide: the corner radius `rc`, the falloff `R` past it and the four lines the tiles meet along.
     const frame = w2 => {
@@ -89,8 +90,13 @@
       const rc = Math.max(0.5, Math.min(rc0, (r - l) / 2, (b - t) / 2));
       return { rc, R: rc + fall, xl: l + rc, xr: r - rc, yt: t + rc, yb: b - rc };
     };
-    const cut = ({ R, xl, xr, yt, yb }) => [[xl - R, yt - R, R, R], [xr, yt - R, R, R], [xl - R, yb, R, R], [xr, yb, R, R],
-                                            [xl, yt - R, xr - xl, R], [xl, yb, xr - xl, R], [xl - R, yt, R, yb - yt], [xr, yt, R, yb - yt], [xl, yt, xr - xl, yb - yt]];
+    // The nine tiles for those lines. With `e` they stop short of a line on both sides, by less than any pixel can show:
+    // a line that is a whole number of pixels up to the last bit of the arithmetic would otherwise be rounded out to the
+    // next pixel on one side.
+    const cut = ({ R, xl, xr, yt, yb }, e = 0) => [
+      [xl - R, yt - R, R - e, R - e], [xr + e, yt - R, R - e, R - e], [xl - R, yb + e, R - e, R - e], [xr + e, yb + e, R - e, R - e],
+      [xl + e, yt - R, xr - xl - 2 * e, R - e], [xl + e, yb + e, xr - xl - 2 * e, R - e],
+      [xl - R, yt + e, R - e, yb - yt - 2 * e], [xr + e, yt + e, R - e, yb - yt - 2 * e], [xl + e, yt + e, xr - xl - 2 * e, yb - yt - 2 * e]];
     const first = frame(w), q = first.rc / first.R, id = `fj-s${color.replace(/\W/g, "")}-${Math.round(alpha * 1000)}-${Math.round(first.rc * 10)}-${Math.round(fall)}`;
     if (!stage.querySelector(`#${id}-0`)) {
       const stops = FALL.map((f, i) => `<stop offset="${(q + (1 - q) * i / (FALL.length - 1)).toFixed(4)}" stop-color="${color}" stop-opacity="${(alpha * f).toFixed(4)}"/>`).join("");
@@ -100,30 +106,73 @@
     }
     const box = ([x, y, w2, h2]) => ({ x, y, width: Math.max(0, w2), height: Math.max(0, h2) });
     const els = cut(first).map((r, i) => make("rect", { ...box(r), fill: i < 8 ? `url(#${id}-${i})` : color, "fill-opacity": i < 8 ? null : alpha }, g));
-    const now = { w, at: "" };   // the width the shape has now, and the matrix and device scale the tiles were last placed for
-    // Places the tiles for the width `now.w`, their lines on whole device pixels of the stage's grid: `m` takes the
-    // shape's space to the stage's, `k` is device pixels per px of the page. The engines put the stage itself on whole
-    // pixels, so its own grid is the one to follow, not the screen's.
+    const now = { w, at: "" };   // the width the shape has now, and what the tiles were last placed for
+    // Places the tiles for the width `now.w`. With `m` (the shape's space in the stage's) and `k` (device pixels per px
+    // of the page) the four lines go on whole device pixels of the stage's grid: the engines put the stage itself on
+    // whole pixels, so its own grid is the one to follow, not the screen's. Without them the tiles are drawn as they are.
     g.place = (m, k) => {
       const at = m ? `${now.w} ${m.a.toFixed(5)} ${m.d.toFixed(5)} ${m.e.toFixed(4)} ${m.f.toFixed(4)} ${k}` : `${now.w}`;
       if (at === now.at) return;
       now.at = at;
       const c = frame(now.w);
+      let e = 0;
       if (m && Math.abs(m.b) < 1e-6 && Math.abs(m.c) < 1e-6 && m.a > 0 && m.d > 0) {
         const X = x => (Math.round((m.a * x + m.e) * k) / k - m.e) / m.a, Y = y => (Math.round((m.d * y + m.f) * k) / k - m.f) / m.d;
         c.xl = X(c.xl); c.xr = X(c.xr); c.yt = Y(c.yt); c.yb = Y(c.yb);
+        e = 0.01 / (Math.min(m.a, m.d) * k);
       }
-      cut(c).forEach((r, i) => set(els[i], box(r)));
+      cut(c, e).forEach((r, i) => set(els[i], box(r)));
     };
     g.fit = (w2, t, dur) => { if (t) t.to(now, { w: w2, duration: dur, ease: EASE.inOut }, 0); else now.w = w2; };
     softs.push(g);
     return g;
   }
-  // Every soft shape placed again for where it now stands on screen. It runs after each frame of the film, and when the
-  // window changes size or scale, since a tile's place on the pixel grid depends on both. All the matrices are read
-  // before any tile is written, so the page lays out once.
-  function snapSofts() {
-    const k = window.devicePixelRatio || 1, ms = softs.map(g => (g.isConnected ? g.getCTM() : null));
+  // The film moves a soft shape by a tween of x, y, scale and the like on the shape or what holds it, or of its width.
+  // `motions` gives, from the finished timeline, the times such a tween starts or ends, and the spans in which one runs.
+  const MOVES = /^(x|y|xPercent|yPercent|scale|scaleX|scaleY|rotation|rotate|svgOrigin|transformOrigin|transform|motionPath|w)$/;
+  const MOVES_ATTR = /^(x|y|width|height|transform|cx|cy|r|rx|ry)$/;
+  function motions(root) {
+    const spans = [];
+    for (const tw of root.getChildren(true, true, false)) {
+      const v = tw.vars || {};
+      if (!Object.keys(v).some(k => MOVES.test(k) || (k === "attr" && v.attr && Object.keys(v.attr).some(a => MOVES_ATTR.test(a))))) continue;
+      let off = 0;
+      for (let p = tw.parent; p && p !== root; p = p.parent) off += p.startTime();
+      spans.push([off + tw.startTime(), off + tw.endTime()]);
+    }
+    const times = [...new Set(spans.flat())].sort((a, b) => a - b), runs = [];
+    for (const [a, b] of spans.filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0])) {
+      if (runs.length && a < runs[runs.length - 1][1]) runs[runs.length - 1][1] = Math.max(runs[runs.length - 1][1], b); else runs.push([a, b]);
+    }
+    return { times, runs };
+  }
+  // Where the film stands as far as soft shapes go: -1 while something moves, else how many motions have started or ended
+  // by now (the tiles placed for one number are right for it and for no other).
+  function stand(t) {
+    const E = 1e-4, { times, runs } = moves;
+    let lo = 0, hi = runs.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (runs[mid][1] <= t + E) lo = mid + 1; else hi = mid; }
+    if (lo < runs.length && runs[lo][0] < t - E) return -1;
+    lo = 0; hi = times.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (times[mid] <= t + E) lo = mid + 1; else hi = mid; }
+    return lo;
+  }
+  let moves = null, placed = null;
+  // Called after every frame. While the film moves, the tiles follow their width and nothing is read from the page.
+  // When it comes to rest, at a new place of the film or after a change of the stage's size or of the screen's density,
+  // every line goes on a whole device pixel: that reads each shape's matrix once, before any tile is written.
+  function restSofts() {
+    if (!moves || !tl) return;
+    const n = stand(tl.time());
+    if (n < 0) { placed = null; softs.forEach(g => g.place()); return; }
+    const k = window.devicePixelRatio || 1, key = `${n} ${k}`;
+    if (placed === key) return;
+    snapSofts(k);
+    placed = key;
+  }
+  function snapSofts(k = window.devicePixelRatio || 1) {
+    softs = softs.filter(g => g.isConnected);   // a shape that has left the stage (a window that grew redrew its shadow) is dropped
+    const ms = softs.map(g => g.getCTM());
     softs.forEach((g, i) => g.place(ms[i], k));
   }
   // A shadow is two soft shapes: where the piece touches the ground, and the light from above. 0 a chip, 1 a card, 2 a window.
@@ -1064,7 +1113,7 @@
   const clock = t => Math.floor(t / 60) + ":" + String(Math.floor(t % 60)).padStart(2, "0");
   const GLYPH = { Play: "M8 5.5v13l11-6.5z", Pause: "M7 5h3.6v14H7zM13.4 5H17v14h-3.6z", Replay: "M12 5a7 7 0 1 1-6.6 4.7M12 5 8.5 2M12 5 8.5 8" };
   function show() {
-    snapSofts();
+    restSofts();
     const t = tl.time(), i = sceneAt(t), n = spec.scenes.length, segs = $(".segs");
     if (i !== shown) {
       shown = i; const s = spec.scenes[i] || {};
@@ -1129,6 +1178,7 @@
     document.body.dataset.timing = JSON.stringify(window.__timing);
     if (built !== n) fail(new Error(`scenes has ${n} entries but build() called scene() for ${built}`), true);
     try { if (!failures.length) lint(ends); } catch (e) { fail(e, true); }
+    moves = motions(tl); placed = null;
     report();
     tl.eventCallback("onUpdate", show).eventCallback("onComplete", show);
     shown = -1;
@@ -1136,7 +1186,7 @@
     if (was && !was.paused) tl.play();
     return was;
   }
-  window.__film = { get timeline() { return tl; } }; // for a host that scrubs, and for tests
+  window.__film = { get timeline() { return tl; }, get softs() { return softs; }, snap: snapSofts, rest: () => !!moves && stand(tl.time()) >= 0 }; // for a host that scrubs, and for tests
   window.explainer = s => build(s).catch(e => fail(e, true)).finally(unready);
   async function build(s) {
     spec = s;
@@ -1195,8 +1245,12 @@
     });
     const retheme = () => { if (themeNow() !== theme) { mount(); show(); post(true); } };
     new MutationObserver(retheme).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
-    new ResizeObserver(snapSofts).observe(stage);   // a new size of the stage moves its pixel grid under every soft shape
-    addEventListener("resize", snapSofts);
+    // A new size of the stage, or of the screen's density (which can change with no resize), moves the pixel grid under
+    // every soft shape.
+    const regrid = () => { placed = null; restSofts(); };
+    new ResizeObserver(regrid).observe(stage);
+    const density = () => matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener("change", () => { regrid(); density(); }, { once: true });
+    density();
     scheme.addEventListener("change", retheme);
     if (query.has("t")) tl.seek(Math.min(+query.get("t"), tl.duration()));
     else if (query.has("scene")) tl.seek(ends[Math.min(+query.get("scene"), n - 1)]);
