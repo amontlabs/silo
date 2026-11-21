@@ -422,16 +422,19 @@ export function entriesAt(repository: string, commit: string, ids: ReadonlySet<s
   const git = (args: string[], input?: string) => execFileSync('git', ['-C', repository, ...args], { input, maxBuffer: 512 * 1024 * 1024, timeout: 120_000, stdio: ['pipe', 'pipe', 'ignore'] });
   const found = new Map<string, string>();
   try {
-    const oids = new Map<string, string>();
+    // By the file's name, which is the entry's id: two entries whose files hold the same bytes are still two.
+    const oidOf = new Map<string, string>();
     for (const line of git(['ls-tree', '-r', '-z', commit, '--', PLAN_DIR]).toString('utf8').split('\0')) {
       const [meta, path] = line.split('\t');
       const id = path ? entryIdOf(path) : null;
-      if (id && ids.has(id)) oids.set(meta.split(' ')[2], id);
+      if (id && ids.has(id)) oidOf.set(id, meta.split(' ')[2]);
     }
-    if (!oids.size) return found;
-    const out = git(['cat-file', '--batch'], [...oids.keys()].map((oid) => `${oid}\n`).join(''));
+    if (!oidOf.size) return found;
+    const oids = [...new Set(oidOf.values())];
+    const blobs = new Map<string, string>();
+    const out = git(['cat-file', '--batch'], oids.map((oid) => `${oid}\n`).join(''));
     let at = 0;
-    for (const [oid, id] of oids) {
+    for (const oid of oids) {
       const end = out.indexOf(10, at);
       if (end === -1) break;
       const [, type, size] = out.subarray(at, end).toString().split(' ');
@@ -439,8 +442,12 @@ export function entriesAt(repository: string, commit: string, ids: ReadonlySet<s
         at = end + 1;
         continue;
       }
-      found.set(id, out.subarray(end + 1, end + 1 + Number(size)).toString('utf8'));
+      blobs.set(oid, out.subarray(end + 1, end + 1 + Number(size)).toString('utf8'));
       at = end + 1 + Number(size) + 1;
+    }
+    for (const [id, oid] of oidOf) {
+      const text = blobs.get(oid);
+      if (text !== undefined) found.set(id, text);
     }
   } catch {
     return null;

@@ -804,6 +804,30 @@ describe('the films', () => {
     expect(printedChanged(entry({ sets: [{ in: 'words', word: 'Pause point', means: 'A stop.' }] }), entry({ adds: ['pause-point'], verdict: 'take' }))).toBe(false);
   });
 
+  it('find each entry at the film\'s commit by its id, two files with the same bytes included, wherever they moved since', () => {
+    const root = mkdtempSync(join(tmpdir(), 'workshop-films-'));
+    const git = (args: string[]) => execFileSync('git', ['-C', root, ...args], { env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }, stdio: 'ignore' });
+    const write = (path: string, text: string) => {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), text);
+    };
+    try {
+      git(['init', '-q', '-b', 'main']);
+      write('plan/p/decisions/twin-a.json', entry({ asks: 'Same?' }));
+      write('plan/p/decisions/twin-b.json', entry({ asks: 'Same?' }));
+      write('films/one/film.json', JSON.stringify({ id: 'one', title: 'One', line: 'L.', shows: ['twin-a', 'twin-b'] }));
+      git(['add', '.']);
+      git(['commit', '-q', '-m', 'the film']);
+      mkdirSync(join(root, 'plan/q/decisions'), { recursive: true });
+      git(['mv', 'plan/p/decisions/twin-a.json', 'plan/q/decisions/twin-a.json']);
+      git(['mv', 'plan/p/decisions/twin-b.json', 'plan/q/decisions/twin-b.json']);
+      git(['commit', '-q', '-m', 'moved']);
+      expect(readFilms(root, false)[0].behind).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('compare what an entry says now with what it said at the film\'s last commit: a change undone does not count, a moved file is the same entry, a new one counts', () => {
     const root = mkdtempSync(join(tmpdir(), 'workshop-films-'));
     const git = (args: string[]) => execFileSync('git', ['-C', root, ...args], { env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }, stdio: 'ignore' });
