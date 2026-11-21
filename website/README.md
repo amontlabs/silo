@@ -259,6 +259,24 @@ pip. It has no entry for a part not decided: the map's key says what a dashed
 line means, and a screen reader still hears "not decided" for such a part. With no entry
 it draws nothing and is no list, but its empty box keeps the title row's height.
 
+What a part needs: a part needs another part when one of its entries (a decision
+or a feature) names an entry of that part in `needs`. A need inside a part, and
+a need of a decision of Product, say nothing. The build computes it
+(`partNeeds` in `data.ts`) and gives each part `needs` and `neededBy`, as part
+ids in the order of the map (`places` of the layout), then the parts the map does
+not place. On the full map, while the pointer is on a part or the keyboard's
+focus is (as for its tip), the parts it needs are marked with a second, inner
+outline in the ink (`needed`), and the parts that neither it needs nor need it
+fade to 40 % (`faint`). Nothing else changes: the colours of the states, the
+accent of a part that is next or being built and the ring of the open part stay as
+they are, and the wires and their words do not change. The tip of a part gains a line
+"Needs" and a line "Needed by", each followed by the titles of those parts; a line
+with no part is left out. What a screen reader hears for a part on the map gains the
+same two sentences ("Needs The engine, Computers." "Needed by Rules and precautions."); the tiles' say
+nothing of it. In the folded strip the tip of a name has the same two lines, and
+nothing is marked or faded. The tip stays 8 px inside the window, above or below
+its part by what fits, whatever its height.
+
 A layout as written (`MapLayout`: `SILO_MAP`, the example, `NO_MAP`) has `rests`
 and no mark of not decided. The page gets the layout from `pageLayout`
 (`PageLayout`): no `rests`, never the layout's `file`, and `undecided: true` on

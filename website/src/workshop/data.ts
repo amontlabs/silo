@@ -155,6 +155,29 @@ export function toHistories(plan: RawPlan, source: HistorySource | null): Histor
   return histories;
 }
 
+/**
+ * What each part needs and what needs it, by part id. A part needs another when one of its entries names an entry of
+ * that one in `needs`; an entry of the same part or of no part says nothing. Both lists follow `order`, the order of
+ * the map; a part the map does not place comes after those it does, in the order of plan/parts.json.
+ */
+export function partNeeds(parts: { id: string }[], entries: Pick<Entry, 'id' | 'part' | 'needs'>[], order: string[]): Map<string, { needs: string[]; neededBy: string[] }> {
+  const partOf = new Map(entries.map((entry) => [entry.id, entry.part]));
+  const rank = (id: string) => { const at = order.indexOf(id); return at === -1 ? order.length : at; };
+  const sorted = parts.map((part) => part.id).sort((a, b) => rank(a) - rank(b));
+  const needs = new Map(parts.map((part) => [part.id, new Set<string>()]));
+  const neededBy = new Map(parts.map((part) => [part.id, new Set<string>()]));
+  for (const entry of entries) {
+    if (entry.part === null) continue;
+    for (const id of entry.needs) {
+      const other = partOf.get(id);
+      if (other === undefined || other === null || other === entry.part) continue;
+      needs.get(entry.part)?.add(other);
+      neededBy.get(other)?.add(entry.part);
+    }
+  }
+  return new Map(parts.map((part) => [part.id, { needs: sorted.filter((id) => needs.get(part.id)?.has(id)), neededBy: sorted.filter((id) => neededBy.get(part.id)?.has(id)) }]));
+}
+
 /** The plan object of tools/plan/read, as the page holds it: decisions and features in the order of order.json. */
 export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null }: BuildOptions = {}): BuildData {
   const entries: Entry[] = ordered(plan).map((raw) => ({
@@ -175,8 +198,9 @@ export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null }: B
     more: hasFacts(raw),
     history: summaryOf(history?.changes.get(raw.id)),
   }));
+  const related = partNeeds(plan.parts, entries, Object.keys(map.places));
   return {
-    parts: plan.parts.map((part) => ({ id: part.id, title: part.title, line: part.line })),
+    parts: plan.parts.map((part) => ({ id: part.id, title: part.title, line: part.line, ...related.get(part.id)! })),
     stages: plan.stages.map((stage) => ({ id: stage.id, title: stage.title, line: stage.line })),
     entries,
     map: pageLayout(map, layoutPlanOf(plan)),

@@ -9,13 +9,18 @@ import type { PartGroup, PartState } from './plan';
 
 const SPOKEN: Record<PartState, string> = { building: 'being built', built: 'built', next: 'next', decided: 'decided', open: 'not decided' };
 
-/** What a screen reader hears for a part or a tile. */
-export function spoken(group: PartGroup): string {
+/** The titles of some parts, in the order given, joined by commas. */
+const titlesOf = (ids: string[], titles: Map<string, string>) => ids.map((id) => titles.get(id) ?? id).join(', ');
+
+/** What a screen reader hears for a part or a tile; with `titles` (part titles by id), also what the part needs and what needs it. */
+export function spoken(group: PartGroup, titles?: Map<string, string>): string {
   const features = group.counts.built + group.counts.building + group.counts.decided + group.counts.undecided;
   const decisions = group.decisions.decided + group.decisions.undecided;
   const state = group.state === 'decided' ? stateWords(group) : SPOKEN[group.state];
   const counted = [`${features} ${features === 1 ? 'feature' : 'features'}`, ...(decisions ? [`${decisions} ${decisions === 1 ? 'decision' : 'decisions'}`] : [])];
-  return `${group.part.title}, ${state}, ${counted.join(', ')}. ${group.part.line}`;
+  const needs = titles && group.part.needs.length ? ` Needs ${titlesOf(group.part.needs, titles)}.` : '';
+  const neededBy = titles && group.part.neededBy.length ? ` Needed by ${titlesOf(group.part.neededBy, titles)}.` : '';
+  return `${group.part.title}, ${state}, ${counted.join(', ')}. ${group.part.line}${needs}${neededBy}`;
 }
 
 /** A part's glyph, drawn from the layout's paths. */
@@ -85,16 +90,23 @@ export interface MapViewProps {
 export function MapView({ layout, groups, folded, current, onOpen }: MapViewProps) {
   const states = new Map(groups.map((group) => [group.part.id, group.state]));
   const byId = new Map(groups.map((group) => [group.part.id, group]));
-  const [tip, setTip] = useState<{ text: string; x: number; y: number } | null>(null);
+  const titles = new Map(groups.map((group) => [group.part.id, group.part.title]));
+  // The part under the pointer or holding the keyboard's focus: the parts it needs are marked, and those that neither it
+  // needs nor need it fade. Only on the full map; the strip marks and fades nothing.
+  const [active, setActive] = useState<string | null>(null);
+  const related = active && !folded ? byId.get(active)?.part : undefined;
+  const [tip, setTip] = useState<{ head: string; needs: string; neededBy: string; x: number; top: number; bottom: number; below: boolean } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const tipRef = useRef<HTMLDivElement>(null);
-  // Centred on its part, and kept 8 px inside the window.
+  // Centred on its part and kept 8 px inside the window, above or below its part by what fits; it is as tall as its lines.
   useLayoutEffect(() => {
     const node = tipRef.current;
     if (!node || !tip) return;
-    const width = node.offsetWidth;
+    const { offsetWidth: width, offsetHeight: height } = node;
     const left = Math.max(8, Math.min(innerWidth - width - 8, tip.x - width / 2));
-    node.style.transform = `translate(${Math.round(left)}px, ${Math.round(tip.y)}px)`;
+    const below = tip.below && tip.bottom + 8 + height <= innerHeight - 8;
+    const top = Math.max(8, Math.min(innerHeight - height - 8, below ? tip.bottom + 8 : tip.top - height - 8));
+    node.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
   }, [tip]);
   useEffect(() => () => clearTimeout(timer.current), []);
 
@@ -102,19 +114,19 @@ export function MapView({ layout, groups, folded, current, onOpen }: MapViewProp
     clearTimeout(timer.current);
     timer.current = setTimeout(() => {
       const box = target.getBoundingClientRect();
-      const text = folded ? `${group.part.title}. ${group.part.line}` : group.part.line;
-      const below = box.height < 200 && box.bottom + 40 < innerHeight;
-      setTip({ text, x: box.left + box.width / 2, y: below ? box.bottom + 8 : box.top - 34 });
+      const head = folded ? `${group.part.title}. ${group.part.line}` : group.part.line;
+      setTip({ head, needs: titlesOf(group.part.needs, titles), neededBy: titlesOf(group.part.neededBy, titles), x: box.left + box.width / 2, top: box.top, bottom: box.bottom, below: box.height < 200 });
     }, 240);
   };
   const hideTip = () => {
     clearTimeout(timer.current);
     setTip(null);
+    setActive(null);
   };
 
   return (
     <section className="ws-mapsec" aria-label="Silo, part by part">
-      <div className={['ws-stage', folded ? 'fold' : '', groups.length ? '' : 'ws-stage-empty'].filter(Boolean).join(' ')}>
+      <div className={['ws-stage', folded ? 'fold' : '', related ? 'relating' : '', groups.length ? '' : 'ws-stage-empty'].filter(Boolean).join(' ')}>
         {groups.length ? null : <p className="ws-quiet">No part yet.</p>}
         {layout.zones.map((zone) => (
           // A zone with no folded place stays where it is and fades out as the map folds.
@@ -145,14 +157,15 @@ export function MapView({ layout, groups, folded, current, onOpen }: MapViewProp
           const group = byId.get(id);
           if (!group) return null;
           const on = current === id;
-          const classes = ['ws-geo', 'ws-part', `s-${group.state}`, place.inner ? 'inner' : '', place.tall ? 'tall' : '', place.wide ? 'wide' : '', on ? 'on' : ''].filter(Boolean).join(' ');
+          const classes = ['ws-geo', 'ws-part', `s-${group.state}`, place.inner ? 'inner' : '', place.tall ? 'tall' : '', place.wide ? 'wide' : '', on ? 'on' : '',
+            related && related.needs.includes(id) ? 'needed' : '', related && id !== related.id && !related.needs.includes(id) && !related.neededBy.includes(id) ? 'faint' : ''].filter(Boolean).join(' ');
           return (
             <button
               type="button" key={id} data-part={id} className={classes} style={style(placeStyle(place.full, place.fold, place))}
-              aria-label={spoken(group)} aria-current={on ? 'true' : undefined}
+              aria-label={spoken(group, titles)} aria-current={on ? 'true' : undefined}
               onClick={() => { hideTip(); onOpen(id); }}
-              onMouseEnter={(event) => showTip(event.currentTarget, group)} onMouseLeave={hideTip}
-              onFocus={(event) => { if (focusVisible(event.currentTarget)) showTip(event.currentTarget, group); }} onBlur={hideTip}
+              onMouseEnter={(event) => { setActive(id); showTip(event.currentTarget, group); }} onMouseLeave={hideTip}
+              onFocus={(event) => { if (focusVisible(event.currentTarget)) { setActive(id); showTip(event.currentTarget, group); } }} onBlur={hideTip}
             >
               <span className="ws-p-ttl">{group.part.title}</span>
               <span className="ws-p-st"><i className="ws-mk" /><span>{stateWords(group)}</span></span>
@@ -161,7 +174,13 @@ export function MapView({ layout, groups, folded, current, onOpen }: MapViewProp
           );
         })}
       </div>
-      {tip ? <div className="ws-tip" ref={tipRef} aria-hidden="true" style={{ transform: `translate(${Math.round(tip.x)}px, ${Math.round(tip.y)}px) translateX(-50%)` }}>{tip.text}</div> : null}
+      {tip ? (
+        <div className="ws-tip" ref={tipRef} aria-hidden="true" style={{ transform: `translate(${Math.round(tip.x)}px, ${Math.round(tip.top)}px) translateX(-50%)` }}>
+          <p>{tip.head}</p>
+          {tip.needs ? <p className="ws-tip-rel"><b>Needs</b> {tip.needs}</p> : null}
+          {tip.neededBy ? <p className="ws-tip-rel"><b>Needed by</b> {tip.neededBy}</p> : null}
+        </div>
+      ) : null}
     </section>
   );
 }
