@@ -83,6 +83,30 @@ export function clock() {
   return { advance(ms: number) { now += ms; } };
 }
 
+/**
+ * Keeps the page's timers of exactly `ms` from firing on their own: the test fires them when it chooses, so a busy
+ * machine cannot make one go off before a step the test takes. A timer the page clears is cleared as usual.
+ */
+export function withheldTimers(ms: number) {
+  const realSet = globalThis.setTimeout;
+  const realClear = globalThis.clearTimeout;
+  const held = new Map<unknown, () => void>();
+  vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, delay?: number, ...args: unknown[]) => {
+    if (delay !== ms) return realSet(fn, delay, ...args);
+    // The id the page holds is a real timer that does nothing, so clearing it works as usual.
+    const id = realSet(() => {}, 2 ** 30);
+    held.set(id, fn);
+    return id;
+  }) as typeof setTimeout);
+  vi.spyOn(globalThis, 'clearTimeout').mockImplementation(((id?: Parameters<typeof clearTimeout>[0]) => {
+    held.delete(id);
+    return realClear(id);
+  }) as typeof clearTimeout);
+  return {
+    fire: () => act(async () => { [...held.values()].forEach((fn) => fn()); held.clear(); }),
+  };
+}
+
 export const wait = (ms: number) => act(async () => { await new Promise((resolve) => setTimeout(resolve, ms)); });
 
 export const notesButton = () => screen.getByRole('button', { name: 'Notes' });

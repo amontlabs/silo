@@ -4,12 +4,14 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { HOLD_MS } from './Entry';
 import { liveState } from './fixtures';
-import { clock, detail, itemOf, mockApi, ok, refused, renderApp, rowButton, wait } from './test-support';
+import { clock, detail, itemOf, mockApi, ok, refused, renderApp, rowButton, wait, withheldTimers } from './test-support';
 
 describe('comments that arrive late', () => {
   it('hold one place per expected comment while loading, with no loading line, and load on hover', async () => {
     let release: () => void = () => {};
     const calls = mockApi({ routes: { 'GET issue': (url) => new Promise((resolve) => { release = () => resolve(ok(detail(Number(url.searchParams.get('n')), { comments: [1, 2].map((id) => ({ id, author: 'mara-k', avatar: '', bot: false, createdAt: '2026-11-14T10:00:00Z', text: `Comment ${id}.` })) }))); }) } });
+    // The opening holds its panel for HOLD_MS; the test lets that hold go only by the comments arriving.
+    withheldTimers(HOLD_MS);
     history.replaceState(null, '', '/workshop#part-b');
     await renderApp();
     fireEvent.pointerEnter(rowButton('Create and delete a computer'));
