@@ -3,14 +3,13 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { checkFiles, formatProblem } from '../../../tools/plan/check/index.js';
-import { entryStatus, listKind, replacedBy, wordId } from '../../../tools/plan/model/index.js';
+import { listKind, wordId } from '../../../tools/plan/model/index.js';
 import { repoAddress } from '../../../tools/workshop/model/index.js';
 import { entryHistory, readSteps } from '../../../tools/plan/history/index.js';
-import { loadDir, parsePlan } from '../../../tools/plan/read/index.js';
-import { checkLayout, LayoutError, NO_MAP, pageLayout, SILO_MAP } from './map.ts';
+import { loadDir } from '../../../tools/plan/read/index.js';
+import { NO_MAP, pageLayout, SILO_MAP } from './map.ts';
+import { checkBuild, checkedPlan as checkPlanFiles, layoutPlanOf, PlanFileError } from './build-check.ts';
 import type { LayoutPlan, MapLayout } from './map.ts';
-import { RESERVED_ADDRESSES } from './routes.ts';
 import { playableFilms } from '../../scripts/films.mjs';
 import { readFilms } from '../../../films/tools/behind.mjs';
 import { buildCommit } from '../../scripts/build-commit.mjs';
@@ -18,7 +17,7 @@ import type { BuildData, Change, Entry, EntryFacts, Facts, Film, Histories, Note
 
 export const PLAN_DIR = 'plan';
 
-export class PlanFileError extends Error {}
+export { PlanFileError };
 
 interface RawEntry {
   id: string;
@@ -231,12 +230,8 @@ export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null, fil
   };
 }
 
-/** Checks the files of a plan, or throws with every problem. `exists` says whether a repository path exists. */
-function checkedPlan(files: Map<string, string>, exists?: (path: string) => boolean): RawPlan {
-  const { errors } = checkFiles(files, exists ? { exists } : {});
-  if (errors.length) throw new PlanFileError(errors.map(formatProblem).join('\n'));
-  return parsePlan(files).plan as unknown as RawPlan;
-}
+/** Checks the files of a plan with the plan tool's check (build-check.ts), or throws with every problem. */
+const checkedPlan = (files: Map<string, string>): RawPlan => checkPlanFiles(files) as RawPlan;
 
 /** Checks the files of a plan and gives their notes, or throws with every problem. */
 export function notesFrom(files: Map<string, string>): Notes {
@@ -253,19 +248,6 @@ export function factsFrom(files: Map<string, string>): Facts {
   return toFacts(checkedPlan(files));
 }
 
-/** What the map reads of a plan: its parts, the status of each decision and feature, and its words. */
-function layoutPlanOf(plan: RawPlan): LayoutPlan {
-  // The plan tool's model reads the entries as the files give them, which the check has already passed.
-  const entries = plan.entries as unknown as Record<string, Parameters<typeof entryStatus>[0]>;
-  const decisions: LayoutPlan['decisions'] = {};
-  const features: LayoutPlan['features'] = {};
-  for (const [id, entry] of Object.entries(entries)) {
-    if (entry.kind === 'decision') decisions[id] = { status: entryStatus(entry, entries) as LayoutPlan['decisions'][string]['status'], replacedBy: replacedBy(entry) };
-    else features[id] = { status: entryStatus(entry, entries) as LayoutPlan['features'][string]['status'] };
-  }
-  return { parts: plan.parts, decisions, features, words: plan.words.flatMap((word) => (word.id ? [word.id] : [])) };
-}
-
 /** Checks the files of a plan and gives what the map's check reads of it, or throws with every problem. */
 export function layoutPlanFrom(files: Map<string, string>): LayoutPlan {
   return layoutPlanOf(checkedPlan(files));
@@ -273,20 +255,8 @@ export function layoutPlanFrom(files: Map<string, string>): LayoutPlan {
 
 /** Checks the files of a plan and gives the page's data, or throws with every problem. */
 export function buildDataFrom(files: Map<string, string>, options: BuildOptions = {}, exists?: (path: string) => boolean): BuildData {
-  const plan = checkedPlan(files, exists);
-  const data = toBuildData(plan, options);
-  for (const part of data.parts) {
-    if ((RESERVED_ADDRESSES as readonly string[]).includes(part.id)) {
-      throw new PlanFileError(`plan/parts.json: the part "${part.id}" takes an address the Workshop keeps for its own page (#${part.id}). Fix: give the part another id; the Workshop keeps ${RESERVED_ADDRESSES.join(', ')}.`);
-    }
-  }
-  try {
-    checkLayout(layoutPlanOf(plan), options.map ?? SILO_MAP);
-  } catch (error) {
-    if (error instanceof LayoutError) throw new PlanFileError(error.message);
-    throw error;
-  }
-  return data;
+  // Every check that can stop the build is in build-check.ts, which the server runs on a verdict's plan too.
+  return toBuildData(checkBuild(files, options.map ?? SILO_MAP, exists) as RawPlan, options);
 }
 
 /** The plan's folder: `WORKSHOP_PLAN` when set (a fixture plan, for a build that proves the page), else plan/ under `repository`. */

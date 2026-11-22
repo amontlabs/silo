@@ -817,13 +817,15 @@ test('Build Output layout: static site, one Node.js function at every endpoint, 
     assert.equal(HANDLER, vc.handler);
     assert.match(vc.runtime, /^nodejs(22|24|26)\.x$/);
     assert.deepEqual((await readdir(main)).sort(), ['.vc-config.json', 'tools', 'website']);
-    // No package ships: the server runs on Node's standard library.
-    assert.deepEqual((await readdir(join(main, 'website'))).sort(), ['api', 'server']);
+    // No package ships: the server runs on Node's standard library. Of the page's code, only the site's build checks
+    // a verdict runs on the plan it leaves, and the map they check.
+    assert.deepEqual((await readdir(join(main, 'website'))).sort(), ['api', 'server', 'src']);
+    assert.deepEqual((await listFiles(join(main, 'website', 'src'))).sort(), ['workshop/build-check.ts', 'workshop/map-fit.ts', 'workshop/map.ts', 'workshop/routes.ts']);
     // The Workshop's model ships beside the server, at its place in the repository, as ESM; of the plan tool, the
     // files the owner's verdict loads (write/ and what it imports), as ESM too.
     const model = (await readdir(new URL('../../tools/workshop/model/', import.meta.url))).filter((name) => name.endsWith('.js')).sort();
     assert.ok(model.includes('index.js') && model.includes('markers.js'));
-    const plan = ['plan/package.json', 'plan/write/index.js', 'plan/check/index.js', 'plan/read/index.js', 'plan/model/names.js', 'plan/model/canonical.js', 'plan/model/status.js'];
+    const plan = ['plan/package.json', 'plan/write/index.js', 'plan/check/index.js', 'plan/read/index.js', 'plan/model/index.js', 'plan/model/names.js', 'plan/model/canonical.js', 'plan/model/status.js'];
     assert.deepEqual((await listFiles(join(main, 'tools'))).sort(), ['workshop/package.json', ...model.map((name) => `workshop/model/${name}`), ...plan].sort());
     assert.equal(JSON.parse(await readFile(join(main, 'tools', 'workshop', 'package.json'), 'utf8')).type, 'module');
     assert.equal(JSON.parse(await readFile(join(main, 'tools', 'plan', 'package.json'), 'utf8')).type, 'module');
@@ -1157,7 +1159,7 @@ test('packaging ships server/ and api/ at any depth, the model of the Workshop a
   try {
     const site = join(root, 'website');
     const here = new URL('..', import.meta.url).pathname;
-    for (const part of ['server', 'api']) await cp(join(here, part), join(site, part), { recursive: true });
+    for (const part of ['server', 'api', 'src/workshop']) await cp(join(here, part), join(site, part), { recursive: true });
     await cp(new URL('../../tools/workshop/model', import.meta.url).pathname, join(root, 'tools', 'workshop', 'model'), { recursive: true });
     await cp(new URL('../../tools/workshop/package.json', import.meta.url).pathname, join(root, 'tools', 'workshop', 'package.json'));
     for (const part of ['write', 'check', 'model', 'read', 'package.json']) await cp(new URL(`../../tools/plan/${part}`, import.meta.url).pathname, join(root, 'tools', 'plan', part), { recursive: true });
@@ -1166,6 +1168,7 @@ test('packaging ships server/ and api/ at any depth, the model of the Workshop a
       const fine = await prepareVercel({ siteDir: site, distDir: join(dist, 'dist'), outputDir: join(root, 'a', '.vercel', 'output') });
       assert.ok(fine.files.includes(join('tools', 'workshop', 'model', 'markers.js')));
       assert.ok(fine.files.includes(join('tools', 'plan', 'write', 'index.js')));
+      assert.ok(fine.files.includes(join('website', 'src', 'workshop', 'build-check.ts')));
       // Another folder of the plan tool is refused.
       await mkdir(join(root, 'tools', 'plan', 'history'), { recursive: true });
       await writeFile(join(root, 'tools', 'plan', 'history', 'x.js'), 'export const x = 1;\n');
@@ -1184,14 +1187,14 @@ test('packaging ships server/ and api/ at any depth, the model of the Workshop a
       await mkdir(join(site, 'lib'), { recursive: true });
       await writeFile(join(site, 'lib', 'z.mjs'), 'export const z = 1;\n');
       await writeFile(config, `import '../lib/z.mjs';\n${original}`);
-      await assert.rejects(prepareVercel({ siteDir: site, distDir: join(dist, 'dist'), outputDir: join(root, 'd', '.vercel', 'output') }), /lib\/z\.mjs, in website\/ but outside website\/server\/ and website\/api\//);
+      await assert.rejects(prepareVercel({ siteDir: site, distDir: join(dist, 'dist'), outputDir: join(root, 'd', '.vercel', 'output') }), /lib\/z\.mjs, in website\/ but outside website\/server\/, website\/api\/ and the site's checks/);
       await assert.rejects(lstat(join(root, 'd', '.vercel', 'output')), 'nothing is written');
       // A package is refused like any other file outside server/ and api/.
       await mkdir(join(site, 'node_modules', 'pkg'), { recursive: true });
       await writeFile(join(site, 'node_modules', 'pkg', 'package.json'), '{ "name": "pkg", "type": "module", "main": "index.js" }\n');
       await writeFile(join(site, 'node_modules', 'pkg', 'index.js'), 'export const p = 1;\n');
       await writeFile(config, `import 'pkg';\n${original}`);
-      await assert.rejects(prepareVercel({ siteDir: site, distDir: join(dist, 'dist'), outputDir: join(root, 'e', '.vercel', 'output') }), /node_modules\/pkg\/index\.js, in website\/ but outside website\/server\/ and website\/api\//);
+      await assert.rejects(prepareVercel({ siteDir: site, distDir: join(dist, 'dist'), outputDir: join(root, 'e', '.vercel', 'output') }), /node_modules\/pkg\/index\.js, in website\/ but outside website\/server\/, website\/api\/ and the site's checks/);
       await assert.rejects(lstat(join(root, 'e', '.vercel', 'output')), 'nothing is written');
     } finally { await rm(dist, { recursive: true, force: true }); }
   } finally { await rm(root, { recursive: true, force: true }); }

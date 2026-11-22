@@ -15,9 +15,11 @@ import { planDir as defaultPlanDir, planEntries } from './plan-entries.mjs';
 // repository: website/api/ and website/server/ at any depth,
 // tools/workshop/model/ (the Workshop's model, with tools/workshop/package.json,
 // which makes it ESM), and the plan tool's write/, check/, model/ and read/ that
-// the owner's verdict runs (with tools/plan/package.json). Any other file it
-// would load, in website/ or outside it, stops the packaging: a package in
-// website/node_modules/ is one of them.
+// the owner's verdict runs (with tools/plan/package.json), and the site's
+// build checks it runs on a verdict's plan: website/src/workshop/build-check.ts
+// and the files of that folder it loads (the map), which Node loads as they
+// are, its types stripped. Any other file it would load, in website/ or outside
+// it, stops the packaging: a package in website/node_modules/ is one of them.
 // Beside the server goes plan-entries.json, the plan's entries made from the
 // plan at build time (scripts/plan-entries.mjs), which the server reads.
 export const ENDPOINTS = ['state', 'me', 'issue', 'login', 'callback', 'logout', 'comment', 'comment-vote', 'vote', 'suggest', 'verdict'];
@@ -31,6 +33,8 @@ export const DEFAULT_OUTPUT = join(website, '..', '.vercel', 'output');
 export const MODEL_DIR = join('tools', 'workshop', 'model');
 /** The folders of the plan tool the owner's verdict loads (server/verdicts.mjs), relative to the repository. */
 export const PLAN_DIRS = ['write', 'check', 'model', 'read'].map((name) => join('tools', 'plan', name));
+/** The folder of the site's build checks the owner's verdict loads (src/workshop/build-check.ts), relative to website/. */
+export const SITE_CHECK_DIR = join('src', 'workshop');
 
 async function exists(path) {
   return stat(path).then(() => true, () => false);
@@ -59,6 +63,7 @@ function functionFiles(siteDir) {
   const root = dirname(site);
   const model = join(root, MODEL_DIR) + sep;
   const plan = PLAN_DIRS.map((dir) => join(root, dir) + sep);
+  const checks = join(site, SITE_CHECK_DIR) + sep;
   const files = new Set();
   for (const file of loadedFiles(site)) {
     const allowed = [model, ...plan].find((dir) => file.startsWith(dir));
@@ -66,8 +71,10 @@ function functionFiles(siteDir) {
       files.add(file);
     } else if (file.startsWith(join(site, 'server') + sep) || file.startsWith(join(site, 'api') + sep)) {
       files.add(file);
+    } else if (file.startsWith(checks) && !file.slice(checks.length).includes(sep) && file.endsWith('.ts')) {
+      files.add(file);
     } else if (file.startsWith(site + sep)) {
-      throw new Error(`The function would load ${file}, in website/ but outside website/server/ and website/api/.`);
+      throw new Error(`The function would load ${file}, in website/ but outside website/server/, website/api/ and the site's checks of website/src/workshop/.`);
     } else {
       throw new Error(`The function would load ${file}, outside website/.`);
     }

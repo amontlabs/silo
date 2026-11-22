@@ -829,6 +829,7 @@ Back and Forward move between places; opening a row replaces the address.
 | `PartView.tsx`, `Suggest.tsx` | An opened part, Product's decisions and a film's place; the suggestions. |
 | `Entry.tsx` | A suggestion's row, and what any row shows open (`Panel`): the text, what the entry says of the plan's lists, its id and the button that copies it, the state, notes, history, and the thread with the votes on its comments. |
 | `routes.ts`, `plan.ts`, `map.ts`, `data.ts` | Addresses; the rows, statuses, films, parts' counts and states on top of the plan's model; the drawing; the build-time reader, the films' order and when a film is behind. |
+| `build-check.ts` | Every check that can stop the build on the plan's files: the plan tool's, the addresses the page keeps, the map's layout. The build runs it, and so does the server on the plan an owner's verdict would leave on `main`. |
 | `api.ts`, `writes.ts`, `memory.ts`, `RichText.tsx`, `Markdown.tsx`, `Boundary.tsx` | The API client, the page's own writes (a list of values set, kept a day; its comments six minutes), the remembered answer, person, view and order, text from GitHub, notes, the fallback list. |
 | `chunks.ts` | A chunk that fails: whether the site now serves another build. |
 | `prerender.tsx`, `NoScript.tsx`, `takeover.ts` | The markup the build writes into the page, the list for a reader without JavaScript, and the script's takeover. |
@@ -1118,7 +1119,17 @@ What the server does, with the owner's own token and nothing else:
    message, such as "model-tool has no answer and sets nothing: write its
    answer first". "Already" answers 200 with `"already": true` and writes
    nothing.
-6. In one GraphQL call, `createCommitOnBranch`, it makes the commit and moves
+6. It runs on the plan the verdict leaves every check that can stop the
+   site's build (`website/src/workshop/build-check.ts`, which the build runs
+   too): the plan tool's check, the addresses the page keeps, and the map's
+   layout. A verdict the plan tool accepts can still break the build: taking a
+   decision that replaces one a wire of the map rests on, or dropping a
+   feature a zone rests on. Such a verdict answers 409 `refused` with the
+   build's own message, and nothing is written. The layout is code
+   (`SILO_MAP` in `map.ts`), not a file of `main`, so the server checks the one
+   it was deployed with: a change to the map pushed to `main` and not yet
+   deployed is not seen.
+7. In one GraphQL call, `createCommitOnBranch`, it makes the commit and moves
    `main` to it: the changed files of `plan/` on the `main` it read, the
    message `Owner: take <id>` or `Owner: drop <id>` with no body, as `plan`
    writes it, and `expectedHeadOid`, the commit read in step 1. GitHub makes
@@ -1127,7 +1138,7 @@ What the server does, with the owner's own token and nothing else:
    A push to `main` meanwhile, or a reset of `main` to an older commit, is
    never undone. A file of `plan/` that is not a plain file (mode `100644`) on
    `main` refuses the verdict, since the call writes plain files only.
-7. When `main` was not where the call expected it (GitHub answers 409, or an
+8. When `main` was not where the call expected it (GitHub answers 409, or an
    error after which `main` is no longer the commit read), it starts again from
    step 1 on the new `main`. After three tries it answers 409 `busy`: "Main kept
    changing while the verdict was written. Try again." When the answer is lost
@@ -1560,8 +1571,12 @@ following Vercel's
   at their paths in the repository: `website/api/` and `website/server/` at
   any depth, the Workshop's
   model, `tools/workshop/model/*.js` with `tools/workshop/package.json` (which
-  makes it ESM), and the files of `tools/plan/` the owner's verdict loads
-  (`write/`, `check/`, `model/` and `read/`, with `tools/plan/package.json`).
+  makes it ESM), the files of `tools/plan/` the owner's verdict loads
+  (`write/`, `check/`, `model/` and `read/`, with `tools/plan/package.json`),
+  and the site's build checks it runs on a verdict's plan:
+  `website/src/workshop/build-check.ts` and the files of that folder it loads
+  (`map.ts`, `map-fit.ts`, `routes.ts`), TypeScript that Node loads with its
+  types stripped.
   The script finds what loads by loading the entry point in a separate
   process with a resolve hook, and refuses by name, before writing anything,
   any other file it loads, in `website/` or outside it. Beside the server it
@@ -1792,6 +1807,9 @@ services:
   that a stale `expectedHeadOid` changes nothing and answers an error, that a
   headline with no body gives the message `plan` writes, and that GitHub
   records the owner as the commit's author;
+- that Vercel's `nodejs24.x` runtime loads the TypeScript files of the site's
+  build checks (`build-check.ts`, `map.ts`) with their types stripped, as Node
+  24 does by default;
 - that GitHub answers `304` to the conditional issue and comment list pages as
   documented, and that the reaction summary in the issue list moves the page's
   ETag when a vote changes.

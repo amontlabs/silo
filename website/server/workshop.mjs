@@ -135,9 +135,10 @@ function memory(forMs) {
   };
 }
 
-// `entries`: the plan's entries by id, from entries.mjs.
+// `entries`: the plan's entries by id, from entries.mjs. `map`: the map's layout a verdict's plan is checked against
+// (verdicts.mjs), Silo's by default.
 export function createWorkshop({
-  config, entries = new Map(), fetch = globalThis.fetch, now = Date.now, log = defaultLog,
+  config, entries = new Map(), fetch = globalThis.fetch, now = Date.now, log = defaultLog, map,
   timeoutMs = DEFAULT_TIMEOUT, deadlineMs = DEADLINE, keepAlive = () => {},
 }) {
   // Every handler's GitHub calls, and every wait it does, share one deadline; background work runs outside it.
@@ -1073,7 +1074,7 @@ export function createWorkshop({
       const call = (method, path, options = {}) => github.request(method, path, { ...options, token: session.t, as: 'user' });
       let result;
       try {
-        result = await writeVerdict({ call, repo, entry, verdict: input.verdict, built: input.built });
+        result = await writeVerdict({ call, repo, entry, verdict: input.verdict, built: input.built, ...(map ? { map } : {}) });
       } catch (error) {
         // verdicts.mjs says when GitHub refused the write itself (DENIED); any other failure is answered as for every route.
         if (error instanceof VerdictRefusal) refuse(error.status, error.code, error.message);

@@ -8,6 +8,9 @@ import { drop, entryFile, take, verdictSubject } from '../../tools/plan/write/in
 import { isHidden, parsePlan } from '../../tools/plan/read/index.js';
 import { wordId } from '../../tools/plan/model/names.js';
 import { GitHubError } from './github.mjs';
+// The site's own checks and Silo's map, as deployed with this server: the layout is code, not a file of main.
+import { checkBuild, PlanFileError } from '../src/workshop/build-check.ts';
+import { SILO_MAP } from '../src/workshop/map.ts';
 
 export const BRANCH = 'main';
 /** How many times the write is done again when main moved between the read and the write. */
@@ -212,10 +215,11 @@ async function moved(call, repo, head) {
 /**
  * Writes the owner's verdict on `entry` ({ id, kind, part }, from the plan the server shipped with) on main.
  * `call(method, path, options)` calls GitHub with the owner's token. `built` is the commit the page was built from:
- * the entry's file there must be the one on main, so the verdict is for the text the owner saw. Answers
+ * what the page showed for the entry there must be on main, so the verdict is for the text the owner saw. `map` is the
+ * map's layout the plan the verdict leaves is checked against, as the site's build checks it. Answers
  * `{ status: 'done' | 'already', commit, message }`; throws a VerdictRefusal, or the GitHubError of a failed call.
  */
-export async function writeVerdict({ call, repo, entry, verdict, built, attempts = ATTEMPTS }) {
+export async function writeVerdict({ call, repo, entry, verdict, built, attempts = ATTEMPTS, map = SILO_MAP }) {
   const [owner, name] = repo.split('/');
   const path = entryFile(entry);
   for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -268,6 +272,17 @@ export async function writeVerdict({ call, repo, entry, verdict, built, attempts
     }
     if (outcome.status === 'refused') throw new VerdictRefusal(409, 'refused', outcome.message);
     if (outcome.status === 'already') return { status: 'already', commit: null, message: outcome.message };
+
+    // The plan the verdict leaves on main must pass every check of the site's build, or the deploy of main would
+    // fail: the plan tool's check, the addresses the Workshop keeps, and the map's layout as this server was built with.
+    const after = new Map(read.files);
+    for (const [file, text] of outcome.changed) after.set(file, text);
+    try {
+      checkBuild(after, map, exists);
+    } catch (error) {
+      if (error instanceof PlanFileError) throw new VerdictRefusal(409, 'refused', error.message);
+      throw error;
+    }
 
     // createCommitOnBranch writes plain files only: a file of another mode (executable) would lose it.
     for (const file of outcome.changed.keys()) {

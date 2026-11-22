@@ -32,8 +32,9 @@ export const PLAN_ENTRIES = [
 // `cuttable(path, body)` picks the calls the test holds: each is cut by `cut()` alone, failing as a call that timed
 // out does. No limit of the workshop's runs on such a call, and no clock of any kind, so a busy machine can neither
 // cut it early nor leave it uncut; every other call keeps the workshop's own limit.
-// `env` changes the variables the workshop reads; a variable set to undefined is removed.
-export async function setup({ configured = true, seed = true, cuttable, entries = PLAN_ENTRIES, env: changes = {} } = {}) {
+// `env` changes the variables the workshop reads; a variable set to undefined is removed. `map` is the map's layout a
+// verdict's plan is checked against, Silo's by default.
+export async function setup({ configured = true, seed = true, cuttable, entries = PLAN_ENTRIES, env: changes = {}, map } = {}) {
   const clock = { t: START };
   const now = () => clock.t;
   const fake = createFakeGitHub({ now });
@@ -60,7 +61,7 @@ export async function setup({ configured = true, seed = true, cuttable, entries 
         }
       }
     : fetch;
-  const workshop = createWorkshop({ config, entries: readPlanEntries(entries), now, log: (entry) => logs.push(JSON.stringify(entry)), fetch: limited });
+  const workshop = createWorkshop({ config, entries: readPlanEntries(entries), now, log: (entry) => logs.push(JSON.stringify(entry)), fetch: limited, ...(map ? { map } : {}) });
   const secrets = () => [...fake.issuedTokens, fake.clientSecret, env.WORKSHOP_SESSION_SECRET, ...[...fake.state.codes.keys()]].filter(Boolean);
 
   // A client of `target`, this setup's workshop unless another instance is given.

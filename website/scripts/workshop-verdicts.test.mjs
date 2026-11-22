@@ -13,6 +13,7 @@ import { ATTEMPTS, BUSY, CHANGED, DENIED, ownersVerdict, PARTIAL, shownFiles } f
 import { BUDGET } from '../server/workshop.mjs';
 import { entriesFrom, planEntries } from './plan-entries.mjs';
 import { ORIGIN, setup, withBudget } from './workshop-test-support.mjs';
+import { checkLayout, NO_MAP } from '../src/workshop/map.ts';
 
 const repository = fileURLToPath(new URL('../..', import.meta.url));
 const SAMPLE = join(repository, 'tools', 'plan', 'test', 'fixtures', 'sample');
@@ -25,10 +26,13 @@ function sampleFiles(change = {}) {
   return files;
 }
 
-/** The workshop on the fake GitHub, its main one commit holding the sample plan (`change` applied), and owner-fake signed in. */
-async function started({ change = {}, env } = {}) {
+/**
+ * The workshop on the fake GitHub, its main one commit holding the sample plan (`change` applied), and owner-fake signed
+ * in. The sample plan is not Silo's: its map is none, unless `map` gives one.
+ */
+async function started({ change = {}, env, map = NO_MAP } = {}) {
   const files = sampleFiles(change);
-  const t = await setup({ entries: entriesFrom(files), ...(env ? { env } : {}) });
+  const t = await setup({ entries: entriesFrom(files), map, ...(env ? { env } : {}) });
   const seed = t.fake.git.seed(new Map([...files].map(([name, text]) => [`plan/${name}`, text])));
   const owner = t.client();
   await owner.signIn('owner-fake');
@@ -612,4 +616,35 @@ test('a verdict already on main answers success before any freshness refusal: th
     const other = await t.verdict('linux-vm-engine', 'drop', t.seed);
     assert.deepEqual([other.status, other.json.error], [409, 'changed']);
   } finally { await t.close(); }
+});
+
+/** A map for the sample plan: a wire that rests on the decision `engine-language`, one on the feature `start-computer`. */
+const SAMPLE_MAP = {
+  file: 'the sample map',
+  places: { engine: { full: [0, 0, 600, 300], fold: [0, 0, 600, 80] }, record: { full: [0, 320, 600, 300], fold: [0, 90, 600, 80] } },
+  zones: [], notes: [], ghosts: [],
+  wires: [
+    { of: 'engine', d: 'M0 0H10', label: [0, 0, 'runs'], rests: ['engine-language'] },
+    { of: 'engine', d: 'M0 10H10', label: [0, 10, 'starts'], rests: ['start-computer'] },
+  ],
+};
+
+test('a verdict that would break the site\'s next build is refused with the build\'s own message, nothing written: the map\'s layout is checked on the plan it leaves', async () => {
+  const cases = [
+    ['zig-only', 'take', 'the sample map: the wire "runs" rests on the decision "engine-language", which was replaced by "zig-only". Fix: look at the wire, then name what it rests on now.'],
+    ['start-computer', 'drop', 'the sample map: the wire "starts" rests on the feature "start-computer", which was dropped. Fix: look at the wire, then name what it rests on now.'],
+  ];
+  for (const [id, kind, message] of cases) {
+    const t = await started({ change: withZigOnly(), map: SAMPLE_MAP });
+    try {
+      const response = await t.verdict(id, kind);
+      assert.deepEqual([response.status, response.json.error, response.json.message], [409, 'refused', message], response.body);
+      assert.equal(t.main(), t.seed);
+      assert.equal(t.gitWrites().length, 0);
+      // The plan tool alone accepts it: only the build's check stops it.
+      assert.equal((kind === 'take' ? take : drop)(t.files, id).status, 'done');
+      // A verdict that leaves the map as it was is written.
+      assert.equal((await t.verdict('no-detour', 'drop')).status, 200);
+    } finally { await t.close(); }
+  }
 });
