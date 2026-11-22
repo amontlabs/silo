@@ -65,7 +65,8 @@ Vite. It has two pages:
   - After a change to the film, with the dev server running, write its still
     again with `npm --prefix website run film-check -- --write-still`, then
     run `npm --prefix website run film-check`. It reads the film's frames in
-    Playwright's Firefox for words that overlap, are cut or are under 11 px
+    Playwright's Firefox, Chromium and WebKit, each in a process of its own
+    (`--browsers` names fewer), for words that overlap, are cut or are under 11 px
     from 390 wide up (it says the smallest size at 320 and does not fail on
     it), for a layout that changes while the film plays, for a page that
     scrolls sideways, for a still framed unlike the film and for rows of cards

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// The home page's film and cards where they need layout, in Playwright's Firefox.
-//   node scripts/film-check.mjs [url] [--write-still] [--shots <dir>]
+// The home page's film and cards where they need layout, in Playwright's Firefox, Chromium and WebKit.
+//   node scripts/film-check.mjs [url] [--browsers firefox,chromium,webkit] [--write-still] [--shots <dir>]
 // The url defaults to the dev server, http://127.0.0.1:4173/. `npm test` does not run it.
 //
 // It holds a frame every 100 ms of the loop at each of SCREENS and exits non-zero when
@@ -15,19 +15,41 @@
 //   a phone is not framed as that frame is at each of PHONES;
 // - in a row of cards at each of ROWS_AT the pictures, labels, titles or texts do not start at one height, as they
 //   are and with any of them taller, or the texts end more than a line apart.
-// --write-still writes that file. --shots saves the end of each shot, at each screen in both themes.
+// Each browser runs the whole check in a process of its own, and the check fails if it fails in one of them. The
+// browsers are Playwright's own: `npx playwright-core install firefox chromium-headless-shell webkit` once.
+// --write-still writes that file, from Firefox, which is also the only browser that compares it. --shots saves the
+// end of each shot, at each screen in both themes, in a folder per browser.
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { firefox } from 'playwright-core';
+import { spawnSync } from 'node:child_process';
+import { chromium, firefox, webkit } from 'playwright-core';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
-  options: { 'write-still': { type: 'boolean' }, shots: { type: 'string' } },
+  options: { 'write-still': { type: 'boolean' }, shots: { type: 'string' }, browsers: { type: 'string' } },
 });
 const URL_ = positionals[0] ?? 'http://127.0.0.1:4173/';
+const ENGINES = { firefox, chromium, webkit };
+const BROWSERS = (values.browsers ?? 'firefox,chromium,webkit').split(',');
+/** The browser src/film/still.html is written from: --write-still uses it whatever --browsers says. */
+const STILL_BROWSER = 'firefox';
+for (const name of BROWSERS) if (!(name in ENGINES)) throw new Error(`no browser named ${name}: use ${Object.keys(ENGINES).join(', ')}`);
+if (values['write-still']) BROWSERS.splice(0, BROWSERS.length, STILL_BROWSER);
+if (BROWSERS.length > 1) {
+  const failed = [];
+  for (const name of BROWSERS) {
+    console.log(`== ${name}`);
+    const args = [URL_, '--browsers', name];
+    if (values.shots) args.push('--shots', join(values.shots, name));
+    const run = spawnSync(process.execPath, [fileURLToPath(import.meta.url), ...args], { stdio: 'inherit' });
+    if (run.status !== 0) failed.push(name);
+  }
+  if (failed.length) console.log(`the film fails in ${failed.join(', ')}`);
+  process.exit(failed.length ? 1 : 0);
+}
 const STILL_FILE = fileURLToPath(new URL('../src/film/still.html', import.meta.url));
 const SCREENS = [[1440, 900], [1280, 720], [1024, 768], [390, 844]];
 /** The screens where the whole film has to show without scrolling. */
@@ -56,11 +78,14 @@ const { TIMED, LENGTH, STILL, endOf, VIEW, CANVAS, viewAt } = await (async () =>
   }
 })();
 
-const browser = await firefox.launch();
+const browser = await ENGINES[BROWSERS[0]].launch();
 const problems = new Set();
 
 async function open([width, height], { theme = 'light', script = true, query = '?hold=0' } = {}) {
-  const context = await browser.newContext({ viewport: { width, height }, colorScheme: theme, javaScriptEnabled: script });
+  // A screen as narrow as a phone's opens as a phone where the browser can, so it has no desktop scroll bar taking
+  // 15 px of its width (Playwright's Firefox cannot, and has none at these widths).
+  const phone = width <= 640 && BROWSERS[0] !== 'firefox' ? { isMobile: true, hasTouch: true } : {};
+  const context = await browser.newContext({ viewport: { width, height }, colorScheme: theme, javaScriptEnabled: script, ...phone });
   const page = await context.newPage();
   page.on('pageerror', (error) => problems.add(`${width} x ${height}: ${error.message}`));
   await page.goto(URL_ + query);
@@ -359,7 +384,8 @@ try {
     await writeFile(STILL_FILE, await still());
     console.log(`wrote ${STILL_FILE}`);
   } else {
-    if ((await readFile(STILL_FILE, 'utf8')) !== (await still())) problems.add('src/film/still.html is not the film at the end of Network: write it again with --write-still');
+    // The still holds the widths of its words as Firefox measures them, so only Firefox can draw it again exactly.
+    if (BROWSERS[0] === STILL_BROWSER && (await readFile(STILL_FILE, 'utf8')) !== (await still())) problems.add('src/film/still.html is not the film at the end of Network: write it again with --write-still');
 
     for (const width of PHONES) {
       const live = await open([width, 844], { query: `?hold=${STILL}` });
@@ -426,10 +452,13 @@ try {
       await close();
     }
 
-    const { page, close } = await open([1440, 900]);
+    // Widths up to a phone's are swept in a page opened as a phone, the others in a desktop page.
+    const desktop = await open([1440, 900]);
+    const narrow = BROWSERS[0] === 'firefox' ? desktop : await open([640, 844]);
     const widths = new Set([999, 1000, 1064, 1065, 640, 641, 900, 901, 1440]);
     for (let width = NARROWEST; width <= 1440; width += 10) widths.add(width);
     for (const width of [...widths].sort((a, b) => a - b)) {
+      const { page } = width <= 640 ? narrow : desktop;
       await page.setViewportSize({ width, height: 844 });
       await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(true)))));
       if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) problems.add(`${width} wide: the page scrolls sideways`);
@@ -440,7 +469,8 @@ try {
       if (width < 390) continue;
       for (const problem of (await readFrames(page, TIMED.map(endOf))).found) problems.add(`${width} wide: ${problem}`);
     }
-    await close();
+    await desktop.close();
+    if (narrow !== desktop) await narrow.close();
   }
 
   if (values.shots) {
