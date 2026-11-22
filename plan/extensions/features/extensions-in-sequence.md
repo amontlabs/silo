@@ -1,5 +1,25 @@
 # Extensions in sequence
 
+## For the owner
+
+An agent's part, 22 November 2026. Main's agents make 2,000 tool calls a day. A pattern in Silo
+sorts 1,900 of them as ordinary. A small model, added as an extension, looks at the other 100 and is
+unsure about 6. Your own agent program, in an extension's computer, looks at those 6 and alerts you
+about one.
+
+The options:
+
+- Build it (recommended). Each step wakes only when the one before is unsure, so the costly one sees
+  a few calls a day. It costs time when a request waits for all three, since they share one limit
+  and the last may not get its turn, and you set up each step.
+- Leave it out. Each extension looks at everything it is woken for. It costs tokens: an agent asked
+  about 2,000 calls a day, or only the small model's opinion.
+
+Recommended: build it. Spam filters and fraud checks work the same way, cheap checks first and a
+costly look last, because most of what they see is ordinary.
+
+## Notes
+
 Set aside for later by the owner. The three tiers, as agreed before they were set aside:
 
 > **Three tiers** (Agreed). Each wakes only when the one before cannot judge.

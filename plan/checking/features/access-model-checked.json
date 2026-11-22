@@ -7,5 +7,9 @@
     "four-ways-to-check",
     "checked-or-scored",
     "properties-are-checked"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "`model-of-access-first`, taken, already commits to building exactly this test."
+  }
 }

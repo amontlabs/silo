@@ -1,5 +1,6 @@
 {
   "asks": "Does an extension say it is done when it has nothing to say?",
+  "answer": "Yes, by ending. Each wake runs a command in the extension's computer, and the wake is done when that command exits, whether it had something to say or not. A wake on a waiting request is done when the extension answers, within the wait's limit. The record keeps when each wake started and how it ended, and the app shows when the extension last finished. A wake that exits with an error, or has not ended by the limit its manifest gives, counts as failed: Silo ends it, and the lines it was woken for are given again at the next wake. After three failed wakes in a row, Silo alerts the user that the extension is not working. A wake that comes while the last one still runs is skipped, and the record says so.",
   "needs": [
     "extension-manifest"
   ]

@@ -5,11 +5,14 @@
     "extension-manifest",
     "built-in-classifiers-run-inside"
   ],
+  "replaces": [
+    "what-a-classifier-is"
+  ],
   "sets": [
     {
       "in": "words",
       "word": "classifier",
-      "means": "Whatever gives a value from a fixed list as its opinion: a pattern or a function inside Silo, or an extension.",
+      "means": "A pattern or a function inside Silo, or an extension, that gives its opinion as a value from a fixed list.",
       "not": [
         "judge",
         "labeler"

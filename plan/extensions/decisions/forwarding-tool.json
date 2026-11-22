@@ -1,6 +1,9 @@
 {
   "asks": "Which tool lets an extension forward alerts and asks?",
+  "answer": "None of its own: forwarding is reading. An alert raised and an ask raised are control lines of the record, so an extension granted to read the control lines of the computers the user chose gets each one as it comes. Its computer sends them on where its own rules allow, such as to a phone service. It cannot answer an ask, since an answer can grant and no tool of an extension grants: the user answers in Silo.",
   "needs": [
-    "extension-tools"
+    "extension-tools",
+    "kinds-of-lines",
+    "read-grant-names-its-part"
   ]
 }

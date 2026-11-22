@@ -1,4 +1,8 @@
 {
   "name": "Extensions in sequence",
-  "what": "Extensions woken in sequence, cheap first: one extension woken by another's opinion."
+  "what": "Extensions woken in sequence, cheap first: one extension woken by another's opinion.",
+  "suggest": {
+    "verdict": "take",
+    "why": "Asking a costly model only about what a cheap step could not sort keeps a careful opinion affordable."
+  }
 }

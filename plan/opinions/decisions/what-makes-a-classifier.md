@@ -1,5 +1,27 @@
 # What makes an extension a classifier
 
+## For the owner
+
+An agent's part, 22 November 2026. Silo's own small check that says which run wrote a file gives a
+value from a list, and so does an extension named Leftovers that answers "by a rebuild" about
+/work/app/node_modules. An extension that sends an alert to your phone when a deploy ends gives no
+such value.
+
+The options:
+
+- Only what answers from a fixed list (recommended). "Classifier" means "A pattern or a function
+  inside Silo, or an extension, that gives its opinion as a value from a fixed list." The first two
+  are classifiers and the third is not. It costs one more word to learn, for one case, and a change
+  to the meaning in force.
+- Whatever gives an opinion, the meaning in force. The first two are classifiers, and so is whatever
+  counts how many runs wrote a file, since that count is an opinion too. It costs a word that covers
+  anything with a view, so it says nothing about what a thing gives.
+- No word. The app says "an extension that answers" and "Silo's own checks". It costs two names for
+  one idea, in the app and in the docs.
+
+Recommended: only what answers from a fixed list. On 21 November you gave that as the reason the
+word fits: it gives a value from a fixed list.
+
 ## The owner's words
 
 - First, as a hunch: "classifier" may be only a name for an added program whose output fits, not

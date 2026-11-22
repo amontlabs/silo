@@ -1,6 +1,6 @@
 {
   "asks": "Does Silo enforce what a manifest says?",
-  "answer": "The manifest is what the user accepts when installing an extension and what Silo enforces afterwards.",
+  "answer": "Silo holds an extension to the manifest the user accepted and to the choices the user made when installing it, such as the computers each tool applies to. Anything else the extension tries is refused, and the refusal is a fact in the record. A new version comes with its own manifest and is imported and installed like any extension: nothing of it is switched on until the user installs it, and until then the version the user accepted stays as it is.",
   "needs": [
     "extension-manifest"
   ],
@@ -8,7 +8,7 @@
     {
       "in": "extensions/properties",
       "id": "manifest-bounds-an-extension",
-      "says": "The manifest is what the user accepts when installing an extension and what Silo enforces afterwards.",
+      "says": "An extension gets only what the manifest the user accepted names: its rules, its computer, what wakes it and its tools, on the computers the user chose.",
       "kind": "safety",
       "check": [
         "hostile test"

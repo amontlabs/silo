@@ -19,5 +19,9 @@
   "keeps": [
     "extension-uses-only-named-tools",
     "no-tool-grants-or-destroys"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It is the simplest useful extension: it reads and tells you, and it can stop nothing."
+  }
 }

@@ -1,6 +1,6 @@
 {
   "asks": "How is your answer to a question kept?",
-  "answer": "It is stored as a path pattern and a kind, so it applies to the past as well as the future. Like everything you do in Silo, that you answered is written in the record.",
+  "answer": "Your answer is kept as your opinion about a pattern of what was asked, such as the paths /work/*/.next, with the kind you gave, such as \"build\". The app shows the pattern before you answer, and you can narrow it to the one path asked about. It applies to the past as well as the future, and stays until you change it. Like everything you do in Silo, that you answered is written in the record.",
   "needs": [
     "questions-to-you"
   ]

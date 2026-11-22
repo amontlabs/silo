@@ -8,5 +8,9 @@
     "file-changes-in-the-record",
     "what-traffic-gives",
     "model-calls-in-the-record"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Silo sees every run from outside, whichever program or app started it, so it is the one place that can tell you a run is stuck or going in circles."
+  }
 }

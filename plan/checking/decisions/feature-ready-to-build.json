@@ -1,4 +1,4 @@
 {
   "asks": "When is a feature ready to build?",
-  "answer": "A feature is ready to build when its properties can be written."
+  "answer": "A feature is ready to build when it is taken and everything it needs is done, as `plan` says. Its properties are written by then: those it adds are part of what the owner took, and those it keeps are named in it. A feature that adds or keeps none is ready all the same, and its tests check it against what the feature says."
 }

@@ -1,4 +1,8 @@
 {
   "name": "A trial on the past",
-  "what": "An extension run on the recorded past before it goes live."
+  "what": "An extension run on the recorded past before it goes live.",
+  "suggest": {
+    "verdict": "take",
+    "why": "The record is already kept, so running a candidate on it is the cheapest honest test before it acts on your computers."
+  }
 }

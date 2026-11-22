@@ -1,5 +1,23 @@
 # When a feature is ready to build
 
+## For the owner
+
+An agent's part, 22 November 2026. The feature "How each run is going" is taken, and everything it
+needs is done. It adds no promise and keeps none.
+
+The options:
+
+- Ready now (recommended). It is built, and its tests check that each run gets a state. It costs a
+  feature with no promise being checked only against its own description.
+- Ready once a promise of its own is written. Someone writes one, such as "every run has exactly one
+  state at any time", and you agree to it first. It costs a promise for every feature, each one
+  yours to agree to, including features like the layout of a view where there is nothing to promise.
+
+Recommended: ready now. The promises a feature needs come to you with it, when you take it, and a
+second gate adds work and no safety.
+
+## Notes
+
 The plan's model says a feature is ready when it is taken and everything it needs is done. This
 answer would add a condition.
 

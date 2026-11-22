@@ -1,4 +1,4 @@
 {
   "asks": "How is the result of a check stated?",
-  "answer": "Say what was checked and how: \"checked on every sequence of up to N calls\", \"held in these runs\". Never \"proven\" for the product."
+  "answer": "A result says what was checked, how, and on what: \"checked on every sequence of up to 6 calls among 3 computers\", \"held in 1 million simulated histories\", \"held in hostile tests on macOS 26\". It also says what the check does not look at, such as \"Linux computers not checked yet\". It names the version of Silo and the date. Never \"proven\" for the product."
 }

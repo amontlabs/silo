@@ -1,5 +1,24 @@
 # How the result of a check is stated
 
+## For the owner
+
+An agent's part, 22 November 2026. Under the promise "A restore changes only what is inside the
+computer", the site says: "Held in 1 million made-up histories of up to 200 steps, and in tests that
+attack a real computer on macOS 26. Not checked on Linux yet. Silo 0.4, 3 December 2026."
+
+The options:
+
+- What was checked, and what was not (recommended). Each promise says how it was checked and what
+  the check leaves out. It costs promises that show their limits, which read weaker than another
+  product's "secure".
+- What was checked only. It costs a reader who assumes the check covers more than it does, such as
+  Linux when only macOS was tested.
+
+Recommended: what was checked, and what was not. A developer trusts a claim whose limits are written
+next to it.
+
+## Notes
+
 The record's list of properties says it again: results are stated as the runs covered, never as
 "proven".
 

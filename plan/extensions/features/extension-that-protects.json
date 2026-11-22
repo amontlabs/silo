@@ -24,5 +24,9 @@
     "precaution-grants-nothing",
     "deny-beats-hold-beats-allow",
     "allow-hold-deny-only-synchronous"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It lets a check stop a push before it goes, and since it can only deny, hold or pause, being wrong costs time, never access."
+  }
 }

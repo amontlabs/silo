@@ -8,7 +8,6 @@
     "what-makes-a-classifier",
     "opinion-is-a-value",
     "who-fixes-the-values",
-    "how-an-opinion-is-shown",
     "opinions-computed-again",
     "classifier-mechanics",
     "extension-gives-an-opinion"
@@ -17,5 +16,9 @@
     "opinion-stored-apart",
     "report-never-stored-as-fact",
     "never-shown-as-a-fact"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Most of what people want to know from the record, such as which agent did what, is a judgement, and this is how Silo gives one without letting it pass for a fact."
+  }
 }

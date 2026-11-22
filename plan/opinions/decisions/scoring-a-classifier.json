@@ -1,4 +1,4 @@
 {
   "asks": "How is a new version of a classifier checked before it replaces the old one?",
-  "answer": "Your answers are also test cases. A new version of a classifier is run on the record and compared with your answers before it replaces the old one."
+  "answer": "When a new version of a classifier arrives, with Silo or with an extension, it first runs beside the old one on the part of the record your answers are about. The app shows how many of your answers each version agrees with, and which opinions would change. If the new version agrees with as many as the old one or more, its opinions replace the old ones. If it agrees with fewer, the old one stays until you choose. With no answers of yours, the new version replaces the old one. If the new version fails or does not finish, the old one stays and the app says so. The run costs what the classifier spends, such as tokens for one that calls a model."
 }

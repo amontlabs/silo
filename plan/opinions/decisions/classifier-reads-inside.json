@@ -1,4 +1,4 @@
 {
   "asks": "May a built-in classifier read content inside a computer?",
-  "answer": "A built-in classifier may also read content inside a computer, such as the state of a Git repository. That content is under the agent's control. This is acceptable for an opinion, and it is the reason a rule never reads one. Such an opinion, and one from a model, can come out differently when it is computed again."
+  "answer": "Yes. A built-in classifier may also read content inside a computer, such as the state of a Git repository. That content is under the agent's control, so an opinion that rests on it can be steered by the agent. This is acceptable for an opinion, and it is the reason a rule never reads one. Content inside never takes a path off the list of what is only here on its own: to say \"by a pull\", the classifier also needs something seen from outside the computer to agree, such as the push seen at the boundary. Without it, the path stays \"only here\". Which signs from outside Silo can use is to find out. An opinion that rests on content inside, and one from a model, can come out differently when it is computed again."
 }

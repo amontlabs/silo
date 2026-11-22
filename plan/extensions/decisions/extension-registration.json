@@ -1,3 +1,4 @@
 {
-  "asks": "How is an extension registered and started?"
+  "asks": "How does Silo keep an extension and connect its program to its tools?",
+  "answer": "Silo keeps each imported extension as its manifest and its files, named by its name, its version and a digest of its files, so that a changed file makes a new version. Installing records which version the user accepted, and on which computers. For each wake, Silo runs the command the manifest names in the extension's computer. Its program reaches its tools through one channel from its computer to the engine. Each call on that channel carries the extension, and the engine refuses a call outside what the user granted, as `who-can-call-the-engine` asks of every call from inside a computer."
 }

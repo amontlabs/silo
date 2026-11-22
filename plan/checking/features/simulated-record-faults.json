@@ -7,5 +7,9 @@
     "record-of-a-computer",
     "gaps-in-the-record",
     "flood-keeps-the-past"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "`record-fakes`, taken, already commits to building exactly these three fakes."
+  }
 }

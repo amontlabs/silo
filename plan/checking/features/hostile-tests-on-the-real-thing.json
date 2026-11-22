@@ -7,5 +7,9 @@
     "how-results-are-said",
     "computers-main-on-a-mac",
     "open-limited-or-closed"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "`checks-on-the-real-thing`, taken, already commits to these tests."
+  }
 }

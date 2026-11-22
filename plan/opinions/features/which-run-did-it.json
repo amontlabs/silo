@@ -10,9 +10,15 @@
     "processes-in-the-record",
     "what-each-run-wrote",
     "what-traffic-gives",
-    "model-calls-in-the-record"
+    "model-calls-in-the-record",
+    "agent-program-data-file",
+    "hot-files"
   ],
   "keeps": [
     "books-balance"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Which agent did what is the first thing people ask of a computer several agents share, and six features need the answer."
+  }
 }

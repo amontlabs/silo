@@ -1,3 +1,4 @@
 {
-  "asks": "May an extension offer extra tools to agents in other computers?"
+  "asks": "May an extension offer extra tools to agents in other computers?",
+  "answer": "No. An extension serves the user: no other computer has a channel to an extension's computer, so agents cannot talk to what reads or protects their computer. Tools for agents come from an ordinary computer that the user lets them reach through a channel, such as an MCP server in a computer of its own."
 }

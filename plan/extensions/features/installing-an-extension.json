@@ -1,4 +1,8 @@
 {
   "name": "Installing an extension",
-  "what": "Installing an extension, and taking a grant back."
+  "what": "Installing an extension, and taking a grant back.",
+  "suggest": {
+    "verdict": "take",
+    "why": "Without it an extension, once installed, keeps every tool it was granted."
+  }
 }

@@ -5,5 +5,9 @@
     "speed-against-budgets",
     "publishing-measurements",
     "how-speed-is-measured"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Speed is a requirement of Silo, and dated numbers on a named machine are how people can hold it to that."
+  }
 }

@@ -6,5 +6,9 @@
     "how-results-are-said",
     "property-serves-three-times",
     "properties-are-checked"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "People who give agents full access want to see what was checked, and the page is written by the checks themselves."
+  }
 }

@@ -1,4 +1,4 @@
 {
   "asks": "Does Silo ship a classifier for heat?",
-  "answer": "Heat: paths written by many runs, for the map only."
+  "answer": "No classifier of its own. Heat is the number of runs that wrote a path, counted from the opinions on which run wrote each path, and it is as sure as they are. Silo counts it for the map of hot files."
 }

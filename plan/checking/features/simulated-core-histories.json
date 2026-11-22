@@ -12,5 +12,9 @@
     "assertions-stay-on",
     "properties-are-checked",
     "engine-program-and-clients"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "`core-simulator` and `simulator-faults`, taken, already commit to building exactly this."
+  }
 }

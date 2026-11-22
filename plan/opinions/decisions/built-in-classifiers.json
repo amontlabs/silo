@@ -1,4 +1,4 @@
 {
   "asks": "Which classifiers ship with Silo?",
-  "answer": "Runs, and the run of each conversation; how a path would come back; kind of call; state of a run; stretches of a run; repeats; owner of leftovers; heat."
+  "answer": "Runs, and the run of each conversation; how a path would come back; the kind of each request; state of a run; stretches of a run; repeats; owner of leftovers. Heat is counted from the opinions on which run wrote each path, and is not a classifier of its own (`heat-is-built-in`)."
 }

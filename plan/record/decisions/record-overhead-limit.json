@@ -2,7 +2,8 @@
   "asks": "How much may keeping the record slow a computer?",
   "answer": "Keeping the record slows a build or a parallel test suite in a computer by no more than 5 percent. The number is a target written before the code, as `own-cost-targets` asks. Whether it can be kept is to find out, by `record-speed-cost`. If the measure says it cannot, the number comes back to the owner, and the record is not thinned quietly to meet it.",
   "needs": [
-    "record-speed-cost"
+    "record-speed-cost",
+    "own-cost-targets"
   ],
   "sets": [
     {

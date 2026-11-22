@@ -1,11 +1,14 @@
 {
   "asks": "What does the app show before you confirm a grant?",
-  "answer": "Before the user confirms a grant, the app shows the paths it adds: from which computer data can reach which host.",
+  "answer": "Before the user confirms a grant, the app shows every path the grant adds: from which computer data can reach which host, the user's Mac or another computer, and through which computers on the way. For an extension that reads main, a path goes from main to the extension's computer, then to each host that computer may reach. When a computer on the way may reach any host, the app says \"any host\". Where a host sends the data next is not shown, because Silo cannot see it.",
+  "needs": [
+    "paths-out-are-shown"
+  ],
   "sets": [
     {
       "in": "extensions/properties",
       "id": "paths-shown-before-a-grant",
-      "says": "Before the user confirms a grant, the app shows the paths it adds: from which computer data can reach which host.",
+      "says": "Before the user confirms a grant, the app shows every path the grant adds: from which computer data can reach which host, the user's Mac or another computer.",
       "kind": "safety",
       "check": [
         "test"

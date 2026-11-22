@@ -54,7 +54,7 @@ only adds rules has no computer at all. So the two words stay apart.
 ## Why "extension"
 
 "Plugin" says something is plugged into the host, and nothing loads into the engine or the app
-(`extended-from-outside`). VS Code and browsers call "extension" what is installed while the host
+(`extension-ships-a-computer`). VS Code and browsers call "extension" what is installed while the host
 runs, in its own process, with a limited set of tools and a manifest.
 
 ## What it replaces

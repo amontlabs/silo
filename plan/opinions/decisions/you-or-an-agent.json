@@ -1,4 +1,4 @@
 {
   "asks": "How does Silo know whether you or an agent did something in a computer?",
-  "answer": "What descends from a session you opened yourself (a terminal over SSH, your editor) is you. What descends from an agent program is a run. The rest is unattributed. A built-in classifier tells them apart from the process tree, which is a report: its answer is an opinion."
+  "answer": "A built-in classifier sorts each process from the process tree, which is a report, so its answer is an opinion. A process that descends from an agent program belongs to that program's run, even when you started the program from your own terminal. Any other process that descends from a session opened over SSH from outside the computer (your terminal, your editor, or the commands an agent app runs itself) is you. The rest is unattributed. An agent program that Silo does not recognise counts as what started it. An agent inside can also make its work look like yours or like another run's, so the opinion can be wrong."
 }

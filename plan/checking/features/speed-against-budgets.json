@@ -11,5 +11,9 @@
     "computers-main-on-a-mac",
     "forking-a-computer",
     "checkpoints-taken-on-their-own"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "`speed-budgets` and `how-speed-is-measured`, taken, already commit to these measurements."
+  }
 }

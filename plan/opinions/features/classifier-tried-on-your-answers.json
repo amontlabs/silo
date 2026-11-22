@@ -6,5 +6,9 @@
     "scoring-a-classifier",
     "opinions-computed-again",
     "checked-or-scored"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Your answers are the only test of what right means for your work, and a version that does worse on them should not go live unnoticed."
+  }
 }

@@ -5,12 +5,15 @@
     "opinions-beside-the-record",
     "questions-to-you",
     "how-your-answer-is-kept",
-    "your-opinion-stays-an-opinion",
     "kinds-of-lines",
     "what-needs-you"
   ],
   "keeps": [
     "your-opinion-kept-as-given",
     "opinion-stored-apart"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "You can tell at a glance what Silo cannot, and one answer covers every folder like it."
+  }
 }

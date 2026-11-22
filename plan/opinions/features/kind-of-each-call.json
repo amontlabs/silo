@@ -6,6 +6,11 @@
     "built-in-classifiers",
     "as-sure-as-least-sure",
     "kinds-of-lines",
-    "hosts-reached-and-denied"
-  ]
+    "hosts-reached-and-denied",
+    "ecosystem-data"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The few requests that change something elsewhere are what you want to see among a thousand that only fetch."
+  }
 }

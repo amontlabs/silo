@@ -1,5 +1,6 @@
 {
   "asks": "Who fixes the list of values an opinion may take?",
+  "answer": "Silo fixes each list, one for each thing it asks about, such as how a path would come back: by a pull, by a rebuild, or only here. Silo's own classifiers and extensions answer from the same lists. An answer outside the list is refused, and that it was refused is a fact in the record. An extension that needs another list waits until Silo offers one.",
   "needs": [
     "opinion-is-a-value"
   ]

@@ -1,4 +1,4 @@
 {
   "asks": "Can the app ask you what you think?",
-  "answer": "The app can put a question to you (\"is this a build?\"). Your answer is your opinion."
+  "answer": "The app can put a question to you, such as \"is /work/site/.next a build?\". Your answer is your opinion. The question waits in the app until you answer it, and no work waits for your answer."
 }

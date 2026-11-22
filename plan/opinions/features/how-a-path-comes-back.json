@@ -8,6 +8,11 @@
     "classifier-mechanics",
     "what-would-bring-it-back",
     "file-changes-in-the-record",
-    "git-history-inside"
-  ]
+    "git-history-inside",
+    "ecosystem-data"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It is what lets you drop a fork knowing what you lose, and the list of what is only here, the view of the disk and receipts need it."
+  }
 }

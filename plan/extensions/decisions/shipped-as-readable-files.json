@@ -1,6 +1,6 @@
 {
   "asks": "How are the classifiers and precautions that ship with Silo shipped?",
-  "answer": "Shipping them as files anyone can read.",
+  "answer": "As files anyone can read, the same as for an extension someone else wrote: its manifest, its rules, its recipe and the source of the code its computer runs. The user can open each of them in Silo before installing it.",
   "needs": [
     "what-ships-with-silo"
   ]
