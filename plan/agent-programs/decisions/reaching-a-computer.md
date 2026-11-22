@@ -46,3 +46,12 @@ How sure this research is:
 - Almost no independent user review was found of the tools for following many agents. No Reddit or
   Hacker News thread could be read.
 - The findings are kept outside this repository.
+
+## Found by an audit, 22 November 2026
+
+An agent's part. One yes here gives every computer, "including one made a moment ago", a way in from
+your Mac, but `channel-question` says every channel is listed, has a rule, and none exists by
+default. In a fork with no grant, `scp fork-3:/work/secret.txt .` takes a file out. The audit
+proposes to add "the way in from your Mac (a terminal, an editor)" to `channel-list`, and to say
+here that the yes grants it to every computer, present and future. A second audit asks to remove
+"repository access" from `channel-list`, since `security-framing` says no destination is special.

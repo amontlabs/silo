@@ -15,3 +15,12 @@ whoever builds it.
   `enforcing-and-recording` keeps enforcement independent of the record. This extends it: a failed
   diagnostic never changes or skips the operation it describes.
   ([source](https://github.com/evmts/guillotine/blob/dbdf61bd7902c726cdfb4cf80d60ed0e02da5663/test_runner.zig#L111))
+
+## Found by an audit, 22 November 2026
+
+An agent's part. This would set "Enforcing does not depend on recording", with a gap recorded when
+the buffer is full. In force, Silo changes nothing in traffic without recording it
+(`denied-tool-call`) and each decision is recorded (`how-a-rule-is-enforced`). The recorder is down,
+the buffer is full, and a rule denies a tool call: the denial goes ahead and only a gap is recorded.
+The audit proposes that this entry needs `change-when-record-cannot-be-written` and says "except
+where Silo changes traffic: there the change is recorded or it is not made."

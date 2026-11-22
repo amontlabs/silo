@@ -37,3 +37,12 @@ The owner now understands it this way: an answer belongs to a tool. An extension
 "deny or hold the network requests of main" must give that answer, and other tools may bring other
 answers. It can be called a classifier if it really needs a name. The owner agrees to leave this
 decision undecided and to keep the word out of the fifth film.
+
+## Found by an audit, 22 November 2026
+
+An agent's part. `meanings-for-what-silo-knows` sets `classifier` as "Whatever gives an opinion",
+and this entry as "An extension that gives a value from a fixed list": the second take overwrites
+the first. The built-in classifier for heat is a function that `processes` runs in the recorder, not
+an extension with a computer. The audit proposes that this entry alone sets the word: "Whatever
+gives a value from a fixed list as its opinion: a pattern or a function inside Silo, or an
+extension." A second audit asks instead: is each built-in an extension with a computer?

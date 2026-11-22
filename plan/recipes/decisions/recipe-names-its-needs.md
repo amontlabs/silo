@@ -21,3 +21,12 @@
   secrets they need, without holding their values.
 - With this, an extension's computer needs nothing special: `extension-secrets` in the part
   `extensions`. Importing an extension is `import-then-install` there.
+
+## Found by an audit, 22 November 2026
+
+An agent's part. This says a recipe may name the rules its computer comes with, and
+`recipe-source-in-repository` says rules are never a file in a repository. A repository holds the
+recipe of its test computer and names `registry.npmjs.org`; an agent in main adds `paste.rs`, and
+`tasks-test-your-changes` switches the rule on. The audit proposes that the source may name rules
+and secrets as proposals, which Silo switches on only with your yes, and that the rules in force are
+kept by the engine and never read from the repository.
