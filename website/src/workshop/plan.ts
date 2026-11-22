@@ -29,6 +29,8 @@ export interface Entry {
   what: string | null;
   needs: string[];
   verdict: Verdict | null;
+  /** Who wrote the verdict when it was the agents (`"by": "agents"`); null for the owner, and for no verdict. */
+  by: 'agents' | null;
   /** A decision's `replaces`: the ids of the decisions it takes the place of. */
   replaces: string[];
   /** A decision's `replaced_by`: the id of the decision that replaced it, written by `plan take`. */
@@ -65,12 +67,16 @@ export interface Change {
   text?: { before: ChangeText; after: ChangeText };
   /** With `replaced`: the id of the decision that replaced it. */
   by?: string;
+  /** With `taken` or `dropped`: the agents wrote the verdict, not the owner. */
+  agents?: true;
 }
 
 /** The newest change of an entry and the number of its changes: all a closed History line needs. */
 export interface HistorySummary {
   date: string;
   what: ChangeName[];
+  /** Whether the newest change is a verdict the agents wrote. */
+  agents?: true;
   count: number;
 }
 
@@ -211,6 +217,8 @@ export interface Row {
   history: HistorySummary | null;
   /** The entry's verdict; null for no verdict, and for anything that is not an entry. */
   verdict: Verdict | null;
+  /** Who wrote the verdict when it was the agents; null for the owner, and for anything that is not an entry. */
+  by: 'agents' | null;
   /** The keys of the rows of the entries it needs. */
   needs: string[];
   /** The day the file says its build started. */
@@ -287,6 +295,14 @@ export function splitRows(rows: Row[]): { features: Row[]; decisions: Row[] } {
   return { features: rows.filter((row) => row.of === 'feature'), decisions: rows.filter((row) => row.of === 'decision') };
 }
 
+/**
+ * A row's state word with who decided it: "decided by agents" and "dropped by agents" for a verdict the agents wrote,
+ * the word as it is for anything else.
+ */
+export function byWho(row: Row, word: string): string {
+  return row.by === 'agents' && (row.status === 'decided' || row.status === 'dropped') ? `${word} by agents` : word;
+}
+
 /** Whether a row stands as decided: a replaced decision does not, whatever it once was. */
 export function isDecided(row: Row): boolean {
   return row.status !== 'undecided' && row.status !== 'replaced';
@@ -331,7 +347,7 @@ function suggestionStatus(live: LiveIssue): Status {
 
 function baseRow(key: string, kind: RowKind, name: string): Row {
   return {
-    key, kind, of: null, name, what: null, issue: null, status: 'undecided', stage: null, part: null, n: null, notes: false, more: false, films: [], filmBehind: false, history: null, verdict: null, needs: [], started: null, built: null,
+    key, kind, of: null, name, what: null, issue: null, status: 'undecided', stage: null, part: null, n: null, notes: false, more: false, films: [], filmBehind: false, history: null, verdict: null, by: null, needs: [], started: null, built: null,
     author: null, up: null, comments: null, replaces: [], replacedBy: null, date: null, closedAt: null, closed: false,
   };
 }
@@ -435,6 +451,7 @@ export function buildPlan(data: BuildData, live: LiveState | null, closedKeys: R
     row.more = entry.more;
     row.history = entry.history;
     row.verdict = entry.verdict;
+    row.by = entry.by;
     row.needs = entry.needs.map((id) => `entry-${id}`);
     row.started = entry.started;
     row.built = entry.built;
@@ -516,13 +533,13 @@ const PHRASES: Record<ChangeName, string> = {
 };
 
 /** What one name of a change says, on an entry of either kind. */
-export function changePhrase(name: ChangeName): string {
-  return PHRASES[name];
+export function changePhrase(name: ChangeName, agents = false): string {
+  return agents && (name === 'taken' || name === 'dropped') ? `${PHRASES[name]} by agents` : PHRASES[name];
 }
 
 /** What a change says on one line: its phrases, in the module's order, joined by " · ". */
-export function changeLine(what: readonly ChangeName[]): string {
-  return what.map((name) => changePhrase(name)).join(' · ');
+export function changeLine(what: readonly ChangeName[], agents = false): string {
+  return what.map((name) => changePhrase(name, agents)).join(' · ');
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

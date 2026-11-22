@@ -205,7 +205,7 @@ export function allSections(plan: Plan, graph: Graph, stages: Stage[], query: Qu
     for (const row of dated) {
       const day = shortDate(row.history!.date);
       if (!current || current.title !== day) sections.push((current = { key: `day-${row.history!.date.slice(0, 10)}`, title: day, items: [] }));
-      const change = changeLine(row.history!.what);
+      const change = changeLine(row.history!.what, row.history!.agents);
       current.items.push(row.of === 'feature' ? featureItem(row, graph, query, false, change) : { type: 'decision', key: row.key, row, change });
     }
     return sections;

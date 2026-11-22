@@ -490,7 +490,10 @@ What a person sees:
   A feature is decided (taken, ready or not), being built (its file says
   `started`), built (its file says `built`), dropped, or not decided. A row says
   its state by its pip, whose tooltip and accessible name are the word: "not
-  decided", "decided", "being built", "built", "dropped", "replaced". A feature being
+  decided", "decided", "being built", "built", "dropped", "replaced". An entry whose
+  verdict the agents wrote (`"by": "agents"`) says "decided by agents" and "dropped by agents"
+  in those places, in its state line ("Decided by agents.") and in History ("Decided by
+  agents"); the filters and the counts keep "decided" and "dropped". A feature being
   built has a mark of its own, half filled in the accent, between the ring of a
   decided one and the full dot of a built one, in a row, in a part's dots and on
   a tile. A decision's name is its `asks`

@@ -7,7 +7,7 @@ import { hasSessionHint } from './api';
 import { DEFAULT_REPO, repoAddress } from '../../../tools/workshop/model/index.js';
 import { Markdown } from './Markdown';
 import { RichText, safeHref } from './RichText';
-import { changeLine, changePhrase, isDecided, relativeTime, shortDate } from './plan';
+import { byWho, changeLine, changePhrase, isDecided, relativeTime, shortDate } from './plan';
 import type { Change, EntryFacts, Facts, Row, Statement } from './plan';
 import { formatHash, placeOf } from './routes';
 import type { Comment } from './api';
@@ -46,21 +46,21 @@ function initials(login: string): string {
 
 export function stateText(row: Row): string {
   switch (row.status) {
-    case 'decided': return 'Decided.';
+    case 'decided': return `${byWho(row, 'Decided')}.`;
     case 'building': return 'Being built.';
     case 'built': {
       const day = row.built ?? row.closedAt;
       return day ? `Built, ${shortDate(day)}.` : 'Built.';
     }
     case 'replaced': return 'Replaced.';
-    case 'dropped': return 'Dropped.';
+    case 'dropped': return `${byWho(row, 'Dropped')}.`;
     default: return 'Not decided.';
   }
 }
 
 export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryContext }) {
   const { w } = ctx;
-  const word = WORDS[row.status];
+  const word = WORDS[row.status] === undefined ? undefined : byWho(row, WORDS[row.status]!);
   const quiet = !isDecided(row);
   const classes = ['ws-item', `st-${row.status}`, open ? 'open' : '', quiet ? 'quiet' : ''].filter(Boolean).join(' ');
   return (
@@ -473,7 +473,7 @@ function ChangePhrases({ change, row, ctx, panel, open, onToggle }: { change: Ch
   return (
     <span className="ws-h-what">
       {change.what.map((name, index) => {
-        const phrase = changePhrase(name);
+        const phrase = changePhrase(name, change.agents === true);
         return (
           <Fragment key={name}>
             {index ? ' · ' : ''}
@@ -558,7 +558,7 @@ function ChunkFailed({ what, state, w }: { what: string; state: 'error' | 'chang
 function historySummary(row: Row): string {
   const last = row.history;
   if (!last) return '';
-  return `${changeLine(last.what)}, ${shortDate(last.date)}${last.count > 1 ? ` · ${last.count} changes` : ''}`;
+  return `${changeLine(last.what, last.agents)}, ${shortDate(last.date)}${last.count > 1 ? ` · ${last.count} changes` : ''}`;
 }
 
 /** The entry's notes and its history, each closed until asked for; `onMove` tells the panel to grow or shrink to them. */

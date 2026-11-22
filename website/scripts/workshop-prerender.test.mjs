@@ -73,7 +73,7 @@ test('without JavaScript every part shows its rows and Product its own, after th
     assert.ok(rows.includes(`<h2>${escape(part.title)}</h2>`), `the title of ${part.id}`);
     const ids = await idsIn(part.id, ['decisions', 'features']);
     assert.ok(ids.length > 0, `the sample's ${part.id} has rows`);
-    for (const id of ids) assert.match(rows, new RegExp(`<li><code>${id}</code> [^<]+ <span class="ws-noscript-state">(Decided|Being built|Not decided|Dropped|Built[^<]*)\\.</span></li>`), `${id} in ${part.id}`);
+    for (const id of ids) assert.match(rows, new RegExp(`<li><code>${id}</code> [^<]+ <span class="ws-noscript-state">(Decided( by agents)?|Being built|Not decided|Dropped( by agents)?|Built[^<]*)\\.</span></li>`), `${id} in ${part.id}`);
   }
   const product = section('product');
   assert.match(product, /<h2>Product<\/h2>/);

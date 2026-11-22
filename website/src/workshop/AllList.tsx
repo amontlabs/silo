@@ -8,11 +8,15 @@ import type { FeatureItem, Graph, Item, Section } from './all';
 import { Panel, pipClass } from './Entry';
 import type { EntryContext } from './Entry';
 import { BEHIND_TIP, FILM_TIP, FilmBox, Icon } from './Films';
+import { byWho } from './plan';
 import type { FilmItem, Plan, Row } from './plan';
 import type { RelationStore } from './relation';
 
 /** A pip's tooltip and accessible name. */
 export const PIP_WORDS: Record<Row['status'], string> = { undecided: 'not decided', decided: 'decided', building: 'being built', built: 'built', dropped: 'dropped', replaced: 'replaced' };
+
+/** The word of a row's pip, with who decided it when the agents did. */
+export const pipWord = (row: Row): string => byWho(row, PIP_WORDS[row.status]);
 
 export interface ListProps {
   sections: Section[];
@@ -63,7 +67,7 @@ function Side({ row, waiting }: { row: Row; waiting: boolean }) {
 }
 
 /** What a row says to a screen reader: its name first, then its step and its state. */
-const spokenRow = (row: Row, step?: number) => [row.name, step ? `step ${step}` : '', PIP_WORDS[row.status]].filter(Boolean).join(', ');
+const spokenRow = (row: Row, step?: number) => [row.name, step ? `step ${step}` : '', pipWord(row)].filter(Boolean).join(', ');
 
 export function AllList(props: ListProps) {
   const { sections, graph, store, flat = false, latest = false, className = '', empty = null } = props;
@@ -308,7 +312,7 @@ function FeatureView({ item, props }: { item: FeatureItem; props: ListProps }) {
       <Line row={row} instance={item.key} props={props} cls="wa-row" label={spokenRow(row, item.step)} lead={open ? filmLead(row, props) : undefined}>
         {toggle ? <button type="button" className="wa-caret" aria-expanded={Boolean(unfolded)} aria-label={`Its decisions, ${item.kids.length}`} onClick={(event) => { event.stopPropagation(); toggle(); }} /> : null}
         <span className="wa-n">{item.step}</span>
-        <i className={pipClass(row)} role="img" aria-label={PIP_WORDS[row.status]} data-tip={pipTip(row)} />
+        <i className={pipClass(row)} role="img" aria-label={pipWord(row)} data-tip={pipTip(row)} />
         <span className="wa-name"><span data-cut="">{row.name}</span><FilmMark row={row} /></span>
         {item.change !== undefined ? <span className="wa-change">{item.change}</span> : <Meter decided={item.decided} total={item.kids.length} />}
         <span className="wa-part">{props.inPart && props.inPart === row.part ? '' : partTitle(props.plan, row.part)}</span>
@@ -321,7 +325,7 @@ function FeatureView({ item, props }: { item: FeatureItem; props: ListProps }) {
   return <Fold holder={item.key} part={row.part} kids={item.kids} passing={item.passing} props={props} render={body} />;
 }
 
-const pipTip = (row: Row) => PIP_WORDS[row.status];
+const pipTip = (row: Row) => pipWord(row);
 
 /** Something that folds its decisions under it: a feature, or the decisions of a part that no feature needs. */
 function Fold({ holder, part, kids, passing, props, render, head }: {
@@ -369,7 +373,7 @@ function DecisionView({ row, instance, props, flat = false, change, holderPart }
   return (
     <div className={['wa-item d', flat ? 'flat' : '', open ? 'open' : '', gone ? 'gone' : ''].filter(Boolean).join(' ')} id={instance}>
       <Line row={row} instance={instance} props={props} cls="wa-row" label={spokenRow(row)} lead={open ? filmLead(row, props) : undefined}>
-        <i className={pipClass(row)} role="img" aria-label={PIP_WORDS[row.status]} data-tip={pipTip(row)} />
+        <i className={pipClass(row)} role="img" aria-label={pipWord(row)} data-tip={pipTip(row)} />
         <span className="wa-name"><span data-cut="">{row.name}</span><FilmMark row={row} /></span>
         {change !== undefined ? <span className="wa-change">{change}</span> : null}
         <span className="wa-part">{part}</span>
