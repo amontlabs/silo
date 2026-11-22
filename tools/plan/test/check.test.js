@@ -572,9 +572,18 @@ test('by: only "agents", only beside a verdict', () => {
   assert.deepEqual(errorsOf(variant((f) => { Object.assign(f['engine/decisions/linux-vm-engine.json'], { verdict: 'take', by: 'owner' }); })), [`${file} by: "owner" is not a value of by`]);
   assert.deepEqual(errorsOf(variant((f) => { Object.assign(f['engine/decisions/linux-vm-engine.json'], { verdict: 'take', by: 'agents' }); })), []);
   assert.deepEqual(errorsOf(variant((f) => { Object.assign(f['record/decisions/no-detour.json'], { verdict: 'drop', by: 'agents' }); })), []);
-  // A feature too.
-  assert.deepEqual(errorsOf(variant((f) => { f['engine/features/start-computer.json'].by = 'agents'; })), []);
+  // A feature is the owner's to decide.
+  assert.deepEqual(errorsOf(variant((f) => { f['engine/features/start-computer.json'].by = 'agents'; })), ['plan/engine/features/start-computer.json by: a verdict by the agents on a feature']);
   assert.deepEqual(errorsOf(variant((f) => { delete f['engine/features/start-computer.json'].verdict; f['engine/features/start-computer.json'].by = 'agents'; })), ['plan/engine/features/start-computer.json by: by without a verdict']);
+});
+
+test('rule 11: a verdict by the agents is refused when the history is not whole, and one with no by is not', () => {
+  const base = filesOf(basePlan());
+  const typed = (f) => { Object.assign(f['engine/decisions/linux-vm-engine.json'], { verdict: 'take', by: 'agents' }); };
+  const errors = (edit, ownerRuledBefore) => checkChange(filesOf(variant(edit)), base, { ruledByOwner: () => true, ownerRuledBefore }).errors.map((e) => `${e.file} ${e.field}: ${e.message}`);
+  assert.deepEqual(errors(typed, () => null), ['plan/engine/decisions/linux-vm-engine.json by: "linux-vm-engine" has a verdict by the agents, which cannot be checked against the history: it is not whole']);
+  assert.deepEqual(errors(typed, () => false), []);
+  assert.deepEqual(errors((f) => { Object.assign(f['engine/decisions/linux-vm-engine.json'], { verdict: 'take' }); }, () => null), []);
 });
 
 test('rule 11: who wrote a verdict is part of it', () => {

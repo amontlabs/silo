@@ -122,6 +122,11 @@ verdict sets it. The word then has the meaning that decision gives it.
     decision that names it in `replaces`; such a decision may be taken `--by agents`.
   - Agents never write a verdict on an entry that sets, removes or adds a principle, a property or
     a word. Those are the owner's, and a property's sentence is written by a person.
+  - Agents never decide a feature: `--by agents` refuses it and `plan check` refuses an `Agents:`
+    verdict on it. A feature is the owner's to decide.
+  - Agents write a verdict only where the whole history can be read. In a shallow clone, or when
+    the integration branch cannot be read, `--by agents` refuses and `plan check` refuses an
+    `Agents:` verdict it cannot verify; CI checks out the full history.
   - The owner confirms what agents decided with the plain command: `plan take <id>` on an entry
     agents took, `plan drop <id>` on one they dropped. It removes `by` and commits
     `Owner: take <id>` or `Owner: drop <id>`; the Workshop then shows the verdict as the

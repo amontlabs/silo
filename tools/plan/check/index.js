@@ -247,7 +247,9 @@ export function checkFiles(files, { exists } = {}) {
     if (Object.hasOwn(data, 'by')) {
       if (!BYS.includes(data.by)) add(file, 'by', `"${shown(data.by)}" is not a value of by`, `write ${BYS.map((by) => `"${by}"`).join(' or ')}, or leave it out: no by means the owner`);
       else if (!VERDICTS.includes(data.verdict)) add(file, 'by', 'by without a verdict', 'remove by: it says who wrote a verdict, and there is none');
-      else if (['sets', 'removes', 'adds'].some((key) => Array.isArray(data[key]) && data[key].length)) {
+      else if (kind === 'feature') {
+        add(file, 'by', 'a verdict by the agents on a feature', 'a feature is the owner\'s to decide: the owner rules on it, with plan take or plan drop and no --by');
+      } else if (['sets', 'removes', 'adds'].some((key) => Array.isArray(data[key]) && data[key].length)) {
         add(file, 'by', 'a verdict by the agents on an entry that sets, removes or adds principles, properties or words', 'those are the owner\'s: the owner rules on this entry, with plan take or plan drop and no --by');
       }
     }
@@ -619,9 +621,10 @@ function entriesOf(files) {
  * owner ruled on this text, and the rule does not apply. With a `verdict`, the owner's take or drop
  * of that kind.
  * A verdict by the agents on an entry the owner ever ruled on is refused too: `ownerRuledBefore(id)`
- * says whether any commit of the merged history wrote the entry a verdict with no `by`.
+ * says whether any commit of the merged history wrote the entry a verdict with no `by`. Null, a
+ * history that is not whole (a shallow clone), refuses the verdict: it cannot be checked.
  * @param {Map<string, string>} files the plan as it is @param {Map<string, string>} baseFiles the merged plan
- * @param {{ ruledByOwner?: (id: string, file: string, verdict?: string) => boolean, ownerRuledBefore?: (id: string) => boolean }} [options]
+ * @param {{ ruledByOwner?: (id: string, file: string, verdict?: string) => boolean, ownerRuledBefore?: (id: string) => boolean | null }} [options]
  * @returns {{ errors: Problem[] }}
  */
 export function checkChange(files, baseFiles, { ruledByOwner, ownerRuledBefore } = {}) {
@@ -630,7 +633,16 @@ export function checkChange(files, baseFiles, { ruledByOwner, ownerRuledBefore }
   const base = entriesOf(baseFiles);
   for (const [id, { file, value }] of entriesOf(files)) {
     const before = base.get(id)?.value;
-    const ownerRuledIt = value.by === 'agents' && VERDICTS.includes(value.verdict) && ownerRuledBefore?.(id);
+    const agentsVerdict = value.by === 'agents' && VERDICTS.includes(value.verdict);
+    const ownerRuledIt = agentsVerdict && ownerRuledBefore?.(id);
+    if (agentsVerdict && ownerRuledBefore?.(id) === null) {
+      errors.push({
+        file,
+        field: 'by',
+        message: `"${id}" has a verdict by the agents, which cannot be checked against the history: it is not whole`,
+        fix: 'fetch the full history (git fetch --unshallow; in CI, fetch-depth: 0 on the checkout) and check again',
+      });
+    }
     if (ownerRuledIt) {
       errors.push({
         file,

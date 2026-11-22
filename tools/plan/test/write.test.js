@@ -614,6 +614,17 @@ test('model: after any sequence of takes and drops the plan passes the check, no
         }
       }
 
+      // The agents never decide a feature, and never write where the history is not whole.
+      const feature = take(files, 'start-computer', agents('agents'));
+      assert.match(feature.message, /a feature is the owner's to decide/, label);
+      if (decisions.size) {
+        const [probe] = decisions.keys();
+        const blind = (rng.int(2) === 0 ? take : drop)(files, probe, { by: 'agents', ownerRuled: () => null });
+        assert.equal(blind.status, 'refused', label);
+        assert.match(blind.message, /full history is needed/, label);
+        assert.equal(blind.changed.size, 0, label);
+      }
+
       // The lists hold exactly the reference's statements, with the sample's own around them.
       const generated = (list, items) => items.filter((item) => (list === 'words' ? wordId(item.word) : item.id).startsWith('gen-'));
       const expectedIn = (list) => [...model.entries()].filter(([, s]) => s.list === list).map(([, s]) => s.value);
@@ -729,12 +740,38 @@ test('agents never write a verdict on an entry the owner ruled on: refused with 
   cleared.set(name, canonicalText(canonicalDecision(bare)));
   assert.equal(take(cleared, 'no-detour', ruled(['no-detour'])).status, 'refused');
   assert.equal(take(cleared, 'no-detour', ruled([])).status, 'done');
-  // A feature: the way is not a decision.
-  assert.match(take(sample(), 'start-computer', ruled(['start-computer'])).message, /the owner deciding it/);
+  // A feature is the owner's to decide, whatever the history says.
+  assert.match(take(sample(), 'start-computer', ruled(['start-computer'])).message, /a feature is the owner's to decide/);
   // Without the history, the agents cannot tell, and do not write.
   const blind = take(files, 'no-detour', { by: 'agents' });
   assert.equal(blind.status, 'refused');
   assert.match(blind.message, /history is needed/);
+});
+
+test('agents never decide a feature: refused whatever the history says, and the owner may', () => {
+  const files = sample();
+  for (const [operation, id] of [[take, 'start-computer'], [drop, 'start-computer']]) {
+    for (const ownerRuled of [() => false, () => true, () => null]) {
+      const refused = operation(files, id, { by: 'agents', ownerRuled });
+      assert.equal(refused.status, 'refused', `${operation.name} ${id}`);
+      assert.match(refused.message, /a feature is the owner's to decide/);
+      assert.equal(refused.changed.size, 0);
+    }
+    assert.notEqual(operation(files, id).status, 'refused', `the owner ${operation.name} ${id}`);
+  }
+});
+
+test('a history that is not whole refuses the agents, take and drop, and the owner is not held back', () => {
+  const files = answered();
+  const unknown = { by: 'agents', ownerRuled: () => null };
+  for (const operation of [take, drop]) {
+    const refused = operation(files, 'no-detour', unknown);
+    assert.equal(refused.status, 'refused');
+    assert.match(refused.message, /full history is needed/);
+    assert.equal(refused.changed.size, 0);
+    assert.equal(operation(files, 'no-detour', AG).status, 'done');
+    assert.equal(operation(files, 'no-detour').status, 'done');
+  }
 });
 
 test('agents never write a verdict on an entry that sets, removes or adds a principle, a property or a word; the owner may', () => {

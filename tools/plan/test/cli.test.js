@@ -1068,6 +1068,72 @@ test('--by agents refuses an entry the owner ever ruled on, even after its verdi
   });
 });
 
+test('a shallow clone: --by agents refuses and the check refuses an agents\' verdict it cannot verify; a full clone accepts both', async () => {
+  await withRepo(async (root) => {
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    writeFileSync(join(root, 'NOTES.md'), 'more history\n');
+    git(root, 'add', 'NOTES.md');
+    git(root, 'commit', '-q', '-m', 'Notes');
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    const dirs = [temp('plan-shallow-'), temp('plan-full-'), temp('plan-shallow-')];
+    try {
+      const [shallow, full, withVerdict] = dirs;
+      git(root, 'clone', '-q', '--depth', '1', `file://${root}`, shallow);
+      git(root, 'clone', '-q', `file://${root}`, full);
+      assert.equal(git(shallow, 'rev-parse', '--is-shallow-repository').trim(), 'true');
+      // The agents' command refuses on the shallow clone and writes nothing.
+      const before = head(shallow);
+      for (const kind of ['take', 'drop']) {
+        const refused = await run(shallow, [kind, 'no-detour', '--by', 'agents']);
+        assert.equal(refused.code, 1, kind);
+        assert.match(refused.err, /full history is needed/);
+        assert.equal(head(shallow), before);
+        assert.ok(clean(shallow));
+      }
+      // The owner's own verdict needs no history.
+      assert.equal((await run(shallow, ['drop', 'no-detour'])).code, 0);
+      // The full clone accepts it.
+      const accepted = await run(full, ['drop', 'no-detour', '--by', 'agents']);
+      assert.equal(accepted.code, 0, accepted.out + accepted.err);
+      assert.equal(git(full, 'log', '-1', '--format=%s').trim(), 'Agents: drop no-detour');
+
+      // The check refuses an agents' verdict on a shallow clone, and accepts it on a full one.
+      assert.equal((await run(root, ['take', 'linux-vm-engine', '--by', 'agents'])).code, 0);
+      writeFileSync(join(root, 'NOTES.md'), 'and more\n');
+      git(root, 'commit', '-q', '-am', 'Notes again');
+      git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+      assert.equal((await run(root, ['check'])).code, 0);
+      git(root, 'clone', '-q', '--depth', '1', `file://${root}`, withVerdict);
+      const checked = JSON.parse((await run(withVerdict, ['check', '--json'])).out);
+      assert.equal(checked.ok, false);
+      assert.ok(checked.errors.some((e) => e.field === 'by' && /history.*not whole/.test(e.message)), JSON.stringify(checked.errors));
+      git(withVerdict, 'fetch', '-q', '--unshallow');
+      assert.equal((await run(withVerdict, ['check'])).code, 0);
+    } finally {
+      for (const dir of dirs) cleanup(dir);
+    }
+  });
+});
+
+test('--by agents refuses a feature, and the check refuses a hand-written agents\' verdict on one', async () => {
+  await withRepo(async (root) => {
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    const before = head(root);
+    for (const kind of ['take', 'drop']) {
+      const refused = await run(root, [kind, 'start-computer', '--by', 'agents']);
+      assert.equal(refused.code, 1, kind);
+      assert.match(refused.err, /a feature is the owner's to decide/);
+      assert.equal(head(root), before);
+      assert.ok(clean(root));
+    }
+    const name = 'engine/features/start-computer.json';
+    writeJson(root, name, { ...readJson(root, name), verdict: 'take', by: 'agents' });
+    git(root, 'commit', '-q', '-am', 'Agents: take start-computer');
+    const checked = JSON.parse((await run(root, ['check', '--json'])).out);
+    assert.ok(checked.errors.some((e) => e.file === `plan/${name}` && e.field === 'by' && /on a feature/.test(e.message)), JSON.stringify(checked.errors));
+  });
+});
+
 test('--by agents refuses an entry that sets a principle, a property or a word, and the check refuses a hand-written agents\' verdict on one', async () => {
   await withRepo(async (root) => {
     git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');

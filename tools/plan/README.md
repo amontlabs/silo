@@ -32,9 +32,13 @@ It commits only the files it changed, and deletes none.
 
 - an entry the owner ruled on: any commit reachable from `HEAD` or the base (`origin/main`, else `HEAD`) wrote it a verdict with no `by`, so an edit that took the verdict away changes nothing. The message names the way: a new decision that names it in `replaces`;
 - an entry whose `sets` or `removes` (or `adds`) hold a principle, a property or a word, which are the owner's;
+- a feature: a feature is the owner's to decide, and `plan check` refuses an `Agents:` verdict on one;
+- a history that is not whole: the repository is shallow (`git rev-parse --is-shallow-repository`) or the history of `HEAD` or the base cannot be read. The message says the full history is needed (`git fetch --unshallow`); `plan check` refuses an `Agents:` verdict it cannot verify the same way. CI checks out with `fetch-depth: 0`. A verdict with no `by` behaves as before;
 - a verdict the owner wrote (no `by`) that the history does not know, such as one in a plan with no history.
 
-The pure `take` and `drop` need `ownerRuled(id)` in their options with `by: 'agents'`, and refuse without it. `plan --help` lists them. `plan`, `plan show` and `plan check` take `--json`; `plan show` on an entry takes `--all`. Exit codes: 0 done,
+The pure `take` and `drop` need `ownerRuled(id)` in their options with `by: 'agents'`, and refuse without it. It answers true or false, or null when the history is not whole, which refuses too.
+
+Two strict edges are deliberate. The owner cannot confirm a decision that has since been replaced: it stays "already taken", and what replaced it is the owner's to rule on. The scan for the owner's verdicts covers `HEAD` as well as the base, so a verdict the owner wrote on a branch that is not merged yet also keeps the agents out. `plan --help` lists them. `plan`, `plan show` and `plan check` take `--json`; `plan show` on an entry takes `--all`. Exit codes: 0 done,
 1 refused or errors found, 2 wrong use.
 
 `plan take` refuses when the plan fails the check, when `plan/` has uncommitted changes, when the
@@ -118,7 +122,7 @@ Each problem names the file, the field, what is wrong and the fix.
   commit since the base, on any merged branch, named `Owner: take <id>` or `Owner: drop <id>`, or
   `Agents: take <id>` or `Agents: drop <id>` (for a verdict typed in, the one of its kind). The
   commit's file and its subject agree on who wrote the verdict: `Agents:` with `"by": "agents"`,
-  `Owner:` with no `by`. A `by` added or removed by hand while the verdict stayed is refused too. An entry with `"by": "agents"` is refused when the history of `HEAD` or the base ever gave it a verdict with no `by` (`ownerRuledBefore`), whatever the commit subjects say, and when it sets, removes or adds statements. Of two such commits, one made on top of the other is
+  `Owner:` with no `by`. A `by` added or removed by hand while the verdict stayed is refused too. An entry with `"by": "agents"` is refused when it is a feature, when the history cannot be read whole (`ownerRuledBefore` answers null), when the history of `HEAD` or the base ever gave it a verdict with no `by` (`ownerRuledBefore`), whatever the commit subjects say, and when it sets, removes or adds statements. Of two such commits, one made on top of the other is
   the later, whatever their dates. That commit must have written the entry's file, found in it by its id
   wherever the file was then. The entry's file now, committed or not, must agree with that version
   on the verdict and on the keys above. A merge, a move, a change of other keys (`adds`,

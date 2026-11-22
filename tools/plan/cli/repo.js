@@ -163,13 +163,20 @@ export function baseFiles(root) {
 /**
  * Whether the owner ever ruled on an entry: any commit reachable from HEAD or from the base `ref`
  * (the merged plan) wrote it a verdict with no `by`. The history is read once, on the first ask.
- * @param {string} root @param {string | undefined} ref the base @returns {(id: string) => boolean}
+ * The answer is null, unknown, when the history is not whole: the repository is shallow, or HEAD
+ * or the base cannot be read. A verdict by the agents is never written or accepted on that.
+ * @param {string} root @param {string | undefined} ref the base @returns {(id: string) => boolean | null}
  */
 export const ownerRuledIn = (root, ref) => {
   /** @type {Set<string> | undefined} */
   let ids;
+  /** @type {boolean | undefined} */
+  let whole;
   return (id) => {
-    ids ??= new Set([...new Set(['HEAD', ...(ref ? [ref] : [])])].flatMap((name) => [...ownerRuled(readSteps(root, name).steps)]));
+    const names = [...new Set(['HEAD', ...(ref ? [ref] : [])])];
+    whole ??= git(root, ['rev-parse', '--is-shallow-repository'])?.trim() === 'false' && names.every((name) => git(root, ['rev-parse', '--verify', '--quiet', `${name}^{commit}`]) !== null);
+    if (!whole) return null;
+    ids ??= new Set(names.flatMap((name) => [...ownerRuled(readSteps(root, name).steps)]));
     return ids.has(id);
   };
 };
