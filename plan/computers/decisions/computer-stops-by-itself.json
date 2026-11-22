@@ -1,4 +1,7 @@
 {
   "asks": "What does Silo do when a computer stops by itself?",
-  "answer": "The engine starts the computer again and alerts you, and after a few failures in a row stops trying and alerts you."
+  "answer": "Silo starts it again and alerts you, since you asked for it to run. Any stop that neither you nor a rule asked for counts, including a helper that stopped on a bug (`helper-on-broken-assumption`) and a shutdown or reboot by an agent inside. If it stops again less than ten minutes after a start, three times in a row, Silo leaves it stopped and alerts you with the last error it saw. A computer that a precaution or a rule had paused is not started again, and stays stopped until you start it. While the Mac is low on memory, a computer that stopped waits until memory is back. What ran in it is gone. Silo starts the computer, not the agent programs, and the alert lists the runs the record shows were going.",
+  "needs": [
+    "engine-reconciles"
+  ]
 }

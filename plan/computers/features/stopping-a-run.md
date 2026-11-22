@@ -1,5 +1,24 @@
 # Stopping one run
 
+## For the owner
+
+An agent's part, 22 November 2026. Sixteen agents work in main. One run of Codex is stuck in a loop
+of `cargo test` with twelve child processes. You stop that run from the app, and the other fifteen
+agents keep working.
+
+The options:
+
+- Build it (recommended). Silo ends the agent program and everything it started. It costs certainty:
+  which processes belong to a run is told to Silo from inside main, so a process that detached
+  itself can survive, and on macOS that information may not exist at first. What the run held in
+  memory is lost.
+- Leave it out. You end it from inside main, with `kill` over SSH, or you stop all of main. It costs
+  time, or the other fifteen agents' work.
+
+Recommended: build it, in its later stage. One stuck agent should not cost the others.
+
+## Notes
+
 From the list of smaller features the owner put on the roadmap on 21 November 2026. The owner's
 words on the list are in `silos-own-extensions`.
 

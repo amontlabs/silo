@@ -4,5 +4,9 @@
   "needs": [
     "computers-stopped-and-paused",
     "processes-in-the-record"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Several agents in main is the normal case, and one runaway agent should be stoppable without stopping the others."
+  }
 }

@@ -1,4 +1,4 @@
 {
   "asks": "Where does a computer's system image come from?",
-  "answer": "A Linux computer: one Ubuntu image, downloaded once. A macOS computer: downloaded and installed on each Mac."
+  "answer": "A Linux computer starts from Ubuntu's official long-term support image for the device's processor, arm64 on a Mac, at the version Silo pins. Silo downloads it the first time a Linux computer is made, checks it against Ubuntu's published checksum and keeps it, so every later Linux computer starts from that copy. A macOS computer starts from Apple's restore image for the Mac's macOS version. Apple forbids shipping macOS installed, so each Mac downloads it from Apple and installs it. Silo keeps the installed system, and later macOS computers start from a copy of it. A download that fails resumes where it stopped. No computer starts from an image that is incomplete or does not match its checksum. With no connection, Silo says what it has to download and how large it is."
 }

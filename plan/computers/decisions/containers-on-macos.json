@@ -1,3 +1,4 @@
 {
-  "asks": "Can a macOS computer run containers?"
+  "asks": "Can a macOS computer run containers?",
+  "answer": "No, as far as is known: a macOS computer cannot run virtual machines, and on a Mac containers need one. That is to confirm with each new macOS. Containers run in a Linux computer; whether Docker runs there is one of the measurements of `linux-vm-engine`. An agent in main that needs containers uses a Linux computer beside main as its Docker host, over a channel you grant from main to it. A container there sees that Linux computer's files, not main's, so the code it needs goes as a commit."
 }

@@ -1,6 +1,6 @@
 {
   "asks": "What does Silo do when memory runs low?",
-  "answer": "Pause and alert.",
+  "answer": "When macOS reports its memory pressure as critical, a rule that ships with Silo, switched on, pauses the running computer that holds the most memory on the Mac, main last, and alerts you with what each computer holds. While the pressure stays critical, it pauses the next one each minute. Silo resumes nothing by itself: an alert says when the pressure is back to normal, and you resume. You can change the rule or switch it off. A paused computer keeps its memory until macOS compresses it or writes it to disk, so how much a pause frees, and how fast, is to find out. When a computer has used all the memory it was given, the system inside handles it as on any machine, and Silo alerts you.",
   "needs": [
     "low-memory-or-disk"
   ]

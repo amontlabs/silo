@@ -21,5 +21,9 @@
   ],
   "keeps": [
     "nothing-shared-from-your-device"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Every other feature of the stage app needs main running on your Mac, and it is what Silo is for first."
+  }
 }

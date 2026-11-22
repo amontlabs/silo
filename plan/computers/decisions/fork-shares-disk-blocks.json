@@ -1,4 +1,4 @@
 {
   "asks": "What does a fork store of its parent's disk?",
-  "answer": "A fork shares its parent's disk at block level and stores only what changes afterwards. So a fork starts with main's build output and pays only for what it rebuilds."
+  "answer": "A fork shares its parent's disk and stores only what changes afterwards, so a fork of main starts with main's build output and takes disk only for what it rebuilds. On a Mac the fork's disk is an APFS clone. On a Linux host it is a reflink, on a file system that has them, such as Btrfs or XFS. On ext4, the default of Ubuntu, which has none, the fork's disk is a qcow2 layer over its parent's, a format libkrun reads; how fast that is, is to find out. What a fork still shares is not freed when the computer it came from is dropped. Disk shows, for each computer, what it holds alone apart from what it shares."
 }

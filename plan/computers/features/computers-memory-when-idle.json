@@ -14,5 +14,9 @@
   ],
   "keeps": [
     "idle-computer-gives-memory-back"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A Mac holds only a few computers, and memory given back by idle ones is what lets main, a fork and a Linux computer share it."
+  }
 }

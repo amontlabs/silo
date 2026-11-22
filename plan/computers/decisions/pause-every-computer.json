@@ -1,4 +1,4 @@
 {
   "asks": "Can you pause every running computer at once?",
-  "answer": "One action pauses every running computer, and one resumes them."
+  "answer": "One action pauses every running computer. One action resumes the computers that action paused. A computer that was already paused, by you, a rule or a precaution, stays paused until you resume that one. A computer that fails to pause is named in an alert, and the others stay paused."
 }

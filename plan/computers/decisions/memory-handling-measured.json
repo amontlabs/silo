@@ -1,4 +1,4 @@
 {
   "asks": "Is memory handling a point where Silo is better than the alternatives?",
-  "answer": "Memory handling is measured, and is a point where Silo is better than the alternatives."
+  "answer": "Silo measures how much memory each computer holds on the device, while agents work and once they are idle, with one benchmark it publishes. The benchmark runs the same work in other tools that give agents a machine on a Mac (Apple's `container`, OrbStack, Docker Desktop, Lima and Tart), and it runs again for each release. Silo says it uses less memory than another tool only where the numbers show it."
 }

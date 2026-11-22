@@ -1,4 +1,4 @@
 {
   "asks": "How do you work in a computer yourself?",
-  "answer": "You visit: a terminal over SSH, your editor opened on a folder, T3 Code connecting in."
+  "answer": "You visit a computer through the way in from your Mac: a terminal over SSH, your editor opened on a folder of the computer, or a tool such as T3 Code connecting in. A macOS computer's screen opens in Silo's app. The SSH entry Silo writes for each computer forwards nothing from your Mac, neither your SSH agent nor ports. Silo's entries come first in your SSH settings, so a general setting of yours that forwards your SSH agent does not apply to them. An editor that runs a server inside the computer, as VS Code does, keeps a link back to your Mac, and VS Code's documentation says a compromised remote could use it to run code on your Mac. Silo shows such a link among the computer's channels while it is open. What each tool lets a computer reach on your Mac is to find out."
 }

@@ -6,5 +6,9 @@
     "computer-stops-by-itself",
     "engine-reconciles",
     "engine-matches-wanted"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A long-lived main has to come back after a crash without you, and a limit on tries keeps a broken one from looping."
+  }
 }

@@ -6,5 +6,9 @@
     "agents-drive-the-screen",
     "windows-stay-inside",
     "macos-vm-driver"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Agents that build or test Mac apps need a screen, and yours stays yours."
+  }
 }

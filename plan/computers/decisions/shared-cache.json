@@ -1,4 +1,4 @@
 {
   "asks": "May several computers write to one cache?",
-  "answer": "A cache that several computers can write to is a path between them. It stays out until it has been measured."
+  "answer": "No. Several computers never write to one cache, because one computer could place a file there that another then runs, outside every rule. Each computer writes its own caches, and a fork starts with its parent's through the disk it shares. A cache outside every computer that only Silo fills, with packages as their registry sent them and checked against the registry's hashes, lets no computer write to another; whether it saves enough to be built is to find out."
 }

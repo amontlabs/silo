@@ -1,4 +1,8 @@
 {
   "name": "A desktop in Linux computers",
-  "what": "A desktop in Linux computers."
+  "what": "A desktop in Linux computers.",
+  "suggest": {
+    "verdict": "take",
+    "why": "The taken `agents-drive-the-screen` already says agents drive a Linux desktop, and a Mac runs only two macOS screens at once."
+  }
 }

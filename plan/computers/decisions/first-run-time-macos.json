@@ -1,3 +1,4 @@
 {
-  "asks": "How long does the first run take with a macOS main?"
+  "asks": "How long does the first run take with a macOS main?",
+  "answer": "It is measured, not chosen: the download of Apple's restore image for the Mac's macOS version, over 10 GB, its install, and the first start, on the owner's Mac. Silo starts the download as soon as you say yes to main, shows each step and the time left, and keeps going if you close the window. A download that stops resumes where it stopped. Silo keeps the installed system, so later macOS computers start from a copy and skip all of it. Until it is measured, Silo states no time in public."
 }

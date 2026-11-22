@@ -5,5 +5,9 @@
     "computers-main-on-a-mac",
     "what-stop-ends",
     "pause-every-computer"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Every rule and precaution that acts on a computer rests on pausing and stopping, and they are the first thing you reach for when agents go wrong."
+  }
 }

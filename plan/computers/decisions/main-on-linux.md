@@ -1,5 +1,23 @@
 # Can main be a Linux computer
 
+## For the owner
+
+An agent's part, 22 November 2026. A developer who builds a Linux server app installs Silo on a Mac
+and wants main to be Linux: lighter, giving idle memory back, and with more than one fork running
+beside it.
+
+The options:
+
+- Your choice (recommended). On a Mac you choose macOS or Linux when you make main. On a Linux
+  server main is Linux. It costs two kinds of main to build and test, and what assumes a macOS main,
+  such as bringing in your agent programs from your Mac with the same paths, does not apply to a
+  Linux main.
+- macOS only, on a Mac. It costs that developer a heavier main than needed, with at most one fork
+  running beside it.
+
+Recommended: your choice. It is what you said you wanted, and its cost comes after the work on a
+macOS main, in a later stage.
+
 ## The owner's words (21 November 2026)
 
 > our purpose is just to start with mac but we want mac and linux possible as main computer really

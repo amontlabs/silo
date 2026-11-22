@@ -1,5 +1,6 @@
 {
   "asks": "What does Silo do when disk runs low?",
+  "answer": "Silo checks the free space on the disk that holds its computers against two levels. Under the first, it alerts you and opens Disk, which shows what takes the space: each computer, its checkpoints, the bin and the record. Under the second, a rule that ships with Silo, switched on, pauses every running computer and alerts you, so that no computer fills the disk in the middle of a write. Silo removes nothing by itself: you free space, then resume. How early is a setting with three presets: early (alert under 50 GB free, pause under 15 GB), normal, the default (20 GB and 5 GB), and late (10 GB and 2 GB). If the disk fills anyway, writes in a computer fail as on a full disk, and Silo pauses it. When a computer fills its own disk, the system inside handles it as on any machine, and Silo alerts you.",
   "needs": [
     "low-memory-or-disk"
   ]

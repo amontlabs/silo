@@ -1,6 +1,6 @@
 {
   "asks": "Which processes does stopping a computer end?",
-  "answer": "Stopping or dropping a computer ends every process started in it, detached ones included.",
+  "answer": "Stopping or dropping a computer ends every process in it, detached ones included. Once a stop begins, nothing crosses the computer's boundary. Silo asks the system inside to shut down, and after 30 seconds ends the virtual machine itself, so a program that ignores the request, or an agent that holds it up, still ends. The disk keeps what was written before the end. How a Linux computer is asked to shut down is to find out.",
   "sets": [
     {
       "in": "computers/properties",

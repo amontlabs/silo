@@ -1,4 +1,8 @@
 {
   "name": "Moving main",
-  "what": "Moving main to another machine."
+  "what": "Moving main to another machine.",
+  "suggest": {
+    "verdict": "take",
+    "why": "A new Mac, or a move to a server, should not mean starting main over."
+  }
 }

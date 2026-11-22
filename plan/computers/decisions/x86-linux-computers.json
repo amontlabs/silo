@@ -1,4 +1,7 @@
 {
   "asks": "Where does an x86 Linux computer run?",
-  "answer": "On a Mac, a Linux computer is arm64. Real x86 Linux needs a Linux device as host."
+  "answer": "On a Mac, a Linux computer is arm64. An x86 program runs in it only through an emulator an agent installs inside, such as QEMU's, several times slower, and Silo adds nothing for it. Apple's Rosetta for Linux works through Apple's framework, which Silo does not use for Linux computers (`linux-vm-engine`); whether it can work under libkrun is to find out. An x86 Linux computer runs on a host with an x86 processor running Linux.",
+  "needs": [
+    "engine-on-linux"
+  ]
 }

@@ -7,5 +7,9 @@
     "low-memory",
     "low-disk",
     "rule-actions-on-the-computer"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A Mac short of memory or disk slows or breaks everything on it, your own apps included, and Silo knows which computer to pause."
+  }
 }

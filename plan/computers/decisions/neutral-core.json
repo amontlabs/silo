@@ -1,11 +1,14 @@
 {
   "asks": "Does the engine's core know which system a computer runs?",
-  "answer": "The engine core stays neutral. Nothing in the core knows which system a computer runs.",
+  "answer": "Nothing in the core names a system. The core holds a computer's system as a value it can only compare, so it refuses a copy across two systems without knowing which they are. What differs between systems reaches it as data from the driver that runs each one: how many of its computers may run at once on this device, as Apple allows two macOS computers on a Mac, and whether a fork starts from memory or from the disk.",
+  "needs": [
+    "engine-shape"
+  ],
   "sets": [
     {
       "in": "computers/properties",
       "id": "core-knows-no-system",
-      "says": "Nothing in the core knows which system a computer runs.",
+      "says": "Nothing in the core names a system. What differs between systems reaches it from the driver that runs each one.",
       "kind": "safety",
       "check": [
         "test"

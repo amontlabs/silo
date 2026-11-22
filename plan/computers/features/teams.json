@@ -1,4 +1,8 @@
 {
   "name": "Teams",
-  "what": "A shared main, several people watching."
+  "what": "A shared main, several people watching.",
+  "suggest": {
+    "verdict": "take",
+    "why": "The taken `who-it-is-for` says team features come later, on the same product."
+  }
 }

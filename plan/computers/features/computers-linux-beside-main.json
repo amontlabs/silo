@@ -17,5 +17,9 @@
     "libkrun-patches",
     "network-stack",
     "made-from-a-recipe"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Agents in a macOS main need Linux for tests, servers and containers, and on a Mac this is the way to get it."
+  }
 }

@@ -1,6 +1,6 @@
 {
   "asks": "What ships on macOS if reports from inside are not ready there?",
-  "answer": "If the inside half is not ready on macOS, the first version there ships with facts only, and no reports. That is still most of the product, and the facts say where they were seen.",
+  "answer": "If reports from inside a macOS computer are not ready, Silo ships on macOS with facts only and does not wait for them. The record of a macOS computer then holds what crosses its boundary, the model calls, the spend, the checkpoints and the screen. It says that reports from inside are not collected there, so their absence does not read as nothing happening. Processes, and which process changed which file, come on macOS once one of the ways in `processes-from-inside-macos` works. Until then the features that need them say they are not available on macOS.",
   "needs": [
     "record-halves-per-system"
   ]
