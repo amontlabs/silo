@@ -13,7 +13,7 @@ wrong grant anything or destroy anything.
   `law-of-triggers`, `grant-needs-a-fact-or-you`).
 - **Kinds of action** (`kind-before-design`, `kinds-of-action`). Still to decide: `why-kinds-first`,
   `word-grant`, `word-revoke`.
-- **A precaution is the only way an opinion acts** (`how-an-opinion-acts`,
+- **A precaution is the only way an opinion acts** (`opinion-acts-through-a-precaution`,
   `what-a-precaution-may-do`, `where-precautions-live`).
 - **When several rules apply** (`which-rule-wins`, `rule-order-never-matters`).
 

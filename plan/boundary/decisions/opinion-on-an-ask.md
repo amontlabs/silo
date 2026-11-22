@@ -1,1 +1,1 @@
-That a classifier never acts is the property `classifier-never-acts` in `opinions`.
+What an opinion may lead to is said by `opinion-acts-through-a-precaution` in `rules`.

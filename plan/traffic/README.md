@@ -17,13 +17,13 @@ program to say so, and to act on it at the boundary before the agent program rea
   adapter per agent program.
 - **A budget is a rule or a precaution, by what the boundary can see** (`budget-rule-or-precaution`):
   the same split as everywhere else in Silo, between what is exact and what can be wrong.
-- **A change to traffic is never silent** (`denied-call-in-the-reply`,
+- **A change to traffic is never silent** (`denied-tool-call`,
   `no-silent-change-to-traffic`), and each denied call stands alone (`each-call-on-its-own`).
 - **A disagreement between an agent program's own account and the boundary is handled by a
   precaution** (`account-mismatch-precaution`): it compares a report with facts.
 
 ## One example
 
-Silo denies a tool call that Claude Code's model asked for. At the boundary, the model's
-reply is changed before Claude Code reads it, and the record holds the original tool call and its
-replacement, both as facts. The agent's next call is judged on its own, like any other.
+Silo denies a tool call that Claude Code's model asked for. The model sees its own call,
+unchanged, with an error that says it was denied, and the record holds what Silo added, as a fact.
+The agent's next call is judged on its own, like any other.

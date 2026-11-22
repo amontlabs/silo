@@ -1,4 +1,4 @@
 {
   "asks": "What does the boundary forward between an agent program and its provider?",
-  "answer": "The boundary forwards every request and every answer byte for byte, except the changes listed above: a secret swapped in, and a denied tool call replaced by a refusal. The sign-in token inside a request is forwarded and written nowhere: not in the record, not in a log. Silo's own connection to the provider is an ordinary one. It does not imitate the agent program."
+  "answer": "The boundary forwards every request and every answer byte for byte, except the changes listed above: a secret swapped in, and the error for a denied tool call. The sign-in token inside a request is forwarded and written nowhere: not in the record, not in a log. Silo's own connection to the provider is an ordinary one. It does not imitate the agent program."
 }

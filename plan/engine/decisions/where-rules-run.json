@@ -1,6 +1,6 @@
 {
   "asks": "Which processes may a rule depend on?",
-  "answer": "Rules stay with the engine and the helper: a rule never depends on the recorder. A rule that counts facts (a budget, a host seen for the first time, a meter passing a line) keeps its count in the engine or the helper. It does not read the record back.",
+  "answer": "Rules stay with the engine and the helper: a rule never depends on the recorder. A rule that counts facts (a budget, a host seen for the first time, a meter passing a line) keeps its count in the helper of the computer it applies to, and tells the engine when a line is passed. It does not read the record back.",
   "needs": [
     "processes"
   ]

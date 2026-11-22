@@ -8,7 +8,7 @@ whoever builds it.
 
 - **One owner per counter.** Each counter has one owner that increments and checks it. A counter
   held for a scope is given back with a `defer` placed right after it is taken. A count a rule
-  depends on, such as spend or the hosts seen, lives in the engine or in the helper, never both.
+  depends on, such as spend or the hosts seen, lives in the helper of the computer it applies to, and the engine only learns when a line is passed.
   ([source](https://github.com/evmts/guillotine-mini/blob/edafd394bc0aa48a9691b037da36b6f36525121a/BUG_HUNT_REPORT.md?plain=1#L614))
 - **Prepare once, then check cheaply.** Turn input that is used often into a ready-to-run form once,
   and reuse it while its identity and settings are unchanged. When rules change, the helper compiles

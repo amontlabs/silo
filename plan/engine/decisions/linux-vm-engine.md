@@ -70,7 +70,7 @@ From the design (sections 3, 6 and 9):
   failure to avoid).
 - An interface the engine, written in Zig, can link through C.
 - The same engine on a Mac (Apple Silicon, arm64 guests) and on a Linux host (Decided:
-  `engine-on-linux`), and later on a shared server or a cloud (Decided: `runs-anywhere`).
+  `engine-on-linux`), and later on a shared server or a cloud (Decided: `where-it-runs`).
 
 What Silo does not need from an engine, because the design builds it: a network policy layer,
 secret substitution, an OCI image pipeline, a catalog database, SDKs, a cloud.

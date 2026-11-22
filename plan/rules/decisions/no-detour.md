@@ -8,7 +8,7 @@ would turn an opinion into a grant by a detour.
 ## The sentence put forward
 
 "No rule is triggered by a fact that says a classifier gave an opinion or a precaution acted."
-Its checks would be the model of access and the simulator.
+Its checks would be the test that runs the real core on every sequence of a few calls, and the simulator.
 
 ## Its flaw
 

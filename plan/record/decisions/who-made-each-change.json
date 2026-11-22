@@ -1,11 +1,11 @@
 {
-  "asks": "Does the record say who made each change?",
-  "answer": "Every change is recorded with who made it.",
+  "asks": "Does the record say who did each control fact?",
+  "answer": "Every control fact says who did it: you, a rule, a precaution, an extension or Silo.",
   "sets": [
     {
       "in": "record/properties",
-      "id": "every-change-has-its-author",
-      "says": "Every change is recorded with who made it.",
+      "id": "every-control-fact-has-its-author",
+      "says": "Every control fact says who did it: you, a rule, a precaution, an extension or Silo.",
       "kind": "safety",
       "check": [
         "simulator"

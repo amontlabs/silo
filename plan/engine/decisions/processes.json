@@ -1,6 +1,6 @@
 {
   "asks": "Which processes make up Silo?",
-  "answer": "The engine, one helper per computer, the recorder, the app and the command, an added classifier in a computer of its own, and the probe inside each computer.",
+  "answer": "The engine, one helper per computer, the recorder, the app and the command, the computer of each extension, and the probe inside each computer.",
   "sets": [
     {
       "in": "words",

@@ -26,11 +26,11 @@ From earlier work on macOS computers. Not yet a decision.
   never Apple's NAT, as `engine` puts forward.
 - A macOS computer is larger than a Linux one, in disk and in memory.
 
-## A flaw to settle with it
+## What a fork is beside a macOS main
 
-A fork is a copy, so a Linux computer beside a macOS main is a fresh computer, not a copy. "Forks
-are macOS or Linux" then holds only for a Linux main. `linux-beside-a-macos-main` says how a Linux
-computer is made beside a macOS main.
+The owner said "forks are macOS or Linux". A fork is a copy, so a Linux computer beside a macOS
+main is a fresh computer, not a copy, and the answer says so. `linux-beside-a-macos-main` says
+how a Linux computer is made beside a macOS main.
 
 ## What follows from it, put forward
 

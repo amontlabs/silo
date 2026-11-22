@@ -27,9 +27,9 @@ The tool that protects requests already works this way. The proposal makes it th
 - A tool that takes a judgement is a question. Silo defines what it is about (a request, a path, a
   call, a run) and the list of answers.
 - The extension answers by using the tool, about lines of the record it read.
-- That it answered, and what, is a fact: Silo saw it at a tool Silo defined
+- That it answered, and about which lines, is a fact: Silo saw it at a tool Silo defined
   (`extension-tool-use-is-a-fact`).
-- What the answer says is an opinion. Silo keeps the latest one beside the record, with the
+- What the extension answered is an opinion, never written into a fact. Silo keeps the latest one beside the record, with the
   extension, its version and the lines it is about.
 
 The same split already holds for the user: that you answered a question is in the record, and
@@ -40,7 +40,7 @@ main. A new file line wakes it. It reads the line and answers "by a rebuild" abo
 `/work/app/node_modules`.
 
 ```text
-the record     14:02  Leftovers 1.2 answered "by a rebuild" about /work/app/node_modules   (a fact)
+the record     14:02  Leftovers 1.2 answered about /work/app/node_modules                     (a fact)
 beside it      /work/app/node_modules: by a rebuild, says Leftovers 1.2                    (an opinion)
 the app        Disk shows it on that path, as Leftovers' opinion
 ```

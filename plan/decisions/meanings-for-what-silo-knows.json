@@ -12,7 +12,7 @@
     {
       "in": "words",
       "word": "classifier",
-      "means": "Whatever gives an opinion: a pattern, a function, a small model, an agent. It never acts.",
+      "means": "Whatever gives an opinion: a pattern, a function, a small model, an agent.",
       "not": [
         "labeler",
         "judge"

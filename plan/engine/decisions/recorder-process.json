@@ -1,5 +1,6 @@
 {
   "asks": "Is the recorder its own process?",
+  "answer": "Yes. The recorder is its own process.",
   "needs": [
     "processes"
   ]

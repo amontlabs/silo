@@ -11,8 +11,8 @@ without letting a judgement pass for what Silo saw.
 
 - **An opinion can be wrong, so it is kept apart** (`opinion-stored-apart`,
   `opinions-computed-again`).
-- **A classifier only gives opinions** (`classifier-never-acts`). What an opinion may lead to is
-  said by a precaution you set, in the part `rules`.
+- **A classifier's opinion acts only through a precaution** (`opinion-acts-through-a-precaution`),
+  which you set, in the part `rules`.
 - **Your own opinions** (`your-opinion-kept-as-given`).
 
 ## One example

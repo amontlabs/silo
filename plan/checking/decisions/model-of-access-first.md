@@ -38,7 +38,7 @@ entry on 21 November 2026.
 The trial had to assume these to write the model. Each is a question for its own entry.
 
 - `actions-a-rule-offers` leaves open which actions a rule offers. Assumed: any.
-- `how-a-hold-ends` is open. Assumed: nothing ends a hold.
+- A hold ends at Silo's limit (`hold-limit`, taken). The trial assumed that nothing ends a hold, because it was written when `how-a-hold-ends` was open. That entry now asks only how the refusal is delivered. When access is built, a hold ends at the limit.
 - What a rule matches is not settled (`rules-are-data`, `allow-hold-or-deny`). Assumed: one
   computer and one host, exactly.
 - Taking a rule away is not designed. Once it exists, three of the four properties fail as the

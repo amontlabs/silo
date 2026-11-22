@@ -1,5 +1,6 @@
 {
   "asks": "Which process holds a computer's boundary?",
+  "answer": "The helper of that computer. It holds the boundary, and with it the real values of the computer's secrets.",
   "needs": [
     "processes"
   ]

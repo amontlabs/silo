@@ -8,8 +8,8 @@ is in the part `rules`.
 | What | Is there an exact statement of "right"? | How it is checked |
 |---|---|---|
 | Recording facts | Yes: everything that crossed the boundary has a fact, or a gap | Hostile tests on the real boundary, the balance of the record, the simulator with faulty sources |
-| The core's decisions: access, rules that deny or hold | Yes: only the user, or a rule the user set, can grant. A matching deny beats a hold, a matching hold beats an allow, and a request without a grant is denied | The model of access, the simulator, proof later if needed |
+| The core's decisions: access, rules that deny or hold | Yes: only the user, or a rule the user set, can grant. A matching deny beats a hold, a matching hold beats an allow, and a request without a grant is denied | A test that runs the real core on every sequence of a few calls, the simulator, proof later if needed |
 | What a precaution may do | Yes: only protective actions | A precaution's type has no other action in it; the simulator |
 
 The rows on a classifier's mechanics and a classifier's opinion are in the part `opinions`, the row
-on an added classifier in the part `extensions`.
+on an extension in the part `extensions`.

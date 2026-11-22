@@ -1,6 +1,6 @@
 {
   "asks": "How is Silo extended?",
-  "answer": "Silo is extended by a client of the engine's calls or by a program inside a computer, and nothing loads into the engine or the app at run time.",
+  "answer": "Nothing loads into the engine or the app at run time. An extension is rules, a computer, or both. Another program that calls the engine, such as T3 Code, is a client and not an extension.",
   "needs": [
     "extension-manifest"
   ]
