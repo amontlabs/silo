@@ -15,6 +15,6 @@
   ],
   "suggest": {
     "verdict": "take",
-    "why": "`core-simulator` and `simulator-faults`, taken, already commit to building exactly this."
+    "why": "It checks every promise of Silo on millions of made-up histories with failures in them, and `core-simulator` and `simulator-faults`, taken, already ask for it."
   }
 }

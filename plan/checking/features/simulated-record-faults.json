@@ -10,6 +10,6 @@
   ],
   "suggest": {
     "verdict": "take",
-    "why": "`record-fakes`, taken, already commits to building exactly these three fakes."
+    "why": "The record is what Silo is for, and these fakes are how its promises are checked against lines lost, repeated or late and against a program inside that lies; `record-fakes`, taken, already asks for them."
   }
 }

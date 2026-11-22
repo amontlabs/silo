@@ -1,6 +1,6 @@
 {
   "asks": "When does an extension's computer run?",
-  "answer": "From install until the extension is removed. Between wakes it is idle and gives memory back, as the taken `idle-memory` says of every idle computer. The user can stop it like any computer; its wakes are then skipped and recorded, and a request that would wait for it ends as its manifest says.",
+  "answer": "Whenever Silo runs, from install until the extension is removed. Between wakes it is idle and gives memory back, as the taken `idle-memory` says of every idle computer. The user can stop it like any computer; its wakes are then skipped and recorded, and a request that would wait for it ends as its manifest says. If it stops by itself, as on a crash, Silo starts it once more and tells the user; if it stops again, it stays stopped, and the same holds as when the user stops it.",
   "needs": [
     "extension-registration"
   ]

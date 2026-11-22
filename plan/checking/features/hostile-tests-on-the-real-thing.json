@@ -10,6 +10,6 @@
   ],
   "suggest": {
     "verdict": "take",
-    "why": "`checks-on-the-real-thing`, taken, already commits to these tests."
+    "why": "The simulator checks Silo's engine against fakes, and only tests on the real computers and the real network show that an agent inside cannot get around a promise; `checks-on-the-real-thing`, taken, already asks for them."
   }
 }

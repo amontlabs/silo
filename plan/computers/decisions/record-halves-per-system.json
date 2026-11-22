@@ -1,4 +1,9 @@
 {
   "asks": "Is what Silo sees of a computer the same on macOS and Linux?",
-  "answer": "In part. What Silo sees from outside a computer is seen the same way on both systems, by code outside it: the network, model calls, secrets, spend, checkpoints and the screen. Which files changed is also seen from outside, by comparing checkpoints (`file-changes-from-outside`); whether that works on a macOS computer as on Linux is to find out, since no trial has run there. What only a program inside can tell, such as which process changed which file, is a report, built once per system (`processes-from-inside-linux`, `processes-from-inside-macos`)."
+  "answer": "In part. What Silo sees from outside a computer is seen the same way on both systems, by code outside it: the network, model calls, secrets, spend, checkpoints and the screen. Which files changed is also seen from outside, by comparing checkpoints (`file-changes-from-outside`); whether that works on a macOS computer as on Linux is to find out, since no trial has run there. What only a program inside can tell, such as which process changed which file, is a report, built once per system (`processes-from-inside-linux`, `processes-from-inside-macos`).",
+  "needs": [
+    "file-changes-from-outside",
+    "processes-from-inside-linux",
+    "processes-from-inside-macos"
+  ]
 }

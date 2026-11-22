@@ -10,6 +10,6 @@
   ],
   "suggest": {
     "verdict": "take",
-    "why": "`model-of-access-first`, taken, already commits to building exactly this test."
+    "why": "It is the first check of the promise that nothing is granted except by you or a rule you set, and `model-of-access-first`, taken, already asks for it."
   }
 }

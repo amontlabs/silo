@@ -2,6 +2,8 @@
   "asks": "Who owns what Nix cannot describe?",
   "answer": "Making a computer has steps Nix cannot describe, and Silo does them itself: putting the system in place, and on macOS, installing the apps Nix does not package and setting the approvals computer use needs. Each app is pinned to a version and checked against its checksum, as packages are. The system is the one `computer-image` gives: on Linux the version Silo pins, on macOS the Mac's own version, which a recipe does not pin. If a step fails, making the computer fails, and Silo says which step and why. An approval that cannot be set is the one exception: the computer is made, and Silo names the approval to give by hand (`no-approval-by-hand`).",
   "needs": [
-    "nix-under-recipes"
+    "nix-under-recipes",
+    "computer-image",
+    "no-approval-by-hand"
   ]
 }

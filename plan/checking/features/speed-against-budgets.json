@@ -14,6 +14,6 @@
   ],
   "suggest": {
     "verdict": "take",
-    "why": "`speed-budgets` and `how-speed-is-measured`, taken, already commit to these measurements."
+    "why": "Speed is a requirement of Silo, and these measurements are how a slow fork or a computer that keeps its memory is seen; `speed-budgets` and `how-speed-is-measured`, taken, already ask for them."
   }
 }

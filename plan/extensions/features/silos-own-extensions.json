@@ -11,5 +11,9 @@
   ],
   "keeps": [
     "extension-computer-is-shown"
-  ]
+  ],
+  "suggest": {
+    "verdict": "drop",
+    "why": "It builds nothing of its own: what it says binds every extension Silo ships through decisions already in the plan, and each extension Silo would ship is a feature of its own, all in the stage later."
+  }
 }

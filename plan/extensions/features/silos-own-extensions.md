@@ -1,5 +1,29 @@
 # Silo's own extensions
 
+## For the owner
+
+An agent's part, 22 November 2026. Later, Silo ships an extension that alerts you when a run is
+stuck. Like one you add, it comes with its manifest, its rules, its recipe and its source as files
+you can read, and Silo holds it to that manifest.
+
+Three decisions already say all of this for every extension Silo ships:
+`shipped-extensions-use-the-manifest`, which you took, and `manifest-is-enforced` and
+`shipped-as-readable-files`, which you are still to answer. Each extension Silo would ship is a
+feature of its own, such as `stuck-run-alert` and `spend-split-and-forecast`, and all of them are in
+the stage later. So in the stage app this feature has nothing to build.
+
+The options:
+
+- Leave it out (recommended). Nothing changes: what this feature says stays in those three
+  decisions. It costs nothing.
+- Build it. It costs a feature that counts as built as soon as importing works, with none of Silo's
+  own extensions shipped.
+
+Recommended: leave it out. A feature should be something to build, and what this one states already
+holds through the decisions.
+
+## Notes
+
 An agent's doubt, from drafting this feature on 21 November 2026.
 
 It may be a condition on what ships with Silo more than a feature of its own. Which extensions

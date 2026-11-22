@@ -2,6 +2,7 @@
   "asks": "Does a subscription sign-in work with substitution at all?",
   "answer": "Not tried. Substitution means Silo holds a subscription's login outside the computer and swaps it into each request, and Silo holds, stores and injects no subscription sign-in, for any provider (`program-and-sign-in-untouched`, `logins`). Anthropic's terms, as read on 18 November 2026, also forbid it for a Claude subscription. So nothing is built or tried for it. If the owner ever replaces `program-and-sign-in-untouched`, a live check answers it for a provider whose terms allow it: the computer holds a placeholder, Silo swaps the real login into each request to the provider, and the check passes when requests succeed and the login is renewed without the computer ever holding it. The renewal is where it is expected to fail, since the program inside writes the new login itself.",
   "needs": [
-    "anthropic-reads-intermediate"
+    "program-and-sign-in-untouched",
+    "logins"
   ]
 }

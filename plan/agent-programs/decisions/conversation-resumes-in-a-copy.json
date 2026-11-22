@@ -1,4 +1,8 @@
 {
   "asks": "Does each agent program take a conversation up again in a copied computer?",
-  "answer": "To find out per program, by a live check run for each version of the program that Silo's pieces pin. Start a conversation in a computer, take a few turns, fork the computer, sign in again in the fork, and use the program's documented way to take a conversation up again (`claude --resume`, `codex resume`). It counts as yes when the program shows the earlier turns and its next request to the model, read at the boundary, carries them. The check does the same after a restore to a checkpoint, and takes the same conversation up in the parent and the fork at once, where it counts as yes when each goes on and neither changes the turns the other shows. The result and the command go in the program's data file. A version that fails the check, or has not been checked, is shown as one whose conversation stays in the computer where it started."
+  "answer": "To find out per program, by a live check run for each version of the program that Silo's pieces pin. Start a conversation in a computer, take a few turns, fork the computer, sign in again in the fork, and use the program's documented way to take a conversation up again (`claude --resume`, `codex resume`). It counts as yes when the program shows the earlier turns and its next request to the model, read at the boundary, carries them. The check does the same after a restore to a checkpoint, and takes the same conversation up in the parent and the fork at once, where it counts as yes when each goes on and neither changes the turns the other shows. The result and the command go in the program's data file. A version that fails the check, or has not been checked, is shown as one whose conversation stays in the computer where it started.",
+  "needs": [
+    "agent-program-data-file",
+    "fork-and-sign-in"
+  ]
 }

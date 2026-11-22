@@ -1,4 +1,9 @@
 {
   "asks": "How is a fork made on each system?",
-  "answer": "A fork starts from a checkpoint of its parent: the one you choose, or, for a fork of the present moment, one taken then. So its disk is copied as a checkpoint's is (`checkpoint-per-system`), sharing blocks with it (`fork-shares-disk-blocks`), and a running parent's disk is copied the way that entry settles. The fork then boots cold, so a program that ran in its parent runs in the fork only when something starts it. A Linux fork boots cold until libkrun can save a computer's memory (`forks-of-running-linux`). A macOS fork always boots cold, since Apple's framework cannot move a saved memory state to a new identity. If the copy fails, as on a full disk, no fork is made, and Silo says why."
+  "answer": "A fork starts from a checkpoint of its parent: the one you choose, or, for a fork of the present moment, one taken then. So its disk is copied as a checkpoint's is (`checkpoint-per-system`), sharing blocks with it (`fork-shares-disk-blocks`), and a running parent's disk is copied the way that entry settles. The fork then boots cold, so a program that ran in its parent runs in the fork only when something starts it. A Linux fork boots cold until libkrun can save a computer's memory (`forks-of-running-linux`). A macOS fork always boots cold, since Apple's framework cannot move a saved memory state to a new identity. If the copy fails, as on a full disk, no fork is made, and Silo says why.",
+  "needs": [
+    "checkpoint-per-system",
+    "fork-shares-disk-blocks",
+    "forks-of-running-linux"
+  ]
 }
