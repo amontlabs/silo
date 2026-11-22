@@ -9,13 +9,13 @@ import { BYS } from '../model/names.js';
 import { PlanError, parsePlan } from '../read/index.js';
 import { drop, take } from '../write/index.js';
 import { Refused, UsageError, parseArgs } from './args.js';
-import { baseFiles, existsIn, findRoot, git, planFiles, ruledByOwner, uncommitted, unwatched } from './repo.js';
+import { baseFiles, existsIn, findRoot, git, planFiles, ownerRuledIn, ruledByOwner, uncommitted, unwatched } from './repo.js';
 
 export const COMMANDS = [
   { name: '', usage: 'plan', what: 'What is next: the first entry with no verdict, the features being built, those ready to build, the features that wait and for what.' },
   { name: 'show', usage: 'plan show <id>', what: 'One entry, part or statement. An entry with what it links to and what binds it (--all: the whole product\'s decisions in full); a part with what is next in it.' },
-  { name: 'take', usage: 'plan take <id> [--by agents]', what: "The owner's yes: writes what the entry sets into the lists and commits \"Owner: take <id>\". --by agents: the agents' yes, for an entry about how Silo is built; commits \"Agents: take <id>\"." },
-  { name: 'drop', usage: 'plan drop <id> [--by agents]', what: "The owner's no: commits \"Owner: drop <id>\". --by agents: the agents' no, never on what the owner decided; commits \"Agents: drop <id>\"." },
+  { name: 'take', usage: 'plan take <id> [--by agents]', what: "The owner's yes: writes what the entry sets into the lists and commits \"Owner: take <id>\". On an entry the agents took, it is the owner's confirmation. --by agents: the agents' yes, for an entry about how Silo is built, never on what the owner ruled or on words, principles and properties; commits \"Agents: take <id>\"." },
+  { name: 'drop', usage: 'plan drop <id> [--by agents]', what: "The owner's no: commits \"Owner: drop <id>\". On an entry the agents dropped, it is the owner's confirmation. --by agents: the agents' no, never on what the owner ruled; commits \"Agents: drop <id>\"." },
   { name: 'check', usage: 'plan check', what: 'The plan holds together. The merge gate and the site\'s build run it.' },
 ];
 
@@ -363,7 +363,7 @@ function check(ctx, argv) {
   const files = planFiles(root);
   const { errors, notes } = checkFiles(files, { exists: existsIn(root) });
   const base = baseFiles(root);
-  if (base) errors.push(...checkChange(files, base.files, { ruledByOwner: ruledByOwner(root, base.ref) }).errors);
+  if (base) errors.push(...checkChange(files, base.files, { ruledByOwner: ruledByOwner(root, base.ref), ownerRuledBefore: ownerRuledIn(root, base.ref) }).errors);
   else notes.push({ file: 'plan/', field: '-', message: 'no git base (origin/main or HEAD): entries changed under their verdict were not looked for', fix: 'run plan check in a git checkout' });
   if (flags.has('json')) ctx.out(JSON.stringify({ ok: errors.length === 0, errors, notes }, null, 2));
   else {
@@ -396,7 +396,9 @@ function verdict(ctx, argv, kind) {
   if (hidden.length) throw new Refused(`git is told not to look at ${hidden.join(', ')}, so it cannot say whether plan/ has uncommitted changes: clear the flag with git update-index --no-assume-unchanged or --no-skip-worktree first`);
 
   const files = planFiles(root);
-  const outcome = (kind === 'take' ? take : drop)(files, id, { exists: existsIn(root), ...(by ? { by } : {}) });
+  const base = baseFiles(root);
+  const ownerRuledBefore = ownerRuledIn(root, base?.ref);
+  const outcome = (kind === 'take' ? take : drop)(files, id, { exists: existsIn(root), ...(by ? { by, ownerRuled: ownerRuledBefore } : {}) });
   if (outcome.status === 'refused') throw refusal(outcome.message, outcome.errors);
   if (outcome.status === 'already') {
     ctx.out(`plan ${kind}: ${outcome.message}`);
@@ -404,10 +406,9 @@ function verdict(ctx, argv, kind) {
   }
   // Rule 11 against the merged plan: the plan must pass it before the verdict, as plan check would.
   // The entry ruled on is left out: the verdict this commit records lifts the rule for it.
-  const base = baseFiles(root);
   if (base) {
     const owner = ruledByOwner(root, base.ref);
-    const changed = checkChange(files, base.files, { ruledByOwner: (other, file, kindOf) => other === id || owner(other, file, kindOf) }).errors;
+    const changed = checkChange(files, base.files, { ruledByOwner: (other, file, kindOf) => other === id || owner(other, file, kindOf), ownerRuledBefore }).errors;
     if (changed.length) throw refusal(`the plan fails the check against ${base.ref} (${changed.length} error${changed.length === 1 ? '' : 's'}); plan check lists them`, changed);
   }
 

@@ -591,3 +591,26 @@ test('rule 11: who wrote a verdict is part of it', () => {
   // ruledKeysDiffer sees `by`.
   assert.equal(ruledKeysDiffer('{"verdict":"take"}', '{"verdict":"take","by":"agents"}'), true);
 });
+
+test('by agents on an entry that sets, removes or adds statements is an error: those are the owner\'s', () => {
+  const sets = (f) => { Object.assign(f['record/decisions/losses-show.json'], { verdict: 'drop', by: 'agents' }); };
+  const [error] = errorsOf(variant(sets));
+  assert.match(error, /record\/decisions\/losses-show\.json by: a verdict by the agents on an entry that sets, removes or adds principles, properties or words/);
+  assert.deepEqual(errorsOf(variant((f) => { Object.assign(f['record/decisions/losses-show.json'], { verdict: 'drop' }); })), []);
+  // A take that added statements: the-design adds many.
+  assert.equal(errorsOf(variant((f) => { f['decisions/the-design.json'].by = 'agents'; })).length, 1);
+  assert.deepEqual(errorsOf(variant((f) => { Object.assign(f['record/decisions/no-detour.json'], { verdict: 'drop', by: 'agents' }); })), []);
+});
+
+test('rule 11: a verdict by the agents on an entry the owner ruled on before is an error, whatever the commit subjects say', () => {
+  const base = filesOf(basePlan());
+  const typed = (f) => { Object.assign(f['engine/decisions/linux-vm-engine.json'], { verdict: 'take', by: 'agents' }); };
+  const changeOf = (edit, options) => checkChange(filesOf(variant(edit)), base, options).errors.map((e) => `${e.file} ${e.field}: ${e.message}`);
+  const owned = (ids) => (id) => ids.includes(id);
+  assert.deepEqual(changeOf(typed, { ruledByOwner: () => true, ownerRuledBefore: owned([]) }), []);
+  assert.deepEqual(changeOf(typed, { ruledByOwner: () => true, ownerRuledBefore: owned(['engine-language']) }), []);
+  assert.deepEqual(changeOf(typed, { ruledByOwner: () => true, ownerRuledBefore: owned(['linux-vm-engine']) }), ['plan/engine/decisions/linux-vm-engine.json by: "linux-vm-engine" has a verdict by the agents, and the owner ruled on it before']);
+  // An owner's verdict is not touched by it, and a by typed onto the owner's verdict is reported once.
+  assert.deepEqual(changeOf((f) => { f['engine/decisions/engine-language.json'].by = 'agents'; }, { ownerRuledBefore: owned(['engine-language']) }).length, 1);
+  assert.deepEqual(changeOf((f) => { Object.assign(f['engine/decisions/linux-vm-engine.json'], { verdict: 'take' }); }, { ruledByOwner: () => true, ownerRuledBefore: owned(['linux-vm-engine']) }), []);
+});

@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { ruledKeysDiffer } from '../check/index.js';
+import { ownerRuled, readSteps } from '../history/index.js';
 import { isHidden, loadDir, loadRef } from '../read/index.js';
 import { Refused } from './args.js';
 
@@ -158,3 +159,17 @@ export function baseFiles(root) {
   }
   return null;
 }
+
+/**
+ * Whether the owner ever ruled on an entry: any commit reachable from HEAD or from the base `ref`
+ * (the merged plan) wrote it a verdict with no `by`. The history is read once, on the first ask.
+ * @param {string} root @param {string | undefined} ref the base @returns {(id: string) => boolean}
+ */
+export const ownerRuledIn = (root, ref) => {
+  /** @type {Set<string> | undefined} */
+  let ids;
+  return (id) => {
+    ids ??= new Set([...new Set(['HEAD', ...(ref ? [ref] : [])])].flatMap((name) => [...ownerRuled(readSteps(root, name).steps)]));
+    return ids.has(id);
+  };
+};

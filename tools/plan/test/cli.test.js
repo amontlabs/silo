@@ -980,17 +980,17 @@ test('evidence: an id with a character of a regular expression gives the file\'s
 test('take --by agents writes the key after the verdict and commits "Agents: take <id>"; drop --by agents "Agents: drop <id>"; the check passes after', async () => {
   await withRepo(async (root) => {
     git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
-    const taken = await run(root, ['take', 'losses-show', '--by', 'agents']);
+    const taken = await run(root, ['take', 'linux-vm-engine', '--by', 'agents']);
     assert.equal(taken.code, 0, taken.out + taken.err);
-    assert.equal(git(root, 'log', '-1', '--format=%s').trim(), 'Agents: take losses-show');
-    assert.match(taken.out, /^Agents: take losses-show/);
-    assert.deepEqual(git(root, 'show', '--name-only', '--format=', 'HEAD').trim().split('\n').sort(), ['plan/record/decisions/losses-show.json', 'plan/record/properties.json']);
-    const file = readJson(root, 'record/decisions/losses-show.json');
+    assert.equal(git(root, 'log', '-1', '--format=%s').trim(), 'Agents: take linux-vm-engine');
+    assert.match(taken.out, /^Agents: take linux-vm-engine/);
+    assert.deepEqual(git(root, 'show', '--name-only', '--format=', 'HEAD').trim().split('\n').sort(), ['plan/engine/decisions/linux-vm-engine.json']);
+    const file = readJson(root, 'engine/decisions/linux-vm-engine.json');
     const keys = Object.keys(file);
     assert.equal(file.verdict, 'take');
     assert.equal(keys[keys.indexOf('verdict') + 1], 'by');
     assert.equal(file.by, 'agents');
-    assert.equal(readFileSync(join(root, 'plan/record/decisions/losses-show.json'), 'utf8'), canonicalText(canonicalFile('record/decisions/losses-show.json')(file)));
+    assert.equal(readFileSync(join(root, 'plan/engine/decisions/linux-vm-engine.json'), 'utf8'), canonicalText(canonicalFile('engine/decisions/linux-vm-engine.json')(file)));
     assert.equal((await run(root, ['check'])).code, 0);
 
     const dropped = await run(root, ['drop', 'no-detour', '--by=agents']);
@@ -999,9 +999,95 @@ test('take --by agents writes the key after the verdict and commits "Agents: tak
     assert.equal(readJson(root, 'record/decisions/no-detour.json').by, 'agents');
     assert.equal((await run(root, ['check'])).code, 0);
     // Without --by, both are the owner's as ever.
-    assert.equal((await run(root, ['take', 'linux-vm-engine'])).code, 0);
+    assert.equal((await run(root, ['take', 'losses-show'])).code, 0);
+    assert.equal(git(root, 'log', '-1', '--format=%s').trim(), 'Owner: take losses-show');
+    assert.equal(Object.hasOwn(readJson(root, 'record/decisions/losses-show.json'), 'by'), false);
+  });
+});
+
+test('the owner\'s plain take confirms what the agents took, and the plain drop what they dropped: "Owner: take <id>", by gone, the check passes', async () => {
+  await withRepo(async (root) => {
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    assert.equal((await run(root, ['take', 'linux-vm-engine', '--by', 'agents'])).code, 0);
+    assert.equal((await run(root, ['drop', 'no-detour', '--by', 'agents'])).code, 0);
+    const confirmed = await run(root, ['take', 'linux-vm-engine']);
+    assert.equal(confirmed.code, 0, confirmed.out + confirmed.err);
+    assert.match(confirmed.out, /^Owner: take linux-vm-engine/);
     assert.equal(git(root, 'log', '-1', '--format=%s').trim(), 'Owner: take linux-vm-engine');
-    assert.equal(Object.hasOwn(readJson(root, 'engine/decisions/linux-vm-engine.json'), 'by'), false);
+    assert.deepEqual(git(root, 'show', '--name-only', '--format=', 'HEAD').trim().split('\n'), ['plan/engine/decisions/linux-vm-engine.json']);
+    const file = readJson(root, 'engine/decisions/linux-vm-engine.json');
+    assert.equal(file.verdict, 'take');
+    assert.equal(Object.hasOwn(file, 'by'), false);
+    assert.equal((await run(root, ['check'])).code, 0);
+    const reversed = await run(root, ['drop', 'no-detour']);
+    assert.equal(reversed.code, 0, reversed.out + reversed.err);
+    assert.equal(git(root, 'log', '-1', '--format=%s').trim(), 'Owner: drop no-detour');
+    assert.deepEqual(readJson(root, 'record/decisions/no-detour.json').verdict, 'drop');
+    assert.equal(Object.hasOwn(readJson(root, 'record/decisions/no-detour.json'), 'by'), false);
+    assert.equal((await run(root, ['check'])).code, 0);
+    // The owner's own verdict: nothing to do.
+    const before = head(root);
+    assert.match((await run(root, ['take', 'linux-vm-engine'])).out, /already taken/);
+    assert.equal(head(root), before);
+    // And now the agents may not touch what the owner confirmed.
+    const refused = await run(root, ['drop', 'linux-vm-engine', '--by', 'agents']);
+    assert.equal(refused.code, 1);
+    assert.match(refused.err, /ruled on by the owner/);
+    assert.equal(head(root), before);
+  });
+});
+
+test('--by agents refuses an entry the owner ever ruled on, even after its verdict was edited out; the check refuses a hand-written agents\' verdict on it', async () => {
+  await withRepo(async (root) => {
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    const name = 'engine/decisions/linux-vm-engine.json';
+    assert.equal((await run(root, ['take', 'linux-vm-engine'])).code, 0);
+    // An edit clears the owner's verdict; the history still says the owner ruled.
+    const { verdict: _verdict, ...bare } = readJson(root, name);
+    writeJson(root, name, bare);
+    git(root, 'commit', '-q', '-am', 'Clear the verdict');
+    const before = head(root);
+    for (const kind of ['take', 'drop']) {
+      const refused = await run(root, [kind, 'linux-vm-engine', '--by', 'agents']);
+      assert.equal(refused.code, 1, kind);
+      assert.match(refused.err, /linux-vm-engine was ruled on by the owner/);
+      assert.match(refused.err, /a new decision that names linux-vm-engine in its replaces/);
+      assert.equal(head(root), before);
+      assert.ok(clean(root));
+    }
+    // The same by hand, under the agents' subject: the check refuses it.
+    writeJson(root, name, { ...bare, verdict: 'take', by: 'agents' });
+    git(root, 'commit', '-q', '-am', 'Agents: take linux-vm-engine');
+    const checked = JSON.parse((await run(root, ['check', '--json'])).out);
+    assert.equal(checked.ok, false);
+    assert.ok(checked.errors.some((e) => e.field === 'by' && /the owner ruled on it before/.test(e.message)), JSON.stringify(checked.errors));
+    // The owner's own take puts it right.
+    git(root, 'reset', '-q', '--hard', before);
+    assert.equal((await run(root, ['take', 'linux-vm-engine'])).code, 0);
+    assert.equal((await run(root, ['check'])).code, 0);
+  });
+});
+
+test('--by agents refuses an entry that sets a principle, a property or a word, and the check refuses a hand-written agents\' verdict on one', async () => {
+  await withRepo(async (root) => {
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    const before = head(root);
+    for (const argv of [['take', 'losses-show', '--by', 'agents'], ['drop', 'losses-show', '--by', 'agents'], ['take', 'nothing-without-a-reason', '--by', 'agents']]) {
+      const refused = await run(root, argv);
+      assert.equal(refused.code, 1, argv.join(' '));
+      assert.match(refused.err, /principles, properties or words: those are the owner's/);
+      assert.equal(head(root), before);
+      assert.ok(clean(root));
+    }
+    // A drop the agents wrote by hand keeps the sets: the check refuses it.
+    const name = 'record/decisions/losses-show.json';
+    writeJson(root, name, { ...readJson(root, name), verdict: 'drop', by: 'agents' });
+    git(root, 'commit', '-q', '-am', 'Agents: drop losses-show');
+    const checked = JSON.parse((await run(root, ['check', '--json'])).out);
+    assert.ok(checked.errors.some((e) => e.file === `plan/${name}` && e.field === 'by' && /principles, properties or words/.test(e.message)), JSON.stringify(checked.errors));
+    // The owner may.
+    git(root, 'reset', '-q', '--hard', before);
+    assert.equal((await run(root, ['drop', 'losses-show'])).code, 0);
   });
 });
 
@@ -1010,7 +1096,7 @@ test('drop --by agents on an entry the owner took is refused and writes nothing;
     const before = head(root);
     const refused = await run(root, ['drop', 'engine-language', '--by', 'agents']);
     assert.equal(refused.code, 1);
-    assert.match(refused.err, /taken by the owner/);
+    assert.match(refused.err, /ruled on by the owner/);
     assert.equal(head(root), before);
     assert.ok(clean(root));
     for (const argv of [['take', 'linux-vm-engine', '--by', 'owner'], ['drop', 'linux-vm-engine', '--by', ''], ['take', 'linux-vm-engine', '--by'], ['take', 'linux-vm-engine', '--by', 'agents', '--by', 'agents']]) {

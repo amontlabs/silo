@@ -115,10 +115,17 @@ verdict sets it. The word then has the meaning that decision gives it.
   entry about how Silo is built: agents decide those, as `owners-part-on-engine` says, and write
   the verdict with `plan take <id> --by agents` or `plan drop <id> --by agents`. The entry then
   holds `"by": "agents"` beside its verdict, and the commit is named `Agents: take <id>` or
-  `Agents: drop <id>`. Only agents use `--by agents`, and only for such an entry. It is refused on
-  a verdict the owner wrote (an entry with a verdict and no `by`), so agents never overrule the
-  owner; the owner may rule on an entry agents decided, with `plan take` or `plan drop`, which
-  removes `by`. A decision that replaces one the owner took may be taken `--by agents`.
+  `Agents: drop <id>`. Only agents use `--by agents`, and only for such an entry.
+  - Agents never write a verdict on an entry the owner ruled on: one that, in any commit of the
+    merged history, held a verdict with no `by`, whether it still holds it or an edit took it away.
+    `--by agents` refuses it and `plan check` refuses an `Agents:` verdict on it. The way is a new
+    decision that names it in `replaces`; such a decision may be taken `--by agents`.
+  - Agents never write a verdict on an entry that sets, removes or adds a principle, a property or
+    a word. Those are the owner's, and a property's sentence is written by a person.
+  - The owner confirms what agents decided with the plain command: `plan take <id>` on an entry
+    agents took, `plan drop <id>` on one they dropped. It removes `by` and commits
+    `Owner: take <id>` or `Owner: drop <id>`; the Workshop then shows the verdict as the
+    owner's, and its History shows the confirmation.
 - An answer in an entry with no verdict is a proposal, and nobody has to follow it. When the
   owner leans towards an answer without saying yes, write it as the entry's answer and say in the
   notes that it is a lean.
@@ -295,6 +302,6 @@ says "decided by agents" where it says "decided", and "dropped by agents" where 
 |---|---|
 | `plan` | Prints what is next: the first entry with no verdict, the features being built, the features ready to build, and the features that wait, each with what it waits for. |
 | `plan show <id>` | Prints one entry or one statement, with what it links to and what applies to it. This is the brief for whoever works on it. With the id of a part, it prints what is next in that part. |
-| `plan take <id> [--by agents]` | Writes the owner's yes; with `--by agents`, the agents' yes (commit `Agents: take <id>`). |
-| `plan drop <id> [--by agents]` | Writes the owner's no; with `--by agents`, the agents' no (commit `Agents: drop <id>`), refused on a verdict the owner wrote. |
+| `plan take <id> [--by agents]` | Writes the owner's yes, which also confirms an entry the agents took; with `--by agents`, the agents' yes (commit `Agents: take <id>`), refused on an entry the owner ruled on and on one that sets statements. |
+| `plan drop <id> [--by agents]` | Writes the owner's no, which also confirms an entry the agents dropped; with `--by agents`, the agents' no (commit `Agents: drop <id>`), refused on an entry the owner ruled on and on one that sets, removes or adds statements. |
 | `plan check` | Checks that the plan's files fit together. The merge gate and the site's build run it. |

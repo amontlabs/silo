@@ -7,22 +7,22 @@ import { PATHSPECS, entryPath } from './paths.js';
 const BUFFER = 1024 * 1024 * 1024;
 
 /**
- * The steps of the repository at `root`, oldest first, and whether it is a shallow clone. Each step is
+ * The steps of the repository at `root`, as of `ref` (HEAD unless given), oldest first, and whether it is a shallow clone. Each step is
  * `{ commit, date, files }`: the full hash, the committer date in UTC (`2026-11-20T12:00:00Z`), and for
  * each changed path relative to `plan/` the text before and after, null when the file did not exist.
  * A merge is one step, compared with its first parent. Makes no network call and never throws: with no
  * repository, no commit or no `plan/`, there are no steps.
- * @param {string} root
+ * @param {string} root @param {string} [ref]
  * @returns {{ steps: { commit: string, date: string, files: Record<string, { before: string | null, after: string | null }> }[], shallow: boolean }}
  */
-export function readSteps(root) {
+export function readSteps(root, ref = 'HEAD') {
   // Looked up here and not imported, so that nothing that imports this folder has a `node:` import.
   const { execFileSync } = process.getBuiltinModule('node:child_process');
   const git = (args, input) => execFileSync('git', ['-C', root, ...args], { input, stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: BUFFER, env: { ...process.env, GIT_NO_LAZY_FETCH: '1' } });
   try {
     const shallow = git(['rev-parse', '--is-shallow-repository']).toString().trim() === 'true';
     // `-z` keeps a path with a newline or a quote whole; `--no-renames` turns a move into a delete and an add.
-    const log = git(['log', '--first-parent', '-m', '--raw', '-z', '--no-abbrev', '--no-renames', '--no-relative', '--root', '--format=%x01%H %ct', '--', ...PATHSPECS]).toString('utf8');
+    const log = git(['log', '--first-parent', '-m', '--raw', '-z', '--no-abbrev', '--no-renames', '--no-relative', '--root', '--format=%x01%H %ct', ref, '--', ...PATHSPECS]).toString('utf8');
     /** @type {{ commit: string, date: string, changes: { path: string, status: string, old: string, now: string }[] }[]} */
     const commits = [];
     const tokens = log.split('\0');

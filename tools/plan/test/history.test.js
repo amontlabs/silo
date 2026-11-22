@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { WHAT, entryHistory, readSteps } from '../history/index.js';
+import { WHAT, entryHistory, ownerRuled, readSteps } from '../history/index.js';
 import { cleanup, git, gitWith, temp } from './helpers.js';
 
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
@@ -437,4 +437,53 @@ test('a take or a drop the agents wrote says so with `agents`; one by the owner 
   assert.deepEqual(taken, { commit: 'c2', date: '2026-11-02T00:00:00Z', what: ['taken'], agents: true });
   assert.deepEqual(dropped, { commit: 'c3', date: '2026-11-03T00:00:00Z', what: ['dropped'], agents: true });
   assert.deepEqual(owner, { commit: 'c4', date: '2026-11-04T00:00:00Z', what: ['taken'] });
+});
+
+test('a change of who decided is an event even when the verdict is the same: the owner confirming what the agents took, or reversing it', () => {
+  const history = entryHistory([
+    step(1, add(P, D)),
+    step(2, edit(P, D, { ...D, verdict: 'take', by: 'agents' })),
+    step(3, edit(P, { ...D, verdict: 'take', by: 'agents' }, { ...D, verdict: 'take' })),
+    step(4, edit(P, { ...D, verdict: 'take' }, { ...D, verdict: 'drop' })),
+    step(5, edit(P, { ...D, verdict: 'drop' }, { ...D, verdict: 'drop', by: 'agents' })),
+    step(6, edit(P, { ...D, verdict: 'drop', by: 'agents' }, { ...D, verdict: 'drop' })),
+    step(7, edit(P, { ...D, verdict: 'drop' }, { ...D, verdict: 'drop', answer: 'Other.' })),
+  ]);
+  assert.deepEqual(history.get('x').map((change) => [change.commit, change.what, change.agents]), [
+    ['c7', ['text'], undefined],
+    ['c6', ['dropped'], undefined],
+    ['c5', ['dropped'], true],
+    ['c4', ['dropped'], undefined],
+    ['c3', ['taken'], undefined],
+    ['c2', ['taken'], true],
+    ['c1', ['added'], undefined],
+  ]);
+});
+
+test('ownerRuled: the entries that held a verdict with no by in any step, even one cleared since', () => {
+  const E = { asks: 'E?' };
+  const steps = [
+    step(1, { ...add(P, D), ...add('engine/decisions/y.json', E), ...add('engine/decisions/z.json', E), ...add('engine/decisions/w.json', { ...E, verdict: 'take' }) }),
+    step(2, { ...edit(P, D, { ...D, verdict: 'take', by: 'agents' }), ...edit('engine/decisions/y.json', E, { ...E, verdict: 'drop' }) }),
+    // y: the owner's verdict is edited out, then the agents write theirs.
+    step(3, edit('engine/decisions/y.json', { ...E, verdict: 'drop' }, E)),
+    step(4, edit('engine/decisions/y.json', E, { ...E, verdict: 'take', by: 'agents' })),
+    // x: the owner confirms what the agents took.
+    step(5, edit(P, { ...D, verdict: 'take', by: 'agents' }, { ...D, verdict: 'take' })),
+    // z: the agents alone.
+    step(6, edit('engine/decisions/z.json', E, { ...E, verdict: 'take', by: 'agents' })),
+  ];
+  assert.deepEqual([...ownerRuled(steps)].sort(), ['w', 'x', 'y']);
+  // Before the confirmation, x was the agents'.
+  assert.deepEqual([...ownerRuled(steps.slice(0, 4))].sort(), ['w', 'y']);
+  assert.deepEqual([...ownerRuled([])], []);
+});
+
+test('readSteps at a ref reads that ref\'s history, so a merged branch\'s owner verdict is found from the base', () => {
+  const root = repo();
+  commit(root, { 'engine/decisions/x.json': D });
+  git(root, 'branch', 'base');
+  commit(root, { 'engine/decisions/x.json': { ...D, verdict: 'take' } });
+  assert.deepEqual([...ownerRuled(readSteps(root).steps)], ['x']);
+  assert.deepEqual([...ownerRuled(readSteps(root, 'base').steps)], []);
 });
