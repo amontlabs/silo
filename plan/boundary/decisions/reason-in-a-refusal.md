@@ -19,6 +19,9 @@ The options:
 Recommended: rules say why, precautions do not. A rule cannot be talked around, so naming it is
 free. A classifier can be, so its reasons stay with you unless you choose otherwise.
 
+This replaces `words-of-a-refusal`, which you took: it gave the words of a refusal to a classifier
+or a precaution, and left out a rule.
+
 ## Notes
 
 Left for when it is built. The reason must not teach an agent how to rephrase.

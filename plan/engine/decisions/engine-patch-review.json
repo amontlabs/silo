@@ -1,6 +1,6 @@
 {
-  "asks": "How is a patch to the VM engine reviewed?",
-  "answer": "A patch to the VM engine is reviewed as boundary code, which is code a hostile computer can reach. It runs in the helper, and a restore reads back state the computer controlled. So the review treats every value that comes from the computer as hostile. A patch that reads such a value brings a hostile test or a fuzz target for what it reads, and without one it is refused. A patch that reads none says so, and the review checks that it does not.",
+  "asks": "How is a patch to libkrun reviewed?",
+  "answer": "A patch to libkrun, the virtual machine monitor that runs Linux computers, is reviewed as boundary code, which is code a hostile computer can reach. It runs in the helper, and a restore reads back state the computer controlled. So the review treats every value that comes from the computer as hostile. A patch that reads such a value brings a hostile test or a fuzz target for what it reads, and without one it is refused. A patch that reads none says so, and the review checks that it does not.",
   "needs": [
     "linux-vm-engine"
   ]

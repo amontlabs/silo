@@ -1,4 +1,7 @@
 {
   "asks": "What may the reason in a refusal say?",
-  "answer": "The reason is always true. A refusal by a rule names what the rule refused, such as a host that is not on the list or a package younger than seven days: a rule holds even when the agent knows it. A refusal by a precaution says only that it was denied, by default, because what a precaution rests on can be fooled. You can let a precaution pass its own words on."
+  "answer": "Only a refusal needs words: \"allowed\" and \"held\" need none. The reason is always true. A refusal by a rule names what the rule refused, such as a host that is not on the list or a package younger than seven days: a rule holds even when the agent knows it. A refusal by a precaution says only that it was denied, by default, because what a precaution rests on can be fooled. You can let a precaution pass its own words on.",
+  "replaces": [
+    "words-of-a-refusal"
+  ]
 }

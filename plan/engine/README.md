@@ -14,7 +14,8 @@ Given by `engine-language`.
   (`macos-vm-driver`).
 - **The core does not wait for a classifier** (`core-never-waits`).
 - How the engine is cut into parts, and which processes Silo runs, are not settled yet:
-  `engine-shape`, `processes`. Neither is the VM engine for Linux computers (`linux-vm-engine`).
+  `engine-shape`, `processes`. Neither is the virtual machine monitor that runs Linux computers
+  (`linux-vm-engine`).
 
 ## One example
 

@@ -44,9 +44,9 @@ From earlier work on macOS computers. Not yet a decision.
   move to a new identity under Apple's framework.
 - Apple forbids shipping a pre-installed macOS image. Each Mac downloads and installs its own, so
   the first run takes longer than with a Linux image (`first-run-time-macos`).
-- A macOS computer needs a second VM engine, Apple's virtualization framework, driven from Swift
-  on the engine side. That is decided, in `engine`. Its network goes through Silo's boundary,
-  never Apple's NAT, as `engine` puts forward.
+- A macOS computer needs a second virtual machine monitor, Apple's Virtualization framework, driven
+  from Swift on the engine side. That is decided, in `engine`. Its network goes through Silo's
+  boundary, never Apple's NAT, as `engine` puts forward.
 - A macOS computer is larger than a Linux one, in disk and in memory.
 
 ## What a fork is beside a macOS main

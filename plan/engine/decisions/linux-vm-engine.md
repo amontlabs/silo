@@ -1,4 +1,4 @@
-# Which VM engine runs Linux computers
+# Which virtual machine monitor runs Linux computers
 
 ## For the owner
 
@@ -16,9 +16,9 @@ The options:
 - MicroSandbox. It forks a running computer today, on a Mac and on Linux. It costs what the old Silo
   already paid: 24 patches, and regressions at each upgrade. It cannot take Silo's network, gives no
   memory back on a Mac, and rests on two founders whose copy of libkrun is 653 commits behind.
-- Apple's framework on the Mac, another engine on Linux. A native screen at once, and mature engines
-  on servers. It costs two engines to build and keep alike, memory that is not given back on a Mac,
-  and still no fork of a running computer on the Mac.
+- Apple's framework on the Mac, another virtual machine monitor on Linux. A native screen at once,
+  and mature ones on servers. It costs two virtual machine monitors to build on and keep alike,
+  memory that is not given back on a Mac, and still no fork of a running computer on the Mac.
 
 Recommended: libkrun, which is your own view of 19 November. Five measurements come before it is
 relied on, among them whether systemd and Docker run and how long a cold fork takes. If one fails,

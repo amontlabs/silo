@@ -1,4 +1,15 @@
 {
   "asks": "How does Silo know whether you or an agent did something in a computer?",
-  "answer": "A built-in classifier sorts each process from the process tree, which is a report, so its answer is an opinion. A process that descends from an agent program belongs to that program's run, even when you started the program from your own terminal. Any other process that descends from a session opened over SSH from outside the computer (your terminal, your editor, or the commands an agent app runs itself) is you. The rest is unattributed. An agent program that Silo does not recognise counts as what started it. An agent inside can also make its work look like yours or like another run's, so the opinion can be wrong."
+  "answer": "A built-in classifier sorts each process from the process tree, which is a report, so its answer is an opinion. A process that descends from an agent program belongs to that program's run, even when you started the program from your own terminal. Any other process that descends from a session opened over SSH from outside the computer (your terminal, your editor, or the commands an agent app runs itself) is you. The rest is unattributed. An agent program that Silo does not recognise counts as what started it. An agent inside can also make its work look like yours or like another run's, so the opinion can be wrong.",
+  "sets": [
+    {
+      "in": "record/properties",
+      "id": "books-balance",
+      "says": "What runs and you are shown to have written adds up to what the boundary saw change. What is left over is shown as \"unattributed\". It is never spread over the runs or over you.",
+      "kind": "safety",
+      "check": [
+        "live check"
+      ]
+    }
+  ]
 }

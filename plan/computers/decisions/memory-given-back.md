@@ -28,7 +28,7 @@ To find out.
 |---|---|---|
 | Memory given back when idle | libkrun returns freed memory on a Mac since 1.19.8; MicroSandbox does not. | To find out. |
 
-Source: the research on the VM engine for Linux computers, 19 November 2026
+Source: the research on the virtual machine monitor for Linux computers, 19 November 2026
 ([the research in the notes of `linux-vm-engine`](../../engine/decisions/linux-vm-engine.md)). How much an idle computer
 gives back on a Mac is one of its five measurements, in `linux-vm-engine`.
 

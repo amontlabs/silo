@@ -25,7 +25,8 @@ engine finds them again, and it never stops a computer it is unsure of.
 
 ## Notes
 
-To find out, for Apple's framework and for the VM engine of Linux computers (`linux-vm-engine`).
+To find out, for Apple's framework and for the virtual machine monitor of Linux computers
+(`linux-vm-engine`).
 
 - A virtual machine lives in the process that created it.
 - libkrun runs a virtual machine in the process that calls it. Fact as of 19 November 2026, from

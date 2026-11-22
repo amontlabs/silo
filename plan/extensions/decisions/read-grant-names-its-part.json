@@ -1,9 +1,12 @@
 {
   "asks": "Does a tool that reads cover everything?",
-  "answer": "A tool that reads names what it reads: a path on a computer, or which kinds of lines of a computer's record, such as its file and process lines. The extension receives those lines, the opinions about them and whether the computer is running, paused or stopped, and nothing else of that record. Model calls are one kind, so an extension gets what was sent to a model and what came back only when its manifest names them.",
+  "answer": "A tool that reads names what it reads: a path on a computer, or which kinds of lines of a computer's record, such as its file and process lines. The extension receives those lines of the computers the user chose, as a stream and by query, the opinions about them and whether each computer is running, paused or stopped, and nothing else of that record. Model calls are one kind, so an extension gets what was sent to a model and what came back only when its manifest names them.",
   "needs": [
     "extension-manifest",
     "kinds-of-lines"
+  ],
+  "replaces": [
+    "what-reading-the-record-gives"
   ],
   "suggest": {
     "verdict": "take",

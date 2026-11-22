@@ -1,4 +1,4 @@
 {
-  "asks": "Which VM engine runs Linux computers, on a Mac and on a Linux host?",
+  "asks": "Which virtual machine monitor runs Linux computers, on a Mac and on a Linux host?",
   "answer": "libkrun, with Silo's own patches on top. Until memory snapshots exist for it, a Linux computer is checkpointed and forked from its disk only, and a fork starts with a cold boot. The choice is confirmed by five measurements, to find out: a Zig helper boots the Ubuntu image through libkrun's C interface on a Mac and on a Linux host, with its traffic sent to a stub network stack; how long a fork takes from a cloned disk; whether systemd and Docker run; how much memory an idle computer gives back on a Mac; how fast the work folders are. If one fails, the choice is asked again."
 }
