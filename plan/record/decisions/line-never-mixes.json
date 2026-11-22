@@ -1,4 +1,6 @@
 {
   "asks": "May one line of the record hold both a fact and a report?",
-  "answer": "A line never mixes the two. That a file changed is a fact. Which process changed it is a report that points to that fact."
+  "answer": "A line never mixes the two. That a file changed is a fact. Which process changed it is a report that points to that fact.",
+  "verdict": "take",
+  "by": "agents"
 }
