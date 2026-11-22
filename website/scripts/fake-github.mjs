@@ -49,6 +49,8 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     truncateOver: Infinity,
     // A test's change to the answer of the plan's read (GraphQL PlanAt), as GitHub may give it in part: (answer) => answer.
     planAnswer: null,
+    // The same for the follow-up read of the folders the first one cut (GraphQL Deeper).
+    deeperAnswer: null,
     // Each createCommitOnBranch asked for: its input, as sent.
     commitInputs: [],
   };
@@ -266,6 +268,16 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     // `until`: a promise the test settles; the call is held until then, however long that is.
     if (hooked?.until) await hooked.until;
     if (hooked?.status) return json(res, hooked.status, hooked.body ?? { message: 'hooked' }, hooked.headers);
+    // `lose`: the call is done, and its answer lost on the way: replaced by that status, or 'drop', the connection closed.
+    if (hooked?.lose) {
+      const { lose } = hooked;
+      res.writeHead = () => res;
+      res.end = () => {
+        if (lose === 'drop') res.socket?.destroy();
+        else { delete res.writeHead; delete res.end; json(res, lose, { message: 'lost' }); }
+        return res;
+      };
+    }
 
     // User authorization (github.com)
     if (path === '/login/oauth/authorize') {
@@ -390,6 +402,19 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
           repository[alias] = !found ? null : found.object.type === 'tree' ? { __typename: 'Tree', ...git.graph(found, 0) } : { __typename: found.object.type === 'blob' ? 'Blob' : 'Commit' };
         }
         return json(res, 200, { data: { repository } });
+      }
+      // The folders of plan/ the first read cut, each read with three levels more; and one file's text at a commit.
+      if (/^query (?:Deeper|EntryAt)\(/.test(body.query || '')) {
+        const { owner, name } = body.variables || {};
+        if (`${owner}/${name}` !== repo) return json(res, 200, { data: { repository: null }, errors: [{ type: 'NOT_FOUND', message: 'Could not resolve to a Repository.' }] });
+        const git = state.git;
+        const options = { truncateOver: state.truncateOver };
+        const repository = {};
+        for (const [, alias, expression] of body.query.matchAll(/(\w+): object\(expression: ("(?:[^"\\]|\\.)*")\)/g)) {
+          repository[alias] = git.graph(git.resolve(JSON.parse(expression)), 3, options);
+        }
+        const answer = { data: { repository } };
+        return json(res, 200, state.deeperAnswer && /^query Deeper\(/.test(body.query) ? state.deeperAnswer(answer) : answer);
       }
       if (/^query PlanAt\(/.test(body.query || '')) {
         const { owner, name, commit, plan, built, builtPlan } = body.variables || {};

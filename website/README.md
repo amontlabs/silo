@@ -1100,14 +1100,17 @@ What the server does, with the owner's own token and nothing else:
 2. In one GraphQL call it reads the names in that commit's root folder, the
    text of every file of `plan/` at it, and the id of every file of `plan/` at
    `built`. A file GitHub gives cut short
-   is read whole from its blob. `plan/` is read as `tools/plan/read` reads it:
-   a link or a submodule anywhere under it, a folder whose name starts with a
-   dot included, refuses the verdict, and so does a folder deeper than
-   `plan/<part>/<kind>/`; a file under a dot name is not read. An answer
-   with any error, even beside data, or a folder or a file it gives without
-   its contents, or a blob GitHub does not give, answers 502 `partial`:
-   "GitHub answered in part, so nothing was written. Try again." A part of
-   `plan/` is never taken for all of it.
+   is read whole from its blob. That call gives the files of `plan/` three
+   folders down; a folder below that is read by one more call, three folders
+   more at a time, so `plan/` is read to its full depth (a folder 27 or more
+   folders below `plan/` refuses the verdict). `plan/` is read as `tools/plan/read`
+   reads it: a link or a submodule anywhere under it, a folder whose name
+   starts with a dot included, refuses the verdict; a file under a dot name is
+   not read. An answer with any error, even beside data, or a folder or a file
+   it gives without its contents anywhere, under a dot name too, or `plan/`
+   named in the root folder without its contents, or a blob GitHub does not
+   give, answers 502 `partial`: "GitHub answered in part, so nothing was
+   written. Try again." A part of `plan/` is never taken for all of it.
 3. When the entry's file on `main` already holds the verdict asked, with no
    `by`, it answers 200 with `"already": true` and writes nothing, before
    anything else is compared: the page asks again after an answer it lost,
@@ -1119,8 +1122,11 @@ What the server does, with the owner's own token and nothing else:
    `built`: the entry's file and its notes, the files of the decisions it
    replaces (the page shows their answer), the lists that hold a statement it
    sets, removes, adds or keeps (the page shows each one's text as it is now),
-   and every file the verdict writes. A change to any other file does not
-   matter.
+   and every file the verdict writes. The files the page showed are those of
+   `built` and those of `main` both: a statement shown at `built` and removed
+   from `main` since, or a decision it replaces deleted since, refuses too
+   (the text of a list that differs is read at `built` to know). A change to
+   any other file does not matter.
 5. It runs `take(files, id)` or `drop(files, id)` of `tools/plan/write`, the
    same functions `plan take` and `plan drop` run, with the options `plan take`
    passes, and always as the owner, never `by: agents`. Its `exists`, whether
@@ -1150,12 +1156,16 @@ What the server does, with the owner's own token and nothing else:
    A push to `main` meanwhile, or a reset of `main` to an older commit, is
    never undone. A file of `plan/` that is not a plain file (mode `100644`) on
    `main` refuses the verdict, since the call writes plain files only.
-8. When `main` was not where the call expected it (GitHub answers 409, or an
-   error after which `main` is no longer the commit read), it starts again from
-   step 1 on the new `main`. After three tries it answers 409 `busy`: "Main kept
-   changing while the verdict was written. Try again." When the answer is lost
-   after the commit was made, the next try finds the verdict on `main` and
-   answers "already".
+8. When `main` was not where the call expected it (GitHub answers 409, an
+   error saying the branch did not point to `expectedHeadOid` (`STALE_DATA`),
+   even with `main` back at the commit read by then, or an error after which
+   `main` is no longer the commit read), it starts again from step 1 on the
+   new `main`. After three tries it answers 409 `busy`: "Main kept changing
+   while the verdict was written. Try again." After a call whose outcome is
+   not known (no answer, none in time, a 5xx, an answer that says nothing
+   sure), the commit may be on `main`: before it answers `busy` or any error,
+   it reads the entry's file on `main` again (one GraphQL call), and when it
+   holds the verdict asked, with no `by`, answers "already".
 
 The call either moves `main` to the new commit or changes nothing. When GitHub
 refuses the write itself (a `FORBIDDEN` or `NOT_FOUND` error, or 403 or 404 to

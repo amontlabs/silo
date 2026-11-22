@@ -648,3 +648,131 @@ test('a verdict that would break the site\'s next build is refused with the buil
     } finally { await t.close(); }
   }
 });
+
+test('what the owner saw includes what the page showed at the build: a statement shown under Now there and removed from main since refuses the verdict', async () => {
+  const t = await started({ change: withZigOnly() });
+  try {
+    // zig-only removes classifier-never-acts: the page built from the seed showed its text under Now.
+    const moved = t.fake.git.push(new Map([['plan/record/properties.json', edited(t.files, 'record/properties.json', (list) => list.filter((p) => p.id !== 'classifier-never-acts'))]]));
+    const refused = await t.verdict('zig-only', 'drop');
+    assert.deepEqual([refused.status, refused.json.error, refused.json.message], [409, 'changed', CHANGED], refused.body);
+    assert.equal(t.main(), moved);
+    assert.equal(t.gitWrites().length, 0);
+    // A decision it replaces, deleted from main since the build, is what the page showed too.
+    const t2 = await started({ change: withZigOnly() });
+    try {
+      t2.fake.git.push(new Map([['plan/engine/decisions/engine-language.json', null]]));
+      const gone = await t2.verdict('zig-only', 'drop');
+      assert.deepEqual([gone.status, gone.json.error], [409, 'changed'], gone.body);
+      assert.equal(t2.gitWrites().length, 0);
+    } finally { await t2.close(); }
+  } finally { await t.close(); }
+});
+
+/** main's commit with `files` (path -> { text } or { sha, mode }) set on the seed's tree. */
+function commitOver(t, files, message) {
+  const git = t.fake.git;
+  const all = git.flatten(git.objects.get(t.main()).tree);
+  for (const [path, file] of files) all.set(path, file.text !== undefined ? { sha: git.blob(file.text), mode: '100644' } : file);
+  const sha = git.commit({ tree: git.treeOf(all), parents: [t.main()], message });
+  git.refs.set('heads/main', sha);
+  return sha;
+}
+
+test('an answer in part anywhere fails the whole read: a file without its object under a dot folder, plan/ named in the root without its object, a deep folder read again without its own', async () => {
+  const cases = [
+    ['a file of a dot folder whose object is null', 'planAnswer', (answer) => {
+      answer.data.repository.plan.entries.find((e) => e.name === '.cache').object.entries.find((e) => e.name === 'notes.txt').object = null;
+      return answer;
+    }],
+    ['plan/ named in main\'s root, its object null', 'planAnswer', (answer) => {
+      answer.data.repository.plan = null;
+      return answer;
+    }],
+    ['a folder below the first read, read again, null', 'deeperAnswer', (answer) => {
+      answer.data.repository.d0 = null;
+      return answer;
+    }],
+  ];
+  for (const [name, read, change] of cases) {
+    const t = await started();
+    try {
+      commitOver(t, new Map([['plan/.cache/notes.txt', { text: 'A note.\n' }], ['plan/.cache/a/b/c/notes.txt', { text: 'Deeper.\n' }]]), 'A dot folder');
+      const head = t.main();
+      t.fake.state[read] = change;
+      const response = await t.verdict('linux-vm-engine', 'take');
+      assert.deepEqual([response.status, response.json.error, response.json.message], [502, 'partial', PARTIAL], `${name}: ${response.body}`);
+      assert.equal(t.main(), head, name);
+      assert.equal(t.gitWrites().length, 0, name);
+    } finally { await t.close(); }
+  }
+});
+
+test('plan/ is read to its full depth, as the plan tool reads it: a file deep under a dot folder is fine, a link deep under one refuses', async () => {
+  const t = await started();
+  try {
+    commitOver(t, new Map([['plan/.review/fixtures/example/readme.txt', { text: 'An example.\n' }], ['plan/.review/fixtures/example/deeper/still/more/notes.txt', { text: 'Deeper.\n' }]]), 'Deep files');
+    const response = await t.verdict('linux-vm-engine', 'take');
+    assert.equal(response.status, 200, response.body);
+    assert.equal(t.fake.git.objects.get(t.main()).message, 'Owner: take linux-vm-engine');
+    const git = t.fake.git;
+    commitOver(t, new Map([['plan/.review/fixtures/example/deeper/still/more/link', { sha: git.blob('../../../../../../../secrets'), mode: '120000' }]]), 'A deep link');
+    const head = t.main();
+    const refused = await t.verdict('no-detour', 'drop', t.seed);
+    assert.deepEqual([refused.status, refused.json.error, refused.json.message], [409, 'refused', 'plan/.review/fixtures/example/deeper/still/more/link is a symbolic link or a submodule on main']);
+    assert.equal(t.main(), head);
+    assert.equal(t.gitWrites().length, 1);
+  } finally { await t.close(); }
+});
+
+test('the last write commits but its answer is lost: main\'s entry is read again, and the verdict on it answers already, not busy or an error', async () => {
+  for (const lose of [502, 'drop']) {
+    const t = await started();
+    try {
+      let writes = 0;
+      t.fake.state.hook = (record) => {
+        if (!isWrite(record)) return null;
+        writes += 1;
+        // Main moves before every write but the last, whose commit is made and its answer lost.
+        if (writes < ATTEMPTS) { t.fake.git.push(new Map([['plan/engine/README.md', `An agent's push ${writes}.\n`]])); return null; }
+        return { lose };
+      };
+      const response = await t.verdict('linux-vm-engine', 'take');
+      assert.equal(response.status, 200, `${lose}: ${response.body}`);
+      assert.deepEqual([response.json.already, response.json.verdict], [true, 'take'], String(lose));
+      assert.equal(t.fake.git.objects.get(t.main()).message, 'Owner: take linux-vm-engine');
+      assert.equal(writes, ATTEMPTS);
+    } finally { t.fake.state.hook = null; await t.close(); }
+  }
+  // Lost on main as it was read, with no move: the reread finds the verdict too.
+  const t = await started();
+  try {
+    t.fake.state.hook = (record) => (isWrite(record) ? { lose: 502 } : null);
+    const response = await t.verdict('linux-vm-engine', 'take', t.seed);
+    assert.equal(response.status, 200, response.body);
+    assert.equal(response.json.already, true);
+  } finally { t.fake.state.hook = null; await t.close(); }
+});
+
+test('a head mismatch GitHub answers to the write (STALE_DATA), with main back where it was read, is main moving: redone within the bound', async () => {
+  const t = await started();
+  try {
+    const stale = { status: 200, body: { data: { createCommitOnBranch: null }, errors: [{ type: 'STALE_DATA', path: ['createCommitOnBranch'], message: 'Expected branch to point to "x" but it did not. Pull and try again.' }] } };
+    let mismatches = 1;
+    t.fake.state.hook = (record) => {
+      if (!isWrite(record) || mismatches === 0) return null;
+      mismatches -= 1;
+      return stale;
+    };
+    const response = await t.verdict('linux-vm-engine', 'take');
+    assert.equal(response.status, 200, response.body);
+    assert.equal(t.fake.git.objects.get(t.main()).message, 'Owner: take linux-vm-engine');
+    assert.equal(t.gitWrites().length, 2);
+
+    mismatches = Infinity;
+    const before = t.fake.state.requests.length;
+    const busy = await t.verdict('no-detour', 'drop', t.main());
+    assert.deepEqual([busy.status, busy.json.error, busy.json.message], [409, 'busy', BUSY]);
+    assert.equal(t.fake.state.requests.slice(before).filter(isWrite).length, ATTEMPTS);
+  } finally { t.fake.state.hook = null; await t.close(); }
+});

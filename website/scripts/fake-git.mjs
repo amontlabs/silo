@@ -106,10 +106,11 @@ export function createFakeGit() {
     return false;
   }
 
-  /** What `object(expression: "<commit>:<path>")` names, or null. */
+  /** What `object(expression: "<commit or branch>:<path>")` names, or null. */
   function resolve(expression) {
     const colon = expression.indexOf(':');
-    const commitSha = colon === -1 ? expression : expression.slice(0, colon);
+    const named = colon === -1 ? expression : expression.slice(0, colon);
+    const commitSha = objects.has(named) ? named : refs.get(`heads/${named}`) ?? named;
     const start = objects.get(commitSha);
     if (start?.type !== 'commit') return null;
     if (colon === -1) return { sha: commitSha, object: start };
