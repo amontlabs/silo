@@ -3,5 +3,7 @@
   "answer": "One of three different results: a value, nothing, or a named failure. A failure is never turned into zero, false or an empty result.",
   "needs": [
     "engine-states-and-failures"
-  ]
+  ],
+  "verdict": "take",
+  "by": "agents"
 }
