@@ -1,7 +1,11 @@
 {
   "asks": "How does a fork become main?",
+  "answer": "You make a fork main, or a rule you set does. In one step Silo stops the old main and gives the fork main's place: its name, its rules, its secrets, its budget and what was granted to it. Stopping the old main is destructive, as any stop is, and giving the fork main's place is granting, so each needs a fact or you. Before the step, if main changed since the fork was made, Silo shows what is only in the old main (`old-main-kept-aside`). The old main is kept aside as a stopped computer, which you can start again or drop. The scheduled jobs and services that were off in the fork are turned on again. If the step fails partway, Silo rolls it back: the old main stays main and the fork stays a fork.",
   "needs": [
     "how-a-fork-ends",
-    "old-main-kept-aside"
+    "old-main-kept-aside",
+    "kinds-of-action",
+    "what-a-fork-is-given",
+    "fork-identity"
   ]
 }

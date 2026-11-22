@@ -1,7 +1,0 @@
-{
-  "asks": "Where does the conversation continue when work moves to a fork?",
-  "answer": "A fork carries the conversation with it, because it is a copy of the whole computer.",
-  "needs": [
-    "conversation-resumes-in-a-copy"
-  ]
-}

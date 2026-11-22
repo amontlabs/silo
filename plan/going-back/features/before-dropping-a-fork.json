@@ -14,5 +14,9 @@
   "keeps": [
     "never-shown-as-a-fact",
     "grant-needs-a-fact-or-you"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Most of what a dropped fork loses is one file or one commit nobody remembered, and the list catches it before the drop."
+  }
 }

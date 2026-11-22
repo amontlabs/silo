@@ -1,5 +1,26 @@
 # What part Silo plays in the logins of agent programs
 
+## For the owner
+
+An agent's part, 22 November 2026. You use Claude Code with your Claude subscription, and Codex with
+an OpenAI API key. You make a fresh computer to run a task.
+
+The options:
+
+- Silo stays out of your logins (recommended). In the fresh computer you sign in to Claude Code
+  again, the vendor's own way. The API key is there already, because a rule of yours gives that
+  secret to the computer. Silo only keeps a login out of a fork unless you say so, and lets a
+  sign-in page open on your Mac. It costs a sign-in in each fresh computer where you use a
+  subscription.
+- Silo keeps your logins and puts them in each computer. You sign in once, and every computer has
+  the login. It costs the vendor's terms: Anthropic's, as read on 18 November 2026, forbid a product
+  to collect, store or pass on the login of a Claude subscription. Several computers that hold one
+  login can also sign each other out.
+
+Recommended: Silo stays out of your logins. It matches your words of 18 November, it fits the
+vendors' terms as read, and an API key, which Silo may hold for you, already works in every computer
+you choose.
+
 ## The owner's position
 
 The owner said this, on 18 November 2026: how people set up their accounts is their own

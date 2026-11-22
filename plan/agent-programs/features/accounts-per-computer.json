@@ -1,4 +1,8 @@
 {
   "name": "Accounts per computer",
-  "what": "Each computer with accounts of its own."
+  "what": "Each computer with accounts of its own.",
+  "suggest": {
+    "verdict": "drop",
+    "why": "Which account each computer uses is already yours to choose, by signing in there or by a rule that gives an API key, and Silo holding subscription logins goes against Anthropic's terms as read."
+  }
 }

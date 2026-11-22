@@ -1,6 +1,6 @@
 {
   "asks": "How long can a dropped computer be brought back?",
-  "answer": "A dropped computer can be brought back until its time in the bin ends. After that nothing of it remains except its record.",
+  "answer": "A dropped computer can be brought back for 7 days, a time you can change, and you can empty the bin sooner. When its time ends, Silo removes the computer and its checkpoints, and nothing of it remains except its record. Silo never empties the bin early on its own. When the disk runs low, it tells you and offers to.",
   "needs": [
     "drop-and-bin"
   ],

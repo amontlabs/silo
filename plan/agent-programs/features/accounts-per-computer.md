@@ -1,5 +1,22 @@
 # Accounts per computer
 
+## For the owner
+
+An agent's part, 22 November 2026. You have a work Claude account and a personal one. You want main
+to use the work account, and a fork for a side project to use the personal one.
+
+The options:
+
+- Leave it out (recommended). You sign in with the account you want inside each computer. An API key
+  is a secret, and a rule already gives each computer the key you choose. It costs you choosing the
+  account yourself in each computer.
+- Build it. Silo assigns an account to each computer and puts its login there. It costs Silo holding
+  your logins, which Anthropic's terms, as read on 18 November 2026, forbid for a Claude
+  subscription.
+
+Recommended: leave it out. What people do with their accounts inside their computers is theirs, as
+you put it on 21 November, and secrets already do this for API keys.
+
 ## The owner's words (21 November 2026)
 
 The owner did not recognise this entry. The owner said that what people do with their subscriptions

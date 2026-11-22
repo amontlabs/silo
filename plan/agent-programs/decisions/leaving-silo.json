@@ -1,4 +1,4 @@
 {
   "asks": "What does a user who leaves Silo take?",
-  "answer": "A user who leaves takes each computer as a standard disk image, and each recipe and rule as text."
+  "answer": "A user who leaves takes each computer as a standard disk image, each recipe and rule as text, and the record in the formats of its export. None of it needs Silo to be read. A Linux computer's image starts in any virtual machine app that reads a raw disk. Whether a macOS computer's image starts in another app built on Apple's framework, such as UTM or Tart, is to find out."
 }

@@ -13,5 +13,9 @@
   ],
   "keeps": [
     "grant-needs-a-fact-or-you"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A drop made too soon is common, and a bin makes it cost nothing for a while."
+  }
 }

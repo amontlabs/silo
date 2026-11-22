@@ -1,5 +1,25 @@
 # A sign-in started in a computer
 
+## For the owner
+
+An agent's part, 22 November 2026. In main, Claude Code connects to Linear's MCP server, which asks
+you to sign in. With your yes, the page opens in the browser on your Mac, where you are already
+signed in to Linear. You approve, and the answer reaches Claude Code in main.
+
+The options:
+
+- Build it (recommended). A sign-in started in any computer finishes in your own browser. It costs a
+  yes each time, and a new way for a computer to reach your Mac: it can open a page in your browser.
+  The code the provider sends back passes through Silo and stays out of the record. How Silo learns
+  the link, and where the answer has to go, is still to find out.
+- Leave it out. You copy the link into your browser yourself. A sign-in that offers a code to paste,
+  as Claude Code's own does, still works. It costs every sign-in that waits for its answer on the
+  computer itself, as many MCP sign-ins do: it never gets it. On a macOS computer you can sign in
+  again in its own browser instead.
+
+Recommended: build it. You called it super important, and without it such a sign-in cannot finish at
+all in a computer with no screen.
+
 ## The owner's words (21 November 2026)
 
 > That thing about signin callback to do from the user machine is super important. I think it's

@@ -1,4 +1,8 @@
 {
   "name": "Hand over a computer",
-  "what": "To hand someone the exact state of a computer."
+  "what": "To hand someone the exact state of a computer.",
+  "suggest": {
+    "verdict": "take",
+    "why": "The exact state of a computer with its record is what a colleague needs to see what an agent did, and team features come later on the same product."
+  }
 }

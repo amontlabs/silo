@@ -7,5 +7,9 @@
     "reaching-a-computer",
     "you-visit-a-computer",
     "computers-main-on-a-mac"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Forks come and go too often to be added to SSH by hand, and every tool that works on another machine reads these settings."
+  }
 }

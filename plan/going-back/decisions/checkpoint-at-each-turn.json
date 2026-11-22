@@ -1,7 +1,8 @@
 {
   "asks": "Is a turn a moment for a checkpoint?",
-  "answer": "When the model traffic can be read, a turn is such a moment.",
+  "answer": "Yes, when Silo can read a computer's model traffic. Silo takes a checkpoint when an agent's request leaves for its model. The agent then waits for the reply and runs no tool call, so the checkpoint is the moment before the tool calls of the next turn. Silo passes the reply on once that checkpoint is taken, so a checkpoint slower than the model delays the turn. If a checkpoint fails or passes its time limit, the reply goes on, and the record says that turn has no checkpoint. Whether checkpoints that often fit the checkpoint's speed budget is to find out. When the traffic cannot be read, checkpoints come at intervals and at the other moments the engine sees.",
   "needs": [
-    "automatic-checkpoints"
+    "automatic-checkpoints",
+    "what-traffic-gives"
   ]
 }

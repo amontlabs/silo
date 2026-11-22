@@ -1,3 +1,4 @@
 {
-  "asks": "Where does the token land when each agent app connects over SSH?"
+  "asks": "Where does the token land when each agent app connects over SSH?",
+  "answer": "To find out per app, by a live check: connect the app to a computer over SSH, sign in, then look for the login on the computer's disk, and fork the computer while the app is connected to see whether the fork's copy works. Known so far: the Claude desktop app appears to keep the login on the Mac and give the session in the computer a short-lived token; with the Codex app, the sign-in is done on the remote machine, so its login lands on the computer's disk. The result goes in the data file of that program, where `fork-and-sign-in` reads where its login is kept."
 }

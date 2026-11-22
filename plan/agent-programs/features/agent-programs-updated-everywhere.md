@@ -1,5 +1,24 @@
 # Agent programs updated in every computer
 
+## For the owner
+
+An agent's part, 22 November 2026. Claude Code releases a new version. You have main, two forks and
+a Linux computer. One action would update Claude Code in all four, after a checkpoint of each.
+
+The options:
+
+- Leave it out (recommended). Each program updates the way its vendor set it up; Claude Code, for
+  one, updates itself. Checkpoints, taken on their own, give the way back if an update breaks
+  something. It costs a stopped computer staying on the old version until its program next starts.
+- Build it. One action updates every computer. It costs Silo running a command in all your computers
+  at once, and handling a run that uses the program during the update, or a computer where the
+  update fails.
+
+Recommended: leave it out. The vendors' own updaters already do this, and a checkpoint taken on its
+own already gives the way back.
+
+## Notes
+
 From the list of smaller features the owner put on the roadmap on 21 November 2026. The owner's
 words on the list are in `silos-own-extensions`.
 

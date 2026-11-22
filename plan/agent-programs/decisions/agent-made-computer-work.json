@@ -1,6 +1,9 @@
 {
   "asks": "How does an agent's work in a computer it asked for reach the user?",
+  "answer": "As the work of any computer does. You see it in Silo's window with the rest of the work, under the agent and the computer that asked for it. A task ends with a receipt, which the agent that asked reads with the `silo` command, including when the computer stopped or crashed before the end. Code comes back from a fork through Git, as from any fork: its commits are brought to the computer it was forked from, or pushed where you allowed. Nothing else crosses between the two computers unless a rule you set lets files through.",
   "needs": [
-    "agents-making-computers"
+    "agents-making-computers",
+    "what-a-fork-is-given",
+    "what-a-receipt-is"
   ]
 }

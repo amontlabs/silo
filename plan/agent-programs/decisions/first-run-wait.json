@@ -1,4 +1,4 @@
 {
   "asks": "What does the first run on macOS show while it waits?",
-  "answer": "With macOS, the wait for the first download and install is long. It has to show something worth looking at."
+  "answer": "The first run puts the wait to use. While macOS downloads and installs, it asks its questions: what to bring in from your Mac, how main's network starts, and the rules your agent programs need. When the install ends, main is made with your answers and nothing is left to ask. Meanwhile it shows how much is downloaded and installed, and what each step is doing. If you quit Silo or the Mac sleeps, the download goes on from where it stopped the next time Silo runs."
 }

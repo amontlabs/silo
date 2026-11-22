@@ -8,5 +8,9 @@
     "agent-program-data-file",
     "offered-programs-list",
     "computers-main-on-a-mac"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It is what lets you keep the agent programs you already use, and every other feature of agent programs stands on it."
+  }
 }

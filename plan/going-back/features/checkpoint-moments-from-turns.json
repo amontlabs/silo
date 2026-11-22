@@ -8,5 +8,9 @@
     "restore-point-before-a-call",
     "what-traffic-gives",
     "model-calls-in-the-record"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It lets you go back to the moment before any command an agent ran, not to the last interval."
+  }
 }

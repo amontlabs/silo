@@ -1,4 +1,4 @@
 {
   "asks": "What is the list of agent programs Silo offers?",
-  "answer": "The list of programs Silo offers is data."
+  "answer": "The programs Silo offers are the data files of `agent-program-data-file` that ship with Silo, one per program, and the list is those files. Adding or removing a program is adding or removing a file, with no change to Silo's code, and no code of Silo names an agent program. A test checks that the list shown is exactly the files shipped, and a review of the code finds no program named in it."
 }

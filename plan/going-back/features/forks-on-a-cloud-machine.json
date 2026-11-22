@@ -1,4 +1,8 @@
 {
   "name": "Forks on a cloud machine",
-  "what": "Forks on a cloud machine."
+  "what": "Forks on a cloud machine.",
+  "suggest": {
+    "verdict": "take",
+    "why": "On a Mac, Apple's limit of two macOS computers and the Mac's memory cap how many forks run at once, and a cloud machine lifts that cap."
+  }
 }

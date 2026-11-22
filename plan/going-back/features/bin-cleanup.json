@@ -1,4 +1,8 @@
 {
   "name": "The bin's cleanup and retention",
-  "what": "The bin's cleanup and retention."
+  "what": "The bin's cleanup and retention.",
+  "suggest": {
+    "verdict": "drop",
+    "why": "Its whole text is its name, and how long the bin keeps a computer and its end are already in `time-in-the-bin` and `dropping-into-the-bin`."
+  }
 }

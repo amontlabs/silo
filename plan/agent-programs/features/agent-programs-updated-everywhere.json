@@ -5,5 +5,9 @@
     "agent-programs-run-unmodified",
     "checkpoints-taken-on-their-own",
     "restore-to-a-checkpoint"
-  ]
+  ],
+  "suggest": {
+    "verdict": "drop",
+    "why": "Agent programs already update the way their vendors set up, checkpoints taken on their own already give the way back, and the action would have Silo run commands in all your computers at once."
+  }
 }

@@ -14,5 +14,9 @@
   ],
   "keeps": [
     "grant-needs-a-fact-or-you"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Putting a computer back to a checkpoint is the plain way back when one agent works in it, and saving first makes the restore itself undoable."
+  }
 }

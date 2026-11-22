@@ -1,4 +1,4 @@
 {
   "asks": "Which agent programs run in a computer?",
-  "answer": "Any agent program runs in a computer, unmodified, including one Silo does not offer to install."
+  "answer": "Any agent program runs in a computer, unmodified, including one Silo does not offer to install: you install it the vendor's way, as on any machine. Silo records what it does from outside, as for any program. Silo has no data file for such a program, so what needs one is not done for it. Its login may be copied into a fork, and Silo says so before the fork is made. Whether its conversation is taken up again in a fork is not checked."
 }

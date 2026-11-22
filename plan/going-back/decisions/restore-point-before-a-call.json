@@ -1,4 +1,7 @@
 {
   "asks": "Which moment does a restore use around a tool call?",
-  "answer": "A restore to a moment in the middle of a tool call can repeat an outside action, so the moment before the call is the one to use."
+  "answer": "When you go back to just before a tool call, Silo restores the checkpoint taken while the agent waited for the reply that asked for it (`checkpoint-at-each-turn`). A checkpoint taken at an interval can fall in the middle of a tool call. Silo marks such a checkpoint from the model traffic, and says before the restore that the agent may run that call again. When Silo cannot read a computer's traffic, it does not know where calls begin and end, and it says so for that computer's checkpoints.",
+  "needs": [
+    "checkpoint-at-each-turn"
+  ]
 }

@@ -12,5 +12,9 @@
     "rule-reads-only-facts",
     "precaution-grants-nothing",
     "grant-needs-a-fact-or-you"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Checkpoints taken on their own fill the disk unless they are also removed on their own."
+  }
 }

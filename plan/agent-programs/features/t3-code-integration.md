@@ -1,5 +1,23 @@
 # T3 Code as a client of Silo
 
+## For the owner
+
+An agent's part, 22 November 2026. You work from T3 Code on your Mac. Today it connects to one
+computer over SSH. With this, T3 Code lists every computer, shows which runs need you, and opens the
+threads of an agent in any of them.
+
+The options:
+
+- Build it, later (recommended). T3 Code talks to Silo as Silo's own app does. It costs a client to
+  keep in step with Silo. If the work lives in Silo's own fork of T3 Code, it also costs a chat
+  window that Silo then maintains, which the plan proposes Silo does not build; done in T3 Code
+  itself, with its maintainers, it does not.
+- Leave it out. T3 Code connects to each computer over SSH, like any app. It costs you going to
+  Silo's window to see the work across computers.
+
+Recommended: build it later, in T3 Code itself where its maintainers accept it. You want it, and an
+app that already holds your agents' threads is where a view across computers helps most.
+
 ## The owner's words (21 November 2026)
 
 The owner said T3 Code is not a competitor and should become a first-class client of Silo, through

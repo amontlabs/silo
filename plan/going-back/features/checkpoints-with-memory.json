@@ -1,4 +1,8 @@
 {
   "name": "Checkpoints with memory",
-  "what": "Checkpoints that keep running programs."
+  "what": "Checkpoints that keep running programs.",
+  "suggest": {
+    "verdict": "take",
+    "why": "A restore that brings back the screen and the running programs matters most on a macOS computer where agents drive apps, and people expect it from the snapshots of Parallels and VMware."
+  }
 }

@@ -1,4 +1,4 @@
 {
   "asks": "What does a restore do before it goes back?",
-  "answer": "A restore first saves where you were."
+  "answer": "Before a restore, Silo takes a checkpoint of where you were, so the restore can be undone. That checkpoint is thinned like the others. If it cannot be taken, for example because the disk is full, the restore does not happen and Silo says why. You can then restore without saving, as a choice of your own."
 }

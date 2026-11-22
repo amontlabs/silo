@@ -1,3 +1,4 @@
 {
-  "asks": "What part does Silo play in the logins of agent programs?"
+  "asks": "What part does Silo play in the logins of agent programs?",
+  "answer": "Silo holds no login of a subscription. You sign in to each agent program the vendor's own way, inside each computer or through the vendor's app connected over SSH. An API key is the other case: Silo holds it as a secret, and a rule gives it to the computers you choose. Which accounts you use, and in which computers, is yours. Silo does two things for logins: a fork or a shared computer does not get the login that a program keeps on the disk unless you say so, and a sign-in started in a computer can finish in the browser on your Mac."
 }

@@ -10,5 +10,9 @@
   ],
   "keeps": [
     "grant-needs-a-fact-or-you"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Build output and caches are most of what fills a computer's disk, and Silo's list of what a rebuild brings back can offer them without touching what is only here."
+  }
 }

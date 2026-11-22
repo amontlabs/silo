@@ -3,9 +3,12 @@
   "what": "A fork is a copy of the whole computer, so it carries the agent's conversation with it. The agent program takes the conversation up again in the fork.",
   "needs": [
     "agent-programs-run-unmodified",
-    "fork-carries-the-conversation",
     "conversation-resumes-in-a-copy",
     "conversation-taken-up-again",
     "forking-a-computer"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A fork is most useful in the middle of a piece of work, when the agent's conversation is worth the most."
+  }
 }

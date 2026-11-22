@@ -1,4 +1,4 @@
 {
   "asks": "What does a checkpoint that leaves paths out say?",
-  "answer": "A checkpoint that leaves paths out, if Silo ever offers one, says what it left out."
+  "answer": "A checkpoint that leaves paths out names them, on the Timeline and before you restore or fork from it. After such a restore or fork, those paths are empty. Silo names them again then, and says that a rebuild brings them back."
 }

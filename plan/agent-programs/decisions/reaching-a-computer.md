@@ -8,7 +8,7 @@ several discussions, and wants it researched first: similar tools, and people wh
 problem.
 
 The question has three parts: `reaching-a-computer`, `following-the-work` (with
-`fork-carries-the-conversation`) and `agents-making-computers`.
+`conversation-taken-up-again`, in `going-back`) and `agents-making-computers`.
 
 ## For the owner
 

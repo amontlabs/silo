@@ -1,4 +1,4 @@
 {
   "asks": "How does Silo integrate with an agent program?",
-  "answer": "Silo integrates with an agent program only through its documented surfaces."
+  "answer": "Silo works with an agent program only through what its vendor documents for others to use: its command-line options, settings, hooks, environment variables and the files its documentation names. Silo does not patch a program, read its private files, or rely on behaviour the vendor does not document. Where the documentation says nothing, Silo does without, and the feature that would need it says so for that program."
 }

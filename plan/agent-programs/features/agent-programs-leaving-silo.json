@@ -6,5 +6,9 @@
     "computers-main-on-a-mac",
     "made-from-a-recipe",
     "allow-hold-or-deny"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A tool you can leave is easier to trust with full access to your work, and your setup and rules should not be locked in."
+  }
 }

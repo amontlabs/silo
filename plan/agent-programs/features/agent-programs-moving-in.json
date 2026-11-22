@@ -7,6 +7,11 @@
     "moving-in",
     "moving-in-on-macos",
     "main-from-the-mac-or-a-recipe",
-    "main-on-macos-first"
-  ]
+    "main-on-macos-first",
+    "files-through-a-channel"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Keeping the agent programs and habits you already have is what this part of Silo is for."
+  }
 }

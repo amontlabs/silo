@@ -1,3 +1,4 @@
 {
-  "asks": "Does Silo refuse to build what helps get around a provider's terms?"
+  "asks": "Does Silo refuse to build what helps get around a provider's terms?",
+  "answer": "Yes. Silo builds nothing whose purpose is to get around a provider's terms, such as rotating accounts to escape a usage limit or sharing one subscription between people. Where Silo is not sure what the terms allow, it asks the provider before building, as `anthropic-reads-intermediate` does. What you do with your own accounts inside your computers is yours: Silo neither checks it nor prevents it."
 }

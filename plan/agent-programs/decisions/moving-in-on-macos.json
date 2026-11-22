@@ -1,4 +1,7 @@
 {
   "asks": "What does moving in keep when main is on macOS?",
-  "answer": "With main on macOS, moving in keeps the same system, paths and tools."
+  "answer": "With main on macOS, what you bring in finds the system it was set up for. Main's user has your user name and the same home folder path as on your Mac, so a path written in a setting, such as /Users/ana/.local/bin/linear-mcp, stays right. A setting that names a path main does not have is listed on the first run, not left to fail later. How a recipe puts a tool at the path your settings name, such as /opt/homebrew/bin/node, is to find out.",
+  "needs": [
+    "main-on-macos-first"
+  ]
 }

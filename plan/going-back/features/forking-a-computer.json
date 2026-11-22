@@ -5,12 +5,10 @@
     "checkpoints-taken-on-their-own",
     "fork-from-the-moment",
     "when-a-fork-is-made",
-    "fork-to-try-a-tool",
     "fork-per-system",
     "fork-shares-disk-blocks",
     "fork-identity",
     "what-a-fork-is-given",
-    "fork-display",
     "whole-computer-grain",
     "meanings-for-computers",
     "speed-budgets",
@@ -19,5 +17,9 @@
   ],
   "keeps": [
     "grant-needs-a-fact-or-you"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A fork is how an agent tries something risky without touching main, which `the-shape` names as one of the reasons for Silo."
+  }
 }

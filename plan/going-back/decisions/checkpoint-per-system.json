@@ -1,4 +1,4 @@
 {
   "asks": "What is a checkpoint made of on each system?",
-  "answer": "On a Linux computer, a snapshot of the disk. On a macOS computer, a clone of the disk."
+  "answer": "On every system, a checkpoint is a copy-on-write copy of the computer's disk, taken from outside the computer. On a Mac it is an APFS clone of the disk image, and on a Linux host a reflink copy, for macOS and Linux computers alike (`work-on-top-of-libkrun`). It shares unchanged blocks with the disk, so it takes only the space of what changes after it. Nothing inside the computer takes part, so nothing inside can stop or change it. It holds the disk and not the running programs. What a program had not yet written to the disk is not in it, as after a power cut. Whether a copy taken while the computer runs is consistent, or needs the computer paused for a moment, is to find out against the checkpoint's speed budget."
 }

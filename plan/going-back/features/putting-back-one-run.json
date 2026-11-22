@@ -10,10 +10,15 @@
     "no-automatic-undo",
     "several-agents-in-main",
     "kinds-of-other-actions",
-    "which-run-did-it"
+    "which-run-did-it",
+    "checkpoints-taken-on-their-own"
   ],
   "keeps": [
     "never-shown-as-a-fact",
     "grant-needs-a-fact-or-you"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Several agents in one main is the normal case, and this is the one way back that leaves the other agents' work in place."
+  }
 }

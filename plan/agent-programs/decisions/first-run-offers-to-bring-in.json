@@ -1,7 +1,8 @@
 {
   "asks": "What does first run do with what is already on the Mac?",
-  "answer": "First run reads what is on the Mac (agent programs, their settings, skills, repositories) and offers to bring each inside.",
+  "answer": "The first run reads what is on your Mac: the agent programs Silo knows, their settings and skills, and your repositories. It lists them, and brings in only what you tick. A login is never brought in: you sign in again inside main. A setting that holds a key, such as the environment of an MCP server, is shown before it comes in, and each value can become a Silo secret instead of a copy. A repository comes in with its history, the files Git tracks and your uncommitted changes. Files Git ignores, such as a .env file or node_modules, stay on your Mac unless you tick them. Nothing on your Mac is changed, and nothing is shared into main: what comes in is a copy, made once.",
   "needs": [
-    "moving-in"
+    "moving-in",
+    "files-through-a-channel"
   ]
 }

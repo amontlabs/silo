@@ -11,5 +11,9 @@
   ],
   "keeps": [
     "never-shown-as-a-fact"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "What a drop or a fork becoming main shows you first is this list, and it turns a whole machine into the few things worth saving."
+  }
 }

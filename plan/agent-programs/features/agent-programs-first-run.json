@@ -8,6 +8,11 @@
     "first-run-wait",
     "first-run-time-macos",
     "computer-image",
-    "computers-main-on-a-mac"
-  ]
+    "computers-main-on-a-mac",
+    "safe-fresh-install"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Every agent needs at least one rule before it can reach its provider, so a first run that sets nothing up leaves agents that cannot work."
+  }
 }

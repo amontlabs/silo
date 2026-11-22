@@ -1,6 +1,6 @@
 {
   "asks": "Where is a checkpoint stored?",
-  "answer": "A checkpoint is stored where the agent in the computer cannot reach it. It never changes once saved.",
+  "answer": "Silo stores a checkpoint outside the computer, on the machine that runs it, on the same drive as the computer's own disk, since a copy that shares blocks can live only there. Nothing inside any computer can reach it, and it never changes once saved. A checkpoint is removed whole or not at all: by thinning, when its computer leaves the bin for good, or by you.",
   "sets": [
     {
       "in": "going-back/properties",

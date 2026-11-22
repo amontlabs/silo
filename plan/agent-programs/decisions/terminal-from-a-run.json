@@ -1,4 +1,4 @@
 {
   "asks": "How does the user get from a run in Silo's window to its conversation?",
-  "answer": "From a run in Silo's window, one action opens a terminal in the right computer, in the right conversation."
+  "answer": "From a run in Silo's window, one action opens your terminal app on the Mac, connected over SSH to the run's computer, in the run's folder, and takes the run's conversation up again with the program's own command. When Silo cannot tell which conversation the run belongs to, the terminal opens in the computer and the folder, and says so. How to open a run that is still going, without starting the same conversation a second time, is to find out."
 }

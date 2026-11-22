@@ -4,5 +4,9 @@
   "needs": [
     "agent-programs-reach-every-computer",
     "engine-program-and-clients"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "You want T3 Code as a first-class client, and an app that already holds your agents' threads is where a view across computers helps most."
+  }
 }

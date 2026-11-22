@@ -1,4 +1,4 @@
 {
   "asks": "What does first run do where it could fail?",
-  "answer": "First run must not fail. It sets up only what will work, and puts a question to you where it would otherwise guess."
+  "answer": "The first run checks what it needs before it changes anything: free disk, memory, the Mac's chip and system version, and the network. When something is missing, it says so before it starts, with what to do, and starts nothing. It sets up only what it has checked will work, and asks you where it would otherwise guess. When a step fails anyway, the first run stops there and says why, and keeps what is done: a download that was cut off goes on from where it stopped. A main left half made is never shown as ready."
 }

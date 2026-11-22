@@ -4,6 +4,11 @@
   "needs": [
     "ports-reached-from-your-mac",
     "agent-programs-run-unmodified",
-    "held-requests-and-asks"
-  ]
+    "held-requests-and-asks",
+    "channel-list"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Without it, a sign-in that waits for its answer on the computer itself never finishes, and you marked it as important."
+  }
 }

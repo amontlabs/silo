@@ -1,3 +1,4 @@
 {
-  "asks": "Does each agent program take a conversation up again in a copied computer?"
+  "asks": "Does each agent program take a conversation up again in a copied computer?",
+  "answer": "To find out per program, by a live check. Start a conversation in a computer, take a few turns, fork the computer, and in the fork use the program's documented way to take a conversation up again (`claude --resume`, `codex resume`). It counts as yes when the program shows the earlier turns and its next request to the model, read at the boundary, carries them. The check signs in again in the fork first, since a fork does not carry the login (`fork-and-sign-in`). It also takes the same conversation up in the parent and the fork at once, and after a restore to a checkpoint. The result and the command go in each program's data file. A program that fails the check is shown as one whose conversation stays in the computer where it started."
 }

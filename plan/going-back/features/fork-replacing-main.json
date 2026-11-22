@@ -7,5 +7,9 @@
     "fork-becomes-main",
     "old-main-kept-aside",
     "how-a-fork-ends"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A try that worked in a fork should become main as it is, with its packages, settings and data, not be done again by hand."
+  }
 }

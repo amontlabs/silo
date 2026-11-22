@@ -1,4 +1,4 @@
 {
   "asks": "Which way in reaches a computer?",
-  "answer": "A computer is reached over SSH, so the terminal, the editor and the tools people already use keep working."
+  "answer": "A computer is reached over SSH, so the terminal, the editor and the agent apps people already use keep working. The SSH server runs inside the computer, with a key Silo made for that computer. An agent with sudo can stop it or change it. Silo then shows on that computer that the way in does not answer, and restoring a checkpoint from before brings it back."
 }

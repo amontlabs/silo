@@ -11,5 +11,9 @@
     "disguising",
     "forking-a-computer",
     "fork-and-sign-in"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It keeps a promise already taken, that a login does not end up in a fork by accident, and a fork is where you put the agent you trust least."
+  }
 }

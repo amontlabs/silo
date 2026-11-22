@@ -8,5 +8,9 @@
     "recognising-a-conversation",
     "now-in-the-app",
     "model-calls-in-the-record"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Going from a run that needs you to its conversation is what Silo's window is for, and it should take one step."
+  }
 }
