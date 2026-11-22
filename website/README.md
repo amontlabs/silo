@@ -1671,7 +1671,10 @@ That gives them nothing: the server only ever uses the installation on
 
 Contents: Read and write is for the owner's verdicts, which commit to `main`
 with the owner's token: a person's token of the App can do no more than the App
-may. An App created before it lacks it: add it in the App's settings
+may. It also lets the App's private key mint an installation token that can
+write the repository's contents: the Workshop never asks for one (it requests
+installation tokens with issues and metadata only), but whoever holds the key
+can. An App created before it lacks it: add it in the App's settings
 (Permissions & events), then accept the new permission on the installation.
 `workshop doctor` reports an App without it.
 
@@ -1754,9 +1757,14 @@ not carry them. Writes from preview deployments are refused because their
 origin differs.
 
 **Identities and scope.** The App can read and write issues and contents of
-the one repository. The installation token is requested for that repository
-with issues and metadata only, so the App's key, which Vercel holds, never
-writes contents. The installation token serves only the snapshot refresh,
+the one repository. The Workshop requests its installation token for that
+repository with issues and metadata only, so no token it asks for with the
+App's key writes contents. The key itself can: since the installation has
+Contents: Read and write, whoever holds the private key, which Vercel holds
+as `WORKSHOP_PRIVATE_KEY`, can mint an installation token that writes the
+repository's code and pushes to `main`, without the owner's session. A leak of
+the key puts the repository's contents at risk, not only its issues: rotate it
+in the App's settings at once, and look at `main`'s history. The installation token serves only the snapshot refresh,
 the repository lookup at sign-in, labelling a suggestion
 (which a visitor cannot do) and opening an entry's thread, with the reads of
 entry issues before and after it. Everything else done for a signed-in person,
@@ -1840,4 +1848,7 @@ services:
   files, whether `plan take` and `plan drop` make it or the Workshop does. The
   Workshop runs the plan tool's own `take` and `drop` and commits with the
   owner's token, so there is one writer of what a verdict changes, and the
-  App's key, held by Vercel, never writes the code. See `tools/plan/README.md`.
+  Workshop never writes the code with the App's own tokens: it requests them
+  with issues and metadata only. The App's key, held by Vercel, could mint one
+  that writes contents, since the installation has Contents: Read and write
+  (see "Identities and scope"). See `tools/plan/README.md`.

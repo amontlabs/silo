@@ -48,7 +48,8 @@ registers a second App by accident; `--replace` registers a new one. Contents wr
 owner's Take and Drop on the Workshop, which commit to `main` with the owner's token; an App
 registered before it asked for Contents gets it in its settings, and the installation then
 accepts it. This command's own installation token, like the site's, is requested with Issues and
-Metadata only.
+Metadata only. The App's private key could still mint one that writes the repository's contents,
+so a leaked key puts the code at risk, not only the issues: rotate it at once.
 
 Credentials are looked up in the environment, then the Keychain (a locked one stops the command),
 then `~/.config/silo-workshop/credentials.json` (0600 or refused). `WORKSHOP_GITHUB_API` and
