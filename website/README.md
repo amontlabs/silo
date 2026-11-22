@@ -1095,7 +1095,11 @@ What the server does, with the owner's own token and nothing else:
    its contents, or a blob GitHub does not give, answers 502 `partial`:
    "GitHub answered in part, so nothing was written. Try again." A part of
    `plan/` is never taken for all of it.
-3. A verdict is for the text the owner saw. The server refuses with 409
+3. When the entry's file on `main` already holds the verdict asked, with no
+   `by`, it answers 200 with `"already": true` and writes nothing, before
+   anything else is compared: the page asks again after an answer it lost,
+   and the verdict may be on `main` by then.
+4. A verdict is for the text the owner saw. The server refuses with 409
    `changed`, "This entry changed since the page was built: reload the page.",
    when `built` is not a commit of `main`'s history (GitHub's compare of
    `built...main`), or when any of these files differs between `main` and
@@ -1104,7 +1108,7 @@ What the server does, with the owner's own token and nothing else:
    sets, removes, adds or keeps (the page shows each one's text as it is now),
    and every file the verdict writes. A change to any other file does not
    matter.
-4. It runs `take(files, id)` or `drop(files, id)` of `tools/plan/write`, the
+5. It runs `take(files, id)` or `drop(files, id)` of `tools/plan/write`, the
    same functions `plan take` and `plan drop` run, with the options `plan take`
    passes, and always as the owner, never `by: agents`. Its `exists`, whether
    each `at` names a regular file of the repository, is answered from `main`:
@@ -1114,7 +1118,7 @@ What the server does, with the owner's own token and nothing else:
    message, such as "model-tool has no answer and sets nothing: write its
    answer first". "Already" answers 200 with `"already": true` and writes
    nothing.
-5. In one GraphQL call, `createCommitOnBranch`, it makes the commit and moves
+6. In one GraphQL call, `createCommitOnBranch`, it makes the commit and moves
    `main` to it: the changed files of `plan/` on the `main` it read, the
    message `Owner: take <id>` or `Owner: drop <id>` with no body, as `plan`
    writes it, and `expectedHeadOid`, the commit read in step 1. GitHub makes
@@ -1123,7 +1127,7 @@ What the server does, with the owner's own token and nothing else:
    A push to `main` meanwhile, or a reset of `main` to an older commit, is
    never undone. A file of `plan/` that is not a plain file (mode `100644`) on
    `main` refuses the verdict, since the call writes plain files only.
-6. When `main` was not where the call expected it (GitHub answers 409, or an
+7. When `main` was not where the call expected it (GitHub answers 409, or an
    error after which `main` is no longer the commit read), it starts again from
    step 1 on the new `main`. After three tries it answers 409 `busy`: "Main kept
    changing while the verdict was written. Try again." When the answer is lost

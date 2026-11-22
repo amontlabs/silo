@@ -145,6 +145,16 @@ export function shownFiles(files, id) {
   return [...shown];
 }
 
+/** The verdict an entry's file holds as the owner's (no `by`), or null. @param {string | undefined} text */
+export function ownersVerdict(text) {
+  try {
+    const data = JSON.parse(text ?? '');
+    return data !== null && typeof data === 'object' && !Array.isArray(data) && !Object.hasOwn(data, 'by') && (data.verdict === 'take' || data.verdict === 'drop') ? data.verdict : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Whether `built` is a commit of the history of `head`, as a page built from main's history names. */
 async function inHistory(call, repo, built, head) {
   if (built === head) return true;
@@ -236,6 +246,10 @@ export async function writeVerdict({ call, repo, entry, verdict, built, attempts
     };
     for (const file of read.fetch) read.files.set(file.path, await blobText(file.oid, file.path));
 
+
+    // The owner's verdict already on main: done, whatever the page saw. The page asks again after an answer it lost,
+    // and the verdict it sent may be on main by then.
+    if (ownersVerdict(read.files.get(path)) === verdict) return { status: 'already', commit: null, message: `${entry.id} is already ${verdict === 'take' ? 'taken' : 'dropped'}` };
 
     // The options `plan take` passes: `exists`, whether each `at` names a file of the repository, here answered from
     // main. A first run with every path a file names the paths the plan tool asks about.

@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { drop, take } from '../../tools/plan/write/index.js';
 import { loadDir } from '../../tools/plan/read/index.js';
-import { ATTEMPTS, BUSY, CHANGED, DENIED, PARTIAL, shownFiles } from '../server/verdicts.mjs';
+import { ATTEMPTS, BUSY, CHANGED, DENIED, ownersVerdict, PARTIAL, shownFiles } from '../server/verdicts.mjs';
 import { BUDGET } from '../server/workshop.mjs';
 import { entriesFrom, planEntries } from './plan-entries.mjs';
 import { ORIGIN, setup, withBudget } from './workshop-test-support.mjs';
@@ -74,9 +74,8 @@ test('a take is one commit on main, named as plan take names it, made with the o
     const reads = t.fake.state.requests.filter((r) => r.path.includes('/git/') && r.method === 'GET');
     assert.deepEqual(reads.map((r) => r.path.split('/git/')[1]), ['ref/heads/main']);
     // Taken again: already, and nothing is written.
-    const again = await t.verdict(id, 'take', t.seed);
-    assert.equal(again.status, 409, 'the page built before the take saw another file');
     assert.equal((await t.verdict('engine-language', 'take')).json.already, true);
+    assert.equal(t.gitWrites().length, 1);
   } finally { await t.close(); }
 });
 
@@ -379,7 +378,7 @@ test('model: main moves only by fast-forwards, and each verdict is one commit eq
       pushes += 1;
       return t.fake.git.push(new Map([[path, `Push ${pushes}.\n`]]));
     };
-    const reached = { done: 0, already: 0, refused: 0, changed: 0, forbidden: 0, notOwner: 0, raced: 0 };
+    const reached = { done: 0, alreadyOnMain: 0, refused: 0, changed: 0, forbidden: 0, notOwner: 0, raced: 0 };
     for (let step = 0; step < 200; step += 1) {
       // A minute between steps, so the verdicts' own ceiling never answers.
       t.clock.t += 61_000;
@@ -427,7 +426,11 @@ test('model: main moves only by fast-forwards, and each verdict is one commit eq
       // What the owner saw: the entry's file and notes, what its page shows and what the verdict writes, at the build.
       const seen = planAt(t.fake.git, built);
       const compared = [path, path.replace(/\.json$/, '.md'), ...shownFiles(files, id), ...(outcome.status === 'done' ? outcome.changed.keys() : [])];
-      if (!t.fake.git.isAncestor(built, base) || compared.some((file) => files.get(file) !== seen.get(file))) {
+      if (ownersVerdict(files.get(path)) === kind) {
+        // Already the owner's verdict on main: done, before anything the page saw is compared.
+        assert.deepEqual([response.status, response.json.already, response.json.commit], [200, true, null], label);
+        reached.alreadyOnMain += 1;
+      } else if (!t.fake.git.isAncestor(built, base) || compared.some((file) => files.get(file) !== seen.get(file))) {
         assert.deepEqual([response.status, response.json.error], [409, 'changed'], label);
         reached.changed += 1;
       } else if (outcome.status === 'refused') {
@@ -435,7 +438,6 @@ test('model: main moves only by fast-forwards, and each verdict is one commit eq
         reached.refused += 1;
       } else if (outcome.status === 'already') {
         assert.deepEqual([response.status, response.json.already, response.json.commit], [200, true, null], label);
-        reached.already += 1;
       } else if (trouble === 0) {
         assert.deepEqual([response.status, response.json.error], [403, 'forbidden'], label);
         reached.forbidden += 1;
@@ -586,5 +588,28 @@ test('the page\'s build must be a commit of main\'s history: one elsewhere with 
     assert.deepEqual([refused.status, refused.json.error], [409, 'changed'], refused.body);
     assert.equal(t.main(), t.seed);
     assert.equal(t.gitWrites().length, 0);
+  } finally { await t.close(); }
+});
+
+test('a verdict already on main answers success before any freshness refusal: the page asking again after a lost answer is told it is done', async () => {
+  const t = await started({ change: { 'engine/decisions/model-tool.json': JSON.stringify({ asks: 'Which tool checks the model of access?', answer: 'Alloy.', verdict: 'take', by: 'agents' }, null, 2) + '\n' } });
+  try {
+    for (const [id, kind] of [['linux-vm-engine', 'take'], ['no-detour', 'drop'], ['model-tool', 'drop']]) {
+      const first = await t.verdict(id, kind);
+      assert.equal(first.status, 200, first.body);
+      const made = t.main();
+      // An agent changes the entry's notes after the verdict: the page built before both asks again.
+      const path = planEntries(SAMPLE).find((entry) => entry.id === id);
+      t.fake.git.push(new Map([[`plan/${path.part ? `${path.part}/` : ''}decisions/${id}.md`, 'Notes written after the verdict.\n']]));
+      const again = await t.verdict(id, kind, t.seed);
+      assert.equal(again.status, 200, `${id}: ${again.body}`);
+      assert.deepEqual([again.json.already, again.json.commit, again.json.verdict], [true, null, kind]);
+      assert.notEqual(t.fake.git.objects.get(made).message, 'A push');
+    }
+    assert.equal(t.gitWrites().length, 3);
+    // The other verdict on the same entry is no "already": it is refused as the page saw another text.
+    t.clock.t += 61_000;
+    const other = await t.verdict('linux-vm-engine', 'drop', t.seed);
+    assert.deepEqual([other.status, other.json.error], [409, 'changed']);
   } finally { await t.close(); }
 });
