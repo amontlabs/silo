@@ -7,5 +7,6 @@ the extension needs. Nothing is approved one by one. The owner called this fine,
 Before, this decision said that installing grants nothing by itself, and that every grant is
 accepted as a grant.
 
-How an extension is installed, and how something it was granted is taken back, is the later
-feature `installing-an-extension`.
+How an extension is installed is the feature `importing-an-extension`. How something it was
+granted is taken back, and how an extension is removed, is the later feature
+`installing-an-extension`.
