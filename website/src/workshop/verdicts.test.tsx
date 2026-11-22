@@ -276,6 +276,45 @@ describe('the owner\'s verdict', () => {
     expect(stateLine()).toBe('Not decided.');
   });
 
+  it.each([
+    ['taken', /^Take$/, /^Confirm take$/, () => ok({ ok: true, commit: 'e'.repeat(40) }), 'Decided.'],
+    ['dropped', /^Drop$/, /^Confirm drop$/, () => ok({ ok: true, commit: 'e'.repeat(40) }), 'Dropped.'],
+    ['refused', /^Take$/, /^Confirm take$/, () => refused(409, 'one-way is not decided.'), 'Not decided.'],
+  ] as const)('keeps the focus on the state line from the confirm on: %s', async (_, first, second, answer, says) => {
+    await openCreate(built(), theOwner, answer);
+    await waitFor(() => expect(button(first)).not.toBeNull());
+    const line = () => item().querySelector<HTMLElement>('.ws-state-text')!;
+    expect(line()).not.toHaveAttribute('tabindex');
+    (button(first) as HTMLElement).focus();
+    fireEvent.click(button(first) as HTMLElement);
+    confirm(second);
+    // At once: a button that is disabled while the server writes holds no focus.
+    expect(document.activeElement).toBe(line());
+    await waitFor(() => expect(item().querySelector('.ws-vbtn[aria-busy]')).toBeNull());
+    await waitFor(() => expect(line()).toHaveTextContent(says));
+    expect(document.activeElement).toBe(line());
+    expect(line()).toHaveAttribute('tabindex', '-1');
+    act(() => line().blur());
+    expect(line()).not.toHaveAttribute('tabindex');
+  });
+
+  it('draws the ring on the state line for a keyboard\'s confirm, none for a pointer\'s', async () => {
+    for (const [detail, ring] of [[0, true], [1, false]] as const) {
+      await openCreate(built(), theOwner);
+      await waitFor(() => expect(button(/^Take$/)).not.toBeNull());
+      const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+      fireEvent.click(button(/^Take$/) as HTMLElement);
+      const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + CONFIRM_AFTER_MS);
+      fireEvent.click(button(/^Confirm take$/) as HTMLElement, { detail });
+      expect(focus).toHaveBeenLastCalledWith({ preventScroll: true, focusVisible: ring });
+      await waitFor(() => expect(stateLine()).toBe('Decided.'));
+      focus.mockRestore();
+      now.mockRestore();
+      cleanup();
+      localStorage.clear();
+    }
+  });
+
   it('a session gone signs the page out and writes nothing', async () => {
     await openCreate(built(), theOwner, () => refused(401, 'Sign in again.'));
     await waitFor(() => expect(button(/^Take$/)).not.toBeNull());

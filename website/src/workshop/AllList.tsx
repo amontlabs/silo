@@ -327,7 +327,7 @@ function FeatureView({ item, props }: { item: FeatureItem; props: ListProps }) {
 
 const pipTip = (row: Row) => pipWord(row);
 
-/** Something that folds its decisions under it: a feature, or the decisions of a part that no feature needs. */
+/** Something that folds its decisions under it: a feature, or the early decisions of a stage and part. */
 function Fold({ holder, part, kids, passing, props, render, head }: {
   holder: string; part: string | null; kids: Row[]; passing: Row[] | null; props: ListProps;
   render?: (unfolded: boolean, toggle: () => void) => ReactNode;

@@ -1,10 +1,10 @@
 // An opened part: its title, line, one dot per feature and the counts on the left, All's rows on the right: its
-// features, each with the decisions it needs folded under it, then its decisions that none of its features needs. The
-// same two columns hold Product's decisions, a film and the suggestions.
+// features, each with the decisions it rests on folded under it, then its decisions that none of its features rests on.
+// The same two columns hold Product's decisions, a film and the suggestions.
 import type { ReactNode } from 'react';
 import { AllList } from './AllList';
 import { filmSections, partFilm, partSections, productSections } from './all';
-import type { Graph, Section } from './all';
+import type { Graph, Placed, Section } from './all';
 import { Entry, pipClass } from './Entry';
 import type { EntryContext } from './Entry';
 import { FilmControl, FilmFrame } from './Films';
@@ -52,6 +52,7 @@ export function Rows({ rows, ctx }: { rows: Row[]; ctx: EntryContext }) {
 export interface PlaceList {
   plan: Plan;
   graph: Graph;
+  placed: Placed;
   ctx: EntryContext;
   store: RelationStore;
   folds: ReadonlyMap<string, boolean>;
@@ -110,7 +111,7 @@ function Tallies({ rows }: { rows: Row[] }) {
 
 export function PartPlace({ group, list, onBack, notes, onFilm }: { group: PartGroup; list: PlaceList; onBack: () => void; notes?: ReactNode; onFilm: (film: string) => void }) {
   const film = partFilm(list.plan, group.part.id);
-  const sections = partSections(list.graph, group.rows);
+  const sections = partSections(list.graph, group.rows, list.placed);
   return (
     <Block
       num={String(group.number).padStart(2, '0')} title={group.part.title} line={group.part.line} onBack={onBack} notes={notes}

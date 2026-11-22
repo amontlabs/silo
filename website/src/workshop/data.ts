@@ -7,13 +7,14 @@ import { listKind, wordId } from '../../../tools/plan/model/index.js';
 import { repoAddress } from '../../../tools/workshop/model/index.js';
 import { entryHistory, readSteps } from '../../../tools/plan/history/index.js';
 import { loadDir } from '../../../tools/plan/read/index.js';
+import { holdsOnlyChoice, parseChoice, splitNotes } from './choice.ts';
 import { NO_MAP, pageLayout, SILO_MAP } from './map.ts';
 import { checkBuild, checkedPlan as checkPlanFiles, layoutPlanOf, PlanFileError } from './build-check.ts';
 import type { LayoutPlan, MapLayout } from './map.ts';
 import { playableFilms } from '../../scripts/films.mjs';
 import { readFilms } from '../../../films/tools/behind.mjs';
 import { buildCommit } from '../../scripts/build-commit.mjs';
-import type { BuildData, Change, Entry, EntryFacts, Facts, Film, Histories, Notes, Statement, Verdict } from './plan.ts';
+import type { BuildData, Change, Entry, EntryFacts, Facts, Film, Histories, Notes, SplitNotes, Statement, Verdict } from './plan.ts';
 
 export const PLAN_DIR = 'plan';
 
@@ -79,10 +80,16 @@ const hasNotes = (raw: RawEntry) => typeof raw.notes === 'string' && raw.notes.t
 
 const ordered = (plan: RawPlan): RawEntry[] => plan.stages.flatMap((stage) => stage.entries).map((id) => plan.entries[id]).filter(Boolean);
 
-/** The notes of the entries that have some, by id: the chunk the page loads when a person reaches "Notes". */
+/** The notes of an entry cut around its choice, while it has no verdict; null once it has one, or without a choice. */
+const openChoice = (raw: RawEntry): SplitNotes | null => (!raw.verdict && hasNotes(raw) ? splitNotes(raw.notes as string) : null);
+
+/**
+ * The notes of the entries that have some, by id: the chunk the page loads when a person reaches "Notes". Those of an
+ * entry that shows its choice in place come cut around it, so Notes can leave it out.
+ */
 export function toNotes(plan: RawPlan): Notes {
   const notes: Notes = {};
-  for (const raw of ordered(plan)) if (hasNotes(raw)) notes[raw.id] = raw.notes as string;
+  for (const raw of ordered(plan)) if (hasNotes(raw)) notes[raw.id] = openChoice(raw) ?? (raw.notes as string);
   return notes;
 }
 
@@ -101,9 +108,11 @@ function statementOf(kind: Statement['kind'], item: Record<string, unknown>): St
   return { id: item.id, kind, word: null, text: text(item.says), asks: kind === 'principle' ? text(item.asks) : null };
 }
 
-/** What the page draws of an entry from its file, as far as the file has it; null when it has none. */
+/** What the page draws of an entry from its files, as far as they have it; null when they have none. */
 function factsOf(raw: RawEntry): EntryFacts | null {
   const facts: EntryFacts = {};
+  const choice = openChoice(raw);
+  if (choice) facts.choice = parseChoice(choice.choice);
   const suggest = raw.suggest;
   if (suggest && (suggest.verdict === 'take' || suggest.verdict === 'drop')) facts.suggest = { verdict: suggest.verdict, why: text(suggest.why) };
   const sets = (Array.isArray(raw.sets) ? raw.sets : []).flatMap((item) => {
@@ -119,14 +128,14 @@ function factsOf(raw: RawEntry): EntryFacts | null {
 }
 
 /**
- * Whether an entry has anything to draw from its facts: a recommendation and what a yes would write only while it
- * has no verdict, what it added once taken, and a feature's properties and surfaces whatever its verdict.
+ * Whether an entry has anything to draw from its facts: its choice, a recommendation and what a yes would write only
+ * while it has no verdict, what it added once taken, and a feature's properties and surfaces whatever its verdict.
  */
 function hasFacts(raw: RawEntry): boolean {
   const facts = factsOf(raw);
   if (!facts) return false;
   const open = !raw.verdict;
-  return Boolean((open && (facts.suggest || facts.sets || facts.removes)) || (raw.verdict === 'take' && facts.adds) || (raw.kind === 'feature' && (facts.keeps || facts.surfaces)));
+  return Boolean((open && (facts.choice || facts.suggest || facts.sets || facts.removes)) || (raw.verdict === 'take' && facts.adds) || (raw.kind === 'feature' && (facts.keeps || facts.surfaces)));
 }
 
 /** Every statement in force, by id: the page's lists. */
@@ -199,6 +208,10 @@ export function partDepends(parts: { id: string }[], entries: Pick<Entry, 'id' |
 
 /** The plan object of tools/plan/read, as the page holds it: decisions and features in the order of order.json. */
 export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null, films = [], filmInfo = [], builtFrom = null }: BuildOptions = {}): BuildData {
+  const choiceOnly = (raw: RawEntry) => {
+    const notes = openChoice(raw);
+    return notes !== null && holdsOnlyChoice(notes);
+  };
   const entries: Entry[] = ordered(plan).map((raw) => ({
     id: raw.id,
     kind: raw.kind,
@@ -215,6 +228,7 @@ export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null, fil
     started: raw.started ?? null,
     built: raw.built ?? null,
     notes: hasNotes(raw),
+    ...(choiceOnly(raw) ? { choiceOnly: true as const } : {}),
     more: hasFacts(raw),
     history: summaryOf(history?.changes.get(raw.id)),
   }));

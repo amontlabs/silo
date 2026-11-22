@@ -311,8 +311,8 @@ describe('the places of the title row', () => {
     history.replaceState(null, '', '/workshop?view=all&state=dropped');
     act(() => { dispatchEvent(new PopStateEvent('popstate')); });
     await waitFor(() => expect(document.querySelector('.wa-list')).not.toBeNull());
-    expect([...document.querySelectorAll('.wa-list .wa-name > span:first-child')].map((name) => name.textContent)).toEqual(['A hosted reviewer', 'An earlier desktop stack', 'Part E', 'Which format does an export use?']);
-    // The dropped decision no feature needs stands, unfolded, under its part's row.
+    expect([...document.querySelectorAll('.wa-list .wa-name > span:first-child')].map((name) => name.textContent)).toEqual(['Part E', 'Which format does an export use?', 'A hosted reviewer', 'An earlier desktop stack']);
+    // The dropped decision no feature rests on stands, unfolded, under its part's row, before its stage's features.
     expect(within(itemOf('A hosted reviewer')).getByRole('img', { name: 'dropped' })).toBeInTheDocument();
     expect(itemOf('A hosted reviewer')).toHaveClass('gone');
     await userEvent.click(rowButton('An earlier desktop stack'));

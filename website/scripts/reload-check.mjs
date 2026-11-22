@@ -5,7 +5,8 @@
 // Two builds of the plan in plan/ are made, A and B, into a directory of their own. A names its chunks apart (as a
 // deployment whose chunks changed does: the site then serves only B's), and each build has its own id. A is served
 // with the API against a fake GitHub (scripts/workshop-dev.mjs) and opened, signed in as owner-fake, at a part that
-// has a feature with facts, notes and history (F) and a feature with no facts (X). A comment is typed on X. Then:
+// has a feature with facts, notes and history (F) and an entry of either kind with nothing to show from the facts
+// chunk (X: a taken decision that adds nothing, say), so that opening X loads none of it. A comment is typed on X. Then:
 // - B replaces A. F's facts, Notes and History each say "The Workshop has changed since this page opened." with
 //   Reload. The first press does not reload, since the comment is not sent: it says "Text you typed is not sent yet."
 //   with "Reload anyway". The second press reloads: the page is B, F is open, and F's facts (a label only B's facts
@@ -70,24 +71,28 @@ test.after(async () => {
 
 /** The id of the build the page runs, from its page. */
 const buildOfPage = (page) => page.evaluate(() => document.querySelector('meta[name="workshop-build"]')?.getAttribute('content') ?? null);
-/** What an entry's row shows once open: its panel, under the row's line in a part's list. */
-const item = (page, id) => page.locator(`[id="entry-${id}-more"]`);
+/** What an entry's row shows once open: its panel, under its line in a part's list, there or in a feature's fold. */
+const item = (page, id) => page.locator(`[id="entry-${id}-more"], [id^="entry-${id}@"][id$="-more"]`);
+/** An entry's notes, once its "Notes" is pressed. */
+const notesOf = (page, id) => page.locator(`[id="entry-${id}-notes"] .ws-md`);
 const row = (page, id) => page.locator(`[data-row="entry-${id}"]`);
 
 /**
- * A part with a feature whose facts, notes and history the page loads later (F), and a feature with no facts (X).
- * F is one whose facts give a label the check can look for after the reload (`labelOf`), so that the choice and
- * what is looked for always agree.
+ * A part with a feature whose facts, notes and history the page loads later (F), and an entry with nothing to show
+ * from the facts chunk (X). F is one whose facts give a label the check can look for after the reload (`labelOf`), so
+ * that the choice and what is looked for always agree. F keeps its "Notes" while its choice shows in place: notes
+ * that hold only the choice have none.
  */
 async function chooseEntries(page) {
   const parts = await page.evaluate(() => {
     const data = window.__workshopData;
     return data.parts.map((part) => {
-      const features = data.entries.filter((entry) => entry.part === part.id && entry.kind === 'feature');
+      const own = data.entries.filter((entry) => entry.part === part.id);
+      const notesButton = (entry) => entry.notes && !(entry.verdict === null && entry.choiceOnly);
       return {
         part: part.id,
-        later: features.filter((entry) => entry.more && entry.notes && entry.history).map((entry) => entry.id),
-        plain: features.filter((entry) => !entry.more).map((entry) => entry.id),
+        later: own.filter((entry) => entry.kind === 'feature' && entry.more && notesButton(entry) && entry.history).map((entry) => entry.id),
+        plain: own.filter((entry) => !entry.more).map((entry) => entry.id),
       };
     });
   });
@@ -97,7 +102,7 @@ async function chooseEntries(page) {
     const x = plain.find((id) => id !== f);
     if (f && x) return { part, f, x };
   }
-  assert.fail('the plan has no part with a feature whose facts give a label to look for, with notes and history, and a feature with no facts');
+  assert.fail('the plan has no part with a feature whose facts give a label to look for, with notes and history, and an entry with nothing to show from the facts chunk');
 }
 
 async function signIn() {
@@ -175,7 +180,7 @@ async function afterReload(page, entries) {
   const f = item(page, entries.f);
   await f.locator('.ws-fact-label', { hasText: await factLabel(entries) }).first().waitFor();
   await f.getByRole('button', { name: 'Notes', exact: true }).click();
-  await f.locator('.ws-md').waitFor();
+  await notesOf(page, entries.f).waitFor();
   await f.getByRole('button', { name: /^History/ }).click();
   await f.locator('.ws-h').first().waitFor();
   assert.equal(await page.getByRole('button', { name: /^Reload/ }).count(), 0, 'nothing offers Reload again');

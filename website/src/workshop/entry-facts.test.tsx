@@ -1,11 +1,12 @@
 // What an open row shows of the plan's lists and of what it needs, its id and the button that copies it.
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { buildData, DECISIONS, fixtureFacts, FEATURES, LIST_DECISIONS, LIST_FEATURES, LISTS, withLists } from './fixtures';
+import { GROW_MS, HOLD_MS } from './Entry';
 import type { Facts } from './plan';
 import { SiteChanged } from './chunks';
-import { itemOf, mockApi, owner, renderApp, rowButton, wait } from './test-support';
+import { itemOf, mockApi, owner, renderApp, rowButton, wait, withheldTimers } from './test-support';
 
 const data = () => buildData(withLists());
 
@@ -50,6 +51,183 @@ describe('the recommendation', () => {
     const item = await openFrom('#part-a/core', 'The engine runs on its own');
     expect(within(item).queryByText(/^Recommended/)).not.toBeInTheDocument();
     expect(item).not.toHaveTextContent('The core piece.');
+  });
+});
+
+describe('the choice', () => {
+  const CHOICE = `# A name
+
+## The choice
+
+An agent's part, 22 November 2026. You press Create twice.
+
+The options:
+
+- One computer (recommended). The second press finds the first. It costs a key.
+- Two computers. Each press makes one.
+
+Recommended: one computer. Nobody wants the second.
+`;
+  const BESIDE = '\n## Notes\n\nFrom the old code.\n';
+  const withChoice = (notes: Record<string, string>) => buildData({ ...withLists(), notes });
+
+  it('shows in place on an entry with no verdict: the case, the options with their costs and why, before what a yes would add', async () => {
+    const item = await openFrom('#part-b/name-a-snapshot', SNAPSHOT, withChoice({ 'name-a-snapshot': CHOICE + BESIDE }));
+    await within(item).findByText('The case');
+    inOrder(item, ['The case', 'You press Create twice.', 'The options', 'The cost', 'One computer', 'recommended', 'It costs a key.', 'Two computers', 'Why this one', 'Nobody wants the second.', 'A yes would add', 'Not decided.']);
+    expect(item).not.toHaveTextContent("An agent's part");
+    expect(within(item).getByText('Each press makes one.')).toHaveClass('ws-span');
+  });
+
+  it('gives a feature its reason once: under "Why this one", the recommendation staying a line', async () => {
+    const item = await openFrom('#part-b/create', 'Create and delete a computer', withChoice({ create: CHOICE }));
+    await within(item).findByText('Why this one');
+    inOrder(item, ['Make a Linux computer.', 'Recommended: take', 'The case', 'Why this one']);
+    expect(item).not.toHaveTextContent('Key records by id.');
+  });
+
+  it('is left out of Notes while it shows in place', async () => {
+    const item = await openFrom('#part-b/create', 'Create and delete a computer', withChoice({ create: CHOICE + BESIDE }));
+    await within(item).findByText('The case');
+    await userEvent.click(within(item).getByRole('button', { name: 'Notes' }));
+    await waitFor(() => expect(item).toHaveTextContent('From the old code.'));
+    expect(within(item).getAllByText('You press Create twice.')).toHaveLength(1);
+  });
+
+  it('leaves no Notes when the notes hold nothing else', async () => {
+    const item = await openFrom('#part-b/create', 'Create and delete a computer', withChoice({ create: CHOICE }));
+    await within(item).findByText('The case');
+    expect(within(item).queryByRole('button', { name: 'Notes' })).not.toBeInTheDocument();
+  });
+
+  it('leaves Notes to show a heading that follows it, alone', async () => {
+    const item = await openFrom('#part-b/create', 'Create and delete a computer', withChoice({ create: `${CHOICE}\n## Open questions\n` }));
+    await within(item).findByText('The case');
+    await userEvent.click(within(item).getByRole('button', { name: 'Notes' }));
+    expect(await within(item).findByText('Open questions')).toBeInTheDocument();
+  });
+
+  it('is read under Notes once the entry has a verdict', async () => {
+    const item = await openFrom('#part-a/core', 'The engine runs on its own', withChoice({ core: CHOICE }));
+    expect(within(item).queryByText('The case')).not.toBeInTheDocument();
+    await userEvent.click(within(item).getByRole('button', { name: 'Notes' }));
+    await waitFor(() => expect(item).toHaveTextContent('You press Create twice.'));
+  });
+
+  it('is read under Notes when it could not load in place', async () => {
+    const item = await openFrom('#part-b/create', 'Create and delete a computer', withChoice({ create: CHOICE }), () => Promise.reject(new Error('offline')));
+    await within(item).findByText(/Details could not load/);
+    await userEvent.click(within(item).getByRole('button', { name: 'Notes' }));
+    await waitFor(() => expect(item).toHaveTextContent('You press Create twice.'));
+  });
+
+  it('goes on with the reason under "Why this one", a paragraph each, and gives it once', async () => {
+    const more = '\nThis replaces `one-press`,\nwhich made two.\n\nA key is kept a day.\n';
+    const item = await openFrom('#part-b/create', 'Create and delete a computer', withChoice({ create: `${CHOICE}${more}` }));
+    const why = (await within(item).findByText('Why this one')).closest('.ws-fact') as HTMLElement;
+    expect([...why.querySelectorAll('p')].map((paragraph) => paragraph.textContent)).toEqual(['Nobody wants the second.', 'This replaces one-press, which made two.', 'A key is kept a day.']);
+    expect(why.querySelector('code')).toHaveTextContent('one-press');
+    expect(item).not.toHaveTextContent('Key records by id.');
+  });
+
+  it('shows whole as Markdown when it has another shape, and the reason of the recommendation stays', async () => {
+    const item = await openFrom('#part-b/create', 'Create and delete a computer', withChoice({ create: `${CHOICE}\nA second case: you press it three times.\n` }));
+    await within(item).findByText('A second case: you press it three times.');
+    inOrder(item, ['Key records by id.', "An agent's part", 'The options:', 'Two computers.', 'Recommended: one computer.', 'A second case']);
+    expect(within(item).queryByText('The case')).not.toBeInTheDocument();
+    const whole = within(item).getByText('A second case: you press it three times.').closest('.ws-fact') as HTMLElement;
+    expect(whole.querySelector('.ws-fact-label')?.textContent).toBe('The choice');
+  });
+
+  it('holds the panel briefly for the details, so it opens at its final size', async () => {
+    const data = withChoice({ 'name-a-snapshot': CHOICE });
+    let arrive!: (value: Facts) => void;
+    mockApi({ me: owner });
+    history.replaceState(null, '', '/workshop#part-b');
+    await renderApp(data, undefined, () => new Promise<Facts>((resolve) => { arrive = resolve; }));
+    withheldTimers(HOLD_MS, { leaves: true });
+    const name = SNAPSHOT.replace('?', '\\?');
+    await userEvent.click(rowButton(name));
+    const item = itemOf(name);
+    expect(item.querySelector('.ws-more.open')).toBeNull();
+    await act(async () => arrive(fixtureFacts(data)));
+    await waitFor(() => expect(item.querySelector('.ws-more.open')).not.toBeNull());
+    expect(within(item).getByText('The case')).toBeInTheDocument();
+    expect(item.querySelector('.ws-ph-notes')).toBeNull();
+  });
+
+  it('keeps the placeholder while a panel that could not wait opens, then grows to the choice', async () => {
+    const data = withChoice({ 'name-a-snapshot': CHOICE });
+    let arrive!: (value: Facts) => void;
+    mockApi({ me: owner });
+    history.replaceState(null, '', '/workshop#part-b');
+    await renderApp(data, undefined, () => new Promise<Facts>((resolve) => { arrive = resolve; }));
+    const name = SNAPSHOT.replace('?', '\\?');
+    await waitFor(() => expect(document.querySelector('.ws-boot')).toBeNull());
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      fireEvent.click(rowButton(name));
+      const item = itemOf(name);
+      await act(async () => { await vi.advanceTimersByTimeAsync(HOLD_MS); });
+      expect(item.querySelector('.ws-more.open')).not.toBeNull();
+      await act(async () => arrive(fixtureFacts(data)));
+      expect(within(item).queryByText('The case')).toBeNull();
+      expect(item.querySelector('.ws-ph-notes')).not.toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(GROW_MS); });
+      expect(within(item).getByText('The case')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('holds a panel that an address opens as a pressed one, and opens it only once the first frames are over', async () => {
+    const data = withChoice({ 'name-a-snapshot': CHOICE });
+    let arrive!: (value: Facts) => void;
+    const frames: FrameRequestCallback[] = [];
+    // No transition runs in the first frames: grown in them, a panel would jump.
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => frames.push(callback));
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+    mockApi({ me: owner });
+    history.replaceState(null, '', '/workshop#part-b/name-a-snapshot');
+    await renderApp(data, undefined, () => new Promise<Facts>((resolve) => { arrive = resolve; }));
+    const item = document.getElementById('entry-name-a-snapshot')!;
+    expect(item.querySelector('.ws-more.open')).toBeNull();
+    await act(async () => arrive(fixtureFacts(data)));
+    expect(item.querySelector('.ws-more.open')).toBeNull();
+    // Two frames are the first ones, each asking for the next.
+    for (let i = 0; i < 2; i += 1) await act(async () => { for (const frame of frames.splice(0)) frame(0); });
+    await waitFor(() => expect(item.querySelector('.ws-more.open')).not.toBeNull());
+    expect(within(item).getByText('The case')).toBeInTheDocument();
+    expect(item.querySelector('.ws-ph-notes')).toBeNull();
+  });
+
+  it('brings a row that an address opens, low on the screen, up, so its panel has room to grow', async () => {
+    const data = withChoice({ 'name-a-snapshot': CHOICE });
+    const shows = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: shows });
+    onTestFinished(() => { delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView; });
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ top: innerHeight - 20, y: innerHeight - 20, left: 0, x: 0, right: 0, bottom: innerHeight, width: 0, height: 0, toJSON: () => '' });
+    mockApi({ me: owner });
+    history.replaceState(null, '', '/workshop#part-b/name-a-snapshot');
+    await renderApp(data, undefined, () => new Promise<Facts>(() => {}));
+    expect(shows).toHaveBeenCalledWith(expect.objectContaining({ block: 'center' }));
+  });
+
+  it('keeps the placeholder while a panel opened by an address, that could not wait, opens', async () => {
+    const data = withChoice({ 'name-a-snapshot': CHOICE });
+    let arrive!: (value: Facts) => void;
+    const grows = withheldTimers(GROW_MS, { leaves: true });
+    mockApi({ me: owner });
+    history.replaceState(null, '', '/workshop#part-b/name-a-snapshot');
+    await renderApp(data, undefined, () => new Promise<Facts>((resolve) => { arrive = resolve; }));
+    const item = document.getElementById('entry-name-a-snapshot')!;
+    await waitFor(() => expect(item.querySelector('.ws-more.open')).not.toBeNull());
+    await act(async () => arrive(fixtureFacts(data)));
+    expect(within(item).queryByText('The case')).toBeNull();
+    expect(item.querySelector('.ws-ph-notes')).not.toBeNull();
+    // The details' wait and the comments'.
+    await grows.fire(2);
+    expect(within(item).getByText('The case')).toBeInTheDocument();
   });
 });
 

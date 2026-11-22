@@ -6,7 +6,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ReactNode } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { allSections, filmSections, formatQuery, graphOf, locate, NO_QUERY, parseQuery, partSections, productSections, rowKeyOf } from './all';
-import type { Query, Section, View } from './all';
+import type { Placed, Query, Section, View } from './all';
 import { AllView } from './AllView';
 import { loginUrl } from './api';
 import type { Me } from './api';
@@ -18,7 +18,7 @@ import { MapView } from './MapView';
 import { FOLD_HEIGHT, hasMap, MAP_WIDTH } from './map';
 import { recallHabit, rememberHabit } from './memory';
 import { statusLine } from './plan';
-import type { BuildData, Facts, Histories, Notes, Row } from './plan';
+import type { BuildData, Facts, Histories, Notes, Row, Status } from './plan';
 import { relationStore } from './relation';
 import { formatHash, HOME, placeFrom, resolveHash, rowHash, rowsOf, samePlace } from './routes';
 import type { Place } from './routes';
@@ -64,7 +64,7 @@ const noHistory = () => Promise.resolve({});
 /** What the page uses of the browser's `ViewTransition`. */
 type ViewTransitionLike = { finished: Promise<void>; ready?: Promise<void>; skipTransition?: () => void };
 /** `bring`: what takes the focus is brought into view at once (going back off the map). */
-type Focus = { kind: 'title' } | { kind: 'part'; part: string; bring?: boolean } | { kind: 'selector'; selector: string; bring?: boolean } | { kind: 'row'; key: string; reveal?: boolean; again?: boolean } | { kind: 'reveal'; key: string; again?: boolean };
+type Focus = { kind: 'title' } | { kind: 'part'; part: string; bring?: boolean } | { kind: 'selector'; selector: string; bring?: boolean } | { kind: 'row'; key: string; reveal?: boolean; again?: boolean } | { kind: 'reveal'; key: string; again?: boolean } | { kind: 'following'; above: HTMLElement[] };
 
 const LEAVE_MS = 140;
 /** How long what just arrived is marked, for its fade in (about 150 ms). */
@@ -224,8 +224,11 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   // Rows open independently. Being open belongs to the entry, by its row's key, not to one drawing of it: a decision
   // opened under its feature is open wherever the list draws it. `openKey` is the one opened last: the address follows
   // it. `openAt` is the drawing of it last opened or found (all.ts `underKey`), whose relations are drawn.
+  // `opened` keeps with each open row the state it had when it opened, or when what the list shows last changed: the
+  // lists place it by that state (all.ts `Placed`), so ruling on it does not take it from under the person.
   const [openKey, setOpenKey] = useState<string | null>(null);
-  const [openKeys, setOpenKeys] = useState<ReadonlySet<string>>(new Set());
+  const [opened, setOpened] = useState<Placed>(new Map());
+  const openKeys = useMemo<ReadonlySet<string>>(() => new Set(opened.keys()), [opened]);
   const [openAt, setOpenAt] = useState<string | null>(null);
   const [openings, setOpenings] = useState(0);
   const [view, setViewState] = useState<View>(first.view);
@@ -255,7 +258,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   const w = useWorkshop(data, openKey, openKeys, openings, loadNotes, loadFacts, loadHistory);
   const { plan, rowByKey, live } = w;
   const graph = useMemo(() => graphOf(plan), [plan]);
-  const sections = useMemo(() => allSections(plan, graph, data.stages, query), [plan, graph, data.stages, query]);
+  const sections = useMemo(() => allSections(plan, graph, data.stages, query, opened), [plan, graph, data.stages, query, opened]);
   const focusNext = useRef<Focus | null>(null);
   /** An address naming what has not arrived yet (a suggestion comes with the live state), and whether the browser's history gave it. */
   const wantedHash = useRef<{ hash: string; fromHistory: boolean } | null>(null);
@@ -325,10 +328,13 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   const isHome = shown.kind === 'home';
   const onMap = () => !isAll && wide() && mapped;
 
-  /** The rows of a place as its list draws them, to find where an entry stands. */
+  const stateNow = (key: string): Status => rowByKey.get(key)?.status ?? 'undecided';
+  const placedNow = (keys: Iterable<string>): Placed => new Map([...keys].map((key) => [key, stateNow(key)]));
+
+  /** The rows of a place as its list draws them, to find where an entry stands. A place moved to holds no row. */
   const sectionsOf = (where: Place, inAll: boolean): Section[] => {
     if (inAll) return sections;
-    if (where.kind === 'part') return partSections(graph, rowsOf(plan, where));
+    if (where.kind === 'part') return partSections(graph, rowsOf(plan, where), samePlace(where, shown) ? opened : undefined);
     if (where.kind === 'product') return productSections(plan.product);
     if (where.kind === 'film') return filmSections(graph, rowsOf(plan, where));
     return [];
@@ -353,7 +359,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     setLeaving(false);
     setPlace(next);
     setOpenKey(key);
-    setOpenKeys(key ? new Set([key]) : new Set());
+    setOpened(placedNow(key ? [key] : []));
     setOpenAt(key ? instance : null);
     if (key) setOpenings((n) => n + 1);
     openKeyRef.current = key;
@@ -474,10 +480,10 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     // Asked for in the same event as the opening, so a failed early fetch shows as loading, not as an error.
     w.fetchNow(row);
     address$(shown, row.key);
-    setOpenKeys((current) => {
-      const next = new Set(current);
+    setOpened((current) => {
+      const next = new Map(current);
       if (options.closing) next.delete(options.closing);
-      next.add(row.key);
+      if (!next.has(row.key)) next.set(row.key, row.status);
       return next;
     });
     setOpenKey(row.key);
@@ -490,8 +496,8 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
 
   /** Closes one entry, wherever it is drawn, and leaves the others as they are. */
   function closeRow(key: string) {
-    setOpenKeys((current) => {
-      const next = new Set(current);
+    setOpened((current) => {
+      const next = new Map(current);
       next.delete(key);
       return next;
     });
@@ -610,24 +616,30 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     focusNext.current = null;
   }
 
-  /** All's query changes in place: the address follows, and the folds made by hand start over. */
+  /**
+   * All's query changes in place: the address follows. A change of filter, search or order starts over the folds made
+   * by hand. Such a change, and one of Display, places each open row by the state it has now.
+   */
   function setQuery(next: Query) {
     setQueryState(next);
     if (next.order !== query.order) rememberHabit({ view: 'all', order: next.order });
     const filtersChanged = next.states.join() !== query.states.join() || next.parts.join() !== query.parts.join() || next.films.join() !== query.films.join() || next.q !== query.q || next.order !== query.order;
-    const nextSections = allSections(plan, graph, data.stages, next);
-    if (filtersChanged) {
-      // The folds made by hand start over, but an open entry is always drawn while the list holds it: its feature stays
-      // unfolded, and its "more" pressed when it lies past the first six.
-      const folds = new Map<string, boolean>();
-      const shownMore = new Set<string>();
+    const released = filtersChanged || next.show.join() !== query.show.join();
+    const placed = released || !isAll ? placedNow(openKeys) : opened;
+    const nextSections = allSections(plan, graph, data.stages, next, placed);
+    if (released) {
+      setOpened(placed);
+      // The folds made by hand stay through Display and start over otherwise, but an open entry is always drawn while
+      // the list holds it: its feature stays unfolded, and its "more" pressed when it lies past the first six.
+      const unfolded = new Map(filtersChanged ? [] : folds);
+      const shownMore = new Set(filtersChanged ? [] : more);
       for (const key of openKeys) {
         const found = locate(nextSections, key, new Set());
         if (!found?.holder) continue;
-        folds.set(found.holder, true);
+        unfolded.set(found.holder, true);
         if (found.more) shownMore.add(found.holder);
       }
-      setFolds(folds);
+      setFolds(unfolded);
       setMore(shownMore);
     }
     // The entry open last stays named only while the list still draws it; open, it is drawn open wherever it now stands.
@@ -641,7 +653,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
       setViewState('all');
       address$(HOME, found ? open : null, true, true, next);
       settle(HOME, found ? open : null, found?.instance ?? null);
-      setOpenKeys(new Set(kept));
+      setOpened(placedNow(kept));
       return;
     }
     if (open && !found) {
@@ -773,10 +785,20 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
       if (target.kind === 'row') item?.querySelector<HTMLElement>(':scope > .wa-row > .wa-hit, :scope > .ws-line > .ws-row')?.focus({ preventScroll: true });
       // While the map folds, the page under it moves: the row is brought into view once the fold is done.
       const wait = Math.max(0, foldedAt.current + FOLD_MS - Date.now());
-      const show = () => document.getElementById(target.key)?.scrollIntoView?.({ block: 'nearest', behavior: still() ? 'instant' : 'smooth' });
+      const show = () => {
+        const row = document.getElementById(target.key);
+        // A row an address opens has its panel still closed: low on the screen, it would open out of sight. So it comes
+        // to the middle, clear of what sticks at the top, and the panel grows under it.
+        const low = target.kind === 'reveal' && row?.querySelector(':scope > .ws-more:not(.open)') && row.getBoundingClientRect().top > innerHeight / 2;
+        row?.scrollIntoView?.({ block: low ? 'center' : 'nearest', behavior: still() ? 'instant' : 'smooth' });
+      };
       if (target.kind === 'row' && target.reveal === false) return;
       if (wait) later(show, wait);
       else show();
+    } else if (target.kind === 'following') {
+      const hits = [...document.querySelectorAll<HTMLElement>('.wa-list .wa-hit')];
+      const above = target.above.find((hit) => hit.isConnected);
+      (above ? hits[hits.indexOf(above) + 1] ?? above : hits[0])?.focus({ preventScroll: true });
     } else if (target.kind === 'title') {
       const top = document.querySelector<HTMLElement>('.ws-top');
       const header = document.querySelector<HTMLElement>('.site-header');
@@ -851,14 +873,23 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   // The rows call these through stable functions, so a row that does not render again still calls the current ones.
   handlers.current = {
     toggle: (row, instance) => {
-      if (openKeys.has(row.key)) closeRow(row.key);
-      else openRow(row.key, instance === undefined ? {} : { instance });
+      if (!openKeys.has(row.key)) {
+        openRow(row.key, instance === undefined ? {} : { instance });
+        return;
+      }
+      // Closed after its state changed, a row can leave or move: the focus goes to the row that takes its place.
+      if (opened.get(row.key) !== stateNow(row.key)) {
+        const hits = [...document.querySelectorAll<HTMLElement>('.wa-list .wa-hit')];
+        const at = hits.indexOf(document.activeElement as HTMLElement);
+        if (at !== -1) focusNext.current = { kind: 'following', above: hits.slice(0, at).reverse().filter((hit) => hit.parentElement?.dataset.row !== row.key) };
+      }
+      closeRow(row.key);
     },
     filmEntries,
   };
-  const ctx: EntryContext = { w, signIn, open: openKeys, onToggle: stableToggle, onFilmEntries: stableFilmEntries };
+  const ctx: EntryContext = { w, signIn, open: openKeys, boot, onToggle: stableToggle, onFilmEntries: stableFilmEntries };
   const list: PlaceList = {
-    plan, graph, ctx, store, folds, more, waiting: w.waiting,
+    plan, graph, placed: opened, ctx, store, folds, more, waiting: w.waiting,
     onFold: (key, open) => setFolds((now) => new Map(now).set(key, open)),
     onMore: (key) => setMore((now) => new Set(now).add(key)),
   };

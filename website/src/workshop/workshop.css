@@ -331,6 +331,42 @@
 .ws-st b { font-weight: 400; color: var(--ink); }
 .ws-st-asks { color: var(--faint); }
 .ws-fact-lines a { color: var(--accent-ink); text-decoration: underline; }
+/* The choice of an entry with no verdict: the case, the options as three columns in one border, and why. An option
+   with no cost takes both columns; the recommended one has the mark of an open row. */
+.ws-fact-text + .ws-fact-text { margin-top: 8px; }
+/* The paragraphs that go on with the reason read as the reason does. */
+.ws-choice .ws-md { margin-top: 8px; max-width: none; font-size: inherit; }
+.ws-choice a { color: var(--accent-ink); text-decoration: underline; }
+.ws-case .ws-fact-text { color: var(--ink); }
+.ws-options { max-width: 960px; container-type: inline-size; }
+.ws-options-head, .ws-options li { display: grid; grid-template-columns: minmax(96px, 184px) minmax(0, 1fr) minmax(0, 1fr); column-gap: 24px; padding: 0 12px; }
+.ws-options-head > :first-child { margin-left: -12px; }
+.ws-options-head > :nth-child(2) { grid-column: 3; }
+.ws-options ul { border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
+.ws-options li { padding-top: 12px; padding-bottom: 12px; font-size: 14px; line-height: 21px; color: var(--muted); overflow-wrap: anywhere; }
+.ws-options li + li { border-top: 1px solid var(--line); }
+.ws-options li.rec { background: var(--surface-hover); box-shadow: inset 2px 0 0 var(--accent); color: var(--ink); }
+.ws-option b { display: block; font-weight: 500; color: var(--ink); }
+.ws-options .rec .ws-tag { color: var(--accent-ink); }
+.ws-options .ws-span { grid-column: 2 / -1; }
+.ws-options .ws-cost { grid-column: 3; }
+@media (max-width: 760px) {
+  .ws-options-head, .ws-options li { display: block; }
+  .ws-options-head { padding: 0; }
+  .ws-options-head > :first-child { margin-left: 0; }
+  .ws-options-head > :nth-child(2) { display: none; }
+  .ws-option { display: block; margin-bottom: 6px; }
+  .ws-options .ws-cost { margin-top: 6px; }
+}
+/* A place's list can be as narrow beside its block on a wider window: the options stack there too. */
+@container (max-width: 519.98px) {
+  .ws-options-head, .ws-options li { display: block; }
+  .ws-options-head { padding: 0; }
+  .ws-options-head > :first-child { margin-left: 0; }
+  .ws-options-head > :nth-child(2) { display: none; }
+  .ws-option { display: block; margin-bottom: 6px; }
+  .ws-options .ws-cost { margin-top: 6px; }
+}
 /* The id and its button: the button keeps the width of its longer word, so nothing moves when it changes. */
 .ws-id { display: inline-flex; align-items: center; gap: 10px; margin-left: 8px; }
 .ws-id code { padding: 0; background: none; font: 12px var(--mono); color: var(--faint); overflow-wrap: anywhere; user-select: all; }
