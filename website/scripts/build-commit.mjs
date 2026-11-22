@@ -1,9 +1,11 @@
 // The commit the Workshop's page is built from, which the page sends with the owner's verdict: the server then
 // refuses when the entry's file on main is not the one at that commit (server/verdicts.mjs). It is HEAD when the
-// plan is this repository's plan/ and git sees no change under plan/; otherwise the page shows text no commit holds,
-// and it has none, so the owner gets no verdict buttons.
+// plan is this repository's plan/, git sees no change under plan/ and no file of plan/ is marked assume-unchanged or
+// skip-worktree (git would hide an edit of it, as `plan take` knows: tools/plan/cli/repo.js `unwatched`); otherwise
+// the page shows text no commit holds, and it has none, so the owner gets no verdict buttons.
 import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
+import { unwatched } from '../../tools/plan/cli/repo.js';
 
 const COMMIT = /^[0-9a-f]{40}$/;
 
@@ -14,6 +16,7 @@ export function buildCommit(repository, planDir) {
   try {
     const head = git('rev-parse', 'HEAD');
     if (!COMMIT.test(head)) return null;
+    if (unwatched(repository).length) return null;
     return git('-c', 'core.fsmonitor=false', 'status', '--porcelain', '--untracked-files=all', '--', 'plan') === '' ? head : null;
   } catch {
     return null;
