@@ -1,4 +1,4 @@
 {
   "asks": "Where is what Silo guarantees done?",
-  "answer": "Everything Silo guarantees is done by parts of Silo that run outside the computer. None of it rests on a prompt, on the agent program's own checks, or on the probe, which runs inside and gives only reports. A guarantee whose check passes only when the inside cooperates is not one: each is tested with a hostile program that has root inside the computer."
+  "answer": "Every property of kind safety or liveness is kept by parts of Silo that run outside the computer. None of it rests on a prompt, on the agent program's own checks, or on the probe, which runs inside and gives only reports. A property whose check passes only when the inside cooperates is not kept: each one that a program inside the computer could break is checked by a hostile test, with a program that has root inside the computer."
 }

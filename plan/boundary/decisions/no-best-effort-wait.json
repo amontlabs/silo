@@ -1,6 +1,6 @@
 {
   "asks": "May a wait at the boundary end by best effort?",
-  "answer": "No. Each wait at the boundary is ended by a timer that the part of Silo holding the request keeps itself. The timer starts when the wait starts. It does not depend on the classifier, the extension, the app or any program inside the computer answering. If that part of Silo stops, the connections it holds close, so no request is left waiting with nothing to end it. The simulator ends waits with each of those parts stuck or crashed, and checks that the request is refused every time. To find out: that every kind of connection closes when that part stops.",
+  "answer": "No. Each wait at the boundary is ended by a timer that the part of Silo holding the request keeps itself. The timer starts when the wait starts. It does not depend on the classifier, the extension, the app or any program inside the computer answering. When the timer ends a hold, the request is refused; when it ends a wait for a classifier, the request is denied or left to the rules, as `classifier-wait-limit` says. If that part of Silo stops, the connections it holds close, so no request is left waiting with nothing to end it. The simulator ends waits with each of those parts stuck or crashed, and checks that every wait ends and that a request passes only where a rule allows it. To find out: that every kind of connection closes when that part stops.",
   "needs": [
     "hold-limit"
   ]

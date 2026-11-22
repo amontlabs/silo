@@ -1,6 +1,6 @@
 {
   "asks": "What does Silo build on top of libkrun?",
-  "answer": "Disk checkpoints and forks that share blocks, with APFS clones on a Mac and reflinks on Linux, and the Mac window for the screen. Memory snapshots are not built on top; how they arrive is a separate decision. So is how a computer is reached.",
+  "answer": "Disk checkpoints and forks that share blocks, with APFS clones on a Mac and reflinks on Linux, and the Mac window for the screen. On a Linux host whose filesystem has no reflinks, such as ext4, which Ubuntu installs by default, the filesystem shares no blocks. Whether Silo then keeps the disks of its computers in a volume of its own that has reflinks, shares blocks through the format of the disk image, or does not fork on that host is to find out, and the choice goes to the owner, since a full copy costs disk and waiting. Memory snapshots are not built on top; how they arrive is a separate decision. So is how a computer is reached.",
   "needs": [
     "linux-vm-engine"
   ]

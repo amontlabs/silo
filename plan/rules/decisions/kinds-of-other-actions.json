@@ -1,6 +1,6 @@
 {
   "asks": "What kind are the other actions the design names?",
-  "answer": "Granting: bring a fork back from the bin; copy files from a fork into its parent; grant an extension the tool that forwards alerts and asks (`forwarding-tool`). Destructive: purge files, put back paths, remove a checkpoint, empty the bin, leave paths out of a checkpoint, remove content from the store at its size limit.",
+  "answer": "Granting: bring a computer back from the bin; copy files from a fork into its parent; grant an extension the tool that forwards alerts and asks (`forwarding-tool`). A copy into the parent first saves the parent's own versions of the files it replaces, so it erases nothing. Destructive: purge files, put back paths, remove a checkpoint, empty the bin, remove paths from a checkpoint that holds them, remove content from the store at its size limit. Leaving paths out of the checkpoints still to come erases nothing when it is set; its kind is asked apart.",
   "needs": [
     "kinds-of-action"
   ]

@@ -1,6 +1,6 @@
 {
   "asks": "Where is the history of a computer kept?",
-  "answer": "The record is also the history and the audit journal. The core's saved state holds the current rows only, and no history: its size is fixed by its tables.",
+  "answer": "In the record, and nowhere else. The core's saved state holds the current rows only, and no history: its size is fixed by its tables (`engine-limits`).",
   "needs": [
     "two-paths"
   ]

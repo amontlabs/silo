@@ -1,4 +1,4 @@
 {
   "asks": "Can Git history inside a computer serve as the record?",
-  "answer": "Git history inside a computer is content the agent controls: it can be rewritten. It is never a source of facts or reports. A classifier may read it to give an opinion, as `how-a-path-comes-back` does."
+  "answer": "No. Git history inside a computer is content the agent controls and can rewrite, so what it says happened is never a fact: what happened to the files is seen from outside the computer as file facts. What only Git holds, such as a commit message, could at most be told to Silo as a report, used only for what cannot be seen from outside, as `when-a-report-is-used` says; whether any source reads it is decided with that source. A classifier may read it to give an opinion, as `how-a-path-comes-back` does."
 }
