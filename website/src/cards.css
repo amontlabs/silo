@@ -14,8 +14,6 @@
   position: relative; min-width: 0; display: grid; grid-template-rows: subgrid; grid-row: span 4;
   row-gap: 0; border-top: 1px solid var(--line); background: var(--paper); cursor: pointer;
 }
-.for .fc-item:focus { outline: none; }
-.for .fc-item:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -3px; }
 
 /* The line over a card fills while its picture plays, as a segment of the film's progress does. */
 .for .fc-fill {

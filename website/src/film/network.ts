@@ -79,7 +79,7 @@ export function paste(f: Reel) {
     { t: out('needs'), d: FADE + 400, to: CHAIN, c: [180, 300] },
   ];
   const toNeeds = at('needs')(400);
-  for (const leg of moves) f.during(leg.t, leg.d);
+  for (const leg of moves) f.during(leg.t, leg.d, 'the request to paste.rs');
   f.cue((t) => {
     const p = along(t, from, moves);
     translate(inner, p[0], p[1]);

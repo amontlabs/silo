@@ -21,7 +21,7 @@ export interface Drawing {
 
 const part = <El extends Element>(figure: Element, selector: string) => figure.querySelector<El>(selector)!;
 
-function drawWindow(figure: Element, go: (key: Key) => void, reduced: boolean): Drawing {
+function drawWindow(figure: Element, go: (key: Key) => void): Drawing {
   const stage = part<SVGSVGElement>(figure, '.film-window');
   stage.replaceChildren();
   // The still is a picture. Drawn, the window holds the sidebar's buttons.
@@ -40,7 +40,7 @@ function drawWindow(figure: Element, go: (key: Key) => void, reduced: boolean): 
 
   const reel = new Reel(canvas);
   drawShots(reel);
-  const sidebar = buildSidebar(side, reel, go, reduced);
+  const sidebar = buildSidebar(side, reel, go);
   const record = G(stage, { 'aria-hidden': 'true' });
   const dock = buildRecord(record, reel, WINDOW_DOCK);
   return {
@@ -96,5 +96,5 @@ function drawPhone(figure: Element): Drawing {
   };
 }
 
-export const drawFilm = (figure: Element, layout: Layout, go: (key: Key) => void, reduced: boolean): Drawing =>
-  layout === 'phone' ? drawPhone(figure) : drawWindow(figure, go, reduced);
+export const drawFilm = (figure: Element, layout: Layout, go: (key: Key) => void): Drawing =>
+  layout === 'phone' ? drawPhone(figure) : drawWindow(figure, go);

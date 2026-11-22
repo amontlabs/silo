@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { recordAnimations } from './cards-test-support';
-import { LINGER, PICTURES } from './cards';
+import { FADE, LINGER, PICTURES } from './cards';
 import { LENGTH, STILL, TIMED, endOf } from './film/story';
 import { homePage, measurableSvg } from './film/test-support';
 import { mountPictures } from './pictures';
@@ -54,6 +54,11 @@ const turnsOver = (ms: number) => {
   }
   return turns;
 };
+/** What of the cards is moving or fading, its copies included. */
+const cardsMove = () => animations.live().filter(({ target }) => target.isConnected);
+const segment = (i: number) => document.querySelectorAll<HTMLButtonElement>('.film-progress button')[i];
+/** Whether the film has two frames on screen. */
+const crossing = () => document.querySelectorAll('.film-window > .f-canvas').length > 1;
 const show = (state: string) => {
   visibility = state;
   document.dispatchEvent(new Event('visibilitychange'));
@@ -297,8 +302,9 @@ describe('the two pictures', () => {
       () => pointer(card('recipes'), 'pointerenter', 'mouse'),
       () => pointer(card('recipes'), 'pointerleave', 'mouse'),
       () => card('extensions').click(),
-      () => card('disk').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true })),
-      () => card('disk').dispatchEvent(new FocusEvent('blur')),
+      () => card('disk').click(),
+      () => segment(pick(TIMED.length)).click(),
+      () => pointer(card('rules'), 'pointerleave', 'mouse'),
       () => see(figure(), 1),
       () => see(figure(), 0),
       () => show('hidden'),
@@ -311,9 +317,16 @@ describe('the two pictures', () => {
     let seed = 7;
     const pick = (below: number) => Math.floor(((seed = (seed * 48271) % 2147483647) / 2147483647) * below);
     let moved = 0;
-    for (let round = 0; round < 100; round++) {
+    const oneMoves = (round: number) => {
+      if (root().film!.moving || reduced) expect(cardsMove(), `round ${round}`).toEqual([]);
+      if (reduced) expect(crossing(), `round ${round}`).toBe(false);
+    };
+    for (let round = 0; round < 160; round++) {
       hands[pick(hands.length)]();
-      vi.advanceTimersByTime(pick(2500));
+      // At once, and after a while that can be shorter than a fade or a crossing.
+      oneMoves(round);
+      vi.advanceTimersByTime(pick(2) ? pick(300) : pick(2500));
+      oneMoves(round);
       const cards = playing();
       expect(cards.length).toBeLessThanOrEqual(1);
       expect(animations.moving()).toEqual(cards);
@@ -326,22 +339,11 @@ describe('the two pictures', () => {
     show('visible');
     setMotion(false);
     see(figure(), 0);
+    // After reduced motion they wait for the visitor's hand.
+    card('rules').click();
     vi.advanceTimersByTime(10000);
     // A minute of turns: every card takes one.
     expect(new Set(turnsOver(60000)).size).toBe(NAMES.length);
-  });
-
-  it('hold the film for a card that has the focus, until it ends', () => {
-    mountPictures();
-    see(figure(), 1);
-    const record = card('record');
-    vi.spyOn(record, 'matches').mockReturnValue(true);
-    record.dispatchEvent(new FocusEvent('focus'));
-    expect(playing()).toEqual(['record']);
-    expect(filmIs()).toBe('held');
-    vi.advanceTimersByTime(lasts('record'));
-    expect(playing()).toEqual([]);
-    expect(filmIs()).toBe('moving');
   });
 
   it('pause where the film is, and go on from there', () => {
@@ -431,15 +433,126 @@ describe('the two pictures', () => {
     expect(playing()).toEqual([]);
   });
 
-  it('stop the card that plays when the visitor asks for less motion, and take turns again after', () => {
+  it('pause the film on the end of its shot when motion is reduced, and start nothing when it no longer is', () => {
+    mountPictures();
+    see(figure(), 1);
+    vi.advanceTimersByTime(TIMED[2].start + 1000);
+    see(card('rules'), 1);
+    setMotion(true);
+    expect(filmIs()).toBe('paused');
+    expect(moment()).toBeCloseTo(endOf(TIMED[2]), -1);
+    vi.advanceTimersByTime(10000);
+    expect(moment()).toBeCloseTo(endOf(TIMED[2]), -1);
+    setMotion(false);
+    see(card('secrets'), 1);
+    show('hidden');
+    show('visible');
+    vi.advanceTimersByTime(60000);
+    expect(filmIs()).toBe('paused');
+    expect(moment()).toBeCloseTo(endOf(TIMED[2]), -1);
+    expect(cardsMove()).toEqual([]);
+  });
+
+  it('keep the still of a film that had not played when motion is reduced', () => {
+    mountPictures();
+    setMotion(true);
+    see(figure(), 1);
+    expect(filmIs()).toBe('paused');
+    expect(moment()).toBeCloseTo(STILL, -1);
+  });
+
+  it('end a crossing at once when motion is reduced', () => {
+    mountPictures();
+    see(figure(), 1);
+    segment(4).click();
+    expect(crossing()).toBe(true);
+    setMotion(true);
+    expect(crossing()).toBe(false);
+    expect(root().film!.moving).toBe(false);
+    expect(moment()).toBeCloseTo(endOf(TIMED[4]), -1);
+  });
+
+  it.each(['before Play', 'while it plays', 'since the page opened'])('jump with no crossfade under reduced motion, %s', (when) => {
+    reduced = when !== 'since the page opened';
+    mountPictures();
+    if (!reduced) setMotion(true);
+    see(figure(), 1);
+    if (when === 'while it plays') $('.film-pause').click();
+    segment(5).click();
+    expect(crossing()).toBe(false);
+    expect(moment()).toBeCloseTo(when === 'while it plays' ? TIMED[5].start : endOf(TIMED[5]), -1);
+    expect($('.f-hl').getAttribute('transform')).not.toBe('translate(0.00 134.00)');
+  });
+
+  it('stop the card that plays at once when motion is reduced, and take turns again once the visitor starts one', () => {
     mountPictures();
     see(card('rules'), 1);
+    see(card('secrets'), 1);
     expect(playing()).toEqual(['rules']);
     setMotion(true);
-    expect(playing()).toEqual([]);
+    expect(cardsMove()).toEqual([]);
+    setMotion(false);
     vi.advanceTimersByTime(10000);
     expect(playing()).toEqual([]);
-    setMotion(false);
+    card('rules').click();
+    expect(playing()).toEqual(['rules']);
+    expect(turnsOver(6000)).toEqual(['rules', 'secrets']);
+  });
+
+  it.each(['on its turn', 'pressed', 'pointed at'])('stop a card %s at once when Play is pressed', (how) => {
+    mountPictures();
+    see(figure(), 1);
+    $('.film-pause').click();
+    if (how === 'on its turn') see(card('record'), 1);
+    else if (how === 'pressed') card('record').click();
+    else pointer(card('record'), 'pointerenter', 'mouse');
+    vi.advanceTimersByTime(1000);
+    expect(playing()).toEqual(['record']);
+    $('.film-pause').click();
+    expect(filmIs()).toBe('moving');
+    expect(cardsMove()).toEqual([]);
+  });
+
+  it.each(['on its turn', 'pressed'])('stop a card %s at once for a jump, and start none until it has crossed over', (how) => {
+    mountPictures();
+    see(figure(), 1);
+    $('.film-pause').click();
+    see(card('rules'), 1);
+    if (how === 'pressed') card('record').click();
+    vi.advanceTimersByTime(1000);
+    segment(3).click();
+    expect(crossing()).toBe(true);
+    expect(cardsMove()).toEqual([]);
+    vi.advanceTimersByTime(100);
+    expect(cardsMove()).toEqual([]);
+    vi.advanceTimersByTime(100);
+    expect(crossing()).toBe(false);
     expect(playing()).toEqual(['rules']);
   });
+
+  it('end a crossing at once for a card the visitor starts', () => {
+    mountPictures();
+    see(figure(), 1);
+    segment(3).click();
+    expect(crossing()).toBe(true);
+    card('record').click();
+    expect(crossing()).toBe(false);
+    expect(playing()).toEqual(['record']);
+  });
+
+  it('drop a dissolve that had begun as the film starts', () => {
+    mountPictures();
+    see(card('rules'), 1);
+    vi.advanceTimersByTime(lasts('rules') + FADE / 2);
+    expect(cardsMove().length).toBeGreaterThan(0);
+    see(figure(), 1);
+    expect(cardsMove()).toEqual([]);
+
+    pointer(card('record'), 'pointerenter', 'mouse');
+    vi.advanceTimersByTime(1000);
+    pointer(card('record'), 'pointerleave', 'mouse');
+    expect(filmIs()).toBe('moving');
+    expect(cardsMove()).toEqual([]);
+  });
+
 });

@@ -6,9 +6,9 @@ import { VIEW, viewAt } from './camera';
 import { Shown } from './chrome';
 import { drawFilm, type Layout } from './drawing';
 import { mountFilm } from './film';
-import { ROWS } from './reel';
-import { END, FADE, LENGTH, REACT, SHOTS, STILL, TIMED, at, endOf, shotOf, type Key, type Span } from './story';
-import { CANVAS } from './svg';
+import { ROWS, type Motion } from './reel';
+import { END, FADE, LENGTH, REACT, SHOTS, STILL, TIMED, at, endOf, shotAt, shotOf, type Key, type Pan, type Span } from './story';
+import { CANVAS, offsetOf } from './svg';
 import { homePage, measurableSvg, seen } from './test-support';
 import { along } from './time';
 
@@ -24,9 +24,9 @@ afterEach(() => vi.unstubAllGlobals());
 /** The film drawn in `layout`, and what renders a moment of it. */
 function drawn(layout: Layout = 'window') {
   const figure = $('.film figure');
-  const drawing = drawFilm(figure, layout, () => {}, false);
+  const drawing = drawFilm(figure, layout, () => {});
   const shown = new Shown();
-  return { figure, reel: drawing.reel, render: (t: number) => drawing.render(t, shown) };
+  return { figure, shown, reel: drawing.reel, render: (t: number) => drawing.render(t, shown) };
 }
 const stageOf = (figure: Element) => figure.querySelector('.film-window')!;
 const onScreen = (el: Element | null): boolean => {
@@ -224,6 +224,18 @@ describe('the drawing', () => {
 
 describe("the phone's camera", () => {
   const pans = TIMED.flatMap((shot) => shot.camera.pans.map((pan) => ({ ...pan, shot: shot.key, t: shot.start + pan.t })));
+  /** What moves in the camera's view during `pan` and is not the one thing it follows, moving with it. */
+  const besides = (pan: Pan, motions: readonly Motion[]) =>
+    motions.filter(({ t, d, of, across }) => {
+      if (t >= pan.t + pan.d || pan.t >= t + d) return false;
+      if (pan.follows && of === pan.follows && t === pan.t && d === pan.d) return false;
+      if (!across) return true;
+      // What says where it keeps to is out of it all the while.
+      for (let u = Math.max(t, pan.t); u < Math.min(t + d, pan.t + pan.d); u += 10) {
+        if (viewAt(u) < across[1] && viewAt(u) + VIEW > across[0]) return true;
+      }
+      return false;
+    });
 
   it('frames parts of the canvas no wider than its view', () => {
     for (const span of TIMED.flatMap(({ camera }) => [...(camera.from ? [camera.from] : []), ...camera.pans.map((pan) => pan.to)])) {
@@ -238,38 +250,82 @@ describe("the phone's camera", () => {
     pans.forEach((pan, i) => {
       const said = `${pan.shot}, the pan at ${pan.t}`;
       if (i) expect(pan.t, said).toBeGreaterThanOrEqual(pans[i - 1].t + pans[i - 1].d);
+      expect(besides(pan, reel.motions), said).toEqual([]);
       if (pan.follows) {
-        expect(reel.motions.some(({ t, d }) => t === pan.t && d === pan.d), `${said} moves with ${pan.follows}`).toBe(true);
-      } else {
-        const moving = reel.motions.filter(({ t, d }) => t < pan.t + pan.d && pan.t < t + d);
-        expect(moving, said).toEqual([]);
+        const followed = reel.motions.some(({ t, d, of }) => of === pan.follows && t === pan.t && d === pan.d);
+        expect(followed, `${said} moves with ${pan.follows}`).toBe(true);
       }
+      // A second thing that moves with it is found, whatever its timing.
+      expect(besides(pan, [...reel.motions, { t: pan.t, d: pan.d }]), said).toHaveLength(1);
     });
   });
 
   it('has finished its last move by the moment a paused jump shows, and ends on what the shot is about', () => {
-    // Where, on the canvas, what each shot is about stands at its end. One view cannot hold all of Now, Needs you or Disk:
+    const { render, figure } = drawn('phone');
+    const canvas = figure.querySelector('.film-view .f-canvas')!;
+    /** Where `el` is drawn on the canvas, from its left to its right, as it has been moved. */
+    const where = (el: Element): Span => {
+      let x = 0;
+      for (let up: Element | null = el; up && up !== canvas; up = up.parentElement) x += offsetOf(up);
+      const number = (name: string) => Number(el.getAttribute(name) ?? 0);
+      if (el.tagName === 'rect') return [x + number('x'), x + number('x') + number('width')];
+      if (el.tagName === 'text') {
+        const box = (el as SVGTextElement).getBBox();
+        return [x + box.x, x + box.x + box.width];
+      }
+      // A mark's path has only moves and lines: its numbers are pairs.
+      const xs = el.getAttribute('d')!.match(/-?[\d.]+/g)!.map(Number).filter((_, i) => i % 2 === 0);
+      return [x + Math.min(...xs), x + Math.max(...xs)];
+    };
+    const find = (shot: Key, selector: string, words: readonly string[] = []) => {
+      const all = [...canvas.querySelectorAll(`[data-shot="${shot}"] ${selector}`)].filter(onScreen);
+      const found = words.length ? words.flatMap((word) => {
+        const said = all.filter((el) => el.textContent === word);
+        expect(said.length, `${shot} says ${word} at its end`).toBeGreaterThan(0);
+        return said;
+      }) : all;
+      expect(found.length, `${shot} has ${selector} at its end`).toBeGreaterThan(0);
+      return found.map(where);
+    };
+    // What each shot is about, found in its drawing as it ends. One view cannot hold all of Now, Needs you or Disk:
     // each ends on the part that matters most, and has been to the others as they changed.
-    const ABOUT: Partial<Record<Key, Span[]>> = {
-      first: [[608, 958]],
+    const ABOUT: Partial<Record<Key, () => Span[]>> = {
+      // main, the box that has its name
+      first: () => {
+        const name = [...canvas.querySelectorAll('[data-shot="first"] text')].find((el) => el.textContent === 'main')!;
+        return [where(name.parentElement!.querySelector('rect')!)];
+      },
       // the runs' names and commands, and the stuck run's opinion
-      now: [[54, 447], [196, 280]],
+      now: () => [
+        ...find('now', 'text', ['Claude Code', 'Codex', 'npm install', 'cargo test', 'sudo npm install -g pnpm', 'stuck']),
+        where([...canvas.querySelectorAll('[data-shot="now"] text')].find((el) => el.textContent === 'stuck')!.parentElement!.querySelector('rect')!),
+      ],
       // the alert's words and the question
-      needs: [[84, 320]],
-      // the chain's labels and their marks
-      timeline: [[159, 448]],
+      needs: () => find('needs', 'text', ['new host', 'paste.rs', 'denied', 'Is', '~/api/target', 'build output?']),
+      // the chain's labels, the muted ones among them, and the mark it starts from
+      timeline: () => [
+        ...find('timeline', 'text.f-muted', ['paste.rs', 'denied', 'curl', 'node postinstall.js', 'npm install', 'turn 14', 'Claude Code']),
+        where([...canvas.querySelectorAll('path.f-acc-f')].find((el) => onScreen(el) && !el.closest('[data-shot]'))!),
+      ],
       // main's rebuildable size after the purge, and the pattern
-      disk: [[30, 319]],
-      // the fork's box, its denied request and the no rule gate it stopped at
-      fork: [[420, 665]],
-      // the three gates and their verdicts
-      network: [[355, 505]],
+      disk: () => find('disk', 'text', ['rebuild', '0 GB', 'npm install', '41× in 12 runs']),
+      // the fork's edge, its denied request and the no rule gate it stopped at
+      fork: () => [
+        ...find('fork', 'rect.f-ghost').map(([, right]): Span => [right, right]),
+        ...find('fork', 'rect.f-gate'),
+        ...find('fork', 'text', ['denied', 'no rule']),
+      ],
+      // the three gates, their rules and their verdicts
+      network: () => [...find('network', 'rect.f-gate'), ...find('network', 'text', ['stripe v2', 'registries v3', 'no rule', 'allowed', 'denied'])],
     };
     for (const shot of TIMED) {
       const last = shot.camera.pans.at(-1);
       if (last) expect(last.t + last.d, `${shot.key}'s last move`).toBeLessThanOrEqual(endOf(shot) - shot.start);
+      const about = ABOUT[shot.key];
+      if (!about) continue;
+      render(endOf(shot));
       const left = viewAt(endOf(shot));
-      for (const [from, to] of ABOUT[shot.key] ?? []) {
+      for (const [from, to] of about()) {
         expect(left, `${shot.key} at its end, from ${from}`).toBeLessThanOrEqual(from);
         expect(left + VIEW, `${shot.key} at its end, to ${to}`).toBeGreaterThanOrEqual(to);
       }
@@ -310,7 +366,7 @@ describe('the player', () => {
     const reference = mountFilm(copy, { reduced: false, inView: true, hold: 0 });
 
     // The model: what the moment has to be.
-    const model = { clock: 0, paused: false, allowed: false, last: null as number | null, landsAt: 0 };
+    const model = { clock: 0, paused: false, reduced: false, allowed: false, last: null as number | null, landsAt: 0 };
     const running = () => model.allowed && !model.paused;
     const picture = (el: HTMLElement) => {
       const parts = layout === 'window' ? ['.film-window'] : ['.film-view', '.film-dock', '.film-place'];
@@ -324,13 +380,13 @@ describe('the player', () => {
     const pick = (below: number) => Math.floor(((seed = (seed * 48271) % 2147483647) / 2147483647) * below);
     let compared = 0;
     for (let step = 0; step < 300; step++) {
-      const what = pick(10);
+      const what = pick(11);
       if (what === 0) {
         const i = pick(segments.length);
         segments[i].click();
         model.clock = model.paused ? endOf(TIMED[i]) : TIMED[i].start;
         model.last = null;
-        model.landsAt = now + 150;
+        model.landsAt = model.reduced ? 0 : now + 150;
       } else if (what === 1) {
         root.querySelector<HTMLButtonElement>('.film-pause')!.click();
         model.paused = !model.paused;
@@ -339,6 +395,16 @@ describe('the player', () => {
         model.allowed = !model.allowed || pick(3) === 0;
         film.allow(model.allowed);
         if (!running()) model.last = null;
+      } else if (what === 3) {
+        model.reduced = !model.reduced;
+        if (model.reduced) {
+          model.paused = true;
+          model.clock = endOf(shotAt(model.clock));
+          model.last = null;
+          model.landsAt = 0;
+        }
+        film.reduce(model.reduced);
+        reference.reduce(model.reduced);
       } else {
         now += 16 + pick(900);
         const frames = waitingFrames;
@@ -355,6 +421,7 @@ describe('the player', () => {
         }
       }
       expect(film.running, `step ${step}`).toBe(running());
+      expect(film.moving, `step ${step}`).toBe(running() || model.landsAt > 0);
       reference.hold(model.clock);
       expect(bars(root), `step ${step}`).toBe(bars(copy));
       // While a jump crosses over, two frames are on screen.
@@ -363,5 +430,22 @@ describe('the player', () => {
       compared++;
     }
     expect(compared).toBeGreaterThan(100);
+  });
+
+  it('slides the mark between two rows, and with reduced motion never does, played or held', () => {
+    const { render, shown, reel, figure } = drawn();
+    const mark = () => figure.querySelector('.f-hl')!.getAttribute('transform');
+    let slid = 0;
+    for (const [i, [t, row]] of reel.lit.entries()) {
+      if (!row || !i || !reel.lit[i - 1][1]) continue;
+      const y = ROWS.find(([name]) => name === row)![1].toFixed(2);
+      shown.reduced = false;
+      render(t + FADE / 4);
+      if (mark() !== `translate(0.00 ${y})`) slid++;
+      shown.reduced = true;
+      render(t + FADE / 4);
+      expect(mark(), `${row} at ${t}`).toBe(`translate(0.00 ${y})`);
+    }
+    expect(slid).toBeGreaterThan(5);
   });
 });

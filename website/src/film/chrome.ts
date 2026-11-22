@@ -2,7 +2,7 @@
 // or, on a phone, as a label over the canvas.
 
 import { ROWS, type Recorded, type Reel, type Row } from './reel';
-import { END, FADE, TIMED, out, type Key } from './story';
+import { END, FADE, out, shotAt, type Key } from './story';
 import { E, G, T, diamond, show, textWidth, translate } from './svg';
 import { clamp, easeInOut, lerp, part, visible } from './time';
 
@@ -12,6 +12,8 @@ import { clamp, easeInOut, lerp, part, visible } from './time';
  */
 export class Shown {
   private values = new Map<string, number>();
+  /** Reduced motion: the sidebar's mark does not slide. */
+  reduced = false;
   /** The jump under way: what was shown as it started, and how much of it has passed. */
   jump: { from: ReadonlyMap<string, number>; u: number } | null = null;
 
@@ -46,7 +48,7 @@ function markedAt(reel: Reel, t: number) {
 const rowY = (row: Row | null) => ROWS.find(([name]) => name === row)?.[1] ?? null;
 
 /** The sidebar's rows, each a way to its shot. */
-export function buildSidebar(side: SVGGElement, reel: Reel, go: (key: Key) => void, reduced: boolean) {
+export function buildSidebar(side: SVGGElement, reel: Reel, go: (key: Key) => void) {
   const highlight = E('rect', { x: 8, y: -13, width: 116, height: 26, rx: 3, class: 'f-hl' }, side);
   const rows = ROWS.map(([name, y, key]) => {
     const g = G(side, { 'data-go': key, role: 'button', tabindex: 0, 'aria-label': name });
@@ -77,13 +79,13 @@ export function buildSidebar(side: SVGGElement, reel: Reel, go: (key: Key) => vo
     let opacity = 0;
     if (to === null && from !== null) [y, opacity] = [from, 1 - u];
     else if (to !== null && from === null) [y, opacity] = [to, u];
-    else if (to !== null && from !== null) [y, opacity] = [lerp(from, to, u), 1];
-    // The mark slides from one row to the next, on a jump too. It only fades to or from no row, or when motion is reduced.
+    else if (to !== null && from !== null) [y, opacity] = [shown.reduced ? to : lerp(from, to, u), 1];
+    // The mark slides from one row to the next, on a jump too. It only fades to or from no row.
     if (shown.jump) {
       const was = shown.jump.from.get('y') ?? null;
       const lit = (shown.jump.from.get('lit') ?? 0) > 0.01;
       if (y === null) y = was;
-      else if (lit && was !== null && !reduced) y = lerp(was, y, easeInOut(shown.jump.u));
+      else if (lit && was !== null) y = lerp(was, y, easeInOut(shown.jump.u));
     }
     if (y !== null) {
       translate(highlight, 0, y);
@@ -139,7 +141,7 @@ function wordsRest(record: readonly Recorded[], i: number) {
   const { t } = record[i];
   const said = t + 120;
   const words = record[i].words.split(/\s+/).length;
-  const shot = TIMED.find((s) => t >= s.start && t < s.start + s.dur)!;
+  const shot = shotAt(t);
   // Its words leave with its shot, or after the cut when they need that to be read, and before the next mark lands.
   // To be read they need 250 ms and 200 ms a word, and 900 ms at least.
   const next = record[i + 1] ? record[i + 1].t - FADE : END;

@@ -19,11 +19,11 @@
       })();
     </script>
     <script>
-      // The film is drawn by its script. Until it has drawn it the film stays hidden, with its room kept, so
-      // a half-drawn picture never shows first. If the script has not started after 3 s, the still the page
-      // holds without script shows and stays. The cards need no wait: their markup is each picture's end.
+      // The film is drawn by its script once its fonts are in. The film stays hidden for that, with its room kept,
+      // for as long as the page waits for its own fonts at most: after 1.2 s the still the page holds without
+      // script shows, until the film is drawn. The cards need no wait: their markup is each picture's end.
       document.documentElement.classList.add('pictures-pending');
-      window.siloPicturesFallback = setTimeout(() => document.documentElement.classList.remove('pictures-pending'), 3000);
+      window.siloPicturesFallback = setTimeout(() => document.documentElement.classList.remove('pictures-pending'), 1200);
     </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -145,7 +145,7 @@
         <section class="for joint" id="cards" aria-labelledby="for-title">
           <h2 class="title" id="for-title">What Silo does</h2>
           <ul class="fc-grid" role="list">
-            <li class="fc-item" data-picture="rules" tabindex="0">
+            <li class="fc-item" data-picture="rules">
               <span class="fc-fill" aria-hidden="true"></span>
               <div class="fc-pic">
                 <svg viewBox="0 0 376 188" aria-hidden="true" focusable="false">
@@ -177,7 +177,7 @@
                 <p class="fc-body">Nothing inside the computer asks for approval. At the boundary, your rules allow, hold or deny each request. The default is deny.</p>
               </div>
             </li>
-            <li class="fc-item" data-picture="secrets" tabindex="0">
+            <li class="fc-item" data-picture="secrets">
               <span class="fc-fill" aria-hidden="true"></span>
               <div class="fc-pic">
                 <svg viewBox="0 0 376 188" aria-hidden="true" focusable="false">
@@ -204,7 +204,7 @@
                 <p class="fc-body">The computer holds a placeholder. Silo swaps in the real key on the way to a host you allowed. The key never enters the computer or the record.</p>
               </div>
             </li>
-            <li class="fc-item" data-picture="record" tabindex="0">
+            <li class="fc-item" data-picture="record">
               <span class="fc-fill" aria-hidden="true"></span>
               <div class="fc-pic">
                 <svg viewBox="0 0 376 188" aria-hidden="true" focusable="false">
@@ -234,7 +234,7 @@
                 <p class="fc-body">File changes, connections and model calls are facts Silo saw itself. What a program inside says is kept apart, since an agent can change it.</p>
               </div>
             </li>
-            <li class="fc-item" data-picture="screen" tabindex="0">
+            <li class="fc-item" data-picture="screen">
               <span class="fc-fill" aria-hidden="true"></span>
               <div class="fc-pic">
                 <svg viewBox="0 0 376 188" aria-hidden="true" focusable="false">
@@ -267,7 +267,7 @@
                 <p class="fc-body">Main is a macOS virtual machine with its own screen. Windows an agent opens there never take your focus or your screen.</p>
               </div>
             </li>
-            <li class="fc-item" data-picture="recipes" tabindex="0">
+            <li class="fc-item" data-picture="recipes">
               <span class="fc-fill" aria-hidden="true"></span>
               <div class="fc-pic">
                 <svg viewBox="0 0 376 188" aria-hidden="true" focusable="false">
@@ -301,7 +301,7 @@
                 <p class="fc-body">A recipe is text: a pinned base and a layer built by Nix. Silo makes a macOS and a Linux computer from it and runs your tests on each.</p>
               </div>
             </li>
-            <li class="fc-item" data-picture="extensions" tabindex="0">
+            <li class="fc-item" data-picture="extensions">
               <span class="fc-fill" aria-hidden="true"></span>
               <div class="fc-pic">
                 <svg viewBox="0 0 376 188" aria-hidden="true" focusable="false">
@@ -337,7 +337,7 @@
           </ul>
           <div class="fc-tree" aria-hidden="true"></div>
           <ul class="fc-examples" role="list" aria-label="Examples of extensions">
-            <li class="fc-item" data-picture="disk" tabindex="0">
+            <li class="fc-item" data-picture="disk">
               <span class="fc-fill" aria-hidden="true"></span>
               <div class="fc-pic">
                 <svg viewBox="0 0 240 94" aria-hidden="true" focusable="false">
@@ -365,7 +365,7 @@
                 <p class="fc-body">Every minute it reads <span class="fc-keep">/work</span> on main, draws a panel and alerts you.</p>
               </div>
             </li>
-            <li class="fc-item" data-picture="call" tabindex="0">
+            <li class="fc-item" data-picture="call">
               <span class="fc-fill" aria-hidden="true"></span>
               <div class="fc-pic">
                 <svg viewBox="0 0 240 94" aria-hidden="true" focusable="false">
@@ -389,7 +389,7 @@
                 <p class="fc-body">It is asked about each tool call before the agent runs it. A denied call goes back to the model with an error.</p>
               </div>
             </li>
-            <li class="fc-item" data-picture="registry" tabindex="0">
+            <li class="fc-item" data-picture="registry">
               <span class="fc-fill" aria-hidden="true"></span>
               <div class="fc-pic">
                 <svg viewBox="0 0 240 94" aria-hidden="true" focusable="false">

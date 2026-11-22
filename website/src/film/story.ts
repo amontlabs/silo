@@ -179,6 +179,8 @@ export const LENGTH = total;
 export const END = LENGTH - 400;
 
 export const shotOf = (key: Key) => TIMED.find((shot) => shot.key === key)!;
+/** The shot that is on at `t`. */
+export const shotAt = (t: number) => TIMED.find(({ start, dur }) => t >= start && t < start + dur)!;
 export const at = (key: Key) => {
   const { start } = shotOf(key);
   return (ms: number) => start + ms;

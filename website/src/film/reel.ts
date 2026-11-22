@@ -1,7 +1,8 @@
-// A reel is one drawing of the film: the shots are built once, with cues on one clock, and a cue only sets
-// opacity, position and text. So the frame at a moment is the same whether playing or held.
+// A reel is one drawing of the film: the shots are built once, with cues on one clock, and a cue only sets what
+// is painted (opacity, position, how much of a line is drawn, text). So nothing changes layout while it plays,
+// and the frame at a moment is the same whether playing or held.
 
-import { END, FADE, PRESSED, out, shotOf, type Key } from './story';
+import { END, FADE, PRESSED, out, shotOf, type Key, type Span } from './story';
 import { CURSOR, E, G, T, show, translate, type Button, type Mark } from './svg';
 import { along, easeInOut, part, visible, type Leg, type Point } from './time';
 
@@ -18,6 +19,15 @@ export interface Recorded {
   kind: Mark;
   words: string;
   accent: boolean;
+}
+/** A stretch of time in which something moves. */
+export interface Motion {
+  t: number;
+  d: number;
+  /** What moves, where a pan follows it or goes on beside it. What moves as one thing has one name. */
+  of?: string;
+  /** The part of the canvas it keeps to, where that is how it stays out of the camera's view. */
+  across?: Span;
 }
 interface Fade {
   /** How far it rises as it arrives. */
@@ -37,7 +47,7 @@ export class Reel {
   badge: [from: number, to: number] = [0, 0];
   bin = Infinity;
   /** Every stretch of time in which something moves. */
-  readonly motions: { t: number; d: number }[] = [];
+  readonly motions: Motion[] = [];
   readonly presses: { t: number; x: number; y: number; w: number; h: number }[] = [];
   readonly pointers: { moves: readonly Leg[]; start: Point; a: number; b: number | null }[] = [];
   /** The whole of each text that types itself. */
@@ -50,8 +60,8 @@ export class Reel {
   cue(run: (t: number) => void) {
     this.cues.push(run);
   }
-  during(t: number, d: number) {
-    this.motions.push({ t, d });
+  during(t: number, d: number, of?: string, across?: Span) {
+    this.motions.push({ t, d, of, across });
   }
   /** Arrives at `a` (fades in and rises), leaves at `b` (fades where it is). */
   fade<El extends SVGElement>(el: El, a: number | null, b: number | null = null, o: Fade = {}): El {
@@ -70,8 +80,8 @@ export class Reel {
     return this.fade(G(this.canvas, { 'data-shot': key }), shotOf(key).start, out(key), { dy: 0 });
   }
   /** Moves along eased legs, as a translation from where it was drawn. */
-  move<El extends SVGElement>(el: El, legs: readonly Leg[], start: Point = [0, 0]): El {
-    for (const leg of legs) this.during(leg.t, leg.d);
+  move<El extends SVGElement>(el: El, legs: readonly Leg[], start: Point = [0, 0], of?: string): El {
+    for (const leg of legs) this.during(leg.t, leg.d, of);
     this.cue((t) => {
       const [x, y] = along(t, start, legs);
       translate(el, x, y);
@@ -79,8 +89,8 @@ export class Reel {
     return el;
   }
   /** A path drawn from its start over `d` ms. */
-  draw<El extends SVGPathElement>(el: El, a: number, d: number): El {
-    this.during(a, d);
+  draw<El extends SVGPathElement>(el: El, a: number, d: number, of?: string): El {
+    this.during(a, d, of);
     let length = 0;
     this.cue((t) => {
       length ||= el.getTotalLength();
@@ -102,8 +112,8 @@ export class Reel {
     });
     return line;
   }
-  eased(a: number, d: number) {
-    this.during(a, d);
+  eased(a: number, d: number, of?: string, across?: Span) {
+    this.during(a, d, of, across);
     return (t: number) => easeInOut(part(t, a, d));
   }
   /** A command types itself from `a`, one character each `ms`. */
@@ -162,7 +172,7 @@ export class Reel {
     const outer = this.fade(G(parent), a, b, { dy: 0 });
     const inner = G(outer);
     E('path', { d: CURSOR, class: 'f-cursor' }, inner);
-    this.move(inner, moves, start);
+    this.move(inner, moves, start, 'the pointer');
     return outer;
   }
   rec(t: number, kind: Mark, words: string, accent = false) {

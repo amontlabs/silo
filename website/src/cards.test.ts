@@ -18,17 +18,10 @@ const mouse = (target: Element, type: string, kind = 'mouse') => {
   Object.defineProperty(event, 'pointerType', { value: kind });
   target.dispatchEvent(event);
 };
-const key = (target: Element, name: string) => {
-  const event = new KeyboardEvent('keydown', { key: name, cancelable: true });
-  target.dispatchEvent(event);
-  return event;
-};
 
 let seen: Parameters<Watch>[1];
 let animations: ReturnType<typeof recordAnimations>;
 let visibility = 'visible';
-/** Whether the focus a card gets is one that shows, as a keyboard's does. */
-let keyboard = true;
 const watch: Watch = (_items, report) => (seen = report);
 
 beforeEach(() => {
@@ -36,12 +29,7 @@ beforeEach(() => {
   document.body.innerHTML = page;
   animations = recordAnimations();
   visibility = 'visible';
-  keyboard = true;
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility });
-  for (const item of document.querySelectorAll<HTMLElement>('.fc-item')) {
-    const matches = (selector: string) => (selector === ':focus-visible' ? keyboard : Element.prototype.matches.call(item, selector));
-    item.matches = matches as typeof item.matches;
-  }
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -180,21 +168,36 @@ describe('the dissolve of a picture', () => {
   });
 
   it('dissolves a card played again while it plays, once', () => {
-    mount();
-    card('rules').click();
-    vi.advanceTimersByTime(1000);
-    key(card('rules'), 'Enter');
-    expect(copies('rules')).toHaveLength(1);
-  });
-
-  it('dissolves a card on its turn that the film stops', () => {
     const cards = mount();
     seen([[0, true]]);
     cards.turns(true);
     vi.advanceTimersByTime(1000);
-    cards.turns(false);
-    expect(animations.playing()).toEqual([]);
+    card('rules').click();
     expect(copies('rules')).toHaveLength(1);
+  });
+});
+
+describe('a stop at once', () => {
+  const stops: [string, (cards: ReturnType<typeof mount>) => void][] = [
+    ['the film starts', (cards) => cards.turns(false)],
+    ['the visitor takes the film', (cards) => cards.giveWay()],
+    ['motion is reduced', (cards) => cards.still(true)],
+    ['the tab is hidden', (cards) => cards.rest()],
+  ];
+  it.each(stops)('leaves no dissolve and no fading line when %s, playing or just over', (_, stop) => {
+    for (const after of [100, 1000, lasts('rules') + 10]) {
+      document.body.innerHTML = page;
+      animations = recordAnimations();
+      const cards = mount();
+      seen([[0, true]]);
+      cards.turns(true);
+      vi.advanceTimersByTime(after);
+      expect(animations.live().length).toBeGreaterThan(0);
+      stop(cards);
+      expect(animations.live().filter(({ target }) => target.isConnected), `${after} ms in`).toEqual([]);
+      expect(document.querySelectorAll('svg.fc-ghost'), `${after} ms in`).toHaveLength(0);
+      vi.clearAllTimers();
+    }
   });
 });
 
@@ -217,19 +220,19 @@ describe('the line over a card', () => {
 });
 
 describe('whose turn it is', () => {
-  it('plays at once a card that gets the focus of a keyboard, and on Enter and Space', () => {
+  it('is no control: a card takes no focus, and no key plays it', () => {
     mount();
-    card('record').dispatchEvent(new FocusEvent('focus'));
-    expect(animations.playing()).toEqual(['record']);
-    vi.advanceTimersByTime(lasts('record'));
+    for (const item of document.querySelectorAll<HTMLElement>('.fc-item')) {
+      expect(item.hasAttribute('tabindex'), item.dataset.picture).toBe(false);
+      vi.spyOn(item, 'matches').mockReturnValue(true);
+      item.dispatchEvent(new FocusEvent('focus'));
+      for (const key of ['Enter', ' ']) {
+        const event = new KeyboardEvent('keydown', { key, cancelable: true });
+        item.dispatchEvent(event);
+        expect(event.defaultPrevented).toBe(false);
+      }
+    }
     expect(animations.playing()).toEqual([]);
-    expect(key(card('record'), ' ').defaultPrevented).toBe(true);
-    expect(animations.playing()).toEqual(['record']);
-    card('record').dispatchEvent(new FocusEvent('blur'));
-    expect(animations.playing()).toEqual([]);
-    expect(key(card('screen'), 'Enter').defaultPrevented).toBe(true);
-    expect(animations.playing()).toEqual(['screen']);
-    expect(key(card('screen'), 'Tab').defaultPrevented).toBe(false);
   });
 
   it('gives the turn to the first in view after the last, of those that came into view at one moment', () => {
@@ -247,8 +250,6 @@ describe('whose turn it is', () => {
     cards.turns(true);
     mouse(card('rules'), 'pointerenter');
     card('rules').click();
-    card('rules').dispatchEvent(new FocusEvent('focus'));
-    key(card('rules'), 'Enter');
     vi.advanceTimersByTime(60000);
     expect(animations.live()).toEqual([]);
     expect(cards.busy).toBe(false);
@@ -260,7 +261,7 @@ describe('whose turn it is', () => {
     // The model: the rules, with no drawing.
     const model = {
       now: 0, current: -1, hand: false, until: 0, pointed: -1, last: -1, resume: -1,
-      may: false, still: false, hidden: false, inView: NAMES.map(() => false),
+      may: false, still: false, quiet: false, hidden: false, inView: NAMES.map(() => false),
     };
     const halt = () => {
       model.current = -1;
@@ -271,7 +272,7 @@ describe('whose turn it is', () => {
       Object.assign(model, { current: i, last: i, hand, until: model.now + lasts(NAMES[i]), resume: -1 });
     };
     const next = () => {
-      if (!model.may || model.still || model.resume >= 0 || model.pointed >= 0 || model.current >= 0) return;
+      if (!model.may || model.still || model.quiet || model.resume >= 0 || model.pointed >= 0 || model.current >= 0) return;
       const after = NAMES.map((_, k) => (model.last + 1 + k) % NAMES.length).find((i) => model.inView[i]);
       if (after !== undefined) play(after, false);
     };
@@ -303,6 +304,7 @@ describe('whose turn it is', () => {
       if (op === 0) {
         mouse(item, 'pointerenter');
         if (!model.still) {
+          model.quiet = false;
           model.pointed = i;
           play(i, true);
         }
@@ -315,23 +317,16 @@ describe('whose turn it is', () => {
       } else if (op === 2) {
         mouse(item, 'pointerenter', 'touch');
         mouse(item, 'pointerleave', 'touch');
-      } else if (op === 3) {
+      } else if (op === 3 || op === 5 || op === 6) {
         item.click();
-        if (model.current !== i || !model.hand) play(i, true);
-      } else if (op === 4) {
-        keyboard = pick(4) > 0;
-        item.dispatchEvent(new FocusEvent('focus'));
-        if (keyboard) play(i, true);
-      } else if (op === 5) {
-        const left = model.current >= 0 ? model.current : i;
-        card(NAMES[left]).dispatchEvent(new FocusEvent('blur'));
-        if (model.current === left && model.hand && model.pointed !== left) {
-          halt();
-          model.resume = model.now + AFTER_POINTER;
+        if (model.current !== i || !model.hand) {
+          if (!model.still) model.quiet = false;
+          play(i, true);
         }
-      } else if (op === 6) {
-        key(item, pick(2) ? 'Enter' : ' ');
-        play(i, true);
+      } else if (op === 4) {
+        cards.giveWay();
+        model.pointed = -1;
+        halt();
       } else if (op === 7 || op === 8 || op === 9) {
         const changes = Array.from({ length: 1 + pick(3) }, () => [pick(NAMES.length), pick(4) > 0] as const);
         seen(changes);
@@ -343,13 +338,14 @@ describe('whose turn it is', () => {
         cards.turns(model.may);
         if (model.may) next();
         else if (model.current >= 0 && !model.hand) halt();
-      } else if (op === 12 && pick(3) === 0) {
+      } else if (op === 12 && (model.still || pick(3) === 0)) {
         model.still = !model.still;
         cards.still(model.still);
         if (model.still) {
+          model.quiet = true;
           model.pointed = -1;
           halt();
-        } else next();
+        }
       } else if (op === 13) {
         model.hidden = !model.hidden;
         visibility = model.hidden ? 'hidden' : 'visible';

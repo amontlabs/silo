@@ -52,7 +52,7 @@ function shotFirst(f: Reel) {
     f.fade(bar, ta + FADE, null, { dy: 0 });
     const inner = G(f.fade(G(g), ta - 1, null, { dy: 0, d: 1 }));
     const cc = card(inner, 52, fy[i], { tok: found[i] });
-    f.move(inner, [{ t: ta, d: 420, to: [mx + 22 - 52, 0], c: [(mx - 30) / 2, -24] }]);
+    f.move(inner, [{ t: ta, d: 420, to: [mx + 22 - 52, 0], c: [(mx - 30) / 2, -24] }], [0, 0], i === 0 ? 'the first copy' : undefined);
     if (i === 0) first = cc;
   });
   f.rec(A(5750), 'f', '3 copied');
@@ -86,7 +86,7 @@ function shotNow(f: Reel) {
   const c1 = lane(100, 'Claude Code', 'npm install', A(100), 30);
   const s1 = f.fade(T(g, 660, 100, '$0.42', 'f-tok16', 'end'), A(680));
   f.rec(A(700), 'f', 'npm install');
-  f.draw(E('path', { d: 'M62 112V136Q62 144 70 144H188', class: 'f-line' }, g), A(1100), 340);
+  f.draw(E('path', { d: 'M62 112V136Q62 144 70 144H188', class: 'f-line' }, g), A(1100), 340, 'the line to the second command');
   lane(149, null, 'cargo test', A(1300), 30);
   f.rec(A(2100), 'f', 'cargo test');
   // What has been read goes to the muted ink, to keep the picture quiet.
@@ -184,7 +184,7 @@ function shotNetwork(f: Reel) {
   f.stroke(net.under, p0, [host, w1], 'f-trace', (t) => (along(t, p0, m1)[0] - NET.src) / (host - NET.src));
   const dot = G(f.fade(G(net.under), A(300), null, { dy: 0 }));
   E('circle', { r: 6, class: 'f-ink' }, dot);
-  f.move(dot, m1, p0);
+  f.move(dot, m1, p0, 'the request to api.stripe.com');
   const secret = G(f.fade(G(net.g), A(300), A(3060), { dy: 0 }));
   const ph = G(secret), real = G(secret);
   placeholder(ph, 0, 24);
@@ -285,7 +285,7 @@ function shotTimeline(f: Reel) {
   // What has been read goes to the muted ink, still named; then one branch, then the other.
   for (const e of [pr, pd, curl, node, tl.label, arrow]) f.mute(e, A(2500));
   // On the same tool call: the files it made, and, hung off them, who wrote them (an opinion).
-  f.draw(E('path', { d: `M${cx + 9} ${Y.n}H612`, class: 'f-line' }, g), A(2760), 300);
+  f.draw(E('path', { d: `M${cx + 9} ${Y.n}H612`, class: 'f-line' }, g), A(2760), 300, 'the branch to the files');
   f.fade(diamond(g, 620, Y.n, 8, 'f'), A(3060), null, { dy: 0 });
   const files = f.fade(T(g, 640, Y.n + 5.5, '1,204 files', 'f-tok16'), A(3060));
   const wy = Y.n + 46;
@@ -301,14 +301,14 @@ function shotTimeline(f: Reel) {
   f.draw(E('path', { d: `M${cx + 9} ${Y.t}H${gx - 8}`, class: 'f-line' }, g), A(4840), 240);
   f.fade(diamond(g, gx, Y.t, 8, 'f'), A(5080), null, { dy: 0 });
   f.fade(T(g, gx - 8, Y.t - 20, 'git push --force', 'f-tok16'), A(5080));
-  f.draw(E('path', { d: `M${gx + 9} ${Y.t}H${gl}`, class: 'f-line' }, g), A(5340), 240);
+  f.draw(E('path', { d: `M${gx + 9} ${Y.t}H${gl}`, class: 'f-line' }, g), A(5340), 240, 'the line to the gate');
   const gate = f.fade(G(g), A(5580), null, { dy: 0 });
   gateBox(gate, gm, Y.t);
   T(gate, gm, Y.t + 5.5, 'no force push', 'f-tok16', 'middle');
   f.fade(T(g, gm, Y.t + 44, 'denied', 'f-tok16', 'middle'), A(5800));
   f.rec(A(5800), 'f', 'git push denied');
   const back = E('path', { d: `M${gm} ${Y.t - 17}C${gm} 88 470 88 447 ${Y.t - 11}`, class: 'f-line' }, g);
-  f.draw(back, A(6000), 380);
+  f.draw(back, A(6000), 380, 'the error on its way back');
   f.fade(E('path', { d: `M443 ${Y.t - 22}L447 ${Y.t - 11}L456 ${Y.t - 18}`, class: 'f-line' }, g), A(6380), null, { dy: 0 });
   f.fade(T(g, (gm + 447) / 2, 92, 'error', 'f-lbl', 'middle'), A(6380));
 }
@@ -390,7 +390,8 @@ function shotFork(f: Reel) {
   const x1 = 820, cp = RAIL.cps[2];
   const r = rail(f, g, { a: A(0), tag: true, x1 });
   f.mute(r.label, A(2380));
-  const run = f.eased(A(2400), 1900);
+  // On a phone it runs on out of view, right of all the camera frames meanwhile.
+  const run = f.eased(A(2400), 1900, 'main running on', [x1, RAIL.x1]);
   f.stroke(g, [x1, RAIL.y], [RAIL.x1, RAIL.y], 'f-line', run);
   const now = G(f.fade(G(g), A(500), null, { dy: 0 }));
   E('circle', { r: 4.5, class: 'f-ink' }, now);
@@ -431,16 +432,16 @@ function shotFork(f: Reel) {
   E('path', { d: 'M-9 -12H4L10 -6V12H-9Z', class: 'f-box', style: 'stroke-width:1.3' }, ni);
   E('path', { d: 'M4 -12V-6H10', class: 'f-line', style: 'stroke-width:1.3' }, ni);
   T(ni, 18, 5, 'notes.md', 'f-tok');
-  f.move(ni, [{ t: A(5200), d: 500, to: [770, RAIL.y + 34] }], [F.x + F.w - 106, F.y + 25]);
+  f.move(ni, [{ t: A(5200), d: 500, to: [770, RAIL.y + 34] }], [F.x + F.w - 106, F.y + 25], 'notes.md');
   // It tried paste.rs too: no rule here either.
   const gx = 590, gy = ly - 5, stop = gx - NET.gw / 2 - 6, edge = F.x + F.w;
   const nt = f.fade(G(g), A(3480), null, { dy: 0 });
   E('line', { x1: gx, y1: F.y, x2: gx, y2: F.y + F.h, class: 'f-line' }, nt);
   E('line', { x1: edge + 1, y1: gy, x2: NET.host, y2: gy, class: 'f-wire' }, nt);
-  f.stroke(nt, [edge + 1, gy], [stop, gy], 'f-trace f-acc-s', f.eased(A(3780), 400));
+  f.stroke(nt, [edge + 1, gy], [stop, gy], 'f-trace f-acc-s', f.eased(A(3780), 400, 'the request to paste.rs'));
   const d4 = G(f.fade(G(nt), A(3700), null, { dy: 0 }));
   E('circle', { r: 6, class: 'f-acc-f' }, d4);
-  f.move(d4, [{ t: A(3780), d: 400, to: [stop, gy] }], [edge + 1, gy]);
+  f.move(d4, [{ t: A(3780), d: 400, to: [stop, gy] }], [edge + 1, gy], 'the request to paste.rs');
   gateBox(nt, gx, gy, true);
   T(nt, gx, gy + 5.5, 'no rule', 'f-tok16 f-muted', 'middle');
   E('circle', { cx: NET.host, cy: gy, r: 6, class: 'f-box' }, nt);
@@ -480,7 +481,7 @@ function shotTests(f: Reel) {
   f.fade(T(g, 310, mid - 10, 'commit', 'f-lbl', 'middle'), A(700));
   f.fade(E('circle', { cx: 360, cy: mid, r: 5, class: 'f-ink' }, g), A(900), null, { dy: 0 });
   f.rec(A(900), 'f', 'commit sent');
-  for (const y of [C.t + h / 2, low + h / 2]) f.draw(E('path', { d: `M360 ${mid}C440 ${mid} 445 ${y} ${x} ${y}`, class: 'f-line' }, g), A(1000), 420);
+  for (const y of [C.t + h / 2, low + h / 2]) f.draw(E('path', { d: `M360 ${mid}C440 ${mid} 445 ${y} ${x} ${y}`, class: 'f-line' }, g), A(1000), 420, 'the commit');
   f.fade(box(g, x, C.t, w, h, 'macOS'), A(1420));
   f.fade(box(g, x, low, w, h, 'Linux'), A(1420));
   f.present.macOS = [A(1420) - FADE, out(k)];
@@ -536,10 +537,10 @@ function shotExt(f: Reel) {
   const wire: Point[] = [[gr, wy], [wx, wy], [wx, bm], [bx.r, bm]];
   E('path', { d: `M${gr} ${wy}H${wx - 12}Q${wx} ${wy} ${wx} ${wy + 12}V${bm - 12}Q${wx} ${bm} ${wx - 12} ${bm}H${bx.r}`, class: 'f-thin' }, rc);
   // A request of main waits at the boundary.
-  f.stroke(net.under, [NET.src, w1], [NET.stop, w1], 'f-trace', f.eased(A(2900), 520));
+  f.stroke(net.under, [NET.src, w1], [NET.stop, w1], 'f-trace', f.eased(A(2900), 520, 'the request'));
   const d = G(f.fade(G(net.under), A(2780), null, { dy: 0 }));
   E('circle', { r: 6, class: 'f-ink' }, d);
-  f.move(d, [{ t: A(2900), d: 520, to: [NET.stop, w1] }], [NET.src, w1]);
+  f.move(d, [{ t: A(2900), d: 520, to: [NET.stop, w1] }], [NET.src, w1], 'the request');
   // The gate asks: a dot leaves along the wire to request check.
   const legs = (pts: readonly Point[], t0: number, total: number) => {
     const len = pts.slice(1).map((p, i) => Math.hypot(p[0] - pts[i][0], p[1] - pts[i][1]));

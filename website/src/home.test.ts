@@ -102,7 +102,9 @@ describe('the home page', () => {
     expect(doc.querySelectorAll('.fc-examples > li.fc-item > .fc-text > .fc-term + p.fc-body:last-child')).toHaveLength(3);
     expect(doc.querySelectorAll('.fc-grid .fc-pic > svg[aria-hidden="true"][viewBox="0 0 376 188"]')).toHaveLength(6);
     expect(doc.querySelectorAll('.fc-examples .fc-pic > svg[aria-hidden="true"][viewBox="0 0 240 94"]')).toHaveLength(3);
-    expect(doc.querySelectorAll('.fc-item[tabindex="0"] > .fc-fill[aria-hidden="true"]:first-child')).toHaveLength(9);
+    expect(doc.querySelectorAll('.fc-item > .fc-fill[aria-hidden="true"]:first-child')).toHaveLength(9);
+    // They are not controls: nothing in them is a stop of the keyboard, and what they say is their text.
+    expect(doc.querySelectorAll('.fc-grid :is([tabindex], [role], a, button), .fc-examples :is([tabindex], [role], a, button)')).toHaveLength(0);
   });
 
   it('draws what the pictures say', () => {
@@ -178,6 +180,28 @@ describe('the home page', () => {
     expect(waited).toHaveLength(4);
     expect([...preloaded].sort()).toEqual([...waited].sort());
     for (const href of preloaded) expect(existsSync(join(process.cwd(), 'public', href))).toBe(true);
+  });
+
+  it('preloads every face the film waits for', () => {
+    const faces = [...read('public/fonts/fonts.css').matchAll(/@font-face \{([^}]*)\}/g)].map(([, body]) => {
+      const [low, high = low] = /font-weight: ([\d ]+);/.exec(body)![1].split(' ').map(Number);
+      return { family: /font-family: '([^']+)'/.exec(body)![1], italic: body.includes('style: italic'), low, high, file: /url\(\.\/([^)]+)\)/.exec(body)![1] };
+    });
+    const preloaded = [...doc.querySelectorAll('link[rel="preload"][as="font"]')].map((link) => link.getAttribute('href'));
+    const waited = [...(/const FACES = \[(.*)\];/.exec(read('src/home.ts'))?.[1].matchAll(/"(?:(\d+) )?\d+px '([^']+)'"/g) ?? [])];
+    expect(waited).toHaveLength(3);
+    for (const [face, weight = '400', family] of waited) {
+      // Plex Sans is one file for every weight from 400 to 600, so 500 asks for no file of its own.
+      const from = faces.find((one) => !one.italic && one.family === family && one.low <= Number(weight) && Number(weight) <= one.high);
+      expect(preloaded, face).toContain(`/fonts/${from?.file}`);
+    }
+  });
+
+  it('shows the still of a film that is not drawn by the time the page shows regardless', () => {
+    const page = /setTimeout\(show, (\d+)\)/.exec(html)?.[1];
+    const still = /classList\.remove\('pictures-pending'\), (\d+)\)/.exec(html)?.[1];
+    expect(page).toBe('1200');
+    expect(still).toBe(page);
   });
 
   it('keeps no style for a class or id the page and its scripts do not use', () => {

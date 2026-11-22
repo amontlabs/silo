@@ -1,6 +1,7 @@
 // The cards of the home page, six features and three examples of extensions. A picture is drawn at its end in
 // index.html: playing it is a set of animations over that drawing, and stopping it is cancelling them. One card
-// plays at a time. The cards in view take turns, and a card the visitor points at, focuses or presses plays at once.
+// plays at a time. The cards in view take turns, and a card the visitor points at or presses plays at once.
+// A card is not a control: it takes no focus, and its text is what a screen reader reads.
 
 type Style = { opacity?: number; transform?: string };
 /** A moment, what a part is then, and how it eases to the next moment. */
@@ -258,12 +259,17 @@ const watchInView: Watch = (items, seen) => {
 export interface Cards {
   /** True while the visitor points at a card, or a card they started is playing. */
   readonly busy: boolean;
-  /** Says whether the cards may take turns on their own. */
+  /** Says whether the cards may take turns on their own. When they may not, a card on its turn stops at once. */
   turns(may: boolean): void;
-  /** Says whether every card stays at its end, as reduced motion asks. */
+  /**
+   * Says whether every card stays at its end, as reduced motion asks. As it does, the cards stop at once. After it,
+   * they take turns again only once the visitor has started one.
+   */
   still(on: boolean): void;
-  /** Stops the card that is playing and leaves it at its end. */
+  /** Stops the card that is playing at once, and leaves it at its end. */
   rest(): void;
+  /** Stops at once and lets go of the pointer, as the visitor takes the film. */
+  giveWay(): void;
 }
 
 /** Starts the cards in `section`. `onChange` is called whenever `busy` changes. */
@@ -276,6 +282,8 @@ export function mountCards(section: HTMLElement, options: { still: boolean; watc
   });
   const inView = cards.map(() => false);
   let still = options.still;
+  /** From when motion is reduced until the visitor next starts a card, none starts on its own. */
+  let quiet = still;
   let mayTurn = false;
   /** The card that is playing, and whether the visitor started it. */
   let current = -1;
@@ -308,6 +316,18 @@ export function mountCards(section: HTMLElement, options: { still: boolean; watc
     current = -1;
     byHand = false;
   }
+  /** Everything of the cards stops where it ends: no dissolve, no fade, and none that had begun goes on. */
+  function cut() {
+    window.clearTimeout(endTimer);
+    current = -1;
+    byHand = false;
+    for (const card of cards) {
+      settle(card);
+      card.fill?.cancel();
+      card.fill = undefined;
+      card.picture.parentNode!.querySelectorAll('.fc-ghost').forEach((copy) => copy.remove());
+    }
+  }
   function play(i: number, hand: boolean) {
     if (still || document.visibilityState === 'hidden') return;
     const was = current;
@@ -330,7 +350,7 @@ export function mountCards(section: HTMLElement, options: { still: boolean; watc
     }, card.end + LINGER);
   }
   function next() {
-    if (!mayTurn || still || waiting || pointed >= 0 || current >= 0) return;
+    if (!mayTurn || still || quiet || waiting || pointed >= 0 || current >= 0) return;
     for (let k = 1; k <= cards.length; k++) {
       const i = (last + k) % cards.length;
       if (inView[i]) return play(i, false);
@@ -346,6 +366,7 @@ export function mountCards(section: HTMLElement, options: { still: boolean; watc
     }, ms);
   }
   function byVisitor(i: number) {
+    if (!still) quiet = false;
     play(i, true);
     changed();
   }
@@ -364,22 +385,8 @@ export function mountCards(section: HTMLElement, options: { still: boolean; watc
       wait(AFTER_POINTER);
       changed();
     });
-    item.addEventListener('focus', () => {
-      if (item.matches(':focus-visible')) byVisitor(i);
-    });
-    item.addEventListener('blur', () => {
-      if (current !== i || !byHand || pointed === i) return;
-      halt();
-      wait(AFTER_POINTER);
-      changed();
-    });
     item.addEventListener('click', () => {
       if (current !== i || !byHand) byVisitor(i);
-    });
-    item.addEventListener('keydown', (event) => {
-      if (event.key !== 'Enter' && event.key !== ' ') return;
-      event.preventDefault();
-      byVisitor(i);
     });
   });
 
@@ -399,18 +406,23 @@ export function mountCards(section: HTMLElement, options: { still: boolean; watc
     turns(may) {
       mayTurn = may;
       if (may) next();
-      else if (current >= 0 && !byHand) halt();
+      else if (current < 0 || !byHand) cut();
     },
     still(on) {
       still = on;
-      if (on) {
-        pointed = -1;
-        halt();
-      } else next();
+      if (!on) return;
+      quiet = true;
+      pointed = -1;
+      cut();
       changed();
     },
     rest() {
-      halt();
+      cut();
+      changed();
+    },
+    giveWay() {
+      pointed = -1;
+      cut();
       changed();
     },
   };

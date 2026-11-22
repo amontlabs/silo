@@ -1,9 +1,11 @@
 // The home page has two pictures: the film and the cards. This starts both and says which may move.
 //
-// Only one thing moves on its own at a time. The film plays while at least 30% of it is in view, and the cards
-// take turns only while the film is not playing. A card the visitor points at, focuses or presses holds
-// the film until they leave it or it ends. A hidden tab holds everything. With reduced motion the cards stay at
-// their end, and the film moves only once the visitor presses Play.
+// One thing moves at a time. The film plays while at least 30% of it is in view, and the cards take turns only
+// while nothing in the film moves: as it starts or jumps, the cards stop at once. A card the visitor points at or
+// presses holds the film until they leave it, it ends or they take the film with Play or a jump. A hidden tab
+// holds everything. With reduced motion the cards stay at their end, the film moves only once the visitor presses
+// Play, and a jump is instant. When reduced motion turns on everything stops, and when it turns off nothing
+// starts by itself.
 
 import { mountCards, type Cards } from './cards';
 import { mountFilm, type Film } from './film/film';
@@ -35,11 +37,21 @@ export function mountPictures({ hold = null }: { hold?: number | null } = {}): {
     if (!film || !cards) return;
     const visible = document.visibilityState !== 'hidden';
     film.allow(filmInView && visible && !cards.busy);
-    cards.turns(visible && !film.running);
+    if (cards.busy) film.land();
+    cards.turns(visible && !film.moving);
   };
-  film = mountFilm(root, { reduced: motion.matches, inView: filmInView, hold, onChange: settle });
+  const take = () => {
+    cards?.giveWay();
+    settle();
+  };
+  film = mountFilm(root, { reduced: motion.matches, inView: filmInView, hold, onTake: take, onChange: settle });
   cards = mountCards(document.getElementById('cards')!, { still: motion.matches, onChange: settle });
-  motion.addEventListener('change', () => cards!.still(motion.matches));
+  motion.addEventListener('change', () => {
+    // The film first: told of the cards alone, it would play on as they let go of it.
+    film.reduce(motion.matches);
+    cards.still(motion.matches);
+    settle();
+  });
 
   new IntersectionObserver(
     (entries) => {
