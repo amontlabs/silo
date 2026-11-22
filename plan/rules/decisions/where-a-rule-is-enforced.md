@@ -29,3 +29,8 @@ program applies the rule.
 `rules-out-of-reach` says "A rule is enforced by the engine, outside the computer" too, and follows
 this answer. `guarantees-outside-the-computer` already says "parts of Silo that run outside the
 computer".
+
+## The owner's words (22 November 2026)
+
+"Yeah agree we have to take the best design here." Said after an agent explained the entry in its
+own words. The owner had not yet been shown the sentence this entry sets, so it has no verdict.

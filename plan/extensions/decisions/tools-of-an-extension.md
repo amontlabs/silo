@@ -41,3 +41,19 @@ with the fourth row:
 | gives an opinion | lines of the record it read | give an opinion | a wrong opinion, shown as the extension's, which acts only through a precaution the user set: the user loses time |
 
 `extension-gives-an-opinion` says how such an opinion is kept, and needs this entry.
+
+## The owner's words (22 November 2026)
+
+"This is pretty weird and seems like a smell that we're not framing it correctly. I mean an
+extension can provide an output that is an opinion. It can also show and what it shows could very
+well be an opinion. Protecting it might do based on an opinion. It can use the tools that are at its
+disposal, to interact with silo, and it can very well use these tools based on opinions, that's also
+why we only provide tools to extensions that can only take non-destructive actions. So I'm not sure
+you're thinking the right way when you want to add that fourth thing which seems unrelated."
+
+An agent's part, the same day. The kinds say what a tool costs the user: what it reads can leak,
+what it shows takes attention, what protects takes time. An opinion is what an extension says
+through a tool, whichever kind the tool is, so it is not a kind. The notes of
+`extension-gives-an-opinion` had weighed a fourth kind and found against it for this reason. The
+agent who answers to the owner withdrew the recommendation to take this entry, and
+`extension-gives-an-opinion` no longer needs it. The owner has not ruled.

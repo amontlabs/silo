@@ -1,8 +1,8 @@
 {
   "asks": "How does an opinion that an extension gives reach the opinions kept beside the record?",
-  "answer": "Through a tool that names what the opinion is about, a request, a path, a tool call or a run, and the list of values it may take, which Silo fixes (`who-fixes-the-values`). An extension granted such a tool gives its opinion about lines of the record it read. That it gave one, and about which lines, is a fact in the record, like every use of a tool. The value is an opinion: Silo keeps the latest one beside the record, with the extension, its version and those lines, and the app shows it on those lines as that extension's opinion. A value outside the list, or about lines the extension may not read, is refused, and the refusal is a fact. An opinion does nothing by itself: only a precaution the user set acts on it.",
+  "answer": "Through a tool that names what the opinion is about, a request, a path, a tool call or a run, and the list of values it may take, which Silo fixes (`who-fixes-the-values`). An extension granted such a tool gives its opinion about lines of the record it read. Such a tool is one that shows, and no kind of tool is added. That it gave one, and about which lines, is a fact in the record, like every use of a tool. The value is an opinion: Silo keeps the latest one beside the record, with the extension, its version and those lines, and the app shows it on those lines as that extension's opinion. A value outside the list, or about lines the extension may not read, is refused, and the refusal is a fact. An opinion does nothing by itself: only a precaution the user set acts on it.",
   "needs": [
     "who-fixes-the-values",
-    "tools-of-an-extension"
+    "extension-tools"
   ]
 }

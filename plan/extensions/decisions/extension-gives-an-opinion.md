@@ -11,7 +11,8 @@ The options:
 - Through a tool, kept beside the record (recommended). You grant the extension a tool that gives
   an opinion about lines of the record it reads, with a value from a list Silo fixes. The app shows
   it on those lines as Leftovers' opinion, and a precaution you set can act on it. A value outside
-  the list is refused. It costs one more kind of tool to read when you import an extension.
+  the list is refused. It is a tool that shows, like an alert or a panel, so it costs one more line to
+  read when you import an extension.
 - No opinions from extensions. An extension can only alert you or draw a panel. It costs every
   judgement an extension makes: nothing shows it where the record is, and no precaution can act on
   it.
@@ -101,8 +102,9 @@ only a precaution may act on it, and no answer ever allows anything.
 | Only the tool that protects gives an opinion; other extensions alert or draw a panel | What an extension finds could not be shown in Silo's own places, checked against the user's answers (`scoring-a-classifier`) or read by a precaution. Silo's own classifiers could not be extensions (`shipped-extensions-use-the-manifest`). |
 | A fourth kind of tool beside reads, shows and protects | The kinds say what a tool costs the user. An answer costs attention, as what is shown does, or time when a precaution acts on it, as what protects does. |
 
-The decision `tools-of-an-extension` proposes that fourth kind all the same: the kinds taken leave
-no tool through which an extension gives an opinion. The two are put to the owner together.
+The decision `tools-of-an-extension` proposed that fourth kind all the same. On 22 November 2026 the
+owner called it a smell: an opinion is what an extension says, shows or protects on, and not one
+more thing it may do. This entry no longer needs that one.
 
 A pattern that an extension adds and Silo applies by itself, as a rule is data, would cover what a
 pattern can say without running any code. It could come beside this. It does not cover a model or
