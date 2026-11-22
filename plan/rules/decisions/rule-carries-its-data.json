@@ -1,4 +1,6 @@
 {
   "asks": "Where does a rule get the hosts and paths it names?",
-  "answer": "A rule carries what it needs as its own data, such as the hosts and paths of package registries. It does not read the opinion \"kind of call\"."
+  "answer": "A rule carries what it needs as its own data, such as the hosts and paths of package registries. It does not read the opinion \"kind of call\".",
+  "verdict": "take",
+  "by": "agents"
 }
