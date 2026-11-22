@@ -1,9 +1,11 @@
 // A fake GitHub for the Workshop's tests and for `workshop-dev.mjs --fake`:
 // the App and installation tokens, the user authorization flow with expiring
 // tokens and PKCE, the issue, comment, reaction and label endpoints the
-// Workshop uses, and the one GraphQL query it sends. State lives in memory.
+// Workshop uses, the git data a verdict reads and writes (refs, trees, blobs,
+// commits; fake-git.mjs), and the two GraphQL queries it sends. State lives in memory.
 import { createHash, generateKeyPairSync, randomBytes, verify } from 'node:crypto';
 import { createServer } from 'node:http';
+import { createFakeGit } from './fake-git.mjs';
 
 export const FAKE_APP = { appId: '1001', slug: 'silo-workshop', clientId: 'Iv1.fakeclient', installationId: 7, repoId: 4242 };
 
@@ -36,6 +38,16 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     // removed less than this ago is still returned, without the label in its own `labels`. 0: no lag.
     listLag: 0,
     requests: [],
+    // The repository's git data: main's ref, its commits, trees and blobs.
+    git: createFakeGit(),
+    // The App's permission Contents, which a person's token of the App carries: 'write', or 'read' (no write).
+    contents: 'write',
+    // What GitHub answers a write of contents the token may not make: 403, or 404 as it does for some.
+    contentsDenied: 403,
+    // GraphQL cuts a blob's text past this many bytes (isTruncated), as GitHub does for large files.
+    truncateOver: Infinity,
+    // Each ref update asked for: { ref, sha, force }.
+    refUpdates: [],
   };
   let baseUrl = '';
   const pem = privateKey.export({ type: 'pkcs1', format: 'pem' });
@@ -353,9 +365,16 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
       const issue = addIssue({ title: body.title, body: body.body || '', labels, author: who.kind === 'user' ? who.user.login : null });
       return json(res, 201, issueJson(issue));
     }
-    // The one query the Workshop sends: the person's 👍 on the latest 100 comments of an issue.
+    // The Workshop's two queries: the plan at a commit for a verdict, and the person's 👍 on the latest 100 comments of an issue.
     if (path === '/graphql' && req.method === 'POST') {
       const body = await readBody(req);
+      if (/^query PlanAt\(/.test(body.query || '')) {
+        const { owner, name, commit, plan, seen } = body.variables || {};
+        if (`${owner}/${name}` !== repo) return json(res, 200, { data: { repository: null }, errors: [{ type: 'NOT_FOUND', message: 'Could not resolve to a Repository.' }] });
+        const git = state.git;
+        const options = { truncateOver: state.truncateOver };
+        return json(res, 200, { data: { repository: { commit: git.graph(git.resolve(commit), 0, options), plan: git.graph(git.resolve(plan), 3, options), seen: git.graph(git.resolve(seen), 0, options) } } });
+      }
       if (who.kind !== 'user') return json(res, 403, { message: 'Forbidden' });
       const { owner, name, number } = body.variables || {};
       if (!/comments\(last: 100\)/.test(body.query || '') || `${owner}/${name}` !== repo) return json(res, 200, { errors: [{ message: 'unknown query' }] });
@@ -402,6 +421,9 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
       }
       return json(res, 404, { message: 'Not Found' });
     }
+
+    const gitMatch = path.match(new RegExp(`^/repos/${repo}/git/(ref|refs|trees|commits|blobs)(?:/(.+))?$`));
+    if (gitMatch) return gitAnswer(req, res, who, gitMatch[1], gitMatch[2]);
 
     const issueMatch = path.match(new RegExp(`^/repos/${repo}/issues/(\\d+)(/.*)?$`));
     if (!issueMatch) return json(res, 404, { message: 'Not Found' });
@@ -476,6 +498,50 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     return json(res, 404, { message: 'Not Found' });
   }
 
+  // The git data endpoints. Reading needs no more than the issues do; writing needs a person's token, write access
+  // to the repository and the App's Contents: write. An installation token never writes contents: the Workshop
+  // requests it with issues and metadata only.
+  async function gitAnswer(req, res, who, kind, rest) {
+    const git = state.git;
+    const writes = req.method !== 'GET';
+    if (writes && !(who.kind === 'user' && canWrite(who) && state.contents === 'write')) {
+      return json(res, state.contentsDenied, { message: state.contentsDenied === 404 ? 'Not Found' : 'Resource not accessible by integration' });
+    }
+    if (kind === 'ref' && req.method === 'GET') {
+      const sha = git.refs.get(rest);
+      return sha ? json(res, 200, { ref: `refs/${rest}`, object: { sha, type: 'commit' } }) : json(res, 404, { message: 'Not Found' });
+    }
+    if (kind === 'blobs' && req.method === 'GET') {
+      const object = git.objects.get(rest);
+      if (object?.type !== 'blob') return json(res, 404, { message: 'Not Found' });
+      return json(res, 200, { sha: rest, size: object.content.length, encoding: 'base64', content: object.content.toString('base64') });
+    }
+    if (kind === 'trees' && !rest && req.method === 'POST') {
+      const sha = git.createTree(await readBody(req));
+      return sha ? json(res, 201, { sha, tree: [] }) : json(res, 422, { message: 'Invalid tree info' });
+    }
+    if (kind === 'commits' && !rest && req.method === 'POST') {
+      const body = await readBody(req);
+      const parents = Array.isArray(body.parents) ? body.parents : [];
+      if (git.objects.get(body.tree)?.type !== 'tree' || parents.some((sha) => git.objects.get(sha)?.type !== 'commit') || typeof body.message !== 'string') {
+        return json(res, 422, { message: 'Validation Failed' });
+      }
+      const sha = git.commit({ tree: body.tree, parents, message: body.message, author: who.user.login, madeAs: who.kind });
+      return json(res, 201, { sha, tree: { sha: body.tree }, parents: parents.map((parent) => ({ sha: parent })), message: body.message, author: { name: who.user.login } });
+    }
+    if (kind === 'refs' && req.method === 'PATCH' && rest) {
+      const body = await readBody(req);
+      state.refUpdates.push({ ref: rest, sha: body.sha, force: body.force });
+      const current = git.refs.get(rest);
+      if (!current) return json(res, 422, { message: 'Reference does not exist' });
+      if (git.objects.get(body.sha)?.type !== 'commit') return json(res, 422, { message: 'Object does not exist' });
+      if (body.force !== true && !git.isAncestor(current, body.sha)) return json(res, 422, { message: 'Update is not a fast forward' });
+      git.refs.set(rest, body.sha);
+      return json(res, 200, { ref: `refs/${rest}`, object: { sha: body.sha, type: 'commit' } });
+    }
+    return json(res, 404, { message: 'Not Found' });
+  }
+
   const server = createServer((req, res) => {
     handle(req, res).catch((error) => { if (process.env.FAKE_GITHUB_DEBUG) console.error(error); json(res, 500, { message: 'fake error' }); });
   });
@@ -494,6 +560,7 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     react,
     reactToComment,
     repo,
+    get git() { return state.git; },
     get url() { return baseUrl; },
     async listen(port = 0, host = '127.0.0.1') {
       await new Promise((resolve) => server.listen(port, host, resolve));
@@ -514,6 +581,8 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
         WORKSHOP_SESSION_SECRET: randomBytes(32).toString('base64'),
         WORKSHOP_REPO: repo,
         WORKSHOP_SITE_ORIGIN: origin,
+        // owner-fake, once seedDemo added it, is the owner.
+        ...(state.users.has('owner-fake') ? { WORKSHOP_OWNER_ID: String(state.users.get('owner-fake').id) } : {}),
       };
     },
   };

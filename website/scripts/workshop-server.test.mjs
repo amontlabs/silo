@@ -346,7 +346,7 @@ test('an issue with only the retired decision label is not a Workshop issue', as
   } finally { await t.close(); }
 });
 
-test('there is no decide or verdict endpoint: the owner\'s verdict lives in the plan\'s files only', async () => {
+test('there is no decide endpoint, and a verdict is never written on an issue: it lives in the plan\'s files only', async () => {
   const t = await setup();
   try {
     const c = t.client();
@@ -357,15 +357,16 @@ test('there is no decide or verdict endpoint: the owner\'s verdict lives in the 
     const post = await c.call('POST', 'decide', { body: { n: retiredNumber, text: 'Debian.' } });
     assert.deepEqual([post.status, post.json.error], [404, 'not_found']);
     assert.equal((await c.call('GET', 'decide')).status, 404);
+    // A verdict names an entry, never an issue.
     for (const verdict of ['take', 'later', 'drop', null]) {
       const response = await c.call('POST', 'verdict', { body: { n: entryNumber, verdict } });
-      assert.deepEqual([response.status, response.json.error], [404, 'not_found']);
+      assert.deepEqual([response.status, response.json.error], [400, 'bad_input']);
     }
-    assert.equal((await c.call('GET', 'verdict')).status, 404);
+    assert.equal((await c.call('GET', 'verdict')).status, 405);
     assert.equal(JSON.stringify([...t.fake.state.issues.values()]), before);
     assert.equal(t.fake.state.requests.slice(requests).filter((r) => r.method !== 'GET').length, 0, 'nothing was written on GitHub');
     assert.equal(ENDPOINTS.includes('decide'), false);
-    assert.equal(ENDPOINTS.includes('verdict'), false);
+    assert.equal(ENDPOINTS.includes('verdict'), true);
   } finally { await t.close(); }
 });
 
@@ -392,7 +393,9 @@ test('every refusal in the contract', async () => {
       [visitor, 'vote', { n: 7, on: true }, {}, 404, 'not_found'],
       [visitor, 'comment', { n: 8, text: 'x' }, {}, 404, 'not_found'],
       [owner, 'decide', { n: 4, text: 'x' }, {}, 404, 'not_found'],
-      [owner, 'verdict', { n: 1, verdict: 'take' }, {}, 404, 'not_found'],
+      [owner, 'verdict', { n: 1, verdict: 'take' }, {}, 400, 'bad_input'],
+      [visitor, 'verdict', { entry: 'which-distro', verdict: 'take', built: 'a'.repeat(40) }, {}, 403, 'not_owner'],
+      [anonymous, 'verdict', { entry: 'which-distro', verdict: 'take', built: 'a'.repeat(40) }, {}, 401, 'signed_out'],
       [visitor, 'comment', { n: 1, text: 'x'.repeat(5001) }, {}, 400, 'too_long'],
       [visitor, 'comment', { n: 1, text: '   ' }, {}, 400, 'empty'],
       [visitor, 'comment', { n: '1', text: 'x' }, {}, 400, 'bad_input'],
@@ -601,7 +604,7 @@ test('no response and no log line carries a token, a code, the client secret or 
 
 // Model: random operations by random people on random issues, a refused verdict
 // among them. After every step, only Workshop issues have changed, and no entry's
-// labels or state have: nothing the server does sets a verdict.
+// labels or state have: a verdict lives in the plan's files, never on an issue.
 test('model: writes only reach Workshop issues, never change an entry, and an entry has one thread', async () => {
   const t = await setup();
   try {
@@ -649,7 +652,7 @@ test('model: writes only reach Workshop issues, never change an entry, and an en
       } else if (op === 0) {
         const verdict = verdicts[rand(verdicts.length)];
         response = await who.call('POST', 'verdict', { body: { n, verdict } });
-        assert.deepEqual([response.status, response.json.error], [404, 'not_found'], `${isOwner ? 'owner' : 'visitor'} #${n}`);
+        assert.deepEqual([response.status, response.json.error], isOwner ? [400, 'bad_input'] : [403, 'not_owner'], `${isOwner ? 'owner' : 'visitor'} #${n}`);
       } else if (op === 1) {
         response = await who.call('POST', 'comment', { body: { n, text: `c ${step}` } });
         assert.equal(response.status === 200, workshop.has(n), response.body);
@@ -816,11 +819,14 @@ test('Build Output layout: static site, one Node.js function at every endpoint, 
     assert.deepEqual((await readdir(main)).sort(), ['.vc-config.json', 'tools', 'website']);
     // No package ships: the server runs on Node's standard library.
     assert.deepEqual((await readdir(join(main, 'website'))).sort(), ['api', 'server']);
-    // The Workshop's model ships beside the server, at its place in the repository, as ESM; nothing of the plan tool ships.
+    // The Workshop's model ships beside the server, at its place in the repository, as ESM; of the plan tool, the
+    // files the owner's verdict loads (write/ and what it imports), as ESM too.
     const model = (await readdir(new URL('../../tools/workshop/model/', import.meta.url))).filter((name) => name.endsWith('.js')).sort();
     assert.ok(model.includes('index.js') && model.includes('markers.js'));
-    assert.deepEqual((await listFiles(join(main, 'tools'))).sort(), ['workshop/package.json', ...model.map((name) => `workshop/model/${name}`)].sort());
+    const plan = ['plan/package.json', 'plan/write/index.js', 'plan/check/index.js', 'plan/read/index.js', 'plan/model/names.js', 'plan/model/canonical.js', 'plan/model/status.js'];
+    assert.deepEqual((await listFiles(join(main, 'tools'))).sort(), ['workshop/package.json', ...model.map((name) => `workshop/model/${name}`), ...plan].sort());
     assert.equal(JSON.parse(await readFile(join(main, 'tools', 'workshop', 'package.json'), 'utf8')).type, 'module');
+    assert.equal(JSON.parse(await readFile(join(main, 'tools', 'plan', 'package.json'), 'utf8')).type, 'module');
 
     // The packaged function runs on its own, from a clean folder with nothing above it to resolve from.
     const clean = await mkdtemp(join(tmpdir(), 'workshop-func-'));
@@ -840,7 +846,7 @@ test('Build Output layout: static site, one Node.js function at every endpoint, 
       }
     } finally { await rm(clean, { recursive: true, force: true }); }
     const serverFiles = (await readdir(join(main, 'website', 'server'))).sort();
-    assert.deepEqual(serverFiles, ['app-auth.mjs', 'config.mjs', 'entries.mjs', 'github.mjs', 'issues.mjs', 'node.mjs', 'plan-entries.json', 'session.mjs', 'snapshot.mjs', 'workshop.mjs']);
+    assert.deepEqual(serverFiles, ['app-auth.mjs', 'config.mjs', 'entries.mjs', 'github.mjs', 'issues.mjs', 'node.mjs', 'plan-entries.json', 'session.mjs', 'snapshot.mjs', 'verdicts.mjs', 'workshop.mjs']);
     // The plan's entries, made from the plan at build time, beside the server.
     const shippedEntries = JSON.parse(await readFile(join(main, 'website', 'server', 'plan-entries.json'), 'utf8'));
     assert.deepEqual(shippedEntries, planEntries());
@@ -1146,7 +1152,7 @@ test('configuration: a non-canonical secret or a bad key is not_configured at th
   }
 });
 
-test('packaging ships server/ and api/ at any depth and the model of the Workshop, and refuses any other file the function loads', async () => {
+test('packaging ships server/ and api/ at any depth, the model of the Workshop and the plan tool\'s files a verdict loads, and refuses any other file the function loads', async () => {
   const root = await mkdtemp(join(tmpdir(), 'workshop-repo-'));
   try {
     const site = join(root, 'website');
@@ -1154,15 +1160,18 @@ test('packaging ships server/ and api/ at any depth and the model of the Worksho
     for (const part of ['server', 'api']) await cp(join(here, part), join(site, part), { recursive: true });
     await cp(new URL('../../tools/workshop/model', import.meta.url).pathname, join(root, 'tools', 'workshop', 'model'), { recursive: true });
     await cp(new URL('../../tools/workshop/package.json', import.meta.url).pathname, join(root, 'tools', 'workshop', 'package.json'));
+    for (const part of ['write', 'check', 'model', 'read', 'package.json']) await cp(new URL(`../../tools/plan/${part}`, import.meta.url).pathname, join(root, 'tools', 'plan', part), { recursive: true });
     const dist = await fixtureSite();
     try {
       const fine = await prepareVercel({ siteDir: site, distDir: join(dist, 'dist'), outputDir: join(root, 'a', '.vercel', 'output') });
       assert.ok(fine.files.includes(join('tools', 'workshop', 'model', 'markers.js')));
-      await mkdir(join(root, 'tools', 'plan', 'model'), { recursive: true });
-      await writeFile(join(root, 'tools', 'plan', 'model', 'x.js'), 'export const x = 1;\n');
+      assert.ok(fine.files.includes(join('tools', 'plan', 'write', 'index.js')));
+      // Another folder of the plan tool is refused.
+      await mkdir(join(root, 'tools', 'plan', 'history'), { recursive: true });
+      await writeFile(join(root, 'tools', 'plan', 'history', 'x.js'), 'export const x = 1;\n');
       const config = join(site, 'server', 'config.mjs');
       const original = await readFile(config, 'utf8');
-      await writeFile(config, `import '../../tools/plan/model/x.js';\n${original}`);
+      await writeFile(config, `import '../../tools/plan/history/x.js';\n${original}`);
       await assert.rejects(prepareVercel({ siteDir: site, distDir: join(dist, 'dist'), outputDir: join(root, 'b', '.vercel', 'output') }), /outside website\//);
       await assert.rejects(lstat(join(root, 'b', '.vercel', 'output')), 'nothing is written');
       // A file deeper in server/ or api/ ships; any other file in website/ is refused by name.

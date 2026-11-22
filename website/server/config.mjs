@@ -21,6 +21,8 @@ export function readConfig(env = process.env, overrides = {}) {
   let sessionSecret = null;
   let privateKey = null;
   if (env.WORKSHOP_APP_ID && !/^\d{1,12}$/.test(env.WORKSHOP_APP_ID)) fail('WORKSHOP_APP_ID');
+  // The owner: the numeric id of a GitHub account, which never changes (a login can). Without it nobody is the owner.
+  const ownerId = env.WORKSHOP_OWNER_ID ? (/^[1-9]\d{0,15}$/.test(env.WORKSHOP_OWNER_ID) ? Number(env.WORKSHOP_OWNER_ID) : fail('WORKSHOP_OWNER_ID')) : null;
   if (env.WORKSHOP_SESSION_SECRET) {
     // Strict base64: exactly 32 bytes whose canonical encoding is the value itself.
     const raw = env.WORKSHOP_SESSION_SECRET;
@@ -42,6 +44,7 @@ export function readConfig(env = process.env, overrides = {}) {
     clientSecret: env.WORKSHOP_CLIENT_SECRET || null,
     privateKey,
     sessionSecret,
+    ownerId,
     repo: REPO_PATTERN.test(repo) ? repo : DEFAULT_REPO,
     origin: origin || DEFAULT_ORIGIN,
     apiBase: 'https://api.github.com',

@@ -6,7 +6,8 @@
 // (snapshot.mjs), which alone reads GitHub for them, with the installation
 // token. Everything done for a signed-in person uses that person's token,
 // except labelling a suggestion and opening an entry's thread (with the reads
-// of entry issues before and after it), which the App does.
+// of entry issues before and after it), which the App does. The owner's verdict
+// is written on main with the owner's token alone (verdicts.mjs).
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createAppAuth } from './app-auth.mjs';
@@ -15,6 +16,7 @@ import { clean, commentIssue, countOf, kindOf, LABELS, labelNames } from './issu
 import { entryMarker, LABELS as LABEL_DEFINITIONS, readEntryMarker } from '../../tools/workshop/model/index.js';
 import { clearCookie, cookieNames, HINT_COOKIE, parseCookies, seal, serializeCookie, SESSION_MAX_AGE, STATE_MAX_AGE, unseal } from './session.mjs';
 import { createSnapshot, SNAPSHOT } from './snapshot.mjs';
+import { DENIED, VerdictRefusal, writeVerdict } from './verdicts.mjs';
 
 export { LABELS };
 
@@ -37,6 +39,7 @@ export const BUDGET = {
   writesPerMinute: 20,
   suggestionsPerMinute: 3,
   suggestionsPerHour: 10,
+  verdictsPerMinute: 6,
   sessionReadsPerMinute: 60,
 };
 const CEILINGS = {
@@ -66,8 +69,10 @@ const PRIVATE = 'private, no-store';
 
 const ENDPOINTS = new Map(Object.entries({
   state: ['GET'], me: ['GET'], issue: ['GET'], login: ['GET'], callback: ['GET'], vote: ['GET', 'POST'],
-  logout: ['POST'], comment: ['POST'], 'comment-vote': ['POST'], suggest: ['POST'],
+  logout: ['POST'], comment: ['POST'], 'comment-vote': ['POST'], suggest: ['POST'], verdict: ['POST'],
 }));
+const VERDICT_KEYS = new Set(['entry', 'verdict', 'built']);
+const COMMIT = /^[0-9a-f]{40}$/;
 
 // The person's 👍 on the latest 100 comments of an issue, in one GraphQL call with their token. A
 // comment id passed 2^31 long ago: `fullDatabaseId` is the REST id as a string.
@@ -151,6 +156,7 @@ export function createWorkshop({
   const writes = counter(60_000);
   const suggestionsMinute = counter(60_000);
   const suggestionsHour = counter(3600_000);
+  const verdicts = counter(60_000);
   const sessionReads = counter(60_000);
   const openings = new Map();
   const usedSignins = memory(STATE_MAX_AGE * 1000);
@@ -793,6 +799,9 @@ export function createWorkshop({
     if (wait) tooMany(wait, 'Too many changes in a minute. Try again shortly.');
   }
 
+  // The owner is the account WORKSHOP_OWNER_ID names; without it, nobody.
+  const isOwner = (session) => config.ownerId !== null && config.ownerId !== undefined && session.id === config.ownerId;
+
   async function writer(ctx) {
     const session = await requireUser(ctx);
     countWrite(session);
@@ -854,7 +863,7 @@ export function createWorkshop({
         clearSession(ctx);
         refuse(401, 'signed_out', 'Sign in with GitHub first.');
       }
-      return json(200, { login: session.login, avatar: session.avatar });
+      return json(200, { login: session.login, avatar: session.avatar, ...(isOwner(session) ? { owner: true } : {}) });
     },
 
     async 'GET issue'(ctx) {
@@ -1042,6 +1051,38 @@ export function createWorkshop({
       snapshots.patch.issue(data, 'suggestion');
       if (unlabelled.size) retryLabels().catch(() => {});
       return json(200, { number });
+    },
+
+    // The owner's verdict on an entry: what `plan take <id>` or `plan drop <id>` and a push to main do, as one commit
+    // on main made with the owner's own token. The page sends the entry's id, the verdict and `built`, the commit it
+    // was built from: the entry's file on main must still be the one there. Nothing else is taken from the page.
+    async 'POST verdict'(ctx) {
+      const session = await requireUser(ctx);
+      if (!isOwner(session)) refuse(403, 'not_owner', 'Only the owner can take or drop an entry.');
+      countWrite(session);
+      const input = readJson(ctx);
+      if (Object.keys(input).some((key) => !VERDICT_KEYS.has(key))) refuse(400, 'bad_input', 'The request was not understood.');
+      if (typeof input.entry !== 'string') refuse(400, 'bad_input', 'That entry is not valid.');
+      const entry = entries.get(input.entry);
+      if (!entry) refuse(404, 'not_found', 'This is not an entry of the plan.');
+      if (input.verdict !== 'take' && input.verdict !== 'drop') refuse(400, 'bad_input', 'The verdict is take or drop.');
+      if (typeof input.built !== 'string' || !COMMIT.test(input.built)) refuse(400, 'bad_input', 'The page does not say which commit it was built from.');
+      // Counted once the request is one GitHub will see.
+      const wait = verdicts.take(session.id, BUDGET.verdictsPerMinute, now());
+      if (wait) tooMany(wait, 'Too many verdicts in a minute. Try again shortly.');
+      const call = (method, path, options = {}) => github.request(method, path, { ...options, token: session.t, as: 'user' });
+      let result;
+      try {
+        result = await writeVerdict({ call, repo, entry, verdict: input.verdict, built: input.built });
+      } catch (error) {
+        if (error instanceof VerdictRefusal) refuse(error.status, error.code, error.message);
+        if (error instanceof GitHubError && (error.status === 403 || error.status === 404) && !error.rateLimited) {
+          ctx.githubStatus = error.status;
+          refuse(403, 'forbidden', DENIED);
+        }
+        throw error;
+      }
+      return json(200, { ok: true, entry: entry.id, verdict: input.verdict, commit: result.commit, ...(result.status === 'already' ? { already: true } : {}), message: result.message });
     },
 
   }));
