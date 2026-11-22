@@ -1822,7 +1822,11 @@ services:
 - that a Vercel build gets the whole history (its clone is shallow, with no
   remote), until a deploy has shown it;
 - the owner's verdict on the real GitHub: that `object(expression:
-  "<commit>:plan")` gives each file's text in one GraphQL call, that a user
+  "<commit>:plan")` gives each file's text in one GraphQL call, that
+  `object(expression: "<commit>:<folder>")` with `__typename` gives a folder's
+  names, that the compare of `<built>...<main>` answers `ahead` or
+  `identical` for a build of `main`'s history and 404 for a commit GitHub does
+  not hold, that a user
   token of the App with Contents: Read and write runs `createCommitOnBranch`,
   that a stale `expectedHeadOid` changes nothing and answers an error, that a
   headline with no body gives the message `plan` writes, and that GitHub
