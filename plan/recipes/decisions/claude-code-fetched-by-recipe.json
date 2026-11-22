@@ -1,4 +1,4 @@
 {
   "asks": "Where does the copy of Claude Code in a computer come from?",
-  "answer": "Silo ships no copy of Claude Code, since its licence reserves all rights. A recipe that includes Claude Code names its version, and when a computer is made, that version is downloaded from Anthropic and checked against the recipe. If the download fails, the computer is not made, and Silo says which download failed."
+  "answer": "Silo ships no copy of Claude Code, since its licence reserves all rights. A recipe that includes Claude Code names its version and that version's checksum. When Silo builds the recipe on the Mac, it downloads that version from Anthropic and checks it against the checksum; computers made from the recipe start from that build (`nix-store-shared`). If the download fails or the checksum differs, the recipe is not built and no computer is made from it, and Silo says which download failed and why."
 }

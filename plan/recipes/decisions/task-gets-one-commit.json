@@ -1,6 +1,6 @@
 {
   "asks": "What does a task's computer get from main?",
-  "answer": "When a task on a repository in main starts, Silo reads that repository and makes one commit of its working tree: the last commit plus every change not yet committed, with new files and without the files the repository ignores. That commit is on no branch and changes nothing in main. Each computer of the task gets that same commit, and its recipe brings everything else. If the repository in main cannot be read, the task does not start, and Silo says why.",
+  "answer": "When a task on a repository in main starts, Silo takes a checkpoint of main and reads the repository from that checkpoint, from outside main, so what the task gets is all of one moment and is not something a program in main told Silo. From it, Silo makes one commit of the working tree: the last commit plus every change not yet committed, with new files and without the files the repository ignores. Silo makes that commit outside main: it is on no branch, and nothing is written to main's disk. Each computer of the task gets that same commit, and its recipe brings everything else. If the repository cannot be read from the checkpoint, the task does not start, and Silo says why. How the host reads a checkpoint's files on each system is to find out, as in `file-changes-from-outside`.",
   "needs": [
     "tasks-test-your-changes"
   ]

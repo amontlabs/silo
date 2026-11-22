@@ -1,6 +1,6 @@
 {
   "asks": "Where is the history of a computer kept?",
-  "answer": "In the record, and nowhere else. The core's saved state holds the current rows only, and no history: its size is fixed by its tables (`engine-limits`).",
+  "answer": "In the record, and the past of a computer's disk in its checkpoints. The engine keeps no history: the core's saved state holds the current rows only, so its size is fixed by its tables (`engine-limits`). What the engine holds of the past is bounded: the inputs since the last save (`engine-saved-state`), the events the recorder has not acknowledged (`events-until-the-recorder`), and the rings of recent events (`numbered-events`) and of recent inputs and effects (`assertions-stay-on`). A test checks that the saved state's size stays the same however many inputs are applied.",
   "needs": [
     "two-paths"
   ]
