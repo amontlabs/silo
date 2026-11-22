@@ -6,5 +6,7 @@
   ],
   "replaces": [
     "checks-on-the-real-thing"
-  ]
+  ],
+  "verdict": "take",
+  "by": "agents"
 }
