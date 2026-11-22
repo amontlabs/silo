@@ -1,7 +1,8 @@
 {
   "asks": "Which costs of Silo's own processes have a target?",
-  "answer": "Each process Silo adds has a target for what it costs, written before its code as a 99th percentile and a worst case: a helper's memory and processor, idle and under load; the wait the boundary adds to one connection and to one model call; the recorder's processor, memory and disk writes during a large build; the probe's processor and memory inside a computer during that build; the time the engine takes to start; and the memory and processor of the engine and of the app at idle. A benchmark measures each one as `how-speed-is-measured` says, and a change that makes a measurement miss its target is not merged. When a target cannot be met without the user seeing less or waiting longer, that choice goes to the owner, and the target is not raised quietly.",
+  "answer": "Each process Silo adds has a target for what it costs, written before its code in the entry that adds the process, as a 99th percentile and a worst case on a named reference machine: a helper's memory and processor, idle and under load; the wait the boundary adds to one connection and to one model call; the recorder's processor, memory and disk writes during a large build; the probe's processor and memory inside a computer during that build; the time the engine takes to start; and the memory and processor of the engine and of the app at idle. A benchmark measures each one as `how-speed-is-measured` says, and a change that makes a measurement miss its target is not merged. When a target cannot be met without the user seeing less or waiting longer, that choice goes to the owner, and the target is not raised quietly.",
   "needs": [
-    "speed-budgets"
+    "speed-budgets",
+    "silo-is-light"
   ]
 }
