@@ -380,6 +380,17 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     if (path === '/graphql' && req.method === 'POST') {
       const body = await readBody(req);
       if (record.graphql === 'createCommitOnBranch') return json(res, 200, commitOnBranch(who, body.variables?.input));
+      if (/^query Exists\(/.test(body.query || '')) {
+        const { owner, name } = body.variables || {};
+        if (`${owner}/${name}` !== repo) return json(res, 200, { data: { repository: null }, errors: [{ type: 'NOT_FOUND', message: 'Could not resolve to a Repository.' }] });
+        const git = state.git;
+        const repository = {};
+        for (const [, alias, expression] of body.query.matchAll(/(\w+): object\(expression: ("(?:[^"\\]|\\.)*")\)/g)) {
+          const found = git.resolve(JSON.parse(expression));
+          repository[alias] = !found ? null : found.object.type === 'tree' ? { __typename: 'Tree', ...git.graph(found, 0) } : { __typename: found.object.type === 'blob' ? 'Blob' : 'Commit' };
+        }
+        return json(res, 200, { data: { repository } });
+      }
       if (/^query PlanAt\(/.test(body.query || '')) {
         const { owner, name, commit, plan, seen } = body.variables || {};
         if (`${owner}/${name}` !== repo) return json(res, 200, { data: { repository: null }, errors: [{ type: 'NOT_FOUND', message: 'Could not resolve to a Repository.' }] });

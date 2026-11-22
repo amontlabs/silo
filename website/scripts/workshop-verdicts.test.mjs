@@ -486,3 +486,43 @@ test('an answer GitHub gives in part fails the whole read, nothing written, and 
     } finally { await t.close(); }
   }
 });
+
+test('the files an at names are looked for on main, as plan take looks for them in the checkout: one deleted from main refuses the verdict', async () => {
+  const properties = JSON.parse(sampleFiles().get('record/properties.json'));
+  properties[0].at = ['engine/test/rule.zig'];
+  const t = await started({ change: { 'record/properties.json': JSON.stringify(properties, null, 2) + '\n' } });
+  try {
+    t.fake.git.push(new Map([['engine/test/rule.zig', 'test "rule" {}\n']]));
+    const built = t.main();
+    // With the file on main, the plan passes the check, and the verdict is written.
+    assert.equal((await t.verdict('no-detour', 'drop', built)).status, 200);
+    // The file deleted from main: the plan fails the check plan take runs, and nothing is written.
+    t.fake.git.push(new Map([['engine/test/rule.zig', null]]));
+    const before = t.main();
+    const refused = await t.verdict('linux-vm-engine', 'take', built);
+    assert.deepEqual([refused.status, refused.json.error], [409, 'refused'], refused.body);
+    const files = planAt(t.fake.git, before);
+    assert.equal(refused.json.message, take(files, 'linux-vm-engine', { exists: (path) => path !== 'engine/test/rule.zig' }).message);
+    assert.match(refused.json.message, /fails the check/);
+    assert.equal(t.main(), before);
+    // A folder of that name is not a file either.
+    t.fake.git.push(new Map([['engine/test/rule.zig/inside.txt', 'A folder.\n']]));
+    assert.deepEqual([(await t.verdict('linux-vm-engine', 'take', built)).json.error], ['refused']);
+    assert.equal(t.gitWrites().length, 1);
+  } finally { await t.close(); }
+});
+
+test('plan/ is read as the plan tool reads it: a link under a folder whose name starts with a dot refuses the verdict', async () => {
+  const t = await started();
+  try {
+    const git = t.fake.git;
+    const all = git.flatten(git.objects.get(t.seed).tree);
+    all.set('plan/.cache/notes', { sha: git.blob('../../secrets'), mode: '120000' });
+    const linked = git.commit({ tree: git.treeOf(all), parents: [t.seed], message: 'A link in a dot folder' });
+    git.refs.set('heads/main', linked);
+    const refused = await t.verdict('linux-vm-engine', 'take');
+    assert.deepEqual([refused.status, refused.json.error, refused.json.message], [409, 'refused', 'plan/.cache/notes is a symbolic link or a submodule on main']);
+    assert.equal(t.main(), linked);
+    assert.equal(t.gitWrites().length, 0);
+  } finally { await t.close(); }
+});

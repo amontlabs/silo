@@ -17,16 +17,22 @@ const SYMLINK = 0o120000;
 const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
 const FILE = 'oid text isTruncated';
+const NAMES = 'entries { name type mode }';
+/** The modes git gives a regular file: what the plan tool's `exists` counts as a file of the repository. */
+const REGULAR = new Set([0o100644, 0o100755]);
 /** One folder of the tree, `depth` folders more below it, with each file's text; the last level gives names only. */
 const level = (depth) => (depth === 0
   ? 'entries { name type mode }'
   : `entries { name type mode object { ... on Blob { ${FILE} } ... on Tree { ${level(depth - 1)} } } }`);
 
 /**
- * One GraphQL call: main's commit and root tree, every file of plan/ at it with its text, and the entry's file at
- * the commit the page was built from.
+ * One GraphQL call: the names in main's root folder, every file of plan/ at main with its text, and the entry's file
+ * at the commit the page was built from.
  */
-export const PLAN_QUERY = `query PlanAt($owner: String!, $name: String!, $commit: String!, $plan: String!, $seen: String!) { repository(owner: $owner, name: $name) { commit: object(expression: $commit) { ... on Commit { tree { oid } } } plan: object(expression: $plan) { ... on Tree { ${level(LEVELS)} } } seen: object(expression: $seen) { ... on Blob { ${FILE} } } } }`;
+export const PLAN_QUERY = `query PlanAt($owner: String!, $name: String!, $commit: String!, $plan: String!, $seen: String!) { repository(owner: $owner, name: $name) { commit: object(expression: $commit) { ... on Commit { tree { ${NAMES} } } } plan: object(expression: $plan) { ... on Tree { ${level(LEVELS)} } } seen: object(expression: $seen) { ... on Blob { ${FILE} } } } }`;
+
+/** One GraphQL call: the names in each folder of `dirs` at `commit`, as `d<index>`; a folder that is not one has no entries. */
+export const existsQuery = (commit, dirs) => `query Exists($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${dirs.map((dir, index) => `d${index}: object(expression: ${JSON.stringify(`${commit}:${dir}`)}) { __typename ... on Tree { ${NAMES} } }`).join(' ')} } }`;
 
 /** A verdict the route answers with a refusal: `status`, `code` and the message the page shows. */
 export class VerdictRefusal extends Error {
@@ -75,12 +81,12 @@ function readTree(tree, prefix, depth, out) {
     if (typeof entry?.name !== 'string') throw partial();
     const path = prefix ? `${prefix}/${entry.name}` : entry.name;
     if (entry.mode === SYMLINK || entry.type === 'commit') throw new VerdictRefusal(409, 'refused', `plan/${path} is a symbolic link or a submodule on main`);
-    if (isHidden(path)) continue;
+    // A folder is looked into whatever its name, for links, as tools/plan/read does; a file under a dot name is not read.
     if (entry.type === 'tree') {
       // The files of a folder at depth 1 are the last ones the query gives with their text.
       if (depth <= 1) throw new VerdictRefusal(409, 'refused', `plan/${path} is deeper than the Workshop reads`);
       readTree(entry.object, path, depth - 1, out);
-    } else if (entry.type === 'blob') {
+    } else if (entry.type === 'blob' && !isHidden(path)) {
       const blob = entry.object;
       if (typeof blob?.oid !== 'string' || typeof entry.mode !== 'number') throw partial();
       out.modes.set(path, entry.mode.toString(8).padStart(6, '0'));
@@ -88,6 +94,42 @@ function readTree(tree, prefix, depth, out) {
       else out.fetch.push({ path, oid: blob.oid });
     }
   }
+}
+
+/** The names of a folder from a GraphQL answer, by name: `{ type, mode }`. An answer without them is in part. */
+function namesOf(tree) {
+  if (!Array.isArray(tree?.entries) || tree.entries.some((entry) => typeof entry?.name !== 'string')) throw partial();
+  return new Map(tree.entries.map((entry) => [entry.name, entry]));
+}
+
+/**
+ * The plan tool's `exists` (tools/plan/cli/repo.js `existsIn`) answered from main: whether each path an `at` names is a
+ * regular file of the repository at `head`. Asked of the paths `paths` only, in one call; `root` is main's root folder.
+ * A path through a link, or a link itself, is not followed: it counts as no file.
+ */
+async function filesOnMain({ call, owner, name, head, root, paths }) {
+  const dirs = [...new Set([...paths].map((path) => path.slice(0, Math.max(0, path.lastIndexOf('/')))))].filter((dir) => dir !== '');
+  /** @type {Map<string, Map<string, any> | null>} */
+  const folders = new Map([['', namesOf(root)]]);
+  if (dirs.length) {
+    const { data: answer } = await call('POST', '/graphql', { body: { query: existsQuery(head, dirs), variables: { owner, name } } });
+    const errors = Array.isArray(answer?.errors) ? answer.errors : [];
+    if (errors.some((error) => error?.type === 'RATE_LIMITED')) throw new GitHubError(429, { as: 'user', rateLimited: true, retryAfter: 60 });
+    const repository = answer?.data?.repository;
+    if (errors.length || !repository) throw partial();
+    dirs.forEach((dir, index) => {
+      const object = repository[`d${index}`];
+      if (object === undefined) throw partial();
+      // null: no such path at main; another type than a folder: no folder there.
+      folders.set(dir, object?.__typename === 'Tree' ? namesOf(object) : null);
+    });
+  }
+  const files = new Set([...paths].filter((path) => {
+    const slash = path.lastIndexOf('/');
+    const entry = folders.get(slash === -1 ? '' : path.slice(0, slash))?.get(path.slice(slash + 1));
+    return entry?.type === 'blob' && REGULAR.has(entry.mode);
+  }));
+  return (path) => files.has(path);
 }
 
 /** Whether main's head is no longer `head`. */
@@ -137,7 +179,13 @@ export async function writeVerdict({ call, repo, entry, verdict, built, attempts
     const seenText = !seen ? null : typeof seen.text === 'string' && !seen.isTruncated ? seen.text : await blobText(seen.oid, path);
     if (seenText === null || read.files.get(path) !== seenText) throw new VerdictRefusal(409, 'changed', CHANGED);
 
-    const outcome = (verdict === 'take' ? take : drop)(read.files, entry.id);
+    // The options `plan take` passes: `exists`, whether each `at` names a file of the repository, here answered from
+    // main. A first run with every path a file names the paths the plan tool asks about.
+    const write = verdict === 'take' ? take : drop;
+    const asked = new Set();
+    write(read.files, entry.id, { exists: (file) => { asked.add(file); return true; } });
+    const exists = await filesOnMain({ call, owner, name, head, root: repository.commit?.tree, paths: asked });
+    const outcome = write(read.files, entry.id, { exists });
     if (outcome.status === 'refused') throw new VerdictRefusal(409, 'refused', outcome.message);
     if (outcome.status === 'already') return { status: 'already', commit: null, message: outcome.message };
 

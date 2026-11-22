@@ -1086,8 +1086,10 @@ What the server does, with the owner's own token and nothing else:
 1. It reads `main`'s commit (`GET /repos/{repo}/git/ref/heads/main`).
 2. In one GraphQL call it reads that commit's tree, the text of every file of
    `plan/` at it, and the entry's file at `built`. A file GitHub gives cut short
-   is read whole from its blob. A link or a submodule under `plan/`, or a
-   folder deeper than `plan/<part>/<kind>/`, refuses the verdict. An answer
+   is read whole from its blob. `plan/` is read as `tools/plan/read` reads it:
+   a link or a submodule anywhere under it, a folder whose name starts with a
+   dot included, refuses the verdict, and so does a folder deeper than
+   `plan/<part>/<kind>/`; a file under a dot name is not read. An answer
    with any error, even beside data, or a folder or a file it gives without
    its contents, or a blob GitHub does not give, answers 502 `partial`:
    "GitHub answered in part, so nothing was written. Try again." A part of
@@ -1097,8 +1099,12 @@ What the server does, with the owner's own token and nothing else:
    page." A verdict is for the text the owner saw. A change to any other file
    does not matter.
 4. It runs `take(files, id)` or `drop(files, id)` of `tools/plan/write`, the
-   same functions `plan take` and `plan drop` run, and always as the owner,
-   never `by: agents`. A refusal answers 409 `refused` with the tool's own
+   same functions `plan take` and `plan drop` run, with the options `plan take`
+   passes, and always as the owner, never `by: agents`. Its `exists`, whether
+   each `at` names a regular file of the repository, is answered from `main`:
+   the names of the folders those paths are in, in one more GraphQL call. A
+   path through a link, or a link, is not followed and counts as no file, so
+   the server refuses where `plan take` might follow it. A refusal answers 409 `refused` with the tool's own
    message, such as "model-tool has no answer and sets nothing: write its
    answer first". "Already" answers 200 with `"already": true` and writes
    nothing.
@@ -1129,14 +1135,14 @@ writes apply, a verdict counts as a write, and the owner may send 6 verdicts a
 minute per instance.
 
 A verdict costs 3 calls with the owner's token (the ref, the GraphQL read, the
-write), one more to read the ref when the write fails, 3 more for each time
+write), one more when an `at` names a file in a folder, one more to read the
+ref when the write fails, 3 more for each time
 `main` moved, and one more for each file GitHub cut. The installation token is not used.
 
 `tools/plan/check` rule 11, which `plan take` runs against `origin/main`
 before it commits, has nothing to compare here: the plan the verdict is
-computed on is `main` itself. Rule 9, whether each `at` names a file of the
-repository, is not run either: the server reads only `plan/`. CI runs the
-whole `plan check` on `main` after the push.
+computed on is `main` itself. CI runs the whole `plan check` on `main` after
+the push.
 
 ### The snapshot: a visitor never causes a call to GitHub
 

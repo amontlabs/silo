@@ -129,7 +129,7 @@ export function createFakeGit() {
   function graph(found, depth, { truncateOver = Infinity } = {}) {
     if (!found) return null;
     const { sha, object } = found;
-    if (object.type === 'commit') return { tree: { oid: object.tree } };
+    if (object.type === 'commit') return { tree: { oid: object.tree, ...graph({ sha: object.tree, object: objects.get(object.tree) }, depth, { truncateOver }) } };
     if (object.type === 'blob') {
       let text = null;
       try {
