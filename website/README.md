@@ -1069,7 +1069,7 @@ over whatever build it is, across reloads, until a build's plan shows that
 verdict for the entry: pushes to `main` deploy production, and the deploy of
 another push may go live before the one that carries the verdict. Then the
 page forgets it, and after a day it forgets it anyway. When the answer is lost
-(no connection, or none within 20 seconds), the page asks once more before it
+(no connection, none within 20 seconds, or the connection cut while the answer is read), the page asks once more before it
 shows a failure: the verdict may be on `main` already, and the server then
 answers "already". A refusal shows its message under the state line, in the
 plan tool's words, and the entry stays as it was. Undoing a verdict, "not now" and "yes, but" are not

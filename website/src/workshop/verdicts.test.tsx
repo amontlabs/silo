@@ -237,8 +237,8 @@ describe('the owner\'s verdict', () => {
     await waitFor(() => expect(within(item()).getByRole('alert')).toHaveTextContent(message));
   });
 
-  it('asks once more when the answer is lost (no connection, or none in time): the verdict may be on main, and the server then says so', async () => {
-    const lost = [() => Promise.reject(new TypeError('Failed to fetch')), () => new Promise<never>(() => {})] as const;
+  it('asks once more when the answer is lost (no connection, none in time, or the connection cut while the answer is read): the verdict may be on main, and the server then says so', async () => {
+    const lost = [() => Promise.reject(new TypeError('Failed to fetch')), () => new Promise<never>(() => {}), () => ({ ...ok({ ok: true, commit: 'e'.repeat(40) }), cut: true })] as const;
     for (const first of lost) {
       const saved = apiConfig.writeTimeoutMs;
       apiConfig.writeTimeoutMs = 50;

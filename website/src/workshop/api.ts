@@ -70,29 +70,38 @@ async function respond<T>(path: string, init?: RequestInit): Promise<{ body: T; 
   const write = init?.method === 'POST';
   const controller = write ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), apiConfig.writeTimeoutMs) : undefined;
+  /** A connection lost, or no answer in time for a write: the request may have been done all the same. */
+  const lost = () => (controller?.signal.aborted ? new ApiError(0, 'timeout', 'No answer.') : new ApiError(0, 'network', 'No connection.'));
   try {
     response = await fetch(`${API}/${path}`, { credentials: 'same-origin', ...init, ...(controller ? { signal: controller.signal } : {}) });
   } catch {
-    if (controller?.signal.aborted) throw new ApiError(0, 'timeout', 'No answer.');
-    throw new ApiError(0, 'network', 'No connection.');
-  } finally {
     clearTimeout(timer);
+    throw lost();
   }
-  if (!response.ok) {
-    let code = 'error';
-    let message = FALLBACK[response.status] ?? 'Something went wrong.';
-    let n: number | null = null;
+  if (response.ok) {
+    // The body of a success is part of the answer: a connection cut while it is read is an answer lost.
     try {
-      const body = (await response.json()) as { error?: unknown; message?: unknown; n?: unknown };
-      if (typeof body.error === 'string') code = body.error;
-      if (typeof body.n === 'number' && Number.isSafeInteger(body.n) && body.n > 0) n = body.n;
-      if (typeof body.message === 'string' && body.message.trim()) message = body.message;
-    } catch {
-      // The status alone says enough.
+      return { body: (await response.json()) as T, headers: response.headers };
+    } catch (error) {
+      if (error instanceof SyntaxError) throw error;
+      throw lost();
+    } finally {
+      clearTimeout(timer);
     }
-    throw new ApiError(response.status, code, message, n);
   }
-  return { body: (await response.json()) as T, headers: response.headers };
+  clearTimeout(timer);
+  let code = 'error';
+  let message = FALLBACK[response.status] ?? 'Something went wrong.';
+  let n: number | null = null;
+  try {
+    const body = (await response.json()) as { error?: unknown; message?: unknown; n?: unknown };
+    if (typeof body.error === 'string') code = body.error;
+    if (typeof body.n === 'number' && Number.isSafeInteger(body.n) && body.n > 0) n = body.n;
+    if (typeof body.message === 'string' && body.message.trim()) message = body.message;
+  } catch {
+    // The status alone says enough.
+  }
+  throw new ApiError(response.status, code, message, n);
 }
 
 /** A cached answer this many seconds old or more counts as old: the CDN serves it while it revalidates. */

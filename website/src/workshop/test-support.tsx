@@ -7,7 +7,8 @@ import type { BuildData } from './plan';
 import { buildData, fixtureFacts, fixtureHistories, fixtureNotes, liveState } from './fixtures';
 
 export type Call = { method: string; path: string; body: Record<string, unknown> | null; headers: Record<string, string> };
-type Answer = { status: number; body: unknown; headers?: Record<string, string> };
+/** `cut`: the connection drops while the body is read, after the status and headers came. */
+type Answer = { status: number; body: unknown; headers?: Record<string, string>; cut?: boolean };
 export type Reply = Answer | Promise<Answer>;
 export type Route = (url: URL, body: Record<string, unknown> | null) => Reply;
 
@@ -41,7 +42,11 @@ export function mockApi(options: { state?: Route; me?: Me | null; routes?: Recor
     const signal = init?.signal;
     const aborted = new Promise<never>((_, reject) => signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError'))));
     const reply: Answer = route ? await Promise.race([Promise.resolve(route(url, body)), aborted]) : refused(404, 'Not found.');
-    return new Response(JSON.stringify(reply.body), { status: reply.status, headers: { 'Content-Type': 'application/json', ...reply.headers } });
+    const text = JSON.stringify(reply.body);
+    const payload = reply.cut
+      ? new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode(text.slice(0, 5))); controller.error(new TypeError('network error')); } })
+      : text;
+    return new Response(payload, { status: reply.status, headers: { 'Content-Type': 'application/json', ...reply.headers } });
   }));
   return calls;
 }
