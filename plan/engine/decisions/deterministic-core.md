@@ -49,3 +49,24 @@ the last two rows of the table.
 A second property, `core-keeps-nothing-between-calls`, says that the core keeps nothing between
 two calls outside its state. The ninth way above is the case for it. The owner said yes on
 21 November 2026 to writing it into the entry.
+
+## From Guillotine
+
+Agent, 22 November 2026. Lessons from Guillotine and guillotine-mini (evmts) that apply to this
+entry, for
+whoever builds it.
+
+- **One encoding per value.** Decide once whether zero and absent are the same, and give every state
+  exactly one representation. The simulator compares states byte for byte. Two encodings of one
+  state would read as a divergence that is not there. Padding bytes are undefined in Zig, so rows
+  have no padding, or the comparison goes field by field.
+  ([source](https://github.com/evmts/guillotine-mini/blob/edafd394bc0aa48a9691b037da36b6f36525121a/src/storage.zig#L327))
+- **Shared logic stays pure.** Shared code takes values and returns values, holds data rather than
+  one consumer's policy, and has no consumer-specific code. The core is proposed as a pure function
+  (`deterministic-core`), and `mechanism-or-use` keeps one use out of the engine. This extends the
+  rule to every shared Zig module: values in, values out.
+  ([source](https://github.com/evmts/guillotine/blob/dbdf61bd7902c726cdfb4cf80d60ed0e02da5663/.claude/commands/codesharing.md?plain=1#L40))
+- **Monotonic durations, UTC times.** Measure durations with a monotonic clock and record times in
+  UTC. The clock input to the core carries a monotonic value for limits and UTC for the record. A
+  monotonic clock stops while the Mac sleeps, so which clock a hold's limit uses is still to name.
+  ([source](https://github.com/evmts/guillotine-mini/blob/edafd394bc0aa48a9691b037da36b6f36525121a/test_runner.zig.md?plain=1#L318))

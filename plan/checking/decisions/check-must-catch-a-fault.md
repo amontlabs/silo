@@ -11,3 +11,15 @@ The standard name is mutation testing. What differs here: one fault is put in by
 check, where mutation testing changes the code automatically in many places.
 
 The owner said yes on 21 November 2026.
+
+## From Guillotine
+
+Agent, 22 November 2026. Lessons from Guillotine and guillotine-mini (evmts) that apply to this
+entry, for
+whoever builds it.
+
+- **A check that cannot fail checks nothing.** Delete tests with no assertion, tests named for a
+  case they never trigger, comparisons that only log, and assertions that cannot be false. Write an
+  assertion as the property, stated positively. `check-must-catch-a-fault` catches these. The test
+  that reads sources can also refuse a comparison whose only effect is a log line.
+  ([source](https://github.com/evmts/guillotine/blob/dbdf61bd7902c726cdfb4cf80d60ed0e02da5663/src/stack/stack.zig#L528))

@@ -1,0 +1,20 @@
+{
+  "asks": "Who can call the engine?",
+  "answer": "Every call to the engine is authenticated and carries where it comes from. A request that is not authenticated is refused before any handler runs. A call from inside a computer is scoped to that computer and can grant it nothing more.",
+  "needs": [
+    "engine-client",
+    "engine-own-program",
+    "what-an-agent-inside-may-do"
+  ],
+  "sets": [
+    {
+      "in": "engine/properties",
+      "id": "every-call-authenticated",
+      "says": "Every call to the engine is authenticated and carries where it comes from.",
+      "kind": "safety",
+      "check": [
+        "hostile test"
+      ]
+    }
+  ]
+}

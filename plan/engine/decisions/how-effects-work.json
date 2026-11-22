@@ -1,6 +1,6 @@
 {
   "asks": "How does the core ask a driver to act?",
-  "answer": "An effect asks a driver, and is not a call. It has an id and no return value. Its answer, or a timeout, comes back later as an input. Every effect is safe to issue twice, or is marked once only and guarded by a key.",
+  "answer": "An effect asks a driver, and is not a call. It has an id and no return value. Its answer, or a timeout, comes back later as an input. Every effect is safe to issue twice, or is marked once only and guarded by a key. A result or a timeout completes its pending effect once. A result that matches no pending effect, or comes after its timeout, completes nothing, and what it reports is checked by observation.",
   "needs": [
     "engine-shape"
   ],
@@ -9,6 +9,15 @@
       "in": "engine/properties",
       "id": "no-effect-twice",
       "says": "No effect happens twice: one issued again changes nothing.",
+      "kind": "safety",
+      "check": [
+        "simulator"
+      ]
+    },
+    {
+      "in": "engine/properties",
+      "id": "effect-completed-once",
+      "says": "A pending effect is completed once, by its result or by its timeout.",
       "kind": "safety",
       "check": [
         "simulator"

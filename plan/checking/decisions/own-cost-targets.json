@@ -1,0 +1,7 @@
+{
+  "asks": "Which costs of Silo's own processes have a target?",
+  "answer": "The memory and processor of a helper, idle and under load. The wait the boundary adds to one connection and to one model call. The processor, memory and disk writes of the recorder during a large build. The cost of the probe inside a computer. The engine and the app at idle. Each target is written before its code, as a 99th percentile and a worst case.",
+  "needs": [
+    "speed-budgets"
+  ]
+}

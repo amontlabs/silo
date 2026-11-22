@@ -1,0 +1,12 @@
+{
+  "asks": "Is \"What Silo adds costs as little as it can\" a principle of Silo?",
+  "answer": "Yes, with the question in what it sets.",
+  "sets": [
+    {
+      "in": "principles",
+      "id": "costs-little",
+      "says": "What Silo adds on top of the virtual machines costs as little as it can.",
+      "asks": "What does it add in memory, processor, disk and waiting, and what is its target?"
+    }
+  ]
+}

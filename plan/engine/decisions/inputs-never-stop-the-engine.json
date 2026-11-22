@@ -1,0 +1,20 @@
+{
+  "asks": "Can an input make the engine stop?",
+  "answer": "No. An assertion states only what no input can break. Anything an input can reach is a named error, refused like any other bad input. After a restart, an input that stopped the engine is set aside and fails with that reason.",
+  "needs": [
+    "assertions-stay-on",
+    "engine-inputs"
+  ],
+  "sets": [
+    {
+      "in": "engine/properties",
+      "id": "no-input-breaks-an-assertion",
+      "says": "No input that passes validation makes an assertion fail.",
+      "kind": "safety",
+      "check": [
+        "simulator",
+        "hostile test"
+      ]
+    }
+  ]
+}

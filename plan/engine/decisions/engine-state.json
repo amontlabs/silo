@@ -1,6 +1,6 @@
 {
   "asks": "What form does the engine's state take?",
-  "answer": "State is a small set of flat tables of plain rows that refer to each other by id.",
+  "answer": "State is a small set of flat tables of plain rows that refer to each other by id. Each kind of id has its own type, so two kinds cannot be mixed.",
   "needs": [
     "engine-shape"
   ]

@@ -1,0 +1,15 @@
+{
+  "asks": "Can a computer read what another computer left on disk or in memory?",
+  "answer": "No. Nothing a computer reads from its disk or its memory comes from another computer, except from a computer it was forked from. A block it has not written reads as zero, and a buffer Silo reuses is cleared before it is handed out.",
+  "sets": [
+    {
+      "in": "computers/properties",
+      "id": "storage-never-crosses-computers",
+      "says": "Nothing a computer reads from its disk or its memory comes from another computer, except from a computer it was forked from.",
+      "kind": "safety",
+      "check": [
+        "hostile test"
+      ]
+    }
+  ]
+}

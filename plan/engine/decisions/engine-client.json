@@ -1,6 +1,6 @@
 {
   "asks": "What speaks to the engine from the app and the command line?",
-  "answer": "The client that speaks to the engine is Zig, linked into the app through a C interface, and it also serves the command line.",
+  "answer": "The client that speaks to the engine is Zig, linked into the app through a C interface, and it also serves the command line. Across the C interface, handles are ids checked on every call, each buffer has one owner that frees it, and each result carries its own error.",
   "needs": [
     "engine-own-program"
   ]

@@ -31,3 +31,13 @@ Read them as upper bounds.
 
 Not checked: drivers, fakes and their faults (`simulator-faults`), a log written in part, and
 Linux.
+
+## From Guillotine
+
+Agent, 22 November 2026. Lessons from Guillotine and guillotine-mini (evmts) that apply to this
+entry, for
+whoever builds it.
+
+- **Fixed seeds for random tests.** Seed every randomized test so a failure replays. The simulator's
+  trial replays from a seed. This makes it the rule for every randomized test.
+  ([source](https://github.com/evmts/guillotine/blob/dbdf61bd7902c726cdfb4cf80d60ed0e02da5663/src/trie/README.md?plain=1#L330))

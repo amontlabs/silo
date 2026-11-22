@@ -1,0 +1,8 @@
+{
+  "asks": "What does the check refuse in the engine's code?",
+  "answer": "In the core, the check that reads the source refuses a bare `unreachable`, a narrowing cast outside one checked helper, wrapping arithmetic on a value that came from an input, a print, a stub, a TODO, and building a type outside the one file allowed to build it, such as a validated input. In all engine code, it refuses code that `zig fmt` would change.",
+  "needs": [
+    "how-the-engine-is-built",
+    "engine-states-and-failures"
+  ]
+}

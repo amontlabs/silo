@@ -10,3 +10,19 @@
 | screen | A stretch of recording while an agent drives the screen, and the input events. | Fact |
 | meter | Disk, memory and processor use of a computer, sampled. | Fact |
 | gap | A source lost facts or reports between two moments, with the count when known. | Fact; a count given by the inside is a report |
+
+## From Guillotine
+
+Agent, 22 November 2026. Lessons from Guillotine and guillotine-mini (evmts) that apply to this
+entry, for
+whoever builds it.
+
+- **The compiler lists what a new kind must touch.** A new variant must be handled everywhere it
+  matters. Guillotine keeps written checklists; a `switch` with no `else` makes the compiler produce
+  the list. Adding a kind of line, input or effect fails to compile until every place handles it. A
+  written checklist covers only what the compiler cannot see, such as docs and the app.
+  ([source](https://github.com/evmts/guillotine/blob/dbdf61bd7902c726cdfb4cf80d60ed0e02da5663/docs/dev/HARDFORKS.md?plain=1#L469))
+- **Every entry of a table is tested.** Test every entry of a lookup table, and pin the number of
+  variants of an enum that mirrors an outside list. A test walks every action and checks its kind is
+  filed; the short fixed list of line kinds is pinned by count.
+  ([source](https://github.com/evmts/guillotine/blob/dbdf61bd7902c726cdfb4cf80d60ed0e02da5663/src/opcodes/REVIEW_SUMMARY.md?plain=1#L105))

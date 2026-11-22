@@ -1,6 +1,6 @@
 {
   "asks": "What limits the engine's tables and memory?",
-  "answer": "Limits are part of the model. Tables have a fixed size. Reaching a limit fails with a named error. No memory is allocated in the core after start.",
+  "answer": "Limits are part of the model. Tables have a fixed size. Reaching a limit fails with a named error. No memory is allocated in the core after start. The limits are one structure that the core is built from, and a check refuses impossible limits when compiling.",
   "needs": [
     "engine-state"
   ],
@@ -12,6 +12,15 @@
       "kind": "safety",
       "check": [
         "assertion"
+      ]
+    },
+    {
+      "in": "engine/properties",
+      "id": "refused-input-changes-nothing",
+      "says": "An input the core cannot apply, because it is invalid or a limit is reached, changes only the rows that say it was refused.",
+      "kind": "safety",
+      "check": [
+        "simulator"
       ]
     }
   ]

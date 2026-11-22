@@ -1,0 +1,4 @@
+{
+  "asks": "How does Silo read what an older version of it wrote?",
+  "answer": "Everything Silo writes to read later starts with the version of its format: record files, the engine's saved state, and the messages between the engine and its clients. A reader states the versions it reads, and refuses any other with a named error."
+}

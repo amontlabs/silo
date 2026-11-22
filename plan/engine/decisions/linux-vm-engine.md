@@ -281,3 +281,14 @@ What it would take, from the facts above:
 3. Whether systemd and Docker run in that image.
 4. How much memory an idle computer gives back on a Mac.
 5. Work folder speed against the 8x budget.
+
+## From Guillotine
+
+Agent, 22 November 2026. Lessons from Guillotine and guillotine-mini (evmts) that apply to this
+entry, for
+whoever builds it.
+
+- **Pin and verify what is fetched.** Keep a content hash for every fetched dependency, image or
+  parameter set, and check it when it is fetched. Kernels, base images and libkrun builds that make
+  a computer are checked by hash before use.
+  ([source](https://github.com/evmts/guillotine-mini/blob/edafd394bc0aa48a9691b037da36b6f36525121a/build.zig.md?plain=1#L494))

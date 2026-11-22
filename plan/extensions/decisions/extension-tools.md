@@ -58,3 +58,14 @@ The owner asked twice whether a better word exists. Compared on 21 November 2026
 an alert only), informs (a question asks), displays (the same, less plain), interacts and
 communicates (true of all three, but they do not say what happens). None is better. The owner has
 not ruled on it.
+
+## From Guillotine
+
+Agent, 22 November 2026. Lessons from Guillotine and guillotine-mini (evmts) that apply to this
+entry, for
+whoever builds it.
+
+- **Extensions get a narrow hook, then a re-check.** Give an extension hook a narrow interface
+  instead of internal pointers, and re-check the core's invariants after it returns. An extension's
+  tool call goes through a narrow interface, and the engine checks its invariants after each one.
+  ([source](https://github.com/evmts/guillotine-mini/blob/edafd394bc0aa48a9691b037da36b6f36525121a/src/frame.zig.md?plain=1#L526))

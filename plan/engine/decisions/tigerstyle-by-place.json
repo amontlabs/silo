@@ -1,0 +1,7 @@
+{
+  "asks": "Which rules of TigerStyle hold where?",
+  "answer": "In the core, without exception: the shipped build is the safe build and every stop is a defined stop; no allocation after start, and fixed tables; every loop bounded, and no recursion; no dependency, clock or thread; checked arithmetic and narrowing; every failure named and handled. TigerStyle's quotas, two assertions and at most seventy lines per function, are not held. The helper and the recorder keep the safe build, a limit on everything an agent can grow, a memory cap fixed at start, named failures and fuzzing; they may allocate under that cap, run threads and depend on pinned libraries. The client, the command line and tools may allocate and depend on libraries, and never swallow a failure. The check script holds each list for its directory.",
+  "needs": [
+    "engine-shape"
+  ]
+}

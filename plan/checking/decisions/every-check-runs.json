@@ -1,0 +1,4 @@
+{
+  "asks": "How do we know every check ran?",
+  "answer": "The check compiles every engine file and runs every test the tree holds, on each system it applies to. A test file that nothing runs, or a test that is commented out, fails the check, and a test left out on purpose is listed with its reason. Each check says how many cases it ran, and one that ran none fails."
+}

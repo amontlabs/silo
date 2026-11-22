@@ -38,3 +38,30 @@ the standard term: it tries every case, and only up to a bound. "Exhaustive test
 read as a test of everything.
 
 The owner took the entry on 21 November 2026.
+
+## From Guillotine
+
+Agent, 22 November 2026. Lessons from Guillotine and guillotine-mini (evmts) that apply to this
+entry, for
+whoever builds it.
+
+- **Each fast path can be switched off.** Every optional optimization has its own switch, on by
+  default. Turning it off changes no result, and the check compares both. When the fast path cannot
+  handle an input, the plain path does. For any fast path in the helper or the recorder, such as
+  compiled rules: the check runs with it on and off and compares.
+  ([source](https://github.com/evmts/guillotine/blob/dbdf61bd7902c726cdfb4cf80d60ed0e02da5663/docs/dev/ARCHITECTURE.md?plain=1#L939))
+- **A plain twin at narrow seams.** Where a fast path exists, keep a deliberately simple version in
+  one readable file, run both on the same input, compare at every step, and report the first
+  difference with both states. Not for the core, and never a second model of access (`model-tool`).
+  Where Silo has a fast path and an obviously right one, both in Zig: the record's index answers
+  equal a scan of the files; inputs handled in a batch give the same result one by one.
+  ([source](https://github.com/evmts/guillotine/blob/dbdf61bd7902c726cdfb4cf80d60ed0e02da5663/docs/dev/ARCHITECTURE.md?plain=1#L49))
+- **An optimization is proven equal.** An optimized path gives the same results, errors and visible
+  accounting as the plain one, and matches its whole pattern, not the start of it. Its own speed is
+  measured apart. Guillotine's bug hunt found merged instructions with wrong operand order and
+  swallowed errors.
+  ([source](https://github.com/evmts/guillotine/blob/dbdf61bd7902c726cdfb4cf80d60ed0e02da5663/src/opcodes/REVIEW_SUMMARY.md?plain=1#L116))
+- **Test one rule with the others off.** A test of one rule turns the other rules off first, so a
+  failure names exactly one cause. Each rule of Silo gets a test alone; the bounded exhaustive test
+  covers them together.
+  ([source](https://github.com/evmts/guillotine-mini/blob/edafd394bc0aa48a9691b037da36b6f36525121a/client/txpool/limits.zig#L1215))

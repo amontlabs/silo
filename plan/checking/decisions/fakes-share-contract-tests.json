@@ -1,0 +1,7 @@
+{
+  "asks": "How do we know a fake driver behaves like the real one?",
+  "answer": "Each fake driver and its real driver pass the same contract tests for the outcomes they document. The faults the fake makes on purpose are tested apart.",
+  "needs": [
+    "core-simulator"
+  ]
+}
