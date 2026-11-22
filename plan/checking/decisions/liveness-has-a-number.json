@@ -1,4 +1,6 @@
 {
   "asks": "How long is \"in the end\" in a liveness property?",
-  "answer": "Each liveness property gives \"in the end\" a number."
+  "answer": "Each liveness property gives \"in the end\" a number.",
+  "verdict": "take",
+  "by": "agents"
 }
