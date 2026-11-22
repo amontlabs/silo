@@ -8,5 +8,9 @@
     "which-process-holds-the-boundary",
     "where-rules-run",
     "computers-main-on-a-mac"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A crash of the engine should not end hours of an agent's work, and the rules still apply meanwhile."
+  }
 }

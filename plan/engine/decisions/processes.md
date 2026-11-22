@@ -1,5 +1,24 @@
 # Which processes make up Silo
 
+## For the owner
+
+An agent's part, 22 November 2026. Main and two forks are running. The part of Silo that runs one of
+the forks hits a bug and crashes.
+
+The options:
+
+- Separate programs (recommended). The engine is one program, each computer has a small program of
+  its own that runs it and holds its boundary, and another program keeps the record. Only that fork
+  stops. Main, the other fork, the engine and the record carry on, and a computer's secrets sit only
+  in its own program. It costs memory and processor for one more program per computer, not measured
+  yet. It also costs more pieces that can fail one by one: when the program that keeps the record
+  stops, the record gets a gap and precautions stop until it is back, while rules still apply.
+- One program for everything. Less memory, and fewer pieces to start and to watch. It costs every
+  computer at once on any crash, and one place that holds every computer's secrets.
+
+Recommended: separate programs. An agent is treated as hostile, so the program that faces it should
+hold one computer and nothing more. The entry also sets the words for two of these programs.
+
 | Process | What it holds | If it stops |
 |---|---|---|
 | **Engine** (core and server) | State and decisions | Running computers keep running under the rules they had. Changes wait. A hold still ends at its limit, which the helper keeps. |

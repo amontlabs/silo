@@ -6,5 +6,9 @@
     "engine-reconciles",
     "how-effects-work",
     "engine-state"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A long-lived main has to come back as you asked after the Mac restarts, and main on a Mac needs it."
+  }
 }

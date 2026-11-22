@@ -1,5 +1,24 @@
 # What limits the engine's tables and memory
 
+## For the owner
+
+An agent's part, 22 November 2026. An agent's script goes wrong and asks for a new fork in a loop,
+ten thousand times.
+
+The options:
+
+- Fixed limits, and a refusal that says why (recommended). The engine has a fixed number of places
+  for computers, rules, secrets and everything else it tracks, chosen when Silo is built. When one
+  is full, the next ask is refused with an error that names the limit, and nothing else changes. The
+  engine's memory is known in advance and never grows. It costs a ceiling you can meet: past a limit
+  Silo says no even if your Mac had room, and raising a limit takes a new version of Silo.
+- Grow as needed. The engine takes memory as asks come in, and refuses nothing by count. It costs
+  the bad day: the loop above grows Silo until the Mac runs short of memory, and everything slows or
+  dies together.
+
+Recommended: fixed limits. An agent can read a refusal with a reason and act on it, which it cannot
+do with a Mac out of memory. TigerBeetle is built this way.
+
 The record checks `nothing-grows-without-limit` with assertions.
 
 ## From Guillotine

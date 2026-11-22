@@ -1,4 +1,4 @@
 {
   "asks": "What carries a computer's network at the boundary?",
-  "answer": "Silo's network stack, on Linux and on macOS computers. Never Apple's NAT."
+  "answer": "Silo's network stack, on Linux and on macOS computers. Never Apple's NAT, which cannot apply a rule or hold a secret at the boundary. Every packet of a computer goes through the stack. If the stack stops, the computer has no network: nothing goes around it. What it costs in speed against a plain machine is to find out, and is measured before it is relied on."
 }

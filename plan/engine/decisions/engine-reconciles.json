@@ -1,6 +1,6 @@
 {
   "asks": "How does the engine bring what is seen to what is wanted?",
-  "answer": "Each row keeps what was asked and what was last observed. While they differ, the core issues effects to make them match, or says what it is waiting for. A virtual machine can die by itself and the device can reboot, so the saved state is never assumed to describe the world.",
+  "answer": "Each row keeps what was asked and what was last observed. While they differ, the core issues effects to make them match, or says what it is waiting for. What was never observed is unknown, and unknown never counts as matching. A virtual machine can die by itself and the device can reboot, so the saved state is never assumed to describe the world.",
   "needs": [
     "engine-state"
   ],

@@ -1,5 +1,24 @@
 # Is the core deterministic
 
+## For the owner
+
+An agent's part, 22 November 2026. The engine stops one night after six hours of agents working in
+main and two forks, and it never happens again.
+
+The options:
+
+- Same inputs, same result (recommended). The deciding part of the engine is handed the time and
+  every random number, and runs on one thread. Given the same inputs in the same order it always
+  ends in the same state, so that night can be replayed step by step, and a test can run millions of
+  made-up nights. It costs strictness: the deciding part may use no library that reads a clock or
+  starts a thread. It may cost speed, since every decision goes through one queue; Silo tracks
+  dozens of computers, so this is not expected to show, and it is not measured yet.
+- An ordinary program. Threads where they help, and the clock read where it is needed. It costs the
+  replay: a failure seen once may never be seen again, and the simulator cannot check this part.
+
+Recommended: same inputs, same result. The two properties this entry sets are the ones you said yes
+to writing in on 21 November, and a trial showed that a test can hold them.
+
 ## Found
 
 A trial on 21 November 2026 built a small core in Zig 0.17.1. It is described in the notes of

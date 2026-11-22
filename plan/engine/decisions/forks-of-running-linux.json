@@ -1,0 +1,7 @@
+{
+  "asks": "How do forks of a running Linux computer arrive?",
+  "answer": "By helping the upstream pull request for memory snapshots in libkrun land, with MicroSandbox's code as a reference, rather than by carrying them in Silo's own copy of libkrun. Until it lands, a Linux fork starts from a copy of the disk and boots cold.",
+  "needs": [
+    "linux-vm-engine"
+  ]
+}

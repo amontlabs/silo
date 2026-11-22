@@ -12,5 +12,9 @@
     "engine-under-failure",
     "engine-takes-back-helpers",
     "helper-on-broken-assumption"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "What Silo promises about crashes holds only if the engine comes back with its state; two of the decisions it needs are still to find out."
+  }
 }

@@ -1,5 +1,23 @@
 # How an operation of several steps survives a crash
 
+## For the owner
+
+An agent's part, 22 November 2026. Forking main takes several steps: copy the disk, make the
+computer, give it its rules, start it. The engine crashes after the second.
+
+The options:
+
+- Finished or rolled back (recommended). Each step is written down before it is taken. After the
+  restart the engine looks at what really exists, then finishes the fork or removes what the fork
+  had created so far, and nothing else. You never find half a fork. It costs a write to disk per
+  step, and sometimes asking again for something that was rolled back.
+- Report what is left. After the restart Silo lists what it found half-made, and you clean up. It is
+  simpler to build. It costs you the cleaning, the disk the leftovers use, and a half-made computer
+  whose rules may not all be in place.
+
+Recommended: finished or rolled back. Checkpoint, restore, fork and drop all have several steps, and
+you should not have to know them.
+
 The record checks `crash-finishes-or-rolls-back` with the simulator, with crashes.
 
 ## From Guillotine

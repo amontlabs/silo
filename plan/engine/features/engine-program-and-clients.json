@@ -18,5 +18,9 @@
     "engine-states-and-failures",
     "how-the-engine-is-built",
     "core-simulator"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Every feature of the app talks to the engine through it, and nine entries already wait on it."
+  }
 }

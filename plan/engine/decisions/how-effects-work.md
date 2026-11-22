@@ -1,5 +1,23 @@
 # How the core asks a driver to act
 
+## For the owner
+
+An agent's part, 22 November 2026. The engine asks for a checkpoint of main. The part that takes it
+hangs and answers a minute late, or the engine crashes and asks again after its restart.
+
+The options:
+
+- Ask, and hear back later (recommended). The engine never waits on the work. It sends the ask with
+  an id, carries on with the other computers, and takes the answer or a timeout when it comes.
+  Asking twice makes one checkpoint. An answer that comes after its timeout changes nothing by
+  itself: the engine looks at what really exists. It costs an occasional wrong first report, when an
+  action is shown as timed out that did finish, until the engine has looked.
+- Wait for the answer. The engine asks and waits, as an ordinary program does. It is simpler, and it
+  never reports a timeout wrongly. It costs every other computer while one action hangs, and a
+  second checkpoint when an ask is repeated after a crash.
+
+Recommended: ask, and hear back later. One stuck computer must not freeze the others.
+
 - The record's line reads "An effect is a request, not a call." "Request" is kept for what waits
   at the boundary, so the line is written "An effect asks a driver".
 - The record checks `no-effect-twice` with the simulator, with crashes.

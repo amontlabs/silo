@@ -1,6 +1,6 @@
 {
   "asks": "Which processes make up Silo?",
-  "answer": "The engine, one helper per computer, the recorder, the app and the command, the computer of each extension, and the probe inside each computer.",
+  "answer": "The engine, one helper per computer, the recorder, the app and the command, the computer of each extension, and the probe inside each computer. When one of them stops, the others keep running. Only a helper takes something with it: its own computer.",
   "sets": [
     {
       "in": "words",

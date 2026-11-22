@@ -1,6 +1,6 @@
 {
   "asks": "How is a patch to the VM engine reviewed?",
-  "answer": "A patch to the VM engine is reviewed as boundary code.",
+  "answer": "A patch to the VM engine is reviewed as boundary code, which is code a hostile computer can reach. It runs in the helper, and a restore reads back state the computer controlled. So the review treats every value that comes from the computer as hostile, and the patch brings a hostile test or a fuzz target for what it reads. A patch without one is refused.",
   "needs": [
     "linux-vm-engine"
   ]

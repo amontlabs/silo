@@ -1,6 +1,6 @@
 {
   "asks": "How does a client follow the engine?",
-  "answer": "Events are numbered. A client is the state at number N plus every event after N.",
+  "answer": "Events are numbered. A client is the state at number N plus every event after N. The engine keeps recent events in a ring of fixed size. A client that asks for the events after N when they have left the ring is told to start again from the whole state at the current number, and is never handed later events with a hole before them.",
   "needs": [
     "engine-shape"
   ],

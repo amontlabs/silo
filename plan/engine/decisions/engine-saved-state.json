@@ -1,5 +1,6 @@
 {
   "asks": "What does the engine save of its own state?",
+  "answer": "The state, and after it every input accepted since that save. This is a write-ahead log, the known practice. An input is written through to the disk before it is accepted, so a call the engine cannot write is refused. At start the engine loads the last saved state and applies the inputs after it, in order. The core is deterministic, so this gives the state it had, and the effects it issues again change nothing. A new save is made when the inputs since the last one reach a fixed count, so the files have a fixed maximum size. The saved state and each input carry a checksum and a format version. An input cut short at the end of the log was never accepted, and is dropped. Any other damage stops the start with a named failure: the engine does not guess a state. What it then starts from, and what a newer engine does with an older format, are to find out. What the write costs per call on a Mac is to find out, and is measured.",
   "needs": [
     "core-state-stays-small"
   ]

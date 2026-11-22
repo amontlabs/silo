@@ -1,6 +1,6 @@
 {
   "asks": "Who can call the engine?",
-  "answer": "Every call to the engine is authenticated and carries where it comes from. A request that is not authenticated is refused before any handler runs. A call from inside a computer is scoped to that computer and can grant it nothing more.",
+  "answer": "Every call to the engine is authenticated and carries where it comes from. Where a call comes from is taken from the way it arrived, never from what the call says about itself. A call that is not authenticated is refused before any handler runs. A call from inside a computer is scoped to that computer and can grant it nothing more. How the app and the command line prove who they are is to find out, on a Mac and on a remote host.",
   "needs": [
     "engine-client",
     "engine-own-program",

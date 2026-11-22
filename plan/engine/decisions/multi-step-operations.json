@@ -1,6 +1,6 @@
 {
   "asks": "How does an operation of several steps survive a crash?",
-  "answer": "Every multi-step operation advances through explicit steps, each safe to stop after. At start each driver says what really exists, and the engine reconciles.",
+  "answer": "Every multi-step operation advances through explicit steps, each safe to stop after, and keeps what was there before it began. At start each driver says what really exists, and the engine reconciles: it finishes the operation, or rolls it back by removing only what the operation itself created. While it can do neither, it keeps trying and says what it is waiting for.",
   "needs": [
     "engine-reconciles"
   ],

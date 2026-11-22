@@ -1,6 +1,6 @@
 {
   "asks": "What does Silo build on top of libkrun?",
-  "answer": "Disk checkpoints and forks that share blocks, a guest agent or SSH, and the Mac window.",
+  "answer": "Disk checkpoints and forks that share blocks, with APFS clones on a Mac and reflinks on Linux, and the Mac window for the screen. Memory snapshots are not built on top; how they arrive is a separate decision. So is how a computer is reached.",
   "needs": [
     "linux-vm-engine"
   ]

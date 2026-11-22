@@ -1,5 +1,23 @@
 # How does a client follow the engine
 
+## For the owner
+
+An agent's part, 22 November 2026. The app is open while three forks start, and your Mac sleeps for
+a minute in the middle. The app missed part of what happened.
+
+The options:
+
+- Numbered changes (recommended). The engine numbers every change. The app holds the state as of one
+  number and applies each change after it, in order. After the sleep it asks for what it missed, or
+  reloads everything when it missed too much. The app and the command line then only ever show a
+  state the engine really had. It costs a short reload now and then.
+- Ask for everything, every so often. The app asks the engine for the whole state on a timer. It is
+  simpler. It costs lateness, and what came and went between two asks is never shown, such as a fork
+  that started and died.
+
+Recommended: numbered changes. The app is where you read what your agents did, so it must never show
+something that was not so.
+
 ## From Guillotine
 
 Agent, 22 November 2026. Lessons from Guillotine and guillotine-mini (evmts) that apply to this

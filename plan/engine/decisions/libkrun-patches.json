@@ -1,6 +1,6 @@
 {
   "asks": "How does Silo carry its patches to libkrun?",
-  "answer": "Every patch Silo carries has an upstream pull request aimed at removing it. Memory snapshots arrive by helping the upstream pull request land, with MicroSandbox's code as a reference, rather than by moving them into Silo's own copy.",
+  "answer": "Every patch Silo carries has an upstream pull request aimed at removing it. Where Silo reaches into libkrun beyond its public interface, it does so from one file, which names the upstream change that will remove each reach. A patch whose pull request is refused upstream is listed with the reason, and is reviewed again at each libkrun release.",
   "needs": [
     "linux-vm-engine"
   ]

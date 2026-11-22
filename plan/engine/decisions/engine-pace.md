@@ -1,5 +1,23 @@
 # How fast the engine is built
 
+## For the owner
+
+An agent's part, 22 November 2026. The engine could be written in one go from the plan as it stands,
+and main could run on your Mac sooner.
+
+The options:
+
+- Slowly on the engine (recommended). Each piece is researched, and tried in a small trial when
+  nobody knows yet whether it works, before anything is built on it. It costs a longer wait before
+  you use Silo yourself, with little to show meanwhile.
+- The first usable Silo sooner. The engine is written from the plan and corrected as problems show.
+  It costs rework underneath everything else: the record, the rules and the app all stand on the
+  engine, and a wrong base is paid for in each of them.
+
+Recommended: slowly on the engine. You said it yourself, and the trial of 21 November already paid:
+of three checks meant to keep the deciding part from reading the clock, one let eight of nine ways
+through.
+
 The owner said this.
 
 ## From Guillotine

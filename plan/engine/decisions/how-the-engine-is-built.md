@@ -1,5 +1,27 @@
 # How the engine is built
 
+## For the owner
+
+An agent's part, 22 November 2026. Agents write the first ten files of the engine. Every later file,
+hundreds of them, copies how those ten are written.
+
+The options:
+
+- Checks first, and a person reads the first files (recommended). The simulator and the checks exist
+  before the first feature. A person reads the first files line by line: you, or an engineer you
+  trust. Each coding rule is a check that refuses the code, never a line of instructions to agents.
+  The sentence of each property is written by a person. It costs your own time on code you may not
+  be able to assess alone, and nothing to try in the app until the checks exist.
+- Features first, checks after. You see Silo working sooner. It costs the pattern: the first files
+  are copied before anything checks them, and a property is claimed before a test holds it.
+- Agents read the first files. A second agent reviews the pattern, and you read nothing. It costs
+  the one outside look the pattern gets, since an agent tends to accept what another agent wrote in
+  the same style.
+
+Recommended: checks first, and a person reads the first files. These are your own four lines.
+Guillotine, one of the projects you trust, wrote its rules as instructions to agents: they ban one
+way of hiding an error, and its code does it 26 times.
+
 The owner said these. Two other lines of the same list have their home elsewhere: "No time
 estimates" binds every agent and is in the repository's `AGENTS.md`; "Properties are stated and
 checked as we build" is `properties-are-checked`, in the part `checking`.

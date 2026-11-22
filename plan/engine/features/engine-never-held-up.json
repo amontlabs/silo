@@ -11,5 +11,9 @@
     "processes",
     "record-of-a-computer",
     "precaution-on-a-waiting-call"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Builds that change tens of thousands of files are everyday work for agents, and they must not slow every ask to Silo."
+  }
 }

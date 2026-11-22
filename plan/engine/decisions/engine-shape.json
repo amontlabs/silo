@@ -1,6 +1,6 @@
 {
   "asks": "How is the engine cut into parts?",
-  "answer": "The core decides and touches nothing. Drivers do things: run a virtual machine, carry the network, take a checkpoint.",
+  "answer": "The core decides and touches nothing. Drivers do things: run a virtual machine, carry the network, take a checkpoint. A call asks the core for a change. The core answers with events, which say what happened, and with effects, which ask a driver to act.",
   "sets": [
     {
       "in": "words",
@@ -26,6 +26,11 @@
       "in": "words",
       "word": "effect",
       "means": "What the core puts out to ask a driver to act."
+    },
+    {
+      "in": "words",
+      "word": "engine",
+      "means": "The central piece of Silo. The app, the command line and every tool only talk to it."
     }
   ]
 }

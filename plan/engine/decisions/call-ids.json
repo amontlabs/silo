@@ -1,6 +1,6 @@
 {
   "asks": "What happens when a caller repeats a call?",
-  "answer": "Every call carries an id chosen by the caller. Repeating it returns the first result.",
+  "answer": "Every call carries an id chosen by the caller. Repeating it returns the first result, and nothing is done again. A repeat that arrives while the first is still under way gets that same result when it is ready. The same id with different content is refused with a named error. The engine keeps ids in a table of fixed size. An id too old for the table is refused as too old, never carried out again. How the engine tells an old id from a new one is to find out; TigerBeetle's client sessions, where each caller numbers its calls in order, are the known way.",
   "needs": [
     "engine-shape"
   ],

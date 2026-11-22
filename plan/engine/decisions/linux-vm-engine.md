@@ -1,5 +1,29 @@
 # Which VM engine runs Linux computers
 
+## For the owner
+
+An agent's part, 22 November 2026. You want a Linux computer beside main on your Mac, and later the
+same computers on a Linux server. Something has to run the virtual machine. The facts below are of
+19 November 2026.
+
+The options:
+
+- libkrun, with Silo's own patches (recommended). One library on a Mac and on Linux, kept by Red Hat
+  with several regular maintainers. It accepts Silo's own network, gives idle memory back to the
+  Mac, and runs each computer in a program of its own. It costs forks of a running computer for now:
+  libkrun cannot save a computer's memory, so a Linux fork starts from a copied disk with a cold
+  boot, until that lands upstream or Silo writes it. Silo also builds the window for the screen.
+- MicroSandbox. It forks a running computer today, on a Mac and on Linux. It costs what the old Silo
+  already paid: 24 patches, and regressions at each upgrade. It cannot take Silo's network, gives no
+  memory back on a Mac, and rests on two founders whose copy of libkrun is 653 commits behind.
+- Apple's framework on the Mac, another engine on Linux. A native screen at once, and mature engines
+  on servers. It costs two engines to build and keep alike, memory that is not given back on a Mac,
+  and still no fork of a running computer on the Mac.
+
+Recommended: libkrun, which is your own view of 19 November. Five measurements come before it is
+relied on, among them whether systemd and Docker run and how long a cold fork takes. If one fails,
+the question comes back to you.
+
 The answer is the owner's view, given on 19 November 2026, and not yet taken. The owner also said
 it is decided when the time comes. In the owner's words: everything is open source, and patches
 are cheap to write with agents; what Silo would add is mostly convenience: snapshots, the screen,

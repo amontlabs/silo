@@ -1,3 +1,4 @@
 {
-  "asks": "How is a Linux computer's screen shown?"
+  "asks": "How is a Linux computer's screen shown?",
+  "answer": "From outside the computer. The virtual machine's graphics device hands each frame to Silo, and the app draws it in a native window, as it does for a macOS computer. Keyboard and mouse go back the same way. It needs a desktop in the computer and no other program there, and it uses no network. To find out by a trial: how frames reach the app without a copy, a cursor that moves without lag, and a resolution that follows the window. Patches for the last two exist outside libkrun and are not upstream. Sound and GPU drawing are left out at first. If the graphics device fails, the window says so and the computer keeps running."
 }

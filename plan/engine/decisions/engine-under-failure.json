@@ -1,6 +1,6 @@
 {
   "asks": "What does the engine give up when a failure forces a choice?",
-  "answer": "When a failure forces a choice, the engine takes longer and never loses state or work.",
+  "answer": "When a failure forces a choice, the engine takes longer and never loses state or work. A call is accepted only once it is saved, so a call the engine cannot save is refused with a reason instead of accepted. After a crash, an accepted call is carried out or fails with a reason.",
   "sets": [
     {
       "in": "engine/properties",

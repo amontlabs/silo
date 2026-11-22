@@ -1,5 +1,27 @@
 # How the engine is cut into parts
 
+## For the owner
+
+An agent's part, 22 November 2026. A restore of main fails once in a thousand times, only when a
+checkpoint is being taken at the same moment. The question is whether a test can find that before
+you meet it.
+
+The options:
+
+- Deciding apart from doing (recommended). One part of the engine only decides what happens next,
+  and it touches no disk, no network and no clock. Other parts do the work: run a computer, carry
+  its network, take a checkpoint. A test can then run the deciding part through millions of made-up
+  histories, crashes and lost answers included, and replay any failure exactly. It costs more code
+  and a slower start, since every action becomes a question sent out and an answer that comes back
+  later. It also adds five words to Silo's vocabulary, the ones this entry sets, and the entries
+  agents agreed on are written with them.
+- One ordinary program. The code that decides also does the work, as most programs are written. It
+  is quicker to write and easier to read at first. It costs the test above: a failure that depends
+  on timing shows only on a real machine, by luck, and cannot be replayed.
+
+Recommended: deciding apart from doing. What Silo promises about crashes and repeated actions can
+only be checked this way, and TigerBeetle and FoundationDB are built like this for the same reason.
+
 ```text
 calls (app, command, agents) ──┐
 driver results ────────────────┼─▶ one queue ─▶ core(state, input) ─▶ new state
