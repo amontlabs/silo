@@ -7,14 +7,13 @@ import type { HistorySource } from './data';
 import type { Change } from './plan';
 import { itemOf, mockApi, owner, renderApp, rowButton } from './test-support';
 
-const CORE = 'The engine runs on its own';
 const ZIG = 'Which language is the core written in?';
-const REVIEWER = 'A hosted reviewer';
 const OLD_FORMAT = 'Which format does an export use?';
 
-/** The fixture plan with the verdicts of `core`, `core-in-zig`, `reviewer` and `old-format` written by the agents. */
+/** The fixture plan with the verdicts of the decisions `core-in-zig` and `old-format` written by the agents. Agents never
+ * decide a feature, so every feature keeps the owner's verdict. */
 const byAgents = (history: HistorySource | null = null) => buildData({
-  features: FEATURES.map((feature) => (feature.id === 'core' || feature.id === 'reviewer' ? { ...feature, by: 'agents' as const } : feature)),
+  features: FEATURES,
   decisions: DECISIONS.map((decision) => (decision.id === 'core-in-zig' || decision.id === 'old-format' ? { ...decision, by: 'agents' as const } : decision)),
 }, history);
 
@@ -28,8 +27,8 @@ async function openFrom(url: string, name: string, data = byAgents()) {
 }
 
 describe('an entry the agents decided', () => {
-  it('says "decided by agents" by its pip, on its row and in its open view, on a feature and on a decision', async () => {
-    for (const [name, url] of [[CORE, '/workshop#part-a/core'], [ZIG, '/workshop#part-a/core-in-zig']]) {
+  it('says "decided by agents" by its pip, on its row and in its open view, on a decision', async () => {
+    for (const [name, url] of [[ZIG, '/workshop#part-a/core-in-zig']]) {
       const item = await openFrom(url, name);
       expect(within(item).getByRole('img', { name: 'decided by agents' })).toHaveClass('ws-pip', 'decided');
       expect(rowButton(name).getAttribute('aria-label') ?? rowButton(name).textContent).toMatch(/decided by agents$/);
@@ -37,12 +36,12 @@ describe('an entry the agents decided', () => {
     }
   });
 
-  it('says "dropped by agents" for a dropped feature and a dropped decision, in All', async () => {
+  it('says "dropped by agents" for a dropped decision, in All', async () => {
     cleanup();
     mockApi({ me: owner });
     window.history.replaceState(null, '', '/workshop?view=all&state=dropped');
     await renderApp(byAgents());
-    for (const name of [REVIEWER, OLD_FORMAT]) {
+    for (const name of [OLD_FORMAT]) {
       await waitFor(() => expect(rowButton(name)).toBeInTheDocument());
       expect(within(itemOf(name)).getByRole('img', { name: 'dropped by agents' })).toHaveClass('ws-pip', 'dropped');
       expect(rowButton(name).getAttribute('aria-label') ?? rowButton(name).textContent).toMatch(/dropped by agents$/);
@@ -50,7 +49,7 @@ describe('an entry the agents decided', () => {
   });
 
   it('keeps the plain words for the owner\'s verdicts, in the same plan', async () => {
-    const item = await openFrom('/workshop#part-a/core', CORE);
+    const item = await openFrom('/workshop#part-a/core-in-zig', ZIG);
     expect(within(item).queryByText('Decided.')).not.toBeInTheDocument();
     cleanup();
     const plain = await openFrom('/workshop#part-c/shells', 'Your shell inside', buildData());
@@ -63,19 +62,19 @@ describe('an entry the agents decided', () => {
 
   it('says "Decided by agents" in the closed History line and in the list of changes', async () => {
     const change = (agents: boolean): Change => ({ commit: '1'.repeat(40), date: '2026-11-20T12:00:00Z', what: ['taken'], ...(agents ? { agents: true as const } : {}) });
-    const source = (agents: boolean): HistorySource => ({ changes: new Map([['core', [change(agents)]]]), shallow: false });
-    const item = await openFrom('/workshop#part-a/core', CORE, byAgents(source(true)));
+    const source = (agents: boolean): HistorySource => ({ changes: new Map([['core-in-zig', [change(agents)]]]), shallow: false });
+    const item = await openFrom('/workshop#part-a/core-in-zig', ZIG, byAgents(source(true)));
     expect(within(item).getByRole('button', { name: /^History/ })).toHaveTextContent('History · Decided by agents, 20 Nov');
     cleanup();
-    const plain = await openFrom('/workshop#part-a/core', CORE, byAgents(source(false)));
+    const plain = await openFrom('/workshop#part-a/core-in-zig', ZIG, byAgents(source(false)));
     expect(within(plain).getByRole('button', { name: /^History/ })).toHaveTextContent('History · Decided, 20 Nov');
   });
 
   it('says "Decided" in the History once the owner confirmed what the agents decided', async () => {
     const agentsChange: Change = { commit: '1'.repeat(40), date: '2026-11-20T12:00:00Z', what: ['taken'], agents: true };
     const confirmed: Change = { commit: '2'.repeat(40), date: '2026-11-21T12:00:00Z', what: ['taken'] };
-    const source: HistorySource = { changes: new Map([['core', [confirmed, agentsChange]]]), shallow: false };
-    const item = await openFrom('/workshop#part-a/core', CORE, byAgents(source));
+    const source: HistorySource = { changes: new Map([['core-in-zig', [confirmed, agentsChange]]]), shallow: false };
+    const item = await openFrom('/workshop#part-a/core-in-zig', ZIG, byAgents(source));
     const history = within(item).getByRole('button', { name: /^History/ });
     expect(history).toHaveTextContent('History · Decided, 21 Nov');
     expect(history).not.toHaveTextContent(/by agents/);
