@@ -11,7 +11,7 @@ can be purged. The owner called this the core.
 
 ## Why it is so
 
-- **Two ways into the record, kept apart by how Silo knows** (`how-silo-knows`,
+- **Two ways into the record, kept apart by how Silo knows** (`words-for-what-silo-knows`,
   `what-the-record-holds`, `what-a-report-carries`). What a program inside says can be interfered
   with by the agent, so it is never taken for what Silo saw from outside. Opinions are computed on
   top, in the part `opinions`.

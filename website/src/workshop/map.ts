@@ -206,7 +206,7 @@ export const SILO_MAP: MapLayout = {
       rests: ['part:boundary', 'part:traffic', 'tool-calls-from-traffic'],
       fold: { d: 'M632 68H700V57M820 36H865', arrows: [[700, 50, 'u'], [872, 36, 'r']] },
     },
-    { of: 'record', d: 'M620 226V411', arrows: [[620, 418, 'd']], label: [578, 330, 'facts'], rests: ['how-silo-knows'], fold: { d: 'M544 90V129', arrows: [[544, 136, 'd']] } },
+    { of: 'record', d: 'M620 226V411', arrows: [[620, 418, 'd']], label: [578, 330, 'facts'], rests: ['words-for-what-silo-knows'], fold: { d: 'M544 90V129', arrows: [[544, 136, 'd']] } },
     { of: 'opinions', d: 'M480 450H443', arrows: [[436, 450, 'l']], label: [458, 442, 'read', 'middle'], rests: ['what-the-record-holds'], fold: { d: 'M456 149H359', arrows: [[352, 149, 'l']] } },
     // A rule is triggered by a fact, a precaution by an opinion.
     { of: 'rules', d: 'M640 450H681M334 482V510H720V489', arrows: [[688, 450, 'r'], [720, 482, 'u']], label: [527, 528, 'triggers', 'middle'], rests: ['word:rule', 'word:precaution', 'opinion-acts-through-a-precaution'], fold: { d: 'M556 149H573', arrows: [[580, 149, 'r']] } },

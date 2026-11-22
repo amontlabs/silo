@@ -42,11 +42,11 @@ show what was sent to it, or its size (`record-shows-what-was-sent`).
   `no-prompt-per-command`, `ask-reaches-you`, `program-gives-up-first`, `no-best-effort-wait`,
   `actions-that-never-wait`.
 - What a computer can reach, to decide: `device-out-of-reach`, `reach-of-a-computer`,
-  `paths-out-are-shown`, `who-chooses-the-rules`, `guarantees-outside-the-computer`,
+  `paths-out-are-shown`, `guarantees-outside-the-computer`,
   `safe-fresh-install`, `channel-list`.
 - Secrets, to decide: `secret-values`, `secret-placeholder`, `secret-entry`, `secret-limits`,
   `secret-and-prompt-cache`.
-- The network, to decide: `network-modes`, `network-rules-from-inside`, `main-network-rules`,
+- The network, to decide: `network-modes`, `main-network-rules`,
   `package-age-rule`, `package-age-at-the-boundary`, `fork-with-network-closed`, `outside-actions-listed`, `ask-each-time`,
   `no-read-freely-preset`.
 - Open: `hold-limit-length`, `how-a-hold-ends`, `reason-in-a-refusal`,

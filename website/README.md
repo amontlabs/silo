@@ -251,7 +251,7 @@ map is the same with or without them.
 Each wire and each zone says in `rests` what in the plan it draws. An entry of
 `rests` is the id of a decision or a feature, `word:<id>` for a word of
 `plan/words.json`, or `part:<id>` for what only a part's line says. The wire
-"facts" rests on `how-silo-knows`. A text may have `rests` too; one with none is
+"facts" rests on `words-for-what-silo-knows`. A text may have `rests` too; one with none is
 drawn as decided. A place and a copy behind a part may have them too, and the
 build checks them as it checks the others, but they change nothing drawn.
 

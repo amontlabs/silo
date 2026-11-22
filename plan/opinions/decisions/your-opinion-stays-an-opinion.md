@@ -1,7 +1,7 @@
 # Your opinion stays an opinion
 
 That an opinion you gave is kept as you gave it is in force: `your-opinion-kept-as-given`. What
-this decision adds is "until the user changes it" and "it is still an opinion: it can be wrong".
+this decision adds is "it is still an opinion: it can be wrong".
 
 The design record's own wording, which this sentence is put forward from:
 
