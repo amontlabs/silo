@@ -10,9 +10,9 @@
 // for a comment's vote.
 // A write that opened an entry's thread says so (`opens`): the answer a cached state gave does not hold the thread yet,
 // so the thread is added to it, never replacing one it already has.
-// The owner's verdicts are kept too, with the commit the page was built from: a verdict changes the plan, which only a
-// new build of the site carries, so it is shown over the build it was made on, and dropped once the page is another
-// build's (or after a day).
+// The owner's verdicts are kept too: a verdict changes the plan, which only a new build of the site carries, so it is
+// shown over whatever build the page is, until a build's plan shows that verdict for the entry (the deploy of another
+// push may go live first), and then forgotten; after a day it is forgotten anyway.
 import type { Comment } from './api';
 import type { LiveIssue, LiveState, Verdict } from './plan';
 
@@ -38,11 +38,10 @@ export interface Write {
   opens?: { entry: string; issue: LiveIssue };
 }
 
-/** A verdict the owner wrote from this page: the entry, the verdict, and the commit of the build it was written on. */
+/** A verdict the owner wrote from this page: the entry, the verdict, and when. */
 export interface KeptVerdict {
   entry: string;
   verdict: Verdict;
-  built: string;
   at: number;
 }
 
@@ -73,7 +72,7 @@ function valid(raw: unknown): Store {
   if (typeof raw !== 'object' || raw === null) return store;
   const { writes, verdicts, comments, ups } = raw as Partial<Store>;
   // A store an older page wrote has no verdicts.
-  if (Array.isArray(verdicts)) store.verdicts = verdicts.filter((v) => v && typeof v.entry === 'string' && (v.verdict === 'take' || v.verdict === 'drop') && typeof v.built === 'string' && typeof v.at === 'number');
+  if (Array.isArray(verdicts)) store.verdicts = verdicts.filter((v) => v && typeof v.entry === 'string' && (v.verdict === 'take' || v.verdict === 'drop') && typeof v.at === 'number');
   if (Array.isArray(writes)) store.writes = writes.filter((w) => w && typeof w.n === 'number' && typeof w.at === 'number' && typeof w.set === 'object' && w.set !== null);
   if (Array.isArray(comments)) store.comments = comments.filter((c) => c && typeof c.n === 'number' && typeof c.at === 'number' && c.comment);
   if (Array.isArray(ups)) store.ups = ups.filter((u) => u && typeof u.n === 'number' && typeof u.at === 'number' && typeof u.up === 'number' && (typeof u.id === 'number' || typeof u.id === 'string'));
@@ -130,17 +129,25 @@ export function keep(write$: Omit<Write, 'at'>, now: number, comment?: Comment, 
   write(store);
 }
 
-/** Keeps a verdict the server wrote on main, for the build `built`; a later one on the same entry replaces it. */
+/** Keeps a verdict the server wrote on main; a later one on the same entry replaces it. */
 export function keepVerdict(verdict: Omit<KeptVerdict, 'at'>, now: number) {
   const store = read(now);
   store.verdicts = [...store.verdicts.filter((kept) => kept.entry !== verdict.entry), { ...verdict, at: now }];
   write(store);
 }
 
-/** The verdicts kept for the build `built`, by entry; a verdict written on another build is that build's to show. */
-export function keptVerdicts(built: string | null, now: number): Map<string, Verdict> {
-  if (built === null) return new Map();
-  return new Map(read(now).verdicts.filter((kept) => kept.built === built).map((kept) => [kept.entry, kept.verdict]));
+/**
+ * The verdicts kept, by entry. One the page's built plan already shows (`carried`) is forgotten: the plan holds it now,
+ * whatever build the page is, and a build served after it shows its own plan.
+ */
+export function keptVerdicts(carried: (entry: string, verdict: Verdict) => boolean, now: number): Map<string, Verdict> {
+  const store = read(now);
+  const left = store.verdicts.filter((kept) => !carried(kept.entry, kept.verdict));
+  if (left.length !== store.verdicts.length) {
+    store.verdicts = left;
+    write(store);
+  }
+  return new Map(left.map((kept) => [kept.entry, kept.verdict]));
 }
 
 /** Keeps the 👍 count the server answered for the person's vote on a comment. */

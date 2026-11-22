@@ -118,8 +118,11 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   const [verdictPending, setVerdictPending] = useState<Record<string, Verdict>>({});
   const [verdictRefusals, setVerdictRefusals] = useState<Record<string, string>>({});
   const [verdictsTick, setVerdictsTick] = useState(0);
-  /** The plan as built, with the owner's verdicts written since on this build laid over it. */
-  const shownData = useMemo(() => withVerdicts(data, keptVerdicts(data.builtFrom, Date.now())), [data, verdictsTick]);
+  /** The plan as built, with the owner's verdicts written since that it does not show yet laid over it. */
+  const shownData = useMemo(() => {
+    const carried = (id: string, verdict: Verdict) => data.entries.some((entry) => entry.id === id && entry.verdict === verdict && entry.by === null);
+    return withVerdicts(data, keptVerdicts(carried, Date.now()));
+  }, [data, verdictsTick]);
   /** The owner may take and drop: `me` said so on this visit, and the page knows the commit it was built from. */
   const mayDecide = typeof answer === 'object' && answer !== null && answer.owner === true && data.builtFrom !== null;
   /** The owner was signed in last and `me` has not answered yet: the room of the buttons is held, so they move nothing. */
@@ -530,7 +533,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
         if (!(error instanceof ApiError && error.status === 0)) throw error;
         await api.verdict(id, verdict, built);
       }
-      keepVerdict({ entry: id, verdict, built }, Date.now());
+      keepVerdict({ entry: id, verdict }, Date.now());
       setVerdictsTick((tick) => tick + 1);
       setAnnounce(verdict === 'take' ? 'Taken' : 'Dropped');
     } catch (error) {

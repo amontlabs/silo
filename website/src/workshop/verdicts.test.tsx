@@ -6,6 +6,7 @@ import { apiConfig } from './api';
 import type { Me } from './api';
 import { ARM_MS, CONFIRM_AFTER_MS } from './Entry';
 import { buildData, DECISIONS } from './fixtures';
+import { KEEP_FIELDS_MS } from './writes';
 import type { BuildData } from './plan';
 import { clock, mockApi, ok, owner, posts, refused, renderApp, rowButton, visitor, withheldTimers } from './test-support';
 import type { Reply } from './test-support';
@@ -135,7 +136,7 @@ describe('the owner\'s verdict', () => {
     // Left armed at the end: the page's own timer is cleared as it unmounts.
   });
 
-  it('is pending while the server writes, then shows the verdict at once, kept across a reload until another build', async () => {
+  it('is pending while the server writes, then shows the verdict at once, kept across reloads and builds until a built plan carries it', async () => {
     let answer: (reply: Reply) => void = () => {};
     const data = built();
     await openCreate(data, theOwner, () => new Promise((resolve) => { answer = resolve; }));
@@ -158,7 +159,35 @@ describe('the owner\'s verdict', () => {
     await openCreate(data, theOwner);
     expect(stateLine()).toBe('Decided.');
     cleanup();
-    // Another build carries the plan as it is then: the page shows that build's plan alone.
+    // A build that does not carry it yet (the deploy of another push went live first) still shows it.
+    await openCreate({ ...data, builtFrom: 'd'.repeat(40) }, theOwner);
+    expect(stateLine()).toBe('Decided.');
+    cleanup();
+    // A build whose plan carries it shows it from the plan, and the page forgets its own: a build without it, an
+    // older one served again, shows its plan alone.
+    const carried = { ...data, builtFrom: 'f'.repeat(40), entries: data.entries.map((entry) => (entry.id === 'create' ? { ...entry, verdict: 'take' as const, by: null } : entry)) };
+    await openCreate(carried, theOwner);
+    expect(stateLine()).toBe('Decided.');
+    cleanup();
+    await openCreate({ ...data, builtFrom: 'a'.repeat(40) }, theOwner);
+    expect(stateLine()).toBe('Not decided.');
+  });
+
+  it('forgets a verdict no build carried after a day', async () => {
+    const time = clock();
+    const data = built();
+    await openCreate(data, theOwner);
+    await waitFor(() => expect(button(/^Take$/)).not.toBeNull());
+    fireEvent.click(button(/^Take$/) as HTMLElement);
+    time.advance(CONFIRM_AFTER_MS);
+    fireEvent.click(button(/^Confirm take$/) as HTMLElement);
+    await waitFor(() => expect(stateLine()).toBe('Decided.'));
+    cleanup();
+    time.advance(KEEP_FIELDS_MS - 1);
+    await openCreate({ ...data, builtFrom: 'd'.repeat(40) }, theOwner);
+    expect(stateLine()).toBe('Decided.');
+    cleanup();
+    time.advance(1);
     await openCreate({ ...data, builtFrom: 'd'.repeat(40) }, theOwner);
     expect(stateLine()).toBe('Not decided.');
   });

@@ -1064,12 +1064,15 @@ a press less than 0.4 seconds after the first is ignored too. An armed button
 goes back after four seconds, or when the focus leaves the pair. While the server works, the pressed button says "Taking…" or
 "Dropping…" and both are disabled. On success the entry shows its verdict at
 once, as the owner's: "Decided." or "Dropped.", and "by agents" goes. The page
-keeps the verdict in its own memory of its writes (`writes.ts`) with the commit
-it was built from, and shows it over that build, across reloads, for a day at
-most. A page of another build shows that build's plan alone: pushes to `main`
-deploy production, so the next build carries the verdict from the plan. A
-refusal shows its message under the state line, in the plan tool's words, and
-the entry stays as it was. Undoing a verdict, "not now" and "yes, but" are not
+keeps the verdict in its own memory of its writes (`writes.ts`) and shows it
+over whatever build it is, across reloads, until a build's plan shows that
+verdict for the entry: pushes to `main` deploy production, and the deploy of
+another push may go live before the one that carries the verdict. Then the
+page forgets it, and after a day it forgets it anyway. When the answer is lost
+(no connection, or none within 20 seconds), the page asks once more before it
+shows a failure: the verdict may be on `main` already, and the server then
+answers "already". A refusal shows its message under the state line, in the
+plan tool's words, and the entry stays as it was. Undoing a verdict, "not now" and "yes, but" are not
 done on the page, and neither is a verdict on a part, a word, a principle or a
 property.
 
