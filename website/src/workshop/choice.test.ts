@@ -144,6 +144,21 @@ Recommended: build it. Budgets need it.
     expect(table(SPEND.replace('Recommended: build it.', 'Recommended: build it later.')).why).toMatch(/^Build it later\. Budgets/);
   });
 
+  it('takes a recommendation that names the marked option by some of its words, and leaves them out of the reason', () => {
+    expect(table(SPEND.replace('Build it (recommended).', 'Build it in Zig (recommended).')).why).toMatch(/^Budgets need it/);
+    expect(table(WORD_AGENT.replace('Recommended: the everyday word, never counted.', 'Recommended: the everyday word.')).why).toMatch(/^People will keep/);
+  });
+
+  it('keeps the words such a recommendation adds, at the start of the reason', () => {
+    expect(table(SPEND.replace('Recommended: build it.', 'Recommended: now, build it.')).why).toMatch(/^Now, build it\. Budgets need it/);
+  });
+
+  it('takes no recommendation that uses a word only another option has', () => {
+    const notes = WORD_AGENT.replace('Recommended: the everyday word, never counted.', 'Recommended: the everyday word, as a conversation.');
+    const { choice } = splitNotes(notes)!;
+    expect(parseChoice(choice)).toEqual({ text: choice.replace('## The choice', '').trim() });
+  });
+
   it('keeps the paragraphs after the recommendation apart from the reason, each whole', () => {
     const more = 'This replaces `spend-per-computer`, which gave\nonly a total.\n\nA price that changes does not change what was shown.';
     for (const notes of [SPEND.replace('## Notes', `${more}\n\n## Notes`), SPEND.slice(0, SPEND.indexOf('## Notes')) + more, SPEND.replace('## Notes', `${more}\n\n## Notes`).replace(/\n/g, '\r\n')]) {
@@ -169,9 +184,6 @@ Recommended: build it. Budgets need it.
     ['two options marked', (notes) => notes.replace('Leave it out.', 'Leave it out (recommended).')],
     ['a recommendation of the option not marked', (notes) => notes.replace('Recommended: build it.', 'Recommended: leave it out.')],
     ['another option named with words that follow it', (notes) => notes.replace('Build it (recommended).', 'Keep it (recommended).').replace('Leave it out.', 'Remove it.').replace(/Recommended: build it\.[^#]*/, 'Recommended: Remove it after the trial. It saves memory.\n\n')],
-    ['a recommendation that starts with no option\'s name', (notes) => notes.replace('Recommended: build it.', 'Recommended: now, build it.')],
-    ['a recommendation of a word that only starts as the name does', (notes) => notes.replace('Recommended: build it.', 'Recommended: build items.')],
-    ['a recommendation of some of the name\'s words', (notes) => notes.replace('Build it (recommended).', 'Build it in Zig (recommended).')],
     ['a recommendation that starts with another option\'s longer name', (notes) => notes.replace('Leave it out.', 'Build it later.').replace('Recommended: build it.', 'Recommended: build it later, as an extension.')],
     ['a list inside an option', (notes) => notes.replace('- Leave it out.', '  - per model\n- Leave it out.')],
   ];

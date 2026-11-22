@@ -81,11 +81,34 @@ function beginsWith(text: string, name: string): boolean {
   return said.startsWith(start) && !/[\p{L}\p{N}_-]/u.test(said.charAt(start.length));
 }
 
+/** Words too common to tell one option from another. */
+const COMMON = new Set(['the', 'and', 'for', 'with', 'that', 'this', 'its', 'are']);
+
+/** The words of a name that can tell it from another: three letters or more, and not a common one. */
+const wordsOf = (text: string): string[] => (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((word) => word.length >= 3 && !COMMON.has(word));
+
 /**
- * The reason under "Why this one", of "Recommended: <option>. <why>". The option is left out when it only names the
- * marked one. One that says more ("build it, in its later stage") starts the reason, so that is not lost. Null when
- * there is no reason, or when what is recommended does not begin with the marked option's name or begins with
- * another's: the mark and the reason would then be of two options.
+ * Whether what follows "Recommended:" names the marked option and no other. It does when it begins with the marked
+ * option's name, and with no longer name of another option. It also does when it uses a word that only the marked
+ * option's name has and no word that another option's name has and the marked one's lacks: "one position" for "One
+ * position gives all four". Anything else could mark one option and give the reason of another.
+ */
+function namesMarked(named: string, marked: ChoiceOption, options: ChoiceOption[]): boolean {
+  const others = options.filter((option) => option !== marked);
+  const begun = others.filter((option) => beginsWith(named, option.name));
+  if (beginsWith(named, marked.name)) return begun.every((option) => option.name.length <= marked.name.length);
+  if (begun.length) return false;
+  const own = new Set(wordsOf(marked.name));
+  const foreign = new Set(others.flatMap((option) => wordsOf(option.name)).filter((word) => !own.has(word)));
+  const said = wordsOf(named);
+  return said.some((word) => own.has(word) && !others.some((option) => wordsOf(option.name).includes(word))) && !said.some((word) => foreign.has(word));
+}
+
+/**
+ * The reason under "Why this one", of "Recommended: <option>. <why>". The option is left out when it says nothing the
+ * marked name does not: the name itself, or some of its words. One that says more ("build it, in its later stage")
+ * starts the reason, so that is not lost. Null when there is no reason, or when what is recommended does not name the
+ * marked option alone.
  */
 function whyOf(line: string, options: ChoiceOption[]): string | null {
   const end = line.indexOf('. ');
@@ -94,10 +117,12 @@ function whyOf(line: string, options: ChoiceOption[]): string | null {
   const why = line.slice(end + 2).trim();
   if (!named || !why) return null;
   const marked = options.find((option) => option.recommended)!;
-  if (!beginsWith(named, marked.name) || options.some((option) => option !== marked && beginsWith(named, option.name))) return null;
-  if (plain(named) === plain(marked.name)) return why;
-  // The case of the name's first letter, so a name such as libkrun keeps its small one.
-  return `${marked.name[0]}${named.slice(1)}. ${why}`;
+  if (!namesMarked(named, marked, options)) return null;
+  const own = new Set(wordsOf(marked.name));
+  if (plain(named) === plain(marked.name) || (!beginsWith(named, marked.name) && wordsOf(named).every((word) => own.has(word)))) return why;
+  // The first letter as a sentence starts, or as the name has it when the name leads, so libkrun keeps its small one.
+  const first = beginsWith(named, marked.name) ? marked.name[0] : named[0].toUpperCase();
+  return `${first}${named.slice(1)}. ${why}`;
 }
 
 /** The section as a table to draw, or as the Markdown it is when any of it does not fit the shape. */

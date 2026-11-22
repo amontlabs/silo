@@ -659,12 +659,14 @@ What a person sees:
   - "An agent's part, <date>." is not shown. An option's cost starts at its
     sentence "It costs" and runs to the end of the option. An option without
     that sentence spans both columns.
-  - What follows "Recommended:" must begin with the name of the option marked
-    "(recommended)", and with no other option's name. Case and punctuation at
-    the end do not count. Otherwise the section is of another shape: it could
-    mark one option and give the reason of another. The name is left out when
-    it stands alone. One that says more starts "Why this one": "Build it, in
-    its later stage."
+  - What follows "Recommended:" must name the option marked "(recommended)"
+    and no other. It does when it begins with that option's name, without
+    regard to case and to punctuation at the end. It also does when it uses a
+    word that only that name has, and no word that only another option's name
+    has: "one position" for "One position gives all four". Otherwise the
+    section is of another shape: it could mark one option and give the reason
+    of another. What it says is left out when the name already says it. One
+    that says more starts "Why this one": "Build it, in its later stage."
   - On a feature whose choice has that shape, "Recommended: take" stays as a
     line and "Why this one" is its reason, so `suggest.why` is not shown.
   - The paragraphs after the one that starts "Recommended:" go on with the
