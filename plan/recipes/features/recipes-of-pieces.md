@@ -14,5 +14,5 @@ The options:
 - Leave it out. Each recipe says everything itself. It costs the same lines in every recipe, and a
   skill copied by hand into the folder of each agent program.
 
-Recommended: build it. You asked that recipes be made of pieces, and a short list of pieces is what
+Recommended: build it. polarzero asked that recipes be made of pieces, and a short list of pieces is what
 makes a recipe quick to write and to read.

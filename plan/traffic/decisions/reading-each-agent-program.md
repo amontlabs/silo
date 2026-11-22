@@ -62,8 +62,8 @@ repository.
 
 ### The test
 
-An ordinary inspecting proxy, mitmproxy 12.3.1, stood in for the boundary on a Mac, with the
-owner's own sign-ins. Each program was told to trust the proxy's certificate for one command.
+An ordinary inspecting proxy, mitmproxy 12.3.1, stood in for the boundary on a Mac, with
+polarzero's own sign-ins. Each program was told to trust the proxy's certificate for one command.
 Nothing was added to the system's trust store. The proxy, its certificate and the raw output were
 deleted afterwards. The summary files that were kept hold, per request, header names, sizes,
 hashes and counts. They hold no sign-in and no conversation text.

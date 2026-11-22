@@ -14,13 +14,13 @@ The options:
   It costs rework underneath everything else: the record, the rules and the app all stand on the
   engine, and a wrong base is paid for in each of them.
 
-Recommended: slowly on the engine. You said it yourself, and the trial of 21 November already paid:
+Recommended: slowly on the engine. polarzero said it themselves, and the trial of 21 November already paid:
 of three checks meant to keep the deciding part from reading the clock, one let eight of nine ways
 through.
 
 ## Notes
 
-The owner said this.
+polarzero said this.
 
 ## From Guillotine
 

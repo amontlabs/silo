@@ -20,8 +20,8 @@ others and computer use, each add one thing and make no computer.
 
 ## Notes
 
-"A recipe is made of pieces that combine" is the owner's, 18 November 2026. The second sentence
+"A recipe is made of pieces that combine" is polarzero's, 18 November 2026. The second sentence
 is a proposal, and sets the word `piece`.
 
-The owner's two examples of pieces: the tools of the computer that watches the others, and
+polarzero's two examples of pieces: the tools of the computer that watches the others, and
 computer use.

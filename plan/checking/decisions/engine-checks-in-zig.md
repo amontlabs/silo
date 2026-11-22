@@ -1,6 +1,6 @@
 # In which language the engine's checks are written
 
-The owner, 21 November 2026, after a trial ran a small real core in Zig over every sequence of
+polarzero, 21 November 2026, after a trial ran a small real core in Zig over every sequence of
 calls and under a simulator, with no model in another language: "Yes we go full zig." And: "it's
 our language, it's great that we can test with it, and we'll really use the language to prove,
 conceptualize, visualize, etc, we want to build from extremely strong principles and this is part

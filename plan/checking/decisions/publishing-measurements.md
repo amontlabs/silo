@@ -14,9 +14,9 @@ The options:
   It costs trust: readers cannot tell a number not measured yet from one that looks bad, and a page
   of only good numbers reads as marketing.
 
-Recommended: every target, met or missed. You asked to measure excellently and make a difference
+Recommended: every target, met or missed. polarzero asked to measure excellently and make a difference
 there, and people trust measurements that show their misses.
 
 ## Notes
 
-Suggested in the notes. The owner, on it: "measure excellently and make a difference there".
+Suggested in the notes. polarzero, on it: "measure excellently and make a difference there".

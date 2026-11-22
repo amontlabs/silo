@@ -24,7 +24,7 @@ free once you see what fills it. How early it alerts is a setting with three pre
 
 How early is part of the question.
 
-The owner's other first thoughts, rough: for disk, what many apps already do; how early is a
+polarzero's other first thoughts, rough: for disk, what many apps already do; how early is a
 setting with a few presets.
 
 To settle with the product and its design.

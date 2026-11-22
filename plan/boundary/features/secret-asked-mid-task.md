@@ -18,7 +18,7 @@ The options:
 Recommended: build it. You suggested it, it is a small step once secrets are held outside and asks
 exist, and it removes the main reason a secret ends up in a conversation.
 
-## The owner's words (21 November 2026)
+## polarzero's words (21 November 2026)
 
 > Stuff such as asking a secret for instance could just be a silo tool shouldn't be?
 
@@ -26,7 +26,7 @@ So the agent asks with a tool of the `silo` command inside the computer, and the
 you in Silo's prompt. The `silo` command so far only reads (`silo-command-reads-the-app`); this adds
 asks to it.
 
-From the list of smaller features the owner put on the roadmap on 21 November 2026. The owner's
+From the list of smaller features polarzero put on the roadmap on 21 November 2026. polarzero's
 words on the list are in `what-ships-with-silo`.
 
 ## An agent's notes

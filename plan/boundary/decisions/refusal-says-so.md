@@ -3,7 +3,7 @@
 ## The choice
 
 An agent's part, 22 November 2026. A program in main connects to a host that no rule allows, and
-Silo refuses the connection. You agreed on 20 November that what comes back says so. What is left
+Silo refuses the connection. polarzero agreed on 20 November that what comes back says so. What is left
 is the word for it, and its meaning.
 
 The options:
@@ -19,12 +19,12 @@ refusal is the plain word for it.
 
 ## Notes
 
-- The sentence is worded from the owner's correction.
+- The sentence is worded from polarzero's correction.
 - "What watches it" is the classifiers and precautions about a computer. By default a computer sees
   nothing of the opinions and precautions about it: the taken decision `where-precautions-live`
   in `rules`.
 - What the reason in a refusal may say: `reason-in-a-refusal`.
-- The owner agreed to this wording on 20 November 2026, without "By default". An agent added those
+- polarzero agreed to this wording on 20 November 2026, without "By default". An agent added those
   two words on 22 November 2026, because `where-precautions-live` makes it a default: you can let
-  main read the opinions about it. The verdict waits for the owner's yes to
+  main read the opinions about it. The verdict waits for polarzero's yes to
   the meaning of "refusal" this decision sets.

@@ -13,7 +13,7 @@ The options:
 - Measure when it is slow. Features are built first and tuned when someone complains. It costs
   weight that builds up unseen and is expensive to remove later.
 
-Recommended: a principle. You asked on 21 November that anything of Silo's be as light as possible,
+Recommended: a principle. polarzero asked on 21 November that anything of Silo's be as light as possible,
 and a virtual machine is already heavy enough.
 
 ## Notes
@@ -21,7 +21,7 @@ and a virtual machine is already heavy enough.
 Agent, 22 November 2026, from Guillotine and guillotine-mini (evmts), two Zig codebases by one
 maintainer.
 
-The owner, 21 November 2026: "My wish being that anything silo is as lightweight as possible and
+polarzero, 21 November 2026: "My wish being that anything silo is as lightweight as possible and
 barely demands anything (excluding stuff like vms of course which is not silo but
 libkrun/microsandbox/third party)."
 

@@ -14,11 +14,11 @@ The options:
 - Build the uses people ask for. The first ones arrive sooner and need no setup. It costs a change
   inside Silo for every new use, and users who cannot adapt what they got.
 
-Recommended: a principle. You asked for classifiers to be "very customizable", and this is the
+Recommended: a principle. polarzero asked for classifiers to be "very customizable", and this is the
 general form of that. Engineers know it as the separation of mechanism and policy.
 
 ## Notes
 
-The owner said it about what a classifier's program does, and asked that it be "very customizable". Those cases are the decisions `what-defines-a-classifier` and `what-ships-with-silo`.
+polarzero said it about what a classifier's program does, and asked that it be "very customizable". Those cases are the decisions `what-defines-a-classifier` and `what-ships-with-silo`.
 
-The general sentence is an agent's, put forward on 20 November 2026. The owner has not answered it.
+The general sentence is an agent's, put forward on 20 November 2026. polarzero has not answered it.

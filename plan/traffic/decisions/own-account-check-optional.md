@@ -19,6 +19,6 @@ for the computer where you have a reason to doubt an agent.
 
 ## Notes
 
-The owner said this, on 19 November 2026.
+polarzero said this, on 19 November 2026.
 
-Not settled, in the owner's words: "Whether it is on by default, and how it is built, are not settled."
+Not settled, in polarzero's words: "Whether it is on by default, and how it is built, are not settled."

@@ -22,13 +22,13 @@ The options:
   in main.
 
 Recommended: offered one by one. Main is where agents have full access, so what goes into it should
-be what you chose. You asked for good onboarding, and the first agent in main should work with what
+be what you chose. polarzero asked for good onboarding, and the first agent in main should work with what
 it had on your Mac.
 
 ## Notes
 
-The owner said this: everyone has their own agent programs, providers and habits; how does all of it
-work inside their Silo computers? The owner wants good onboarding for it.
+polarzero said this: everyone has their own agent programs, providers and habits; how does all of it
+work inside their Silo computers? polarzero wants good onboarding for it.
 
 Whether main copies from the Mac or starts from a guided recipe is open:
 `main-from-the-mac-or-a-recipe`.

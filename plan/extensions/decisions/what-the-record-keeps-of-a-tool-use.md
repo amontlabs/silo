@@ -1,8 +1,8 @@
 # What the record keeps of a tool use
 
-- The owner, on 21 November 2026, when agreeing to `extension-tool-use-is-a-fact`: "since it's a
+- polarzero, on 21 November 2026, when agreeing to `extension-tool-use-is-a-fact`: "since it's a
   silo tool call we can confidently know what it means and improve the Ux for it as in display it
-  with more knowledgable information". The owner then read the wording of the answer and agreed
+  with more knowledgable information". polarzero then read the wording of the answer and agreed
   to it the same day.
 - An agent: the answer says what the record keeps, because a view can show only that. How a view
   shows it is settled when that view is built.

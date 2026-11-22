@@ -6,7 +6,7 @@ An agent's part, 22 November 2026. An extension called Leftovers reads the file 
 says how /work/app/node_modules would come back: by a rebuild. Disk shows that opinion on the folder,
 and a precaution you set could act on it.
 
-The decision you took, `extension-tools`, gives three kinds of tool, like the scopes of a GitHub
+The decision polarzero took, `extension-tools`, gives three kinds of tool, like the scopes of a GitHub
 token: reads, shows and protects. Giving that opinion is none of them. It reads nothing. It is not an
 alert, a question or a panel. It does not deny, hold or pause, though a precaution can act on it. So
 under the decision as taken, no extension can give an opinion, and an extension cannot be a
@@ -24,13 +24,13 @@ The options:
 - Keep three kinds. Only Silo's own classifiers give opinions. It costs every judgement Silo did not
   think of: an extension could only alert you, and no precaution could act on what it found.
 
-Recommended: a fourth kind. You asked for a list like the scopes of a GitHub token, and an opinion
-has a target and a worst case of its own. Your words of 21 November also say that an answer belongs
+Recommended: a fourth kind. polarzero asked for a list like the scopes of a GitHub token, and an opinion
+has a target and a worst case of its own. polarzero's words of 21 November also say that an answer belongs
 to a tool.
 
 ## Notes
 
-Everything else of `extension-tools` stays word for word, and its notes keep your words. Its table,
+Everything else of `extension-tools` stays word for word, and its notes keep polarzero's words. Its table,
 with the fourth row:
 
 | A tool | Target | What the extension may do | Worst case |
@@ -42,7 +42,7 @@ with the fourth row:
 
 `extension-gives-an-opinion` says how such an opinion is kept, and needs this entry.
 
-## The owner's words (22 November 2026)
+## polarzero's words (22 November 2026)
 
 "This is pretty weird and seems like a smell that we're not framing it correctly. I mean an
 extension can provide an output that is an opinion. It can also show and what it shows could very
@@ -55,5 +55,5 @@ An agent's part, the same day. The kinds say what a tool costs the user: what it
 what it shows takes attention, what protects takes time. An opinion is what an extension says
 through a tool, whichever kind the tool is, so it is not a kind. The notes of
 `extension-gives-an-opinion` had weighed a fourth kind and found against it for this reason. The
-agent who answers to the owner withdrew the recommendation to take this entry, and
-`extension-gives-an-opinion` no longer needs it. The owner has not ruled.
+agent who answers to polarzero withdrew the recommendation to take this entry, and
+`extension-gives-an-opinion` no longer needs it. polarzero has not ruled.

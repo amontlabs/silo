@@ -12,7 +12,7 @@ The options:
   waits five minutes and reads what each kind of computer still holds, on a Mac and on a Linux host.
   The numbers are published, and a kind of computer that misses its target or gives nothing back
   comes back to you. It costs a run of the benchmark at each release. Until its first run nobody
-  knows whether a macOS computer gives anything back, so `idle-memory`, which you took, is not shown
+  knows whether a macOS computer gives anything back, so `idle-memory`, which polarzero took, is not shown
   to hold there.
 - Measured once, before the first release. It costs what changes later: an update of macOS, or of
   what runs Linux computers, can stop memory coming back, and nothing would show it.

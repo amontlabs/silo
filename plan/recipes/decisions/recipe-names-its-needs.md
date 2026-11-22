@@ -1,6 +1,6 @@
 # What a computer needs from outside
 
-## The owner's words (21 November 2026)
+## polarzero's words (21 November 2026)
 
 - About the secrets of an extension: is a secret named in the recipe, and is a recipe only what
   gets inside the computer? It would be weird for an extension to name its secrets in one place
@@ -31,4 +31,4 @@ recipe of its test computer and names `registry.npmjs.org`; an agent in main add
 and secrets as proposals, which Silo switches on only with your yes, and that the rules in force are
 kept by the engine and never read from the repository.
 
-The question is put to the owner in `recipe-source-in-repository`, under "The choice".
+The question is put to polarzero in `recipe-source-in-repository`, under "The choice".

@@ -4,7 +4,7 @@
 
 An agent's part, 22 November 2026. Silo ships a handful of small checks, such as the one that says
 which run wrote a file. The plan calls them built-in classifiers. A Mac holds only a few running
-computers, and you decided that what ships follows the same rule as what people add, so each would
+computers, and polarzero decided that what ships follows the same rule as what people add, so each would
 take a computer of its own.
 
 The options:

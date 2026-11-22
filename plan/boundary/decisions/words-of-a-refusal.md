@@ -1,1 +1,1 @@
-The owner said both sentences.
+polarzero said both sentences.

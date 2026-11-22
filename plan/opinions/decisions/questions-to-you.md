@@ -19,7 +19,7 @@ enough.
 
 ## Notes
 
-The owner said this, in the discussions of 18 and 19 November 2026.
+polarzero said this, in the discussions of 18 and 19 November 2026.
 
 How the answer is kept: `how-your-answer-is-kept`. That it stays an opinion follows from the word
 `opinion`.

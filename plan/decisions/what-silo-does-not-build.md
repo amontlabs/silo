@@ -15,7 +15,7 @@ The options:
 - Name the two exceptions (recommended). Silo does no orchestration. A file crosses between two
   computers only by a rule you set. From Silo you send an agent only an answer to its question and a
   comment on what a turn changed. It costs a strict line, since a file can carry a message. It also
-  costs a second place to talk to agents beside their own apps, and you said on 21 November that
+  costs a second place to talk to agents beside their own apps, and polarzero said on 21 November that
   working with them is the client app's job.
 - Name files only. A file crosses by your rule, and from Silo you send an agent only an answer to
   its question. It costs comments, which `comments-to-the-agent` recommends leaving out.
@@ -28,7 +28,7 @@ Recommended: name the two exceptions. Both features are useful and small. Naming
 from sliding into a chat app.
 
 Whether an integration kept in Silo's own fork of T3 Code is an exception is asked elsewhere.
-The question is put to the owner in `t3-code-integration`, under "The choice".
+The question is put to polarzero in `t3-code-integration`, under "The choice".
 
 ## Found by an audit, 22 November 2026
 

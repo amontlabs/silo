@@ -1,6 +1,6 @@
 # The secrets of an extension
 
-The owner, on 21 November 2026:
+polarzero, on 21 November 2026:
 
 - An extension should be able to say which secrets the user has to give, and it then just uses
   Silo's mechanism for secrets.

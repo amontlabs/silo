@@ -11,7 +11,7 @@ The options:
   works. The push is still held. It costs one more question that every addition has to answer. A
   trap, such as a fake secret that no honest task uses, may still be set, but it is never counted as
   a promise.
-- Case by case. Only rules carry the sentence, as you said it. It costs the other promises, about
+- Case by case. Only rules carry the sentence, as polarzero said it. It costs the other promises, about
   budgets, the record or going back, which could then rest on the agent not knowing.
 
 Recommended: a principle. Silo's source and the user's rules are readable, so a promise that needs
@@ -19,6 +19,6 @@ them hidden is not one. Security engineers know this as no security through obsc
 
 ## Notes
 
-The owner said it about rules: "whether it knows or not the rules it can't go around them". That case is settled by `security-framing` and `how-a-rule-is-enforced`.
+polarzero said it about rules: "whether it knows or not the rules it can't go around them". That case is settled by `security-framing` and `how-a-rule-is-enforced`.
 
-The general sentence is an agent's, put forward on 20 November 2026. The owner has not answered it.
+The general sentence is an agent's, put forward on 20 November 2026. polarzero has not answered it.

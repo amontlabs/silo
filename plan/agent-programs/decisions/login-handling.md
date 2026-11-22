@@ -12,4 +12,4 @@ something risky: the agent in the fork holds the token, though `what-a-fork-is-g
 gets no secrets. The audit proposes that `what-a-fork-is-given` says: "A login that an agent program
 keeps on the disk is copied with the disk: Silo shows it before the fork is made."
 
-The question is put to the owner in `fork-and-sign-in`, under "The choice".
+The question is put to polarzero in `fork-and-sign-in`, under "The choice".

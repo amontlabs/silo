@@ -18,9 +18,9 @@ The options:
 Recommended: build it later, in T3 Code itself where its maintainers accept it. You want it, and an
 app that already holds your agents' threads is where a view across computers helps most.
 
-## The owner's words (21 November 2026)
+## polarzero's words (21 November 2026)
 
-The owner said T3 Code is not a competitor and should become a first-class client of Silo, through
+polarzero said T3 Code is not a competitor and should become a first-class client of Silo, through
 an integration built later:
 
 > build some integration with T3 Code in a fork. That's for later tho
@@ -37,14 +37,14 @@ On sharing one subscription or account across computers:
 - Today T3 Code connects into one computer over SSH (`computer-reached-over-ssh`,
   `agent-programs-reach-every-computer`). What a first-class client adds is not designed. The second
   sentence of `what` is an agent's wording.
-- The owner said on the same day that the view where you work with agents' threads is the client
+- polarzero said on the same day that the view where you work with agents' threads is the client
   app's job. Those words are in the notes of `what-needs-you`.
 
 ## A question for when this is designed
 
 Can one subscription or account be used from every computer with no work from the user?
 
-- The owner's idea is a proxy.
+- polarzero's idea is a proxy.
 - `logins` proposes the opposite for a subscription: "Silo holds no login of a
   subscription, for any provider."
 - The notes of `logins` say why. Anthropic's terms, read on 18 November 2026, forbid a developer to

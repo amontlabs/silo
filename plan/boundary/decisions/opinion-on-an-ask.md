@@ -16,7 +16,7 @@ The options:
 - No opinion on an ask. You answer from what the request is, and nothing else. It costs you the
   warning a classifier would have given.
 
-Recommended: shown as an opinion. You asked for classifiers to help you read less, and the ask says
+Recommended: shown as an opinion. polarzero asked for classifiers to help you read less, and the ask says
 whose opinion it is and that it can be wrong. The yes stays yours in every case.
 
 ## Notes

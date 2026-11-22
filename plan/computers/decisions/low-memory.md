@@ -22,4 +22,4 @@ stopped, and main, where your agents live, keeps going longest.
 
 ## Notes
 
-For memory, the owner's first thought is pause and alert. A first thought, not a yes.
+For memory, polarzero's first thought is pause and alert. A first thought, not a yes.

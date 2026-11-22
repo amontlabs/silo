@@ -19,16 +19,16 @@ The options:
 - No word. The app says "an extension that answers" and "Silo's own checks". It costs two names for
   one idea, in the app and in the docs.
 
-Recommended: only what answers from a fixed list. On 21 November you gave that as the reason the
+Recommended: only what answers from a fixed list. On 21 November polarzero gave that as the reason the
 word fits: it gives a value from a fixed list.
 
-## The owner's words
+## polarzero's words
 
 - First, as a hunch: "classifier" may be only a name for an added program whose output fits, not
   a strict kind.
 - On 21 November 2026: "classifier" is the correct word, and the reason is that it produces a
   value from a fixed list, more than that it produces an opinion. It is one specific case, not a
-  generic category. The owner wondered why the design fixated on it.
+  generic category. polarzero wondered why the design fixated on it.
 
 ## An agent's notes
 
@@ -44,7 +44,7 @@ word fits: it gives a value from a fixed list.
 - `what-a-classifier-is` still says a classifier is whatever gives an opinion. `opinion-is-a-value`
   notes the three shapes the plan calls an opinion.
 
-## Still unclear to the owner (21 November 2026)
+## Still unclear to polarzero (21 November 2026)
 
 "I still don't know what the output is, like how it works."
 
@@ -53,11 +53,11 @@ three words that Silo fixes (`what-wakes-an-extension`). Everything else goes th
 Nothing in the part `extensions` needs the word "classifier", so this decision can wait, and the
 fifth film can show the case without the word.
 
-## The owner's answer (21 November 2026, later)
+## polarzero's answer (21 November 2026, later)
 
-The owner now understands it this way: an answer belongs to a tool. An extension that has the tool
+polarzero now understands it this way: an answer belongs to a tool. An extension that has the tool
 "deny or hold the network requests of main" must give that answer, and other tools may bring other
-answers. It can be called a classifier if it really needs a name. The owner agrees to leave this
+answers. It can be called a classifier if it really needs a name. polarzero agrees to leave this
 decision undecided and to keep the word out of the fifth film.
 
 ## Found by an audit, 22 November 2026
@@ -69,4 +69,4 @@ an extension with a computer. The audit proposes that this entry alone sets the 
 gives a value from a fixed list as its opinion: a pattern or a function inside Silo, or an
 extension." A second audit asks instead: is each built-in an extension with a computer?
 
-The question is put to the owner in `built-in-classifiers-run-inside`, under "The choice".
+The question is put to polarzero in `built-in-classifiers-run-inside`, under "The choice".

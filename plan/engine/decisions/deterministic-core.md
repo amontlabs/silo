@@ -16,7 +16,7 @@ The options:
 - An ordinary program. Threads where they help, and the clock read where it is needed. It costs the
   replay: a failure seen once may never be seen again, and the simulator cannot check this part.
 
-Recommended: same inputs, same result. The two properties this entry sets are the ones you said yes
+Recommended: same inputs, same result. The two properties this entry sets are the ones polarzero said yes
 to writing in on 21 November, and a trial showed that a test can hold them.
 
 ## Found
@@ -61,12 +61,12 @@ inputs stop giving the same outputs. Only the test that reads the source caught 
 
 ## The property this entry proposes
 
-`core-touches-nothing` was shown to the owner on 21 November 2026, before the trial, with its
-check left to the trial. The owner said to write it into the entry. Its check is a test, made of
+`core-touches-nothing` was shown to polarzero on 21 November 2026, before the trial, with its
+check left to the trial. polarzero said to write it into the entry. Its check is a test, made of
 the last two rows of the table.
 
 A second property, `core-keeps-nothing-between-calls`, says that the core keeps nothing between
-two calls outside its state. The ninth way above is the case for it. The owner said yes on
+two calls outside its state. The ninth way above is the case for it. polarzero said yes on
 21 November 2026 to writing it into the entry.
 
 ## From Guillotine

@@ -18,7 +18,7 @@ processor anyway, so it costs little and saves you the hunt.
 
 ## Notes
 
-From the list of smaller features the owner put on the roadmap on 21 November 2026. The owner's
+From the list of smaller features polarzero put on the roadmap on 21 November 2026. polarzero's
 words on the list are in `what-ships-with-silo`.
 
 ## An agent's notes

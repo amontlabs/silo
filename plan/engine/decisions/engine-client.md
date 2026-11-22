@@ -1,6 +1,6 @@
 # What speaks to the engine from the app and the command line
 
-- The owner set this on 16 November 2026.
+- polarzero set this on 16 November 2026.
 - That the Mac app is Swift and only renders is `mac-app-language`, in the part `views`.
 
 ## Sources

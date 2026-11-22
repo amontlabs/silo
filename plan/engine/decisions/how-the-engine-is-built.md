@@ -18,13 +18,13 @@ The options:
   the one outside look the pattern gets, since an agent tends to accept what another agent wrote in
   the same style.
 
-Recommended: checks first, and a person reads the first files. These are your own four lines.
+Recommended: checks first, and a person reads the first files. These are polarzero's own four lines.
 Guillotine, one of the projects you trust, wrote its rules as instructions to agents: they ban one
 way of hiding an error, and its code does it 26 times.
 
 ## Notes
 
-The owner said these. Two other lines of the same list have their home elsewhere: "No time
+polarzero said these. Two other lines of the same list have their home elsewhere: "No time
 estimates" binds every agent and is in the repository's `AGENTS.md`; "Properties are stated and
 checked as we build" is `properties-are-checked`, in the part `checking`.
 

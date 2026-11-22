@@ -7,4 +7,4 @@ after a grant. The audit proposes to keep the safer default and to add to `what-
 "Its commits leave when you grant the push or bring them to the parent (`keeping-from-a-fork`)."
 This decision then reads: Git is the way out, open at any moment of the fork's life.
 
-The question is put to the owner in `what-a-fork-is-given`, under "The choice".
+The question is put to polarzero in `what-a-fork-is-given`, under "The choice".

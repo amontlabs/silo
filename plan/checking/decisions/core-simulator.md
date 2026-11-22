@@ -6,8 +6,8 @@
 
 ## Found
 
-A trial on 21 November 2026 built a small core in Zig 0.17.1 and a simulator for it, on the
-owner's Mac (Apple M4 Max). The core holds the small model of access that `model-tool` is tried
+A trial on 21 November 2026 built a small core in Zig 0.17.1 and a simulator for it, on
+polarzero's Mac (Apple M4 Max). The core holds the small model of access that `model-tool` is tried
 on: five tables and seven calls. The code is thrown away, as every trial's code is.
 
 The proposed answer holds up.

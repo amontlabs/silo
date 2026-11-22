@@ -8,5 +8,5 @@ Two things changed around it. A question to the user is a tool that shows (`exte
 what an extension gives is an answer about a waiting request, or something it shows
 (`what-wakes-an-extension`). What stays is the requirement on it: it points at the record.
 
-Put forward by an agent on 21 November 2026, as the taken answer with its subject corrected. The
-owner read this wording and agreed to it the same day.
+Put forward by an agent on 21 November 2026, as the taken answer with its subject corrected.
+polarzero read this wording and agreed to it the same day.

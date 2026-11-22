@@ -5,7 +5,7 @@
 An agent's part, 22 November 2026. Main has no rule that allows paste.rs, and an agent in main tries
 to reach it. The connection is refused outside main.
 
-The promise you took says: "A rule is enforced by the engine, outside the computer, and each
+The promise polarzero took says: "A rule is enforced by the engine, outside the computer, and each
 decision is recorded with the version of the rule." The engine's entries now propose a small program
 for each computer, outside it, that holds that computer's network and applies its rules
 (`processes`, `which-process-holds-the-boundary`). A crash in one computer's program then leaves
@@ -30,7 +30,7 @@ program applies the rule.
 this answer. `guarantees-outside-the-computer` already says "parts of Silo that run outside the
 computer".
 
-## The owner's words (22 November 2026)
+## polarzero's words (22 November 2026)
 
 "Yeah agree we have to take the best design here." Said after an agent explained the entry in its
-own words. The owner had not yet been shown the sentence this entry sets, so it has no verdict.
+own words. polarzero had not yet been shown the sentence this entry sets, so it has no verdict.

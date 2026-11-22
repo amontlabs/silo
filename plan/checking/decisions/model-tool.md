@@ -13,12 +13,12 @@ computers, secrets and hosts, and shown the shortest one that breaks a property.
 | TLA+ with TLC | Java | Stable 1.7.4 | a research agent's report of 20 November 2026, not checked again |
 | Alloy 6 | Java | Version 6.2.0 of 9 January 2025 | the same report, not checked again |
 
-Java 25 and Node 26 are on the owner's Mac.
+Java 25 and Node 26 are on polarzero's Mac.
 
 ## What decides
 
 A trial settles this: the same small model written for each candidate. Two things decide, agreed
-with the owner on 21 November 2026:
+with polarzero on 21 November 2026:
 
 - a person reads the model easily;
 - the tool can check a history that the Zig simulator produced, so that the model cannot drift
@@ -35,8 +35,8 @@ exists for Zig.
 
 ## Found
 
-A trial on 21 November 2026 wrote the same small model of access for five candidates, on the
-owner's Mac. The model has five tables, seven calls and four properties. Its bounds are
+A trial on 21 November 2026 wrote the same small model of access for five candidates, on
+polarzero's Mac. The model has five tables, seven calls and four properties. Its bounds are
 2 computers, 2 secrets, 2 hosts, 3 rules and 6 calls in a row. Each candidate also had to write
 histories to a file and check a history given to it, in one format: one JSON object per line.
 The code is thrown away, as every trial's code is.
@@ -63,6 +63,6 @@ properties of the part `rules` will meet this case when taking a rule away is de
 
 ## No tool
 
-The owner, 21 November 2026, asked whether to drop the separate checking language: "Yes we go full
+polarzero, 21 November 2026, asked whether to drop the separate checking language: "Yes we go full
 zig." So no person had to read the five models, and the answer was written on that day. The
-reasons are in the notes of `model-of-access-first`. The owner took the entry on 21 November 2026.
+reasons are in the notes of `model-of-access-first`. polarzero took the entry on 21 November 2026.

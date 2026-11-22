@@ -1,6 +1,6 @@
 # What an extension may use
 
-## The owner's words (20 and 21 November 2026)
+## polarzero's words (20 and 21 November 2026)
 
 - An extension needs a list of authorizations, well organised, like the scopes of a token on
   GitHub. Importing it shows precisely which ones it needs.
@@ -12,7 +12,7 @@
   alerts. Silo offers a tool that creates a panel.
 - A tool is not a rule: "rules are actually kind of different and sit at a different layer."
 - "Read" is the word for the first kind, not "see".
-- An alert, a question and a panel do not read as protective to the owner. Denying, holding and
+- An alert, a question and a panel do not read as protective to polarzero. Denying, holding and
   pausing clearly are. The first three are "more informative".
 - Where an extension can pause, the user selects the computers it can pause: all of them, or
   specific ones.
@@ -45,7 +45,7 @@ it.
 can give. Reading is now a tool the manifest names, granted when the extension is installed.
 
 An earlier answer of this decision said that no call acts, so that "may use: everything" was
-safe. The owner was not convinced: a call that only reads can still leak.
+safe. polarzero was not convinced: a call that only reads can still leak.
 
 ## Open
 
@@ -54,9 +54,9 @@ say still says it is done: `extension-says-done`.
 
 ## The word "shows"
 
-The owner asked twice whether a better word exists. Compared on 21 November 2026: notifies (fits
+polarzero asked twice whether a better word exists. Compared on 21 November 2026: notifies (fits
 an alert only), informs (a question asks), displays (the same, less plain), interacts and
-communicates (true of all three, but they do not say what happens). None is better. The owner has
+communicates (true of all three, but they do not say what happens). None is better. polarzero has
 not ruled on it.
 
 ## From Guillotine

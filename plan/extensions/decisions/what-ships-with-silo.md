@@ -19,24 +19,24 @@ would is the test that this way is good enough.
 
 ## Notes
 
-The owner said this, in the discussions of 18 and 19 November 2026. The classifiers that ship with
+polarzero said this, in the discussions of 18 and 19 November 2026. The classifiers that ship with
 Silo are the features `which-run-did-it`, `how-a-path-comes-back`, `kind-of-each-call` and
 `how-each-run-is-going`, in the part `opinions`.
 
-## The owner's words on a list of smaller features (21 November 2026)
+## polarzero's words on a list of smaller features (21 November 2026)
 
-The owner wants them "in our plan on the roadmap so we decide later when we get to specifics", and
+polarzero wants them "in our plan on the roadmap so we decide later when we get to specifics", and
 said of the list:
 
 > most of these really being stuff that could be extensions on silo that either we ship builtin or
 > people might want to contribute.
 
-The owner said "most" and did not say which. On the secret asked mid-task, the owner added (21
+polarzero said "most" and did not say which. On the secret asked mid-task, polarzero added (21
 November 2026):
 
 > Stuff such as asking a secret for instance could just be a silo tool shouldn't be?
 
-An agent's reading, which the owner asked for: the list holds four kinds of thing, and only the
+An agent's reading, which polarzero asked for: the list holds four kinds of thing, and only the
 last are extensions.
 
 | Kind | Entries | Why |

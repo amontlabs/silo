@@ -15,16 +15,16 @@ The options:
   subscription.
 
 Recommended: leave it out. What people do with their accounts inside their computers is theirs, as
-you put it on 21 November, and secrets already do this for API keys.
+polarzero put it on 21 November, and secrets already do this for API keys.
 
-## The owner's words (21 November 2026)
+## polarzero's words (21 November 2026)
 
-The owner did not recognise this entry. The owner said that what people do with their subscriptions
+polarzero did not recognise this entry. polarzero said that what people do with their subscriptions
 and accounts inside their computers is theirs, and not Silo's job. The same position is in the notes
 of `logins`, from 18 November 2026.
 
-The owner also said that using one subscription or account across computers "should be easy indeed.
+polarzero also said that using one subscription or account across computers "should be easy indeed.
 I think the proxy thing basically", to look at when T3 Code is integrated. That question is in the
 notes of `t3-code-integration`.
 
-The owner has not ruled on this entry. It stays as it was.
+polarzero has not ruled on this entry. It stays as it was.

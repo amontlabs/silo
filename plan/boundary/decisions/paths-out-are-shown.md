@@ -15,7 +15,7 @@ The options:
   nothing else exists. It costs you the reason to look at the list, since you cannot take it as
   complete.
 
-Recommended: every path. You asked to know completely what goes in and out of a computer, and a list
+Recommended: every path. polarzero asked to know completely what goes in and out of a computer, and a list
 that may be incomplete does not answer that.
 
 ## Notes

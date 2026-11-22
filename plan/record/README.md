@@ -4,10 +4,10 @@ What Silo writes down about a computer: facts and reports, written once.
 
 ## For
 
-The owner asked for a good system to track what happens in a computer: which agent made which
+polarzero asked for a good system to track what happens in a computer: which agent made which
 calls, when, with which secret, at what cost, which files it wrote and deleted. On top of it, a
 way to make sense of it: which session wrote what, what might be a problem, what takes space and
-can be purged. The owner called this the core.
+can be purged. polarzero called this the core.
 
 ## Why it is so
 

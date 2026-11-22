@@ -1,6 +1,6 @@
 # What an extension is
 
-## The owner's words
+## polarzero's words
 
 - First, on 19 November 2026, of what was then called a plugin: it has a structure that must
   match what Silo supports. It says when it is triggered, what its input is, where it runs, what
@@ -12,10 +12,10 @@
   program" or "a back end" is an unnecessary abstraction (`extension-ships-a-computer`).
 - What an extension shows in the app is not a part it ships. It uses components the app already
   has, such as questions and alerts, and a tool that creates a panel (`extension-tools`).
-- The owner asked for one design of the whole before single points are settled, and found the
+- polarzero asked for one design of the whole before single points are settled, and found the
   picture below makes sense.
-- A manifest uses the standard field names, not plain labels such as "given" or "gives back". The
-  owner called `on`, `inputs`, `outputs`, `runs`, `permissions` perfect. What goes under each is
+- A manifest uses the standard field names, not plain labels such as "given" or "gives back".
+  polarzero called `on`, `inputs`, `outputs`, `runs`, `permissions` perfect. What goes under each is
   settled when it is built.
 
 ## The picture
@@ -34,7 +34,7 @@ Its secrets: `extension-secrets`. Importing and installing: `import-then-install
 
 ## Three examples
 
-The owner wants these three in the film.
+polarzero wants these three in the film.
 
 | Extension | Computer | Wakes on | May use | Adds |
 |---|---|---|---|---|
@@ -42,12 +42,12 @@ The owner wants these three in the film.
 | disk watch | yes | every minute | read `/work` on main; create a panel; alert the user | |
 | request check | yes | a network request of main waits | deny or hold that request | |
 
-Examples of what an extension may use are generic and exact, such as a path. The owner asked for
+Examples of what an extension may use are generic and exact, such as a path. polarzero asked for
 this.
 
 ## A manifest is not a recipe
 
-The owner wondered whether a manifest could be called a recipe too, and saw that it might
+polarzero wondered whether a manifest could be called a recipe too, and saw that it might
 confuse. A recipe says how to make a computer. A manifest names a recipe, and an extension that
 only adds rules has no computer at all. So the two words stay apart.
 

@@ -1,8 +1,8 @@
 # Which of what stays on disk is worth keeping
 
-The owner wanted to know, when several runs work in a repository, which run did what, what was
+polarzero wanted to know, when several runs work in a repository, which run did what, what was
 pushed, and what remains: a build, a cache, or something to keep such as an instruction added to a
-main instruction file. The owner was wary of sliding back into merging, and reminded that most
+main instruction file. polarzero was wary of sliding back into merging, and reminded that most
 people work with Git and GitHub, so most things can be pulled again.
 
 | What brings it back | Examples | How Silo knows | What Silo may do |

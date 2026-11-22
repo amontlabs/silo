@@ -32,4 +32,4 @@ Then it can:
 The answer above is (a). Under each, whatever was running in it is gone. Whether agents start
 again with it is part of the question.
 
-The owner asked that it be decided with the whole design.
+polarzero asked that it be decided with the whole design.

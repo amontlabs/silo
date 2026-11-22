@@ -1,6 +1,6 @@
 # What a precaution may do
 
-The first sentence is the owner's, settled after the rest. The other two are agreed as they
+The first sentence is polarzero's, settled after the rest. The other two are agreed as they
 stand. The list is not the whole of it: `kinds-of-action` files taking back a secret and closing
 a network or any other channel as protective, so a precaution can do them too.
 

@@ -12,7 +12,7 @@ The options:
   call back, with the denial as its result. Nothing extra is sent to Anthropic. It costs a stand-in
   for each tool of each program, and a tool without one cannot be denied. Claude Code's window shows
   the stand-in, not the model's call. It is not tested yet.
-- Silo answers the model itself, your idea of 20 November. Silo keeps the reply from Claude Code,
+- Silo answers the model itself, polarzero's idea of 20 November. Silo keeps the reply from Claude Code,
   sends Anthropic the conversation with the call and the denial, and passes on the model's next
   reply. It costs one more model request for each denial, paid on your plan. That request carries
   your Max sign-in though Claude Code did not send it, and Anthropic's terms forbid a developer "to
@@ -20,16 +20,16 @@ The options:
   Code's copy of the conversation also lacks the call and the denial, so Silo has to add them to
   every later request.
 
-Recommended: a harmless stand-in. The model sees the same thing as with your idea, and Silo never
+Recommended: a harmless stand-in. The model sees the same thing as with polarzero's idea, and Silo never
 sends a request in your name.
 
 ## Notes
 
 Left for when it is built. Silo sits before the agent program, which is what runs the tool.
 
-## The owner's way (20 November 2026)
+## polarzero's way (20 November 2026)
 
-The owner: do exactly what an agent program's automatic mode does, and "simply return the denial
+polarzero: do exactly what an agent program's automatic mode does, and "simply return the denial
 as the tool output", back to the provider.
 
 Read as a mechanism: Silo does not pass the reply to the agent program. It sends the provider the
@@ -49,12 +49,12 @@ An agent's notes on it:
   against "It does not imitate the agent program" of `forwarded-byte-for-byte`.
 - Not tested.
 
-## The owner's answer (21 November 2026)
+## polarzero's answer (21 November 2026)
 
-The owner holds that returning the denial to the provider as the tool's result works as it does in
+polarzero holds that returning the denial to the provider as the tool's result works as it does in
 an agent program, and sees one real issue: Silo sending a request of its own. It is decided later,
 in the Workshop.
 
-An agent's note, not shared by the owner: the provider keeps no conversation, so the agent
+An agent's note, not shared by polarzero: the provider keeps no conversation, so the agent
 program's later requests carry neither the call nor the denial unless Silo adds them. To test when
 this is built.

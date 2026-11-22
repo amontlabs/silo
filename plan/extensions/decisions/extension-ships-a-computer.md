@@ -1,8 +1,8 @@
 # An extension that executes anything ships a computer
 
-## The owner's words (21 November 2026)
+## polarzero's words (21 November 2026)
 
-- The owner asked for something specific and generic that says at which point an extension can
+- polarzero asked for something specific and generic that says at which point an extension can
   do something on the machine.
 - Then: if something is executed, what the extension ships is a computer. Its manifest declares
   the computer through its recipe. Secrets and the rest then fit in naturally, and importing the

@@ -18,16 +18,16 @@ The options:
   included. It costs the precautions their strength, since the agent can learn what triggers them
   and work around it.
 
-Recommended: everything except the checks. It is your own reason in `where-precautions-live`: the
+Recommended: everything except the checks. It is polarzero's own reason in `where-precautions-live`: the
 agent should not know what can trigger a precaution.
 
-Two decisions you took say that an agent reads everything, `what-an-agent-inside-may-do` and
+Two decisions polarzero took say that an agent reads everything, `what-an-agent-inside-may-do` and
 `silo-command-reads-the-app`, so this one replaces both and keeps the rest of what they say. The
 lines of the record about an opinion or a precaution are hidden with them. The audit's finding is in
 the notes of `what-an-agent-inside-may-do`.
 
-## The owner's words (21 November 2026)
+## polarzero's words (21 November 2026)
 
-The owner believes Silo plans tools for agents to read what Silo recorded "for their computer or
+polarzero believes Silo plans tools for agents to read what Silo recorded "for their computer or
 others, based on the permissions". The words and what the plan already says are in the notes of
 `app-as-text`. The record of another computer is not asked by this decision and has no entry.

@@ -3,7 +3,7 @@
 ## The choice
 
 An agent's part, 22 November 2026. An extension you installed to deny unsafe requests is slow or
-stuck, and a request from main waits for its answer. Today the decision you took gives the choice to
+stuck, and a request from main waits for its answer. Today the decision polarzero took gives the choice to
 the extension's author.
 
 The options:

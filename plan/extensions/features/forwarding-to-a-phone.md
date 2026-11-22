@@ -18,7 +18,7 @@ Recommended: build it. Agents work while you are away, and an ask nobody sees en
 
 ## Notes
 
-Set aside for later by the owner. The text, from the owner:
+Set aside for later by polarzero. The text, from polarzero:
 
 > The first added piece is a program that forwards alerts and asks to a phone: with it an ask or
 > an alert reaches a phone long before Silo has a phone app. It reads the alerts and asks of the

@@ -13,12 +13,12 @@ The options:
 - Both are protection. The pitch is simpler. It costs a broken promise on the day a classifier is
   fooled.
 
-Recommended: a principle. These are your own words, and it is the split security engineers make
+Recommended: a principle. These are polarzero's own words, and it is the split security engineers make
 between prevention and detection.
 
 ## Notes
 
-The owner said this: "A classifier can be fooled, and a rule at the boundary cannot be got around.
+polarzero said this: "A classifier can be fooled, and a rule at the boundary cannot be got around.
 So the rules are the promise, and a precaution is extra caution on top of them."
 
 The question is worded by whoever wrote the plan. The name is a concept of the design record's

@@ -6,7 +6,7 @@ An agent's part, 22 November 2026. You set a rule that no package younger than s
 installed. An agent fetches the package by hand with curl, to get past the setting of the package
 manager.
 
-This is already settled by two decisions you took: `where-limits-are-set` (limits are set at the
+This is already settled by two decisions polarzero took: `where-limits-are-set` (limits are set at the
 boundary, never inside a computer) and `rules-inside-are-no-boundary`, which gives this very case.
 You ruled on an earlier wording of this entry, so only you can close it.
 
@@ -21,5 +21,5 @@ Recommended: at the boundary. Taking it changes nothing; it closes a question yo
 ## Notes
 
 An agent's part. The design record marks this line "(Notes for the rule; Agreed for where it
-sits)" (l.430–431). The owner agreed where such a rule sits. Whether the rule exists at all is
+sits)" (l.430–431). polarzero agreed where such a rule sits. Whether the rule exists at all is
 from the notes, so this waits for `package-age-rule`.

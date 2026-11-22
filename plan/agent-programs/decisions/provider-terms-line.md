@@ -20,6 +20,6 @@ so a provider's trust in it is worth more than any one feature.
 
 ## Notes
 
-One line of the earlier notes is in question, and is the owner's to settle:
+One line of the earlier notes is in question, and is polarzero's to settle:
 
 "Silo builds nothing that helps get around a provider's terms, such as rotating accounts".

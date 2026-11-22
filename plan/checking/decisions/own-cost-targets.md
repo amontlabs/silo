@@ -17,7 +17,7 @@ The options:
   with a note, to be tuned later. It costs weight that grows a few milliseconds at a time: each
   model call and each idle hour cost a little more, and nobody chose it.
 
-Recommended: targets that hold. You asked on 21 November that anything of Silo's be as light as
+Recommended: targets that hold. polarzero asked on 21 November that anything of Silo's be as light as
 possible, and a target holds the weight down only if missing it stops the change.
 
 ## Notes

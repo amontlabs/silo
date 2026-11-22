@@ -19,5 +19,5 @@ and your own tools need recipes of your own.
 
 ## Notes
 
-The owner said this on 18 November 2026. A place where people share recipes is the later feature
+polarzero said this on 18 November 2026. A place where people share recipes is the later feature
 `sharing-place`, in `extensions`.

@@ -10,7 +10,7 @@ nothing, the check would have been the thing to fix.
 The standard name is mutation testing. What differs here: one fault is put in by hand for each
 check, where mutation testing changes the code automatically in many places.
 
-The owner said yes on 21 November 2026.
+polarzero said yes on 21 November 2026.
 
 ## From Guillotine
 

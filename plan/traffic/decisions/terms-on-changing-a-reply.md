@@ -23,4 +23,4 @@ risk, and reading three texts in full is little next to that.
 
 ## Notes
 
-Left for when it is built. This is research, done by reading the terms, not a question to send to anyone. (The owner said this.)
+Left for when it is built. This is research, done by reading the terms, not a question to send to anyone. (polarzero said this.)

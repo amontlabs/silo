@@ -20,8 +20,8 @@ should not install.
 
 ## Notes
 
-Set aside for later by the owner. What installing grants is put forward in
+Set aside for later by polarzero. What installing grants is put forward in
 `import-then-install`.
 
-Whether this is brought forward to be built with installing: the question is put to the owner in
+Whether this is brought forward to be built with installing: the question is put to polarzero in
 `importing-an-extension`, under "The choice".

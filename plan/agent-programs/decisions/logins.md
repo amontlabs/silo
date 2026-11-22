@@ -21,7 +21,7 @@ The options:
 - Promise nothing yet. Silo says nothing about subscriptions until logins are designed as a whole.
   It costs anyone with a subscription knowing whether theirs works.
 
-Recommended: Silo stays out of your logins. It matches your words of 18 November, it fits the
+Recommended: Silo stays out of your logins. It matches polarzero's words of 18 November, it fits the
 vendors' terms as read, and an API key, which Silo may hold for you, already works in every computer
 you choose. An account at risk costs more than signing in again.
 
@@ -30,14 +30,14 @@ an agent program. It is one of the two conditions of Anthropic's rule for a prod
 or runs Claude Code, kept whether or not that rule applies to Silo. Silo plans no such change, so it
 costs nothing now.
 
-## The owner's position
+## polarzero's position
 
-The owner said this, on 18 November 2026: how people set up their accounts is their own
+polarzero said this, on 18 November 2026: how people set up their accounts is their own
 business, and Silo has no say in it. Sharing one login between computers, or switching between
-several accounts, is something people do if they want. The owner does not yet have a clear idea
+several accounts, is something people do if they want. polarzero does not yet have a clear idea
 of this part and does not want it designed before the whole design is understood.
 
-The owner said this after reading what is known, on 18 November 2026: how a login gets into a
+polarzero said this after reading what is known, on 18 November 2026: how a login gets into a
 computer is not for Silo to solve. A person connects the vendor's own app the official way, over
 SSH, or runs the agent program inside the computer with an API key held as a Silo secret. The
 question that stays open is wider than logins: how agent apps connect to computers at all
@@ -78,7 +78,7 @@ question that stays open is wider than logins: how agent apps connect to compute
 
 ## Sign-ins that cross to the Mac (21 November 2026)
 
-The owner called the sign-in whose page opens on the Mac "super important". It is the feature
+polarzero called the sign-in whose page opens on the Mac "super important". It is the feature
 `sign-in-from-a-computer`, which holds no login.
 
 ## What vendors do and say

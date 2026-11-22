@@ -19,4 +19,4 @@ and only a blank one is clean.
 
 ## Notes
 
-The owner said this on 18 November 2026.
+polarzero said this on 18 November 2026.

@@ -21,7 +21,7 @@ first what sets Silo apart.
 The answer is worded by whoever wrote the plan. What the discussion said about order, with the
 design record's marks:
 
-- The order of work is the owner's.
+- The order of work is polarzero's.
 - No time estimates. (Decided)
 - The record is the core. Merging is not.
 - Main on macOS, and forks on macOS or Linux, have priority. (Owner) A fork is a copy, so a Linux

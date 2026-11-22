@@ -15,10 +15,10 @@ The options:
 - macOS only, on a Mac. It costs that developer a heavier main than needed, with at most one fork
   running beside it.
 
-Recommended: your choice. It is what you said you wanted, and its cost comes after the work on a
+Recommended: your choice. It is what polarzero said they wanted, and its cost comes after the work on a
 macOS main, in a later stage.
 
-## The owner's words (21 November 2026)
+## polarzero's words (21 November 2026)
 
 > our purpose is just to start with mac but we want mac and linux possible as main computer really
 > it should just be user choice.
@@ -31,7 +31,7 @@ This is a lean, not a verdict. The answer is written from these words.
   (`linux-server-host`, and `engine-on-linux`, taken).
 - macOS runs only on Apple hardware. On a Linux machine main is a Linux computer, and the user has
   no choice there. `one-kind-of-computer` allows a difference the platform forces.
-- No taken decision conflicts with it. `who-it-is-for` says who is first: the owner, on a Mac.
+- No taken decision conflicts with it. `who-it-is-for` says who is first: polarzero, on a Mac.
   `where-it-runs` says the user's own machine comes first. `main-and-its-agents` says there is one
   main and not which system it runs. `mac-agent-not-the-main-path` is about where the agent runs.
 - `main-on-macos-first`, which has no verdict, says "first". This decision says what comes after.

@@ -21,7 +21,7 @@ the same reason, and Silo already keeps the past.
 
 ## Notes
 
-Set aside for later by the owner. The text, put forward before:
+Set aside for later by polarzero. The text, put forward before:
 
 > **What it does.** This is measured. Because the record is kept, an added classifier can be run
 > against recorded history before it goes live. Silo replays the past to it in a fresh computer

@@ -18,12 +18,12 @@ The options:
 - Nix that you write. You see and edit Nix itself. It costs ease, since few people and few models
   write Nix correctly.
 
-Recommended: Nix underneath, unseen. It gives what you asked of recipes, machines rebuilt exactly,
+Recommended: Nix underneath, unseen. It gives what polarzero asked of recipes, machines rebuilt exactly,
 and the products that use Nix for development machines all hide it.
 
 ## Notes
 
-The owner, 18 November 2026: "The owner sees Nix as what recipes need: security, predictability,
+polarzero, 18 November 2026: "polarzero sees Nix as what recipes need: security, predictability,
 and machines that can be rebuilt exactly." The answer is a proposal built on the research below.
 
 ## What the research of 18 November 2026 found

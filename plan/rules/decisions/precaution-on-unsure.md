@@ -21,8 +21,8 @@ described, and "unsure" is the one answer where a person adds something.
 
 ## Notes
 
-A default to settle when it is built, with how it is shown and changed. The owner said this.
+A default to settle when it is built, with how it is shown and changed. polarzero said this.
 
-In the owner's example of a classifier asked about each tool call, "unsure" holds the tool call
+In polarzero's example of a classifier asked about each tool call, "unsure" holds the tool call
 for you (`classifier-asked-synchronously`). What happens when no answer comes in time is asked in
 `extension-that-does-not-answer`.

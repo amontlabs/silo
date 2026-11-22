@@ -4,7 +4,7 @@ The lesson behind `recipe-stored-by-silo` and `no-project-folder` was that an ag
 rules file that sits in a repository. This answer lets a repository name rules and keeps the rules in
 force out of it.
 
-Whether this is how the owner wants it is the question under "The choice".
+Whether this is how polarzero wants it is the question under "The choice".
 
 ## The choice
 

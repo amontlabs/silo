@@ -9,7 +9,7 @@ and does not repeat them: `plan show <id>` gives each one.
 Silo gives your agents a computer of their own, with a record of what happens in it and a way
 back (`the-shape`, `record`).
 
-The first user is the owner, on a Mac (`who-it-is-for`). Where computers run after that:
+The first user is polarzero, on a Mac (`who-it-is-for`). Where computers run after that:
 `where-it-runs`. The sentence that says what Silo is, for the home page, is still to decide:
 `one-sentence`.
 

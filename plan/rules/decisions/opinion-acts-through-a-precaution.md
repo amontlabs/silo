@@ -7,5 +7,5 @@ Its second sentence stays true. Its first no longer does: an extension may deny,
 itself, and granting it that tool is what sets the precaution (`extension-may-protect` in the part
 `extensions`).
 
-Put forward by an agent on 21 November 2026, so that no taken decision contradicts another. The
-owner read this wording and agreed to it the same day.
+Put forward by an agent on 21 November 2026, so that no taken decision contradicts another.
+polarzero read this wording and agreed to it the same day.

@@ -21,7 +21,7 @@ set, off until you switch it on, and no destination is treated as special.
 
 ## Notes
 
-From the list of smaller features the owner put on the roadmap on 21 November 2026. The owner's
+From the list of smaller features polarzero put on the roadmap on 21 November 2026. polarzero's
 words on the list are in `what-ships-with-silo`.
 
 ## An agent's notes
@@ -33,7 +33,7 @@ words on the list are in `what-ships-with-silo`.
   request to a host or a command, and you would have to name it.
 - `ask-reaches-you`, which has no verdict, proposes that only Silo's own apps answer, the phone app
   included, and that a chat app or a forwarded message "does not answer". An answer given in Silo's own `phone-app` is given in Silo. An answer
-  given through `forwarding-to-a-phone` would go against it. The owner has not ruled.
+  given through `forwarding-to-a-phone` would go against it. polarzero has not ruled.
 - `hold-limit`, taken, gives every hold a limit. A merge that waits for your phone can pass it, and
   is then refused as held and not answered. The agent program may also give up first
   (`program-gives-up-first`).

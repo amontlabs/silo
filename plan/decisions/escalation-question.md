@@ -14,7 +14,7 @@ The options:
   a new feature answer it, and two properties that follow from the sentence cannot name where they
   come from.
 
-Recommended: a principle. You decided the sentence already, and this makes every addition answer to
+Recommended: a principle. polarzero decided the sentence already, and this makes every addition answer to
 it.
 
 ## Notes

@@ -7,7 +7,7 @@ The taken decision `main-and-its-agents` says there is one main. Several would c
 ## The choice
 
 An agent's part, 22 November 2026. You work for two clients and want their code and their logins
-kept apart. You decided that there is one main, and this entry still asks whether there are several.
+kept apart. polarzero decided that there is one main, and this entry still asks whether there are several.
 
 The options:
 

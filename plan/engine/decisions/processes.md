@@ -32,7 +32,7 @@ hold one computer and nothing more. The entry also sets the words for two of the
 | **Probe**, inside each computer | Nothing Silo relies on | Reports stop, and the recorder writes that the probe fell silent. Facts and rules are not affected. |
 
 - When the record cannot be written for long, what happens to a request is not decided here. The
-  question is put to the owner in `enforcing-and-recording`, under "The choice".
+  question is put to polarzero in `enforcing-and-recording`, under "The choice".
 - That the recorder is its own process is put forward in `recorder-process`, and that the boundary
   lives in the helper in `which-process-holds-the-boundary`. Both need this decision and say what
   the table assumes.

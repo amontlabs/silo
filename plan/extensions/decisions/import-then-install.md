@@ -1,8 +1,8 @@
 # Import, then install
 
-The owner, on 21 November 2026: "you import it, which allows you to preview it and then you
+polarzero, on 21 November 2026: "you import it, which allows you to preview it and then you
 actually install it and it installs the rules specifically." Installing is agreeing to everything
-the extension needs. Nothing is approved one by one. The owner called this fine, and important.
+the extension needs. Nothing is approved one by one. polarzero called this fine, and important.
 
 Before, this decision said that installing grants nothing by itself, and that every grant is
 accepted as a grant.

@@ -14,5 +14,5 @@ The options:
 - Leave it out. You notice repeats in receipts, one run at a time. It costs the patterns that span
   runs, which is where most of the waste is.
 
-Recommended: build it. You asked for the record to be a ground for noticing and improving how agents
+Recommended: build it. polarzero asked for the record to be a ground for noticing and improving how agents
 work, and this is that place.

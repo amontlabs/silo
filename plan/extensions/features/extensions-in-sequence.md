@@ -12,7 +12,7 @@ The options:
 - Build it (recommended). Each step wakes only when the one before is unsure, so the costly one sees
   a few calls a day. It costs time when a request waits for all three, since they share one limit
   and the last may not get its turn, and you set up each step. It also costs a change to
-  what you decided wakes an extension (`what-wakes-an-extension`), which is a time, a new line of
+  what polarzero decided wakes an extension (`what-wakes-an-extension`), which is a time, a new line of
   the record, your click or a request that waits. The opinion of a pattern inside Silo is none of
   these.
 - Leave it out. Each extension looks at everything it is woken for. It costs tokens: an agent asked
@@ -23,7 +23,7 @@ costly look last, because most of what they see is ordinary.
 
 ## Notes
 
-Set aside for later by the owner. The three tiers, as agreed before they were set aside:
+Set aside for later by polarzero. The three tiers, as agreed before they were set aside:
 
 > **Three tiers** (Agreed). Each wakes only when the one before cannot judge.
 >
@@ -36,7 +36,7 @@ Set aside for later by the owner. The three tiers, as agreed before they were se
 
 Put forward with `extension-manifest`: the tiers become one extension woken by another's opinion.
 
-**The monitor agent** (the owner's idea, in an agreed form). The owner proposed an agent shipped
+**The monitor agent** (polarzero's idea, in an agreed form). polarzero proposed an agent shipped
 inside the app, with tools to use the app and look inside computers, not allowed to change files
 or use the network, sitting at the app's level with the whole picture. The agreed form is the
 third tier above: your own agent program, in its own computer, with read access to the record.

@@ -1,9 +1,9 @@
 # What an extension never does
 
-## The owner's words (21 November 2026)
+## polarzero's words (21 November 2026)
 
 - On the sentence, which then said plugin: "basically perfect".
-- The reason, in the owner's words: what happens inside a computer is considered hostile, so
+- The reason, in polarzero's words: what happens inside a computer is considered hostile, so
   things are settled with rules at the boundary, and precautions and the rest are added for
   convenience. The same choice is made here: the list of tools an extension can reach is limited
   by design, which makes extensions secure and predictable.
@@ -20,7 +20,7 @@ cannot, whatever was granted when it was installed, because no such tool exists.
 
 `what-a-classifier-can-never-do` and its property: "An added classifier can never act on a
 computer, answer an ask, set or change a rule or a precaution, give a secret, or write into another
-computer." The owner did not understand where that sentence came from: it listed what is forbidden
+computer." polarzero did not understand where that sentence came from: it listed what is forbidden
 without its reason. Each item of the list grants or destroys, so the law covers it.
 
 That an extension may protect by itself is put forward apart: `extension-may-protect`.
@@ -28,6 +28,6 @@ That an extension may protect by itself is put forward apart: `extension-may-pro
 ## The same correction elsewhere
 
 Three taken decisions still say "classifier" for what is added. Each has a decision that takes its
-place, put forward and not yet seen by the owner: `extension-spend`,
+place, put forward and not yet seen by polarzero: `extension-spend`,
 `what-reading-the-record-gives`, `extension-points-at-the-record`. In the part `rules`,
 `opinion-acts-through-a-precaution` does the same for "A classifier never acts".

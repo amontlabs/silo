@@ -21,7 +21,7 @@ for your work, so a version that gets more of them wrong should not take over on
 
 ## Notes
 
-The design record marks this both as the owner's and as a proposal, and does not say which
+The design record marks this both as polarzero's and as a proposal, and does not say which
 sentence is whose.
 
 The row "A classifier's opinion" of the table "Where each kind of checking goes", whole:

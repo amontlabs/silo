@@ -6,7 +6,7 @@ An agent's part, 22 November 2026. You have two recipes, one for main and one fo
 and both include Node.js and Python. Three computers are made from main's recipe.
 
 Sharing one store of packages from your Mac into computers is ruled out by `device-not-shared`,
-which you took: nothing from your device is shared into a computer. What is left for you is the disk
+which polarzero took: nothing from your device is shared into a computer. What is left for you is the disk
 this costs.
 
 The options:

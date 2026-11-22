@@ -15,10 +15,10 @@ The options:
   costs your conversations: every extension that reads main can send them to any host its computer
   may reach.
 
-Recommended: each read names its part. It is the list of scopes you asked for, like a GitHub
+Recommended: each read names its part. It is the list of scopes polarzero asked for, like a GitHub
 token's, and an extension then holds only what its job needs.
 
-This replaces `what-reading-the-record-gives`, which you took: it gave an extension all the facts
+This replaces `what-reading-the-record-gives`, which polarzero took: it gave an extension all the facts
 and reports of the computers you chose.
 
 ## Notes

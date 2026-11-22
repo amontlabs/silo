@@ -19,5 +19,5 @@ happens as exactly as what it costs.
 
 ## Notes
 
-The owner put budgets on rates on the roadmap on 21 November 2026: spend per hour, new conversations
-per minute. The feature is `budgets-on-rates`. The owner did not answer this question.
+polarzero put budgets on rates on the roadmap on 21 November 2026: spend per hour, new conversations
+per minute. The feature is `budgets-on-rates`. polarzero did not answer this question.

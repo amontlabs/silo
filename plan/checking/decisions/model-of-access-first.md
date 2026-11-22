@@ -15,7 +15,7 @@ and says nothing about the code. Two texts make the case: Joseph Hellerstein, "N
 
 The answer of that day held a remedy: the simulator compares the Zig core with the model. So the
 tool had to be able to exchange histories with the simulator, and that became a criterion of
-`model-tool`. The owner agreed on 21 November 2026.
+`model-tool`. polarzero agreed on 21 November 2026.
 
 ## No model in another language
 
@@ -23,14 +23,14 @@ The trial of `model-tool` then ran a small real core in Zig over every sequence 
 model's bounds. It took 44 s, and no model in another language was quicker to check. Its numbers
 are in the notes of `model-tool`.
 
-The owner, 21 November 2026, asked whether to drop the separate checking language: "Yes we go full
+polarzero, 21 November 2026, asked whether to drop the separate checking language: "Yes we go full
 zig." And on why: "it's our language, it's great that we can test with it, and we'll really use
 the language to prove, conceptualize, visualize". The answer was reworded on that day to say so.
 
-The owner then asked why not use the simulator alone. The reasons are in the notes of
-`four-ways-to-check`. The owner, 21 November 2026: "we always use simulator and when we have a reason to believe
+polarzero then asked why not use the simulator alone. The reasons are in the notes of
+`four-ways-to-check`. polarzero, 21 November 2026: "we always use simulator and when we have a reason to believe
 certain order we do that in addition". The properties of access depend on the order
-of calls, as `rule-order-never-matters` says outright, so both are used here. The owner took the
+of calls, as `rule-order-never-matters` says outright, so both are used here. polarzero took the
 entry on 21 November 2026.
 
 ## What the plan does not settle for access
@@ -42,8 +42,8 @@ The trial had to assume these to write the model. Each is a question for its own
 - What a rule matches is not settled (`rules-are-data`, `allow-hold-or-deny`). Assumed: one
   computer and one host, exactly.
 - Taking a rule away is not designed. Once it exists, three of the four properties fail as the
-  trial worded them, because the rules a request saw are read against the rules of now. The
-  owner, 21 November 2026: a rule can of course be removed, and this is written when that part is
+  trial worded them, because the rules a request saw are read against the rules of now.
+  polarzero, 21 November 2026: a rule can of course be removed, and this is written when that part is
   planned.
 - What a drop does to the computer's secrets is not settled. Assumed: nothing.
 - `importing-changes-nothing`, in the part `extensions`, is also checked this way. The trial left
@@ -51,9 +51,9 @@ The trial had to assume these to write the model. Each is a question for its own
 
 ## A small version first
 
-The owner, 21 November 2026, when taking the entry: "what I'm planning for I think is to always start with a poc, like
+polarzero, 21 November 2026, when taking the entry: "what I'm planning for I think is to always start with a poc, like
 something small with relevant code, structures, and some test so I can read what the flow is,
 discuss it, then implement in the actual code."
 
-The owner added the same day that this has not started yet. It is how the owner plans to work, and
+polarzero added the same day that this has not started yet. It is how polarzero plans to work, and
 no part has been built this way so far.

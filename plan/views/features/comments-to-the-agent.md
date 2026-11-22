@@ -13,9 +13,9 @@ The options:
 - Leave it out (recommended). From the run, you open its conversation in your agent app and write
   there. It costs one switch of window.
 
-Recommended: leave it out. You said that working with the agents is the job of the client app, such
+Recommended: leave it out. polarzero said that working with the agents is the job of the client app, such
 as T3 Code, and Silo's window is where you see the work.
 
 ## Notes
 
-The question is put to the owner in `what-silo-does-not-build`, under "The choice".
+The question is put to polarzero in `what-silo-does-not-build`, under "The choice".

@@ -1,9 +1,9 @@
 # How any program on the Mac reaches any computer
 
-The owner said this, on 18 November 2026: people use the app of their agent program on the Mac
+polarzero said this, on 18 November 2026: people use the app of their agent program on the Mac
 and connect it to a machine over SSH. That can be the way into a computer. It is not yet clear
 how it works with many computers. Adding each one to SSH by hand is too heavy, a user switches
-between computers, and an agent may start other computers. The owner expects this to need
+between computers, and an agent may start other computers. polarzero expects this to need
 several discussions, and wants it researched first: similar tools, and people who have the same
 problem.
 

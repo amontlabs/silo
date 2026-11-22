@@ -3,7 +3,7 @@
 ## The choice
 
 An agent's part, 22 November 2026. An agent reads the same 4,000-line file twenty times in one run.
-You asked for repeated reads to be noticed, and you also decided that file reads are not recorded.
+polarzero asked for repeated reads to be noticed, and also decided that file reads are not recorded.
 
 The options:
 

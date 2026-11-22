@@ -9,7 +9,7 @@ is done for starting a computer, taking a checkpoint and the memory of an idle c
 keeping the record costs a build and a test suite, and for the time Silo takes to recover after a
 crash.
 
-This is what `speed-budgets` and `how-speed-is-measured`, which you took, already say. Taking it is
+This is what `speed-budgets` and `how-speed-is-measured`, which polarzero took, already say. Taking it is
 a yes to building it when its stage comes.
 
 The options:

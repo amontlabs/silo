@@ -20,7 +20,7 @@ The options:
   way of working: from the app on your Mac.
 
 Recommended: checked for each app. That a login does not end up in a fork by accident is a promise
-you took in `login-handling`, and the apps are a common way in.
+polarzero took in `login-handling`, and the apps are a common way in.
 
 ## What is known
 

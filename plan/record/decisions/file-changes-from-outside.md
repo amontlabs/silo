@@ -43,7 +43,7 @@ trial's code is.
 
 - **The Linux machine:** Ryzen 7 2700X, Ubuntu 26.04.1, MicroSandbox 0.7.14. Each number is the
   median of 7 interleaved runs.
-- **The owner's Mac:** M4 Max, macOS 26.5, MicroSandbox 0.7.16. Each number is the median of 5
+- **polarzero's Mac:** M4 Max, macOS 26.5, MicroSandbox 0.7.16. Each number is the median of 5
   interleaved runs. All of them were taken while other trials ran on the same Mac, at a load
   average of 46 to 184. Its ratios are worth more than its times.
 

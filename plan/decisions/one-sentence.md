@@ -21,7 +21,7 @@ The options:
   moment. The reason becomes "only agents work there; you visit, and what you do is told apart". It
   costs a bolder first sentence.
 - Make the bold one true. The sentence stays, and Silo must record every file read and restore to
-  any second. It costs a slower, heavier Silo and two decisions you took, `file-reads` and
+  any second. It costs a slower, heavier Silo and two decisions polarzero took, `file-reads` and
   `automatic-checkpoints`.
 
 Recommended: say what is true. The first sentence people read should be one Silo keeps.

@@ -23,7 +23,7 @@ offers it.
 
 ## Notes
 
-The owner said this, 18 November 2026. The owner expects much more interest this way.
+polarzero said this, 18 November 2026. polarzero expects much more interest this way.
 
 ## Why, as put forward
 
@@ -51,7 +51,7 @@ From earlier work on macOS computers. Not yet a decision.
 
 ## What a fork is beside a macOS main
 
-The owner said "forks are macOS or Linux". A fork is a copy, so a Linux computer beside a macOS
+polarzero said "forks are macOS or Linux". A fork is a copy, so a Linux computer beside a macOS
 main is a fresh computer, not a copy, and the answer says so. `linux-beside-a-macos-main` says
 how the code reaches it.
 

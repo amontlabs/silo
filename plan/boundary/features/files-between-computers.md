@@ -19,7 +19,7 @@ The options:
 Recommended: build it, after the features of the app's stage that every user meets. The two common
 cases already have their own way, so this one can wait for the stage "later".
 
-## The owner's words (21 November 2026)
+## polarzero's words (21 November 2026)
 
 > A file channel between computers and from the user machine to a computer indeed would be a good
 > feature. Between computers I believe there could be a tool, and this channel should be able to
@@ -42,9 +42,9 @@ The need: people who run agents on several machines move files between them by h
   computers.
 - `what-silo-does-not-build` proposes that a file crosses only by a rule you set and that Silo
   carries nothing else between agents. A file can carry a message. An agent's reading: Silo carries the file and neither reads it nor chooses where
-  it goes. The owner has not ruled on this.
+  it goes. polarzero has not ruled on this.
 - Bad paths to design: the receiving computer is paused, stopped or dropped. Its disk is full. The
   file changes while it is copied. A file of the same name is already there. A hold ends with no
   answer.
-- Stage: placed in the app's stage beside `ways-out-shown` by an agent. The owner said it "would be
+- Stage: placed in the app's stage beside `ways-out-shown` by an agent. polarzero said it "would be
   a good feature" and did not say when.

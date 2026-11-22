@@ -8,5 +8,5 @@ Found by two audits of the plan (A27 and B7).
 
 ## The choice
 
-Yes changes one word of a decision you took and nothing else. No keeps "undone", which reads as
+Yes changes one word of a decision polarzero took and nothing else. No keeps "undone", which reads as
 "reversible", the word `protective` asks not to use.

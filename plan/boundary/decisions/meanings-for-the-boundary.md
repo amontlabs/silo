@@ -10,7 +10,7 @@ Mac, the word itself has to be decided again.
 The options:
 
 - One sentence that says what the thing is (recommended). Allow, hold, deny, ask and secret each get
-  a short meaning. Boundary and channel keep the meanings you already took. The list of channels and
+  a short meaning. Boundary and channel keep the meanings polarzero already took. The list of channels and
   the rule on what is denied stay in their own decisions. It costs a reader of the word list one
   more place to look for the list of channels.
 - The meanings as the old word list has them. Each word also carries what follows from it. It costs

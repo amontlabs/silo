@@ -21,7 +21,7 @@ you.
 
 ## Notes
 
-The owner wants to plug something in and know, completely, what it can affect on the network and
+polarzero wants to plug something in and know, completely, what it can affect on the network and
 the disk, and what goes in and out of a computer. Three kinds of knowledge answer it. This
 decision holds the first; `extension-bound-checked-once` the second; the later feature
 `extension-trial-on-the-past` the third.

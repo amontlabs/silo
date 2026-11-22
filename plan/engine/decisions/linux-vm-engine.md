@@ -20,14 +20,14 @@ The options:
   and mature ones on servers. It costs two virtual machine monitors to build on and keep alike,
   memory that is not given back on a Mac, and still no fork of a running computer on the Mac.
 
-Recommended: libkrun, which is your own view of 19 November. Five measurements come before it is
+Recommended: libkrun, which is polarzero's own view of 19 November. Five measurements come before it is
 relied on, among them whether systemd and Docker run and how long a cold fork takes. If one fails,
 the question comes back to you.
 
 ## Notes
 
-The answer is the owner's view, given on 19 November 2026, and not yet taken. The owner also said
-it is decided when the time comes. In the owner's words: everything is open source, and patches
+The answer is polarzero's view, given on 19 November 2026, and not yet taken. polarzero also said
+it is decided when the time comes. In polarzero's words: everything is open source, and patches
 are cheap to write with agents; what Silo would add is mostly convenience: snapshots, the screen,
 smoother use.
 

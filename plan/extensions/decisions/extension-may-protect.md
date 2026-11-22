@@ -1,12 +1,12 @@
 # An extension may protect by itself
 
-Put forward on 21 November 2026, with the picture of an extension as a whole. The owner found
+Put forward on 21 November 2026, with the picture of an extension as a whole. polarzero found
 that picture makes sense and has not ruled on this point by itself.
 
 ## What it changes
 
 - Until now the plan said that a classifier never acts: it gives a value, and a precaution says
-  what happens. The owner found that confusing: providing an output to a precaution is not the
+  what happens. polarzero found that confusing: providing an output to a precaution is not the
   purpose of an extension, and "on not safe: deny" does not say what is denied.
 - Here an extension denies, holds or pauses by itself. The tool names its target, which says what
   is denied.
@@ -23,9 +23,9 @@ one costs only time. The law for an extension is `what-an-extension-never-does`.
 `what-a-classifier-is`, in the part `opinions`, added the property this decision removes. Its
 answer still says a classifier is whatever gives an opinion.
 
-## The owner's answer (21 November 2026, later)
+## polarzero's answer (21 November 2026, later)
 
 "If you're saying that an extension can use rules that are protective, then yes, if I understand
 correctly, but maybe I'm confusing stuff." What is meant here is tools, not rules: the extension's
-computer asks Silo to deny, hold or pause. The verdict waits for the owner's word on that reading.
-The owner agreed to that reading the same day.
+computer asks Silo to deny, hold or pause. The verdict waits for polarzero's word on that reading.
+polarzero agreed to that reading the same day.

@@ -17,16 +17,16 @@ The options:
   computer itself, as many MCP sign-ins do: it never gets it. On a macOS computer you can sign in
   again in its own browser instead.
 
-Recommended: build it. You called it super important, and without it such a sign-in cannot finish at
+Recommended: build it. polarzero called it super important, and without it such a sign-in cannot finish at
 all in a computer with no screen.
 
-## The owner's words (21 November 2026)
+## polarzero's words (21 November 2026)
 
 > That thing about signin callback to do from the user machine is super important. I think it's
 > related to giving ports from a computer accessible on the machine, which I believe is already
 > planned. This is an important feature indeed.
 
-The owner marks this feature as important.
+polarzero marks this feature as important.
 
 ## The need
 
@@ -49,7 +49,7 @@ the browser are on different machines.
   is disguised (`disguising`). The provider's answer carries a code that works as a login for a
   short time. It passes through and stays out of the record, as the value of a secret does. How is
   to design.
-- The owner said on 18 November 2026, in `logins`, that how a login gets into a computer is not for
+- polarzero said on 18 November 2026, in `logins`, that how a login gets into a computer is not for
   Silo to solve. This entry holds no login and moves none. It lets the vendor's flow finish across
   two machines.
 - A macOS computer has a browser of its own, where a sign-in can finish with nothing crossing. You

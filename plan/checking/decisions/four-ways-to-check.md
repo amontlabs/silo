@@ -22,13 +22,13 @@ and 509 MB for 10.5 million states, on a loaded Mac. One more call in a row, or 
 was no longer practical.
 
 So for access, trying the real core this way is enough, and the first engine code can be that
-part of the core. The owner agreed on 21 November 2026: "Yes we go full zig." The table's third
+part of the core. polarzero agreed on 21 November 2026: "Yes we go full zig." The table's third
 row and the answer were reworded on that day.
 
-Then the owner asked why not use the simulator alone. The simulator draws its sequences of calls
+Then polarzero asked why not use the simulator alone. The simulator draws its sequences of calls
 at random, so nothing guarantees that it draws the one order a fault needs. The test of every
 sequence is certain, and can only afford short ones. In the trial both found both faults at
-once. The owner, 21 November 2026: "we always use simulator and when we have a reason to believe
+once. polarzero, 21 November 2026: "we always use simulator and when we have a reason to believe
 certain order we do that in addition". The answer and the
 table were reworded to say so: the simulator always, and this test where a property depends on
 the order of calls.
@@ -37,7 +37,7 @@ The plan's lists named this way of checking `model`. Its name is now `bounded ex
 the standard term: it tries every case, and only up to a bound. "Exhaustive test" alone would
 read as a test of everything.
 
-The owner took the entry on 21 November 2026.
+polarzero took the entry on 21 November 2026.
 
 ## From Guillotine
 

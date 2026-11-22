@@ -14,7 +14,7 @@ The options:
   needs one, and Silo has to know where each agent program keeps its sign-in. For a program Silo
   does not know, the fork may carry it, and Silo tells you before it makes the fork.
 - Copied, and shown first. The sign-in is copied with the disk, and Silo tells you before the fork
-  is made. It costs the promise you took, that a login does not end up in a fork by accident, which
+  is made. It costs the promise polarzero took, that a login does not end up in a fork by accident, which
   becomes "never without you seeing it".
 - Left open for now. Nothing is decided until logins are designed as a whole. It costs a promise
   that is not kept until then, and the plan has to say so.
@@ -22,6 +22,6 @@ The options:
 Recommended: left out unless you say. A fork is where you put the agent you trust least. It already
 starts with none of your secrets, so the sign-in follows the same rule.
 
-This answers only what a fork carries. The rest of logins stays open in `logins`, as you asked. The
+This answers only what a fork carries. The rest of logins stays open in `logins`, as polarzero asked. The
 audit's finding is in the notes of `login-handling`. It put the second option forward first, and
 named this one as the stronger.

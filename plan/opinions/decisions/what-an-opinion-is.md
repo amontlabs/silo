@@ -1,6 +1,6 @@
 # What an opinion is
 
-The owner agreed to this in the discussions of 18 and 19 November 2026.
+polarzero agreed to this in the discussions of 18 and 19 November 2026.
 
 The row of the table "What Silo knows", whole:
 

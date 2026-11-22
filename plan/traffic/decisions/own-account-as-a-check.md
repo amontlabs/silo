@@ -21,7 +21,7 @@ with what Silo saw is worth knowing, and whether the check is on is a separate c
 
 ## Notes
 
-The owner said this, on 19 November 2026.
+polarzero said this, on 19 November 2026.
 
 - What handles a mismatch is in force: `account-mismatch-precaution`.
 - Whether each program's account matches the boundary: `own-account-matches`, with the first test.

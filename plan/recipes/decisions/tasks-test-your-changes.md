@@ -22,6 +22,6 @@ machine of each system, and only a computer made from the recipe tells you.
 
 ## Notes
 
-The owner's example, 18 November 2026. How it would work is put forward in
+polarzero's example, 18 November 2026. How it would work is put forward in
 `task-gets-one-commit`, `engine-runs-task-checks` and `task-macos-limit`; the results come back
 as receipts (`what-a-receipt-is`).

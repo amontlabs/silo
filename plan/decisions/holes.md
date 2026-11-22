@@ -1,6 +1,6 @@
 # Holes
 
-Settled by the owner after 19 November 2026.
+Settled by polarzero after 19 November 2026.
 
 ## From Guillotine
 

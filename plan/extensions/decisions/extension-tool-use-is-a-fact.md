@@ -4,7 +4,7 @@
   extension points at the lines of the record that led to it. In the fifth film, disk watch wakes
   on a time, reads `/work` on main and alerts. Nothing put that read in the record, so its alert
   had no line to point at. With this decision it points at "disk watch read /work on main".
-- The owner, the same day: "I agree with this btw, since this crosses the boundary. I feel like by
+- polarzero, the same day: "I agree with this btw, since this crosses the boundary. I feel like by
   design this would have been caught anyway like no reason it doesn't get caught, except that
   since it's a silo tool call we can confidently know what it means and improve the Ux for it as
   in display it with more knowledgable information". What follows "except" is put forward in

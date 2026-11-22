@@ -32,5 +32,5 @@ the default of 14.1, question 17." That default is asked in `extension-that-does
 The property it sets is row 35 of the record's section 10, whole. For a hold, the part in force
 is `hold-limit`.
 
-- That no wait at the boundary ends by best effort is the owner's, said of the limits on a hold and
+- That no wait at the boundary ends by best effort is polarzero's, said of the limits on a hold and
   on every wait at the boundary.

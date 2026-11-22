@@ -19,5 +19,5 @@ that mean well.
 
 ## Notes
 
-Put to the owner on 19 November 2026, who did not object. That a precaution is kept outside the
+Put to polarzero on 19 November 2026, who did not object. That a precaution is kept outside the
 computer is in force (`where-precautions-live`); that nothing done inside can change it is not.

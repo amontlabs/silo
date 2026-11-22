@@ -17,9 +17,9 @@ The options:
 Recommended: build it. Editors and container tools all forward ports for this reason, and a fork you
 cannot open in your browser is of little use for web work.
 
-## The owner's words (21 November 2026)
+## polarzero's words (21 November 2026)
 
-The owner believed this was planned: "giving ports from a computer accessible on the machine, which
+polarzero believed this was planned: "giving ports from a computer accessible on the machine, which
 I believe is already planned."
 
 ## An agent's notes

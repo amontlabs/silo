@@ -17,7 +17,7 @@ The options:
   tests run again for both systems.
 
 Recommended: never names a system. It keeps the two systems the same wherever the platform does not
-force a difference, as you already decided, and keeps the part that decides small enough to check.
+force a difference, as polarzero already decided, and keeps the part that decides small enough to check.
 
 ## Notes
 

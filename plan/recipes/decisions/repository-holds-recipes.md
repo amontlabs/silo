@@ -21,7 +21,7 @@ the file names is never switched on without your yes.
 
 ## Notes
 
-The owner said this on 18 November 2026.
+polarzero said this on 18 November 2026.
 
 It has to be squared with `recipe-stored-by-silo` and `no-project-folder`. The way put forward is
 `recipe-source-in-repository`.

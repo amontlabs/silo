@@ -1,6 +1,6 @@
 # How the engine's code keeps a failure from being forgotten
 
-The owner said this on 19 November 2026. What Zig gives is agreed as the reading.
+polarzero said this on 19 November 2026. What Zig gives is agreed as the reading.
 
 The rest of the same line has its home elsewhere: "Bad paths are written first" is the principle
 `bad-paths-first`, put forward by `bad-paths-principle` and not in force; "A bad state should be
@@ -37,11 +37,11 @@ The trial proposes to say so in the answer. In the core:
 A test that reads the core's source would refuse each of them. That test was not built. A test of
 the same kind was built for `deterministic-core`, with the parser that comes with Zig.
 
-The owner said yes to the three rules on 21 November 2026: "That's pretty important to have clear
+polarzero said yes to the three rules on 21 November 2026: "That's pretty important to have clear
 guidelines for these yes so we make as high quality as possible tests". The answer was reworded
 on that day, and the entry proposes the property `core-forgets-no-case` so that the test gets
 built with the core.
 
-A fourth rule was added on the same day, with the owner's yes: no `catch` that turns every failure
+A fourth rule was added on the same day, with polarzero's yes: no `catch` that turns every failure
 into one value, such as `catch null` or `catch {}`. The trial let that through, and none of the
 three rules covered it.

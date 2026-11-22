@@ -21,7 +21,7 @@ Recommended: through a tool. Extensions exist because people hold different opin
 opinion is only useful where you look and where a precaution can read it. Which lists of values
 exist is asked in `who-fixes-the-values`.
 
-## The owner's words
+## polarzero's words
 
 - On 21 November 2026, in the notes of `what-makes-a-classifier`: "I still don't know what the
   output is, like how it works." And later that day: an answer belongs to a tool. An extension that
@@ -30,7 +30,7 @@ exist is asked in `who-fixes-the-values`.
 - On 21 November 2026, asked whether an agent should propose an answer here: "You can definitely
   propose the best design for the classifier question on its note."
 
-Everything below is an agent's proposal. The owner has not ruled on it.
+Everything below is an agent's proposal. polarzero has not ruled on it.
 
 ## Why the question exists
 
@@ -102,8 +102,8 @@ only a precaution may act on it, and no answer ever allows anything.
 | Only the tool that protects gives an opinion; other extensions alert or draw a panel | What an extension finds could not be shown in Silo's own places, checked against the user's answers (`scoring-a-classifier`) or read by a precaution. Silo's own classifiers could not be extensions (`shipped-extensions-use-the-manifest`). |
 | A fourth kind of tool beside reads, shows and protects | The kinds say what a tool costs the user. An answer costs attention, as what is shown does, or time when a precaution acts on it, as what protects does. |
 
-The decision `tools-of-an-extension` proposed that fourth kind all the same. On 22 November 2026 the
-owner called it a smell: an opinion is what an extension says, shows or protects on, and not one
+The decision `tools-of-an-extension` proposed that fourth kind all the same. On 22 November 2026
+polarzero called it a smell: an opinion is what an extension says, shows or protects on, and not one
 more thing it may do. This entry no longer needs that one.
 
 A pattern that an extension adds and Silo applies by itself, as a rule is data, would cover what a

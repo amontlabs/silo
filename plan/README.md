@@ -53,7 +53,8 @@ Each decision and each feature is one file, named by its id. The tool and the re
 call either one an **entry**. An entry may have notes beside it, in `<id>.md`. They are plain
 prose: where the entry comes from, the options, what was found, and the owner's own words. Each
 part of the notes says whether it is the owner's or an agent's. A part that does not say is an
-agent's.
+agent's. The Workshop shows the notes to every visitor, so they name the owner by GitHub name,
+polarzero, and never write "the owner". "You" in them is the user of Silo, never the owner.
 
 The notes of an entry the owner has yet to decide start with a section `## The choice`. It gives
 one real case, the options with what each costs, and the option recommended. The recommended

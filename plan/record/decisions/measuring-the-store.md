@@ -1,6 +1,6 @@
 # Designing the store
 
-The owner said this.
+polarzero said this.
 
 ## From Guillotine
 

@@ -10,9 +10,9 @@ record, so the principle is not in force yet.
 
 An agent's part. This gives agents inside "anything the user could do in the app", and
 `silo-command-reads-the-app` lets `silo` read everything the app shows. `where-precautions-live`,
-with the owner's words, says a computer sees nothing of the opinions and precautions about it. An
+with polarzero's words, says a computer sees nothing of the opinions and precautions about it. An
 agent in main runs `silo` and reads the precaution that pauses main. The audit proposes that
 `where-precautions-live` wins and that both entries say "except see the opinions and precautions
 about it". Both lose their verdict with the edit and are taken again.
 
-The question is put to the owner in `computer-reads-its-record`, under "The choice".
+The question is put to polarzero in `computer-reads-its-record`, under "The choice".

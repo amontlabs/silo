@@ -14,7 +14,7 @@ The options:
   status, each line can be answered in place, and each line opens a place with the detail. It costs
   nothing, as long as each new view keeps the three levels.
 
-Recommended: leave it out. The first screen you decided on is these three levels.
+Recommended: leave it out. The first screen polarzero decided on is these three levels.
 
 ## Notes
 

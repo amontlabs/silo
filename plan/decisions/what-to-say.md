@@ -16,15 +16,15 @@ The options:
 - What others lack. Other products checkpoint and fork machines for agents, and Silo adds the
   record. It costs being filed next to those products before anything else is heard.
 
-Recommended: what you get. You asked for accurate, simple words, and five things a person can
+Recommended: what you get. polarzero asked for accurate, simple words, and five things a person can
 picture are that. The answer is the same five lines as before, written as full sentences.
 
 ## Notes
 
 These five lines carry no mark in the design record.
 
-The owner's instruction, for all of it: phrase the product in accurate, simple words backed by the
-research, and treat the owner's own rough wording with caution. If interest comes from an accurate
+polarzero's instruction, for all of it: phrase the product in accurate, simple words backed by the
+research, and treat polarzero's own rough wording with caution. If interest comes from an accurate
 and simple description, that is the best proof the product is interesting.
 
 Proposed, adapted from the notes: "Three things cap what a person gets from agents: what they dare

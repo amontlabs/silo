@@ -15,12 +15,12 @@ The options:
 - The agent writes it. Silo shows the agent's own summary, as agent programs already do. It costs
   the check: an agent with full access can write anything, and a summary is often written to please.
 
-Recommended: Silo writes it from the record. You called the receipt the main thing Silo gives, and
+Recommended: Silo writes it from the record. polarzero called the receipt the main thing Silo gives, and
 it is worth that only if the agent cannot shape it.
 
 ## Notes
 
-The owner called the receipt the core of what Silo gives.
+polarzero called the receipt the core of what Silo gives.
 
 The design record states these sentences with no mark, so they are not in force. The meaning of
 the word `receipt` is worded from them.

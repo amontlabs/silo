@@ -14,7 +14,7 @@ The options:
 - Leave it out. You read the agent's summary and the diff. It costs everything a diff does not show,
   such as packages, hosts, secrets and spend, and any check of the agent's claim.
 
-Recommended: build it. You called the receipt the main thing Silo gives, and it is how an hour of
+Recommended: build it. polarzero called the receipt the main thing Silo gives, and it is how an hour of
 agent work is judged in a minute.
 
 ## Notes
