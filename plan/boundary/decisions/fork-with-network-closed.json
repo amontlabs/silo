@@ -1,4 +1,4 @@
 {
   "asks": "Can a fork run with no network?",
-  "answer": "A fork can run with its network closed, for a check or a benchmark, and its record shows the network stayed closed."
+  "answer": "A fork can run with its network closed, for a check or a benchmark. Its record says whether the network stayed closed from the start of the run to its end, and holds each attempt that was denied. If the network was opened at any moment, the record shows when and who opened it, and does not say it stayed closed."
 }

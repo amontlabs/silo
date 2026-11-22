@@ -1,26 +1,10 @@
 {
-  "asks": "What do these words for the boundary mean: boundary, channel, allow, hold, deny, ask, secret?",
+  "asks": "What do these words for the boundary mean: allow, hold, deny, ask, secret?",
+  "answer": "Allow, hold and deny are the three things that can happen to a request waiting at the boundary: it passes, it waits for your answer, or it is refused as denied. An ask is what a hold shows you. A secret is a value a computer can use and cannot read. Boundary and channel keep the meanings in force.",
   "needs": [
     "words-for-the-boundary"
   ],
   "sets": [
-    {
-      "in": "words",
-      "word": "boundary",
-      "means": "The edge of a computer. Everything that enters or leaves it passes through parts of Silo that run outside it. Rules decide there.",
-      "not": [
-        "wall",
-        "door"
-      ]
-    },
-    {
-      "in": "words",
-      "word": "channel",
-      "means": "One way through the boundary. The channels are the network, ports, files, secrets, the screen, the clipboard, and the way in from your Mac. None exists by default.",
-      "not": [
-        "door"
-      ]
-    },
     {
       "in": "words",
       "word": "allow",
@@ -37,7 +21,7 @@
     {
       "in": "words",
       "word": "deny",
-      "means": "What happens to one request waiting at the boundary: it is refused. Everything is denied unless a rule allows it or you say yes to an ask. \"Deny\" is the word at the boundary; \"pause\" and \"stop\" are kept for a computer.",
+      "means": "What happens to one request waiting at the boundary: it is refused, and what comes back says denied.",
       "not": [
         "block"
       ]
@@ -45,7 +29,7 @@
     {
       "in": "words",
       "word": "ask",
-      "means": "What a hold shows you: a request that waits for your answer. Your yes is a grant."
+      "means": "What a hold shows you: a request that waits for your answer."
     },
     {
       "in": "words",

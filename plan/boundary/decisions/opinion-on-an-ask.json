@@ -1,4 +1,4 @@
 {
   "asks": "What part may a classifier play in an ask?",
-  "answer": "No classifier grants anything. A classifier may give an opinion on what is held, and the ask shows it as an opinion."
+  "answer": "No classifier grants anything. A classifier may give an opinion on what is held, and the ask shows it as an opinion and says whose it is. The ask does not wait for it: when the opinion is late or missing, the ask is shown without one."
 }

@@ -1,4 +1,4 @@
 {
   "asks": "What does a fresh install allow?",
-  "answer": "A fresh install with nothing configured is the safe setup."
+  "answer": "With nothing configured, nothing is open: a new computer has its network closed and holds no secret. When you make main, Silo asks once how its network starts: open, limited or closed."
 }

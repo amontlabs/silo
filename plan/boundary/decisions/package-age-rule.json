@@ -1,4 +1,4 @@
 {
   "asks": "Is there a rule on the age of packages?",
-  "answer": "Yes. A rule denies a package younger than a set age."
+  "answer": "Yes. A rule denies a package younger than an age you set, for the registries the rule names. When the age of a package from one of those registries cannot be established, the package is denied. A package fetched from anywhere else is not covered: whether that host can be reached is for the network rules. How the boundary reads the age is to find out."
 }

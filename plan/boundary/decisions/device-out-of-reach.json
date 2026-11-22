@@ -1,11 +1,11 @@
 {
   "asks": "Can a computer reach your device?",
-  "answer": "A computer cannot reach your device: not your Mac, your local network, your VPN or cloud metadata.",
+  "answer": "A computer cannot reach your device, your local network or your VPN, even when its network is open. A rule you set can open one address and port there, by name. Cloud metadata is never reachable, and no rule opens it.",
   "sets": [
     {
       "in": "boundary/properties",
       "id": "computer-cannot-reach-your-device",
-      "says": "A computer cannot reach your device.",
+      "says": "An open network does not include your device, your local network or your VPN. No rule opens cloud metadata.",
       "kind": "safety",
       "check": [
         "hostile test"

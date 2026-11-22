@@ -15,7 +15,8 @@
     "word": "boundary",
     "means": "The edge of a computer.",
     "not": [
-      "door"
+      "door",
+      "wall"
     ]
   },
   {

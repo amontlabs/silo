@@ -1,3 +1,4 @@
 {
-  "asks": "How is a held request refused on each kind of connection?"
+  "asks": "How is a held request refused on each kind of connection?",
+  "answer": "By what the connection can carry. On a request Silo reads, it replies with the status 403 and a body that says denied, or held and not answered; a 403 is not retried by the usual programs, where a 5xx is. On a connection Silo does not read, it resets the connection. On a name lookup, it answers that the lookup is refused. When the program no longer listens, nothing is sent. In every case the record says how the hold ended. To find out: the status and the body each agent program reads best."
 }

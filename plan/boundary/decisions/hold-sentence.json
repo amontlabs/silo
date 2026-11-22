@@ -1,6 +1,6 @@
 {
   "asks": "What does an agent get back when a hold ends without your answer?",
-  "answer": "A hold waits for your answer. If it ends without one, for any reason, the request is refused with a message that says it was held and not answered.",
+  "answer": "A hold waits for your answer. If it ends without one, for any reason, the request is refused, and what comes back says it was held and not answered. The reasons are Silo's limit, a cancel from inside the computer, the program closing its connection, and the computer being paused, stopped or dropped. The ask then closes in the app, and a yes can no longer be given to it. When the program no longer listens, nothing can come back to it, and the record says how the hold ended.",
   "needs": [
     "hold-limit"
   ],

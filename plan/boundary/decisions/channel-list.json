@@ -1,4 +1,4 @@
 {
   "asks": "Which channels does a computer have?",
-  "answer": "The channels are the network, ports, files, secrets, the screen, the clipboard, and the way in from your Mac (a terminal, an editor). Each says what it lets through and in which direction."
+  "answer": "A computer's channels are the ones Silo has built. Each says what it lets through, in which direction, and what is at the other end: the internet, your Mac or another computer. The design has seven today: the network, ports, files, secrets, the screen, the clipboard and the way in from your Mac (a terminal, an editor). A feature that makes something new cross the boundary adds its channel to the list. Opening a link in the browser on your Mac would be the eighth."
 }

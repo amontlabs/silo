@@ -1,6 +1,6 @@
 {
   "asks": "Does Silo show every path by which data can leave a computer?",
-  "answer": "Every path by which data can leave a computer is among the paths Silo shows for it.",
+  "answer": "Every path by which data can leave a computer is among the paths Silo shows for it. A path ends at the first place outside the computer: a host, your Mac or another computer. Name lookups count as a path. Where a host you allowed sends the data next is not shown, because Silo cannot see it. To find out: a hostile test that tries each known side way, name lookups included.",
   "sets": [
     {
       "in": "boundary/properties",

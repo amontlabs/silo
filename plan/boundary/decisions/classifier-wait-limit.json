@@ -1,6 +1,6 @@
 {
   "asks": "Does a wait for a classifier's opinion end at Silo's limit?",
-  "answer": "The wait for a classifier's opinion has a limit too, and Silo ends it itself.",
+  "answer": "The wait for a classifier's opinion has a limit too, and Silo ends it itself. Silo keeps that limit, and the classifier or its extension cannot lengthen it. When the limit ends the wait, the request is denied or left to the rules, as the setting of that extension says.",
   "needs": [
     "hold-limit"
   ],
@@ -8,7 +8,7 @@
     {
       "in": "boundary/properties",
       "id": "every-wait-ends",
-      "says": "Every wait at the boundary ends: by an answer (yours, or a classifier's opinion), when the program closes its connection, or at Silo's own limit.",
+      "says": "Every wait at the boundary ends. When nothing else ended it, Silo ends it at its own limit.",
       "kind": "liveness",
       "check": [
         "simulator"

@@ -1,3 +1,4 @@
 {
-  "asks": "How long may a hold last?"
+  "asks": "How long may a hold last?",
+  "answer": "A hold lasts 90 seconds unless the rule that holds says otherwise. That is shorter than the two minutes after which Claude Code ends a command by default, so the agent gets Silo's message and not its own timeout. A rule can set another length. To find out by measuring: how long each agent program Silo supports waits, and how it takes the refusal at the limit. The 90 seconds change if the measures say so."
 }

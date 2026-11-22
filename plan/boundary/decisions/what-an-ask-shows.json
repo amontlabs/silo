@@ -1,4 +1,4 @@
 {
   "asks": "What does an ask show you?",
-  "answer": "An ask is the request you see when a hold needs your answer. It is shown in Silo's words, with exactly what your yes would let pass."
+  "answer": "An ask is the request you see when a hold needs your answer. Silo writes it from facts: which computer, where the request goes, what it carries when Silo can read it, and which secret it would use. It says exactly what your yes would let pass, which is that one request. When Silo cannot read what the request carries, the ask says so. What the agent says about why it asks may be shown beside it, marked as the agent's own words."
 }

@@ -18,6 +18,8 @@ The options:
 Recommended: build it, in the stage "later" where it sits. It needs a Linux computer beside main and
 agents on a macOS screen first, and both are worth having without it.
 
+## Notes
+
 From the list of smaller features the owner put on the roadmap on 21 November 2026. The owner's
 words on the list are in `silos-own-extensions`.
 

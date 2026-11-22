@@ -1,4 +1,4 @@
 {
   "asks": "Does Silo know which calls change something elsewhere?",
-  "answer": "Calls that change something elsewhere (\"outside actions\") are listed."
+  "answer": "Not as a fact. From outside the computer Silo sees a call, not what it changed on someone else's server. Which calls change something elsewhere (\"outside actions\") is the opinion of the classifier that sorts each call, and Silo lists them marked as that opinion. The list can miss one or hold one wrongly."
 }

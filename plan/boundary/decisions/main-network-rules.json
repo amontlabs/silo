@@ -1,4 +1,4 @@
 {
   "asks": "Does main reach every host its projects need?",
-  "answer": "Main has rules of its own. Holding every project does not let it reach everything."
+  "answer": "Main has rules of its own, set the same way as for every computer. Holding every project gives it no wider reach: a host is reachable from main only when main's rules allow it. Rules are per computer, so inside main an agent working on one project can reach a host allowed for another. A narrower reach takes a fork or a fresh computer with narrower rules."
 }
