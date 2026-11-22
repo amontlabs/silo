@@ -1,5 +1,5 @@
 // A scene is a piece of the page and a list of cues, each a change made at a given moment. A scene can be
-// shown as it is at any moment, or played on from one. The home page's two pictures are scenes.
+// shown as it is at any moment, or played on from one. The small pictures of the home page's cards are scenes.
 
 export type Part = HTMLElement | SVGElement;
 /** Finds parts of the scene. */

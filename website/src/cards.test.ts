@@ -162,14 +162,14 @@ describe('the dissolve of a card picture', () => {
     expect(copies('full')).toHaveLength(1);
   });
 
-  it('dissolves a card on its turn that the flow stops', () => {
+  it('dissolves a card on its turn that the film stops', () => {
     const cards = mount();
     seen(0, true);
     cards.turns(true);
     vi.advanceTimersByTime(1000);
     const classes = [...live('full').querySelectorAll('.on')].map((part) => part.getAttribute('class'));
     expect(classes.length).toBeGreaterThan(0);
-    // The flow starts playing: the cards may no longer take turns.
+    // The film starts playing: the cards may no longer take turns.
     cards.turns(false);
     expect(card('full').classList.contains('playing')).toBe(false);
     expect(copies('full')).toHaveLength(1);

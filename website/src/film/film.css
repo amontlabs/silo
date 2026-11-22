@@ -1,0 +1,121 @@
+/* The home page's film. Everything here is under .film, and the classes of what it draws start with f-.
+   It has three layouts, at the widths film.ts measures it for: the window; up to 1064 px the window with its
+   smallest words a unit larger, so they still show at 11 px; under 1000 px the phone's, where the window would be
+   too small to read. */
+.film {
+  --film-small: 13px;
+  --film-button: 14px;
+  margin: 18px -16px 0;
+  width: 1120px;
+  max-width: calc(100% + 32px);
+}
+.film figure { margin: 0; }
+.film .film-window { display: block; width: 100%; height: auto; aspect-ratio: 1120 / 480; overflow: visible; }
+.film .film-phone { display: none; }
+.film .film-under { display: flex; align-items: center; gap: 16px; margin-top: 10px; min-height: 27px; }
+/* Without its script the film is a still: its controls keep their room and are not shown. */
+.film:not(.live) .film-under { visibility: hidden; }
+.film .film-progress { flex: 1; display: flex; gap: 4px; height: 14px; align-items: center; }
+.film .film-progress button { flex: var(--w) 0 0; height: 14px; padding: 0; border: 0; background: none; cursor: pointer; position: relative; }
+.film .film-progress button:before { content: ""; position: absolute; left: 0; right: 0; top: calc(50% - 1px); height: 2px; background: var(--line); border-radius: 1px; }
+.film .film-progress button i { position: absolute; left: 0; top: calc(50% - 1px); height: 2px; background: var(--ink); border-radius: 1px; width: 100%; transform: scaleX(0); transform-origin: left; }
+.film .film-progress button:focus-visible,
+.film .film-pause:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 3px; }
+.film .film-pause { font: 13px/1 var(--sans); color: var(--muted); background: none; border: 1px solid var(--line); border-radius: 3px; padding: 6px 11px; min-width: 60px; }
+.film .film-pause:hover { color: var(--ink); border-color: var(--muted); }
+
+/* The drawing */
+.film text { fill: var(--ink); }
+.film .f-win { fill: var(--surface); stroke: var(--line); }
+.film .f-logo { color: var(--ink); }
+.film .f-hair { stroke: var(--line); fill: none; }
+.film .f-box { fill: var(--surface); stroke: var(--ink); stroke-width: 1.5; }
+.film .f-box.f-ghost { stroke: var(--wire); stroke-dasharray: 6 5; fill: none; }
+.film .f-wire { stroke: var(--line); stroke-width: 1.5; fill: none; }
+.film .f-thin { stroke: var(--wire); stroke-width: 1; fill: none; }
+.film .f-trace { stroke: var(--ink); stroke-width: 2; fill: none; }
+.film .f-line { stroke: var(--ink); stroke-width: 1.5; fill: none; }
+.film .f-dash { stroke-dasharray: 5 5; }
+.film .f-dot { stroke: var(--wire); stroke-width: 1.5; stroke-dasharray: 1 6; stroke-linecap: round; fill: none; }
+.film .f-acc-s { stroke: var(--accent); }
+.film .f-acc-f { fill: var(--accent); }
+.film .f-ink { fill: var(--ink); }
+.film .f-wiref { fill: var(--wire); }
+.film .f-bar { fill: var(--line); }
+.film .f-gate { fill: var(--surface); stroke: var(--ink); stroke-width: 1.5; }
+.film .f-gate.f-open { stroke: var(--wire); stroke-dasharray: 4 4; }
+.film .f-card { fill: var(--surface); stroke: var(--line); stroke-width: 1.25; }
+.film .f-card.f-acc { fill: var(--accent-wash); stroke: var(--accent); }
+.film .f-card.f-solid { stroke: var(--ink); }
+.film .f-card.f-placeholder { stroke: var(--wire); stroke-dasharray: 4 4; }
+.film .f-btn { fill: var(--surface); stroke: var(--wire); stroke-width: 1.25; }
+.film .f-btn.f-primary { fill: var(--ink); stroke: var(--ink); }
+/* Shapes filled with ink that carry no words: in dark they must not outshine the words. */
+.film .f-filled,
+.film .f-part { fill: var(--ink); }
+.film .f-few { fill: var(--ink); opacity: 0.45; }
+.film .f-box.f-emptied { fill: none; stroke: var(--wire); }
+.film .f-wire.f-ghosted { stroke: var(--wire); }
+.film .f-dia-o { fill: var(--surface); stroke: var(--ink); stroke-width: 1.5; }
+.film .f-knock { fill: var(--surface); }
+.film .f-hl { fill: var(--media); }
+.film .f-hit { fill: transparent; stroke: none; }
+.film .f-cursor { fill: var(--ink); stroke: var(--surface); stroke-width: 1.3; stroke-linejoin: round; }
+.film .f-tok { font: 15px var(--mono); }
+.film .f-tok16 { font: 16px var(--mono); }
+.film .f-lbl { font: var(--film-small) var(--sans); fill: var(--muted); }
+.film .f-name { font: 500 15px var(--sans); }
+.film .f-chrome { font: var(--film-small) var(--sans); fill: var(--muted); }
+.film .f-chrome.f-on { fill: var(--ink); }
+.film .f-muted,
+.film text .f-muted { fill: var(--muted); }
+.film .f-acc-t,
+.film text .f-acc-t { fill: var(--accent-ink); }
+.film .f-on-ink { fill: var(--surface); }
+.film .f-sans { font-family: var(--sans); }
+.film .f-btn-t { font-size: var(--film-button); }
+.film .f-canvas,
+.film .f-canvas ~ g { pointer-events: none; }
+.film .f-side [data-go] { cursor: pointer; outline: none; }
+.film .f-side [data-go]:focus-visible .f-hit { stroke: var(--accent-ink); stroke-width: 2; }
+
+/* In dark, --line all but vanishes on the window: what must be seen takes a stronger step. */
+:root[data-theme="dark"] .film .f-wire,
+:root[data-theme="dark"] .film .f-divide { stroke: var(--wire); }
+:root[data-theme="dark"] .film .f-bar,
+:root[data-theme="dark"] .film .f-filled { fill: var(--wire); }
+:root[data-theme="dark"] .film .f-part { fill: var(--muted); }
+:root[data-theme="dark"] .film .f-hl { fill: var(--line); }
+:root[data-theme="dark"] .film .film-progress button:before { background: var(--wire); }
+
+/* On a short screen the film gives up width, so its window and controls stay in view, down to where its words would be under 11 px. */
+@media (max-height: 820px) and (min-width: 1000px) {
+  .film { margin-top: 12px; width: min(1120px, max(948px, (100vh - 270px) * 7 / 3)); }
+  .film .film-under { margin-top: 8px; }
+}
+
+@media (max-width: 1064px) {
+  .film { --film-small: 14px; }
+}
+
+/* The phone: where we are, then the canvas through a camera, then the record. All three keep their height. */
+@media (max-width: 999.98px) {
+  .film { --film-small: 15px; --film-button: 15px; }
+  .film .film-window { display: none; }
+  .film .film-phone { display: block; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); overflow: hidden; }
+  .film .film-place { position: relative; margin: 0; height: 34px; border-bottom: 1px solid var(--line); }
+  .film .film-place span { position: absolute; left: 8px; top: 5px; padding: 0 8px; border-radius: 3px; background: var(--media); font: 13px/24px var(--sans); }
+  :root[data-theme="dark"] .film .film-place span { background: var(--line); }
+  .film .film-view,
+  .film .film-dock { display: block; width: 100%; height: auto; overflow: hidden; }
+  .film .film-view { aspect-ratio: 480 / 406; max-height: 406px; }
+  .film .film-dock { aspect-ratio: 480 / 52; max-height: 52px; box-shadow: inset 0 1px var(--line); }
+}
+@media (max-width: 640px) {
+  .film { margin-top: 20px; }
+  /* Edge to edge in the page's frame, which draws the sides. */
+  .film .film-phone { border-left: 0; border-right: 0; border-radius: 0; }
+  .film .film-under { gap: 12px; padding: 0 16px; }
+  .film .film-progress,
+  .film .film-progress button { height: 28px; }
+}

@@ -13,6 +13,7 @@
     "workshop:dev": "node scripts/workshop-dev.mjs",
     "load-check": "node scripts/load-check.mjs",
     "motion-sheet": "node scripts/motion-sheet.mjs",
+    "film-check": "node scripts/film-check.mjs",
     "film-seams": "node scripts/film-seams.mjs",
     "reload-check": "node scripts/reload-check.mjs"
   },
