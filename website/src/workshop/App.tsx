@@ -618,27 +618,28 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
 
   /**
    * All's query changes in place: the address follows. A change of filter, search or order starts over the folds made
-   * by hand, and places each open row by the state it has now.
+   * by hand. Such a change, and one of Display, places each open row by the state it has now.
    */
   function setQuery(next: Query) {
     setQueryState(next);
     if (next.order !== query.order) rememberHabit({ view: 'all', order: next.order });
     const filtersChanged = next.states.join() !== query.states.join() || next.parts.join() !== query.parts.join() || next.films.join() !== query.films.join() || next.q !== query.q || next.order !== query.order;
-    const placed = filtersChanged || !isAll ? placedNow(openKeys) : opened;
+    const released = filtersChanged || next.show.join() !== query.show.join();
+    const placed = released || !isAll ? placedNow(openKeys) : opened;
     const nextSections = allSections(plan, graph, data.stages, next, placed);
-    if (filtersChanged) {
+    if (released) {
       setOpened(placed);
-      // The folds made by hand start over, but an open entry is always drawn while the list holds it: its feature stays
-      // unfolded, and its "more" pressed when it lies past the first six.
-      const folds = new Map<string, boolean>();
-      const shownMore = new Set<string>();
+      // The folds made by hand stay through Display and start over otherwise, but an open entry is always drawn while
+      // the list holds it: its feature stays unfolded, and its "more" pressed when it lies past the first six.
+      const unfolded = new Map(filtersChanged ? [] : folds);
+      const shownMore = new Set(filtersChanged ? [] : more);
       for (const key of openKeys) {
         const found = locate(nextSections, key, new Set());
         if (!found?.holder) continue;
-        folds.set(found.holder, true);
+        unfolded.set(found.holder, true);
         if (found.more) shownMore.add(found.holder);
       }
-      setFolds(folds);
+      setFolds(unfolded);
       setMore(shownMore);
     }
     // The entry open last stays named only while the list still draws it; open, it is drawn open wherever it now stands.

@@ -146,6 +146,35 @@ describe('a row that is open when its state changes', () => {
   });
 });
 
+describe('a change in Display', () => {
+  it('lets a row that is open go, as a change of filter does', async () => {
+    const time = await openPage('?view=all&state=undecided');
+    const at = 'entry-q1@entry-top';
+    await press(at);
+    await rule(at, 'take', time);
+    fireEvent.click(screen.getByRole('button', { name: 'Display' }));
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Features' }));
+    await act(async () => {});
+    expect(drawn().filter((id) => rowKeyOf(id) === 'entry-q1')).toEqual([]);
+    expect(location.hash).toBe('');
+  });
+
+  it('keeps in sight an open row that it lets move behind "N more", and the folds made by hand', async () => {
+    const time = await openPage('?view=all');
+    fireEvent.click(within(itemAt('entry-top')).getByRole('button', { name: /^Its decisions/ }));
+    fireEvent.click(within(itemAt('entry-next')).getByRole('button', { name: /^Its decisions/ }));
+    const at = 'entry-q0@entry-top';
+    await press(at);
+    await rule(at, 'take', time);
+    fireEvent.click(screen.getByRole('button', { name: 'Display' }));
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Films' }));
+    await act(async () => {});
+    expect(kidsOf('entry-top').indexOf('entry-q0')).toBe(6);
+    expect(hitOf(at)).toHaveAttribute('aria-expanded', 'true');
+    expect(kidsOf('entry-next')).toEqual(['entry-q1', 'entry-q0']);
+  });
+});
+
 /** A number from 0 to 1 at each call, the same ones for the same seed. */
 function randomOf(seed: number) {
   let n = seed;
@@ -236,6 +265,7 @@ describe('the lists, whatever is pressed in whatever order', () => {
         fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Features' }));
         await act(async () => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
         query = { ...query, show: query.show.includes('feature') ? ['decision'] : ['feature', 'decision'] };
+        now();
         did.push('display');
       } else if (!place && roll < 0.94) {
         if (!screen.queryByRole('searchbox', { name: 'Search' })) fireEvent.click(screen.getByRole('button', { name: 'Search' }));
