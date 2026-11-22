@@ -1,0 +1,19 @@
+{
+  "asks": "What does the record keep of a denied attempt to reach a host?",
+  "answer": "Every denied attempt is recorded, with the host and the time as facts. Which process made it comes from the probe, as a report. When the probe gives no report, the line says that no process was reported, and Silo does not guess one. Only the host and the time are promised, since an agent with `sudo` can stop the probe.",
+  "replaces": [
+    "denied-attempts"
+  ],
+  "sets": [
+    {
+      "in": "boundary/properties",
+      "id": "denied-attempts-are-recorded",
+      "says": "Every denied attempt is recorded, with the host and the time as facts.",
+      "kind": "safety",
+      "check": [
+        "simulator",
+        "hostile test"
+      ]
+    }
+  ]
+}

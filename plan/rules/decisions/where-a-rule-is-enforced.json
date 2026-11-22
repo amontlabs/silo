@@ -1,0 +1,18 @@
+{
+  "asks": "Where is a rule enforced?",
+  "answer": "A rule is enforced outside the computer, and each decision is recorded with the version of the rule. Which of Silo's programs outside the computer applies it is how Silo is built, which agents decide.",
+  "replaces": [
+    "how-a-rule-is-enforced"
+  ],
+  "sets": [
+    {
+      "in": "rules/properties",
+      "id": "rule-decisions-are-recorded",
+      "says": "A rule is enforced outside the computer, and each decision is recorded with the version of the rule.",
+      "kind": "safety",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}
