@@ -3,5 +3,7 @@
   "answer": "A fake source that drops facts, repeats them and delivers them late. A fake inside that lies about which process did something. A fake computer that floods.",
   "needs": [
     "simulator-faults"
-  ]
+  ],
+  "verdict": "take",
+  "by": "agents"
 }
