@@ -70,4 +70,14 @@ describe('an entry the agents decided', () => {
     const plain = await openFrom('/workshop#part-a/core', CORE, byAgents(source(false)));
     expect(within(plain).getByRole('button', { name: /^History/ })).toHaveTextContent('History · Decided, 20 Nov');
   });
+
+  it('says "Decided" in the History once the owner confirmed what the agents decided', async () => {
+    const agentsChange: Change = { commit: '1'.repeat(40), date: '2026-11-20T12:00:00Z', what: ['taken'], agents: true };
+    const confirmed: Change = { commit: '2'.repeat(40), date: '2026-11-21T12:00:00Z', what: ['taken'] };
+    const source: HistorySource = { changes: new Map([['core', [confirmed, agentsChange]]]), shallow: false };
+    const item = await openFrom('/workshop#part-a/core', CORE, byAgents(source));
+    const history = within(item).getByRole('button', { name: /^History/ });
+    expect(history).toHaveTextContent('History · Decided, 21 Nov');
+    expect(history).not.toHaveTextContent(/by agents/);
+  });
 });
