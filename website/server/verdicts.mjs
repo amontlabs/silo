@@ -1,8 +1,9 @@
 // The owner's verdict from the Workshop: what `plan take <id>` or `plan drop <id>` and a push to main do, through
 // GitHub's API with the owner's own token. Main's plan/ is read at one commit, the plan tool's pure `take` or `drop`
-// runs on it, and the files it changed become one commit on main whose only parent is that commit. The ref moves
-// only as a fast-forward: when main moved meanwhile, everything is done again from the new main. Nothing reaches
-// main before the ref moves, and the objects made before a failure are reachable from nothing.
+// runs on it, and the files it changed become one commit on main whose only parent is that commit, made and put on
+// main in one call (GraphQL createCommitOnBranch) only while main's head is still that commit: a compare-and-swap, so
+// a push or a reset of main meanwhile is never undone. When main moved, everything is done again from the new main, a
+// bounded number of times. The call either moves main to the commit or changes nothing.
 import { drop, entryFile, take, verdictSubject } from '../../tools/plan/write/index.js';
 import { isHidden } from '../../tools/plan/read/index.js';
 import { GitHubError } from './github.mjs';
@@ -40,6 +41,15 @@ export const CHANGED = 'This entry changed since the page was built: reload the 
 export const BUSY = 'Main kept changing while the verdict was written. Try again.';
 export const DENIED = 'GitHub refused the change to main. The Workshop needs the permission Contents: Read and write, and your account write access to the repository.';
 
+/**
+ * The commit and the move of main, together: GitHub makes the commit on `expectedHeadOid` with the token's user as its
+ * author and moves the branch to it only if its head is still that commit.
+ */
+export const COMMIT_MUTATION = 'mutation Verdict($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }';
+/** The GraphQL error types of an answer that refuses the write itself: the token may not write the repository's contents. */
+const DENIED_TYPES = new Set(['FORBIDDEN', 'NOT_FOUND']);
+const MODE_FILE = '100644';
+
 /** A file's text from its bytes, refused when they are not UTF-8. */
 function decode(bytes, path) {
   try {
@@ -72,6 +82,12 @@ function readTree(tree, prefix, depth, out) {
   }
 }
 
+/** Whether main's head is no longer `head`. */
+async function moved(call, repo, head) {
+  const { data } = await call('GET', `/repos/${repo}/git/ref/heads/${BRANCH}`);
+  return data?.object?.sha !== head;
+}
+
 /**
  * Writes the owner's verdict on `entry` ({ id, kind, part }, from the plan the server shipped with) on main.
  * `call(method, path, options)` calls GitHub with the owner's token. `built` is the commit the page was built from:
@@ -92,8 +108,7 @@ export async function writeVerdict({ call, repo, entry, verdict, built, attempts
       const limited = Array.isArray(answer?.errors) && answer.errors.some((error) => error?.type === 'RATE_LIMITED');
       throw new GitHubError(limited ? 429 : 502, { as: 'user', rateLimited: limited, retryAfter: limited ? 60 : 0 });
     }
-    const root = repository.commit?.tree?.oid;
-    if (typeof root !== 'string' || !repository.plan) throw new VerdictRefusal(409, 'refused', 'main has no plan/');
+    if (!repository.plan) throw new VerdictRefusal(409, 'refused', 'main has no plan/');
     const read = { files: new Map(), modes: new Map(), fetch: [] };
     readTree(repository.plan, '', LEVELS, read);
     const blobText = async (oid, where) => {
@@ -110,19 +125,36 @@ export async function writeVerdict({ call, repo, entry, verdict, built, attempts
     if (outcome.status === 'refused') throw new VerdictRefusal(409, 'refused', outcome.message);
     if (outcome.status === 'already') return { status: 'already', commit: null, message: outcome.message };
 
-    const tree = [...outcome.changed].map(([file, text]) => ({ path: `plan/${file}`, mode: read.modes.get(file) ?? '100644', type: 'blob', content: text }));
-    const { data: made } = await call('POST', `/repos/${repo}/git/trees`, { body: { base_tree: root, tree } });
-    const { data: commit } = await call('POST', `/repos/${repo}/git/commits`, { body: { message: verdictSubject(verdict, entry.id), tree: made.sha, parents: [head] } });
-    try {
-      await call('PATCH', `/repos/${repo}/git/refs/heads/${BRANCH}`, { body: { sha: commit.sha, force: false } });
-    } catch (error) {
-      // GitHub answers 422 when the update is not a fast-forward: main moved since it was read.
-      if (!(error instanceof GitHubError && error.status === 422)) throw error;
-      const { data: now } = await call('GET', `/repos/${repo}/git/ref/heads/${BRANCH}`);
-      if (now?.object?.sha === head) throw error;
-      continue;
+    // createCommitOnBranch writes plain files only: a file of another mode (executable) would lose it.
+    for (const file of outcome.changed.keys()) {
+      const mode = read.modes.get(file);
+      if (mode !== undefined && mode !== MODE_FILE) throw new VerdictRefusal(409, 'refused', `plan/${file} has the mode ${mode} on main, and the Workshop writes only plain files (${MODE_FILE}): use plan ${verdict} ${entry.id}`);
     }
-    return { status: 'done', commit: commit.sha, message: outcome.message };
+    const input = {
+      branch: { repositoryNameWithOwner: repo, branchName: BRANCH },
+      // The subject alone, as `plan take` writes it: `git commit -m <subject>` gives no body.
+      message: { headline: verdictSubject(verdict, entry.id) },
+      fileChanges: { additions: [...outcome.changed].map(([file, text]) => ({ path: `plan/${file}`, contents: Buffer.from(text, 'utf8').toString('base64') })) },
+      expectedHeadOid: head,
+    };
+    let answered;
+    try {
+      ({ data: answered } = await call('POST', '/graphql', { body: { query: COMMIT_MUTATION, variables: { input } } }));
+    } catch (error) {
+      if (!(error instanceof GitHubError) || error.rateLimited) throw error;
+      if (error.status === 403 || error.status === 404) throw new VerdictRefusal(403, 'forbidden', DENIED);
+      // 409: main is not where the call expected it. Any other failure may hide a commit made: main is read again.
+      if (error.status === 409 || await moved(call, repo, head)) continue;
+      throw error;
+    }
+    const oid = answered?.data?.createCommitOnBranch?.commit?.oid;
+    if (typeof oid === 'string' && !answered.errors?.length) return { status: 'done', commit: oid, message: outcome.message };
+    const errors = Array.isArray(answered?.errors) ? answered.errors : [];
+    if (errors.some((error) => error?.type === 'RATE_LIMITED')) throw new GitHubError(429, { as: 'user', rateLimited: true, retryAfter: 60 });
+    if (errors.some((error) => DENIED_TYPES.has(error?.type))) throw new VerdictRefusal(403, 'forbidden', DENIED);
+    // The head was not the one expected (main moved, forward or back), or the answer says nothing sure: read main again.
+    if (await moved(call, repo, head)) continue;
+    throw new GitHubError(502, { as: 'user' });
   }
   throw new VerdictRefusal(409, 'busy', BUSY);
 }

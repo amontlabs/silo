@@ -1098,29 +1098,35 @@ What the server does, with the owner's own token and nothing else:
    message, such as "model-tool has no answer and sets nothing: write its
    answer first". "Already" answers 200 with `"already": true` and writes
    nothing.
-5. It creates one tree, `main`'s tree with each changed file of `plan/`
-   (`POST /git/trees`), and one commit whose only parent is the `main` it
-   read, with the message `Owner: take <id>` or `Owner: drop <id>`, as `plan`
-   writes it (`POST /git/commits`). The commit is made with the owner's token,
-   so GitHub records the owner as its author.
-6. It moves `main` to that commit with `force: false`
-   (`PATCH /git/refs/heads/main`). When GitHub answers 422 because `main` moved
-   since step 1 (an agent pushed), it starts again from step 1 on the new `main`.
-   After three tries it answers 409 `busy`: "Main kept changing while the
-   verdict was written. Try again." The ref is never forced.
+5. In one GraphQL call, `createCommitOnBranch`, it makes the commit and moves
+   `main` to it: the changed files of `plan/` on the `main` it read, the
+   message `Owner: take <id>` or `Owner: drop <id>` with no body, as `plan`
+   writes it, and `expectedHeadOid`, the commit read in step 1. GitHub makes
+   the commit with the owner's token, so it records the owner as its author,
+   and moves `main` only if its head is still that commit: a compare-and-swap.
+   A push to `main` meanwhile, or a reset of `main` to an older commit, is
+   never undone. A file of `plan/` that is not a plain file (mode `100644`) on
+   `main` refuses the verdict, since the call writes plain files only.
+6. When `main` was not where the call expected it (GitHub answers 409, or an
+   error after which `main` is no longer the commit read), it starts again from
+   step 1 on the new `main`. After three tries it answers 409 `busy`: "Main kept
+   changing while the verdict was written. Try again." When the answer is lost
+   after the commit was made, the next try finds the verdict on `main` and
+   answers "already".
 
-Nothing reaches `main` before step 6: a tree or a commit made before a failure
-is reachable from nothing. When GitHub refuses a write with 403 or 404, as it
-does when the App lacks Contents: Read and write or the account cannot write
-to the repository, the answer is 403 `forbidden`, which says so. Without
+The call either moves `main` to the new commit or changes nothing. When GitHub
+refuses the write itself (a `FORBIDDEN` or `NOT_FOUND` error, or 403 or 404 to
+the call), as it does when the App lacks Contents: Read and write or the
+account cannot write to the repository, the answer is 403 `forbidden`, which
+says so. Without
 `WORKSHOP_OWNER_ID`, or for another account, the answer is 403 `not_owner`
 before any call to GitHub. The origin, cookie and header rules of the other
 writes apply, a verdict counts as a write, and the owner may send 6 verdicts a
 minute per instance.
 
-A verdict costs 5 calls with the owner's token (the ref, the GraphQL read, the
-tree, the commit, the ref update), 2 more for each time `main` moved, and one
-more for each file GitHub cut. The installation token is not used.
+A verdict costs 3 calls with the owner's token (the ref, the GraphQL read, the
+write), one more to read the ref when the write fails, 3 more for each time
+`main` moved, and one more for each file GitHub cut. The installation token is not used.
 
 `tools/plan/check` rule 11, which `plan take` runs against `origin/main`
 before it commits, has nothing to compare here: the plan the verdict is
@@ -1393,7 +1399,7 @@ snapshots catch up when the hour resets.
 | `website/server/entries.mjs` | Reads `plan-entries.json`, the plan's entries the server knows. |
 | `website/server/snapshot.mjs` | The in-memory snapshot that answers every anonymous read, and its refresh. |
 | `website/server/workshop.mjs` | Every endpoint, independent of the HTTP server. |
-| `website/server/verdicts.mjs` | The owner's verdict: main's `plan/` read in one GraphQL call, `take` or `drop` of `tools/plan/write`, the tree, the commit and the fast-forward of `main`. |
+| `website/server/verdicts.mjs` | The owner's verdict: main's `plan/` read in one GraphQL call, `take` or `drop` of `tools/plan/write`, and the commit made and put on `main` in one compare-and-swap call (`createCommitOnBranch`). |
 | `website/server/node.mjs` | Adapter for Node's `req`/`res`, used by Vercel and the local server. |
 | `website/api/workshop.cjs` | Vercel's entry point. |
 | `website/scripts/prepare-vercel.mjs` | Writes the Build Output (static site, function, routes). |
@@ -1730,8 +1736,9 @@ was built from, never a path, a file's text or a commit message: the server
 looks the id up in the plan it shipped with, reads `main` itself and runs the
 plan tool on it. The write is made with the owner's token, so GitHub checks
 that the owner may write to the repository and records the owner as the
-author; the installation token never writes contents. `main` moves only by a
-fast-forward, and only after the tree and the commit exist. *Limits:* a stolen
+author; the installation token never writes contents. `main` moves only from
+the commit the server read to the one it made on it, in the same call that
+makes it. *Limits:* a stolen
 session cookie of the owner can take and drop entries until it expires, the
 owner signs out, or the secret is changed. Branch protection on `main` that
 refuses such a commit (required reviews, required signatures) makes every
@@ -1761,9 +1768,10 @@ services:
   remote), until a deploy has shown it;
 - the owner's verdict on the real GitHub: that `object(expression:
   "<commit>:plan")` gives each file's text in one GraphQL call, that a user
-  token of the App with Contents: Read and write creates the tree and the
-  commit and moves `main`, that a non-fast-forward update answers 422, and that
-  GitHub records the owner as the commit's author;
+  token of the App with Contents: Read and write runs `createCommitOnBranch`,
+  that a stale `expectedHeadOid` changes nothing and answers an error, that a
+  headline with no body gives the message `plan` writes, and that GitHub
+  records the owner as the commit's author;
 - that GitHub answers `304` to the conditional issue and comment list pages as
   documented, and that the reaction summary in the issue list moves the page's
   ETag when a vote changes.

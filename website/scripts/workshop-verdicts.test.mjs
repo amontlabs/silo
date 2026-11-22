@@ -34,9 +34,12 @@ async function started({ change = {}, env } = {}) {
   await owner.signIn('owner-fake');
   const verdict = (entry, kind, built = seed, who = owner, extra = {}) => who.call('POST', 'verdict', { body: { entry, verdict: kind, built, ...extra } });
   const main = () => t.fake.git.refs.get('heads/main');
-  const gitWrites = () => t.fake.state.requests.filter((r) => r.path.includes('/git/') && r.method !== 'GET');
+  const gitWrites = () => t.fake.state.requests.filter(isWrite);
   return { ...t, files, seed, owner, verdict, main, gitWrites };
 }
+
+/** The one call that writes: the commit and main's move together (GraphQL createCommitOnBranch). */
+const isWrite = (record) => record.graphql === 'createCommitOnBranch';
 
 /** The files of a commit's plan/, by path relative to plan/. */
 const planAt = (git, commit) => new Map([...git.files(git.objects.get(commit).tree)].filter(([path]) => path.startsWith('plan/')).map(([path, text]) => [path.slice('plan/'.length), text]));
@@ -63,8 +66,10 @@ test('a take is one commit on main, named as plan take names it, made with the o
     const expected = take(t.files, id).changed;
     assert.deepEqual([...changedBy(t.fake.git, t.main())].sort(), [...expected].sort());
     assert.deepEqual([...expected.keys()].sort(), [`decisions/${id}.json`, 'principles.json']);
-    // Every write of git data is the person's; the installation token never writes contents.
-    assert.ok(t.gitWrites().length === 3 && t.gitWrites().every((r) => r.kind === 'user' && r.login === 'owner-fake'), JSON.stringify(t.gitWrites()));
+    // One write, the person's; the installation token never writes contents. The subject alone, no body, as
+    // `git commit -m` gives it, made on the main that was read and only while it is still main's head.
+    assert.ok(t.gitWrites().length === 1 && t.gitWrites().every((r) => r.kind === 'user' && r.login === 'owner-fake'), JSON.stringify(t.gitWrites()));
+    assert.deepEqual(t.fake.state.commitInputs.map((input) => [input.message, input.expectedHeadOid]), [[{ headline: `Owner: take ${id}` }, t.seed]]);
     // Reading plan/ is one GraphQL call and one ref read, not a call per file.
     const reads = t.fake.state.requests.filter((r) => r.path.includes('/git/') && r.method === 'GET');
     assert.deepEqual(reads.map((r) => r.path.split('/git/')[1]), ['ref/heads/main']);
@@ -225,7 +230,7 @@ test('main moving during the write: done again on the new main, then 409 after a
   try {
     let pushes = 0;
     const agentPush = (times) => (record) => {
-      if (record.method === 'PATCH' && record.path.endsWith('/git/refs/heads/main') && pushes < times) {
+      if (isWrite(record) && pushes < times) {
         pushes += 1;
         t.fake.git.push(new Map([[`plan/engine/README.md`, `An agent's push ${pushes}.\n`]]));
       }
@@ -238,18 +243,59 @@ test('main moving during the write: done again on the new main, then 409 after a
     assert.equal(commit.message, 'Owner: take linux-vm-engine');
     assert.equal(t.fake.git.objects.get(commit.parents[0]).message, 'A push', 'redone on the new main');
     assert.equal(planAt(t.fake.git, t.main()).get('engine/README.md'), 'An agent\'s push 1.\n', 'the agent\'s push is kept');
-    const patches = t.fake.state.requests.filter((r) => r.method === 'PATCH');
-    assert.equal(patches.length, 2);
+    assert.equal(t.gitWrites().length, 2);
 
     pushes = 0;
     t.fake.state.hook = agentPush(Infinity);
     const before = t.fake.state.requests.length;
     const busy = await t.verdict('no-detour', 'drop');
     assert.deepEqual([busy.status, busy.json.error, busy.json.message], [409, 'busy', BUSY]);
-    assert.equal(t.fake.state.requests.slice(before).filter((r) => r.method === 'PATCH').length, ATTEMPTS);
+    assert.equal(t.fake.state.requests.slice(before).filter(isWrite).length, ATTEMPTS);
     assert.equal(t.fake.git.objects.get(t.main()).message, 'A push', 'main is the agents\' pushes alone');
-    // Every ref update asked for a fast-forward.
-    assert.ok(t.fake.state.refUpdates.length === 2 + ATTEMPTS && t.fake.state.refUpdates.every((update) => update.force === false));
+  } finally { t.fake.state.hook = null; await t.close(); }
+});
+
+test('main reset to an older commit while the verdict is written: the commits removed stay removed, and the verdict is redone on the main as it is', async () => {
+  const t = await started();
+  try {
+    const removed = t.fake.git.push(new Map([['plan/engine/README.md', 'A push that is then undone.\n']]));
+    let reset = false;
+    t.fake.state.hook = (record) => {
+      if (isWrite(record) && !reset) {
+        reset = true;
+        t.fake.git.refs.set('heads/main', t.seed);
+      }
+      return null;
+    };
+    const response = await t.verdict('linux-vm-engine', 'take');
+    assert.equal(response.status, 200, response.body);
+    const commit = t.fake.git.objects.get(t.main());
+    assert.equal(commit.message, 'Owner: take linux-vm-engine');
+    assert.deepEqual(commit.parents, [t.seed], 'made on main as the reset left it');
+    assert.equal(t.fake.git.isAncestor(removed, t.main()), false, 'the commit the reset removed is not put back');
+    assert.equal(t.gitWrites().length, 2);
+  } finally { t.fake.state.hook = null; await t.close(); }
+});
+
+test('GitHub answering 409 to the write is main moving: redone, then 409 after a bounded number of tries', async () => {
+  const t = await started();
+  try {
+    let conflicts = 1;
+    t.fake.state.hook = (record) => {
+      if (!isWrite(record) || conflicts === 0) return null;
+      conflicts -= 1;
+      return { status: 409, body: { message: 'Conflict' } };
+    };
+    const response = await t.verdict('linux-vm-engine', 'take');
+    assert.equal(response.status, 200, response.body);
+    assert.equal(t.fake.git.objects.get(t.main()).message, 'Owner: take linux-vm-engine');
+    assert.equal(t.gitWrites().length, 2);
+
+    conflicts = Infinity;
+    const before = t.fake.state.requests.length;
+    const busy = await t.verdict('no-detour', 'drop', t.main());
+    assert.deepEqual([busy.status, busy.json.error, busy.json.message], [409, 'busy', BUSY]);
+    assert.equal(t.fake.state.requests.slice(before).filter(isWrite).length, ATTEMPTS);
   } finally { t.fake.state.hook = null; await t.close(); }
 });
 
@@ -265,8 +311,8 @@ test('a refusal of the plan tool reaches the page as the tool gives it, and noth
   } finally { await t.close(); }
 });
 
-test('GitHub refusing the write (the App without Contents: write, 403 or 404, or the ref update alone) leaves main as it was', async () => {
-  for (const status of [403, 404]) {
+test('GitHub refusing the write (the App without Contents: write, FORBIDDEN or NOT_FOUND, or a 403 to the call) leaves main as it was', async () => {
+  for (const status of ['FORBIDDEN', 'NOT_FOUND']) {
     const t = await started();
     try {
       t.fake.state.contents = 'read';
@@ -278,11 +324,11 @@ test('GitHub refusing the write (the App without Contents: write, 403 or 404, or
   }
   const t = await started();
   try {
-    t.fake.state.hook = (record) => (record.method === 'PATCH' ? { status: 403, body: { message: 'Resource not accessible by integration' } } : null);
+    t.fake.state.hook = (record) => (isWrite(record) ? { status: 403, body: { message: 'Resource not accessible by integration' } } : null);
     const response = await t.verdict('linux-vm-engine', 'take');
     assert.deepEqual([response.status, response.json.error], [403, 'forbidden']);
-    assert.equal(t.main(), t.seed, 'the tree and the commit made reach nothing');
-    t.fake.state.hook = (record) => (record.method === 'PATCH' ? { status: 500 } : null);
+    assert.equal(t.main(), t.seed);
+    t.fake.state.hook = (record) => (isWrite(record) ? { status: 500 } : null);
     assert.equal((await t.verdict('linux-vm-engine', 'take')).status, 502);
     assert.equal(t.main(), t.seed);
   } finally { t.fake.state.hook = null; await t.close(); }
@@ -310,7 +356,7 @@ test('the session must be the owner\'s on every write: a cross-site POST never r
 });
 
 // Model: random verdicts by the owner and a visitor, with the page's build any earlier main, agents pushing to main
-// (between requests and during the ref update) and GitHub refusing a ref update. After every step main is checked
+// (between requests and during the write) and GitHub refusing the write. After every step main is checked
 // against a reference: it moves only by a fast-forward, by the agents' pushes or by one commit per verdict the server
 // answered as done, named `Owner: <verdict> <id>`, whose only parent is the main before it and whose changes are
 // exactly what take() or drop() gives on that parent; every refusal leaves main as the agents left it.
@@ -359,7 +405,7 @@ test('model: main moves only by fast-forwards, and each verdict is one commit eq
       const trouble = rand(4);
       let racedTo = null;
       t.fake.state.hook = (record) => {
-        if (record.method !== 'PATCH') return null;
+        if (!isWrite(record)) return null;
         t.fake.state.hook = null;
         if (trouble === 0) return { status: 403, body: { message: 'Resource not accessible by integration' } };
         if (trouble === 1) {
@@ -409,6 +455,5 @@ test('model: main moves only by fast-forwards, and each verdict is one commit eq
     }
     // Every case was reached, so no rule was checked on nothing.
     for (const [name, times] of Object.entries(reached)) assert.ok(times > 0, `${name} was never reached: ${JSON.stringify(reached)}`);
-    assert.ok(t.fake.state.refUpdates.every((update) => update.force === false));
   } finally { t.fake.state.hook = null; await t.close(); }
 });

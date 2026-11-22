@@ -151,8 +151,8 @@ export function createFakeGit() {
   }
 
   /**
-   * POST /git/trees: `base_tree` with each entry of `tree` set (`content` or `sha`) or removed (`sha: null`).
-   * Answers null when the request names what does not exist.
+   * The tree of a commit createCommitOnBranch makes: `base_tree` with each entry of `tree` set (`content` or `sha`) or
+   * removed (`sha: null`). Answers null when the request names what does not exist.
    */
   function createTree({ base_tree: base, tree: entries }) {
     if (base !== undefined && objects.get(base)?.type !== 'tree') return null;
