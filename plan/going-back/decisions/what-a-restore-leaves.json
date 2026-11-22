@@ -1,0 +1,18 @@
+{
+  "asks": "When you restore a computer, what stays as it is now?",
+  "answer": "Only what is inside the computer goes back: its disk and the conversations. The record, what was spent, the rules and precautions, and what you granted or took back stay as they are now.",
+  "needs": [
+    "whole-computer-grain"
+  ],
+  "sets": [
+    {
+      "in": "going-back/properties",
+      "id": "restore-changes-only-the-inside",
+      "says": "A restore changes only what is inside the computer. The record, what was spent, the rules and precautions, and what was granted or taken back stay as they are.",
+      "kind": "safety",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}

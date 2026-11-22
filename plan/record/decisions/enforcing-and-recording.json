@@ -1,11 +1,11 @@
 {
-  "asks": "Does enforcing wait for the record to be written?",
-  "answer": "Enforcing does not depend on recording. The boundary enforces from the rules it was given. If the record cannot be written, facts and reports wait in a buffer of fixed size, and then a gap is recorded.",
+  "asks": "When the record cannot be written, does Silo keep deciding on requests and changing traffic?",
+  "answer": "Only as long as it can keep what it decides. The boundary enforces from the rules it was given, without waiting for the recorder. Its decisions and its changes to traffic wait in room kept for them, and are never lost in a gap. When that room is full, a request that needs a new decision does not pass until the record catches up, and a change to traffic is not made. What was allowed before carries on. Other facts and reports wait in a buffer of fixed size, and then a gap is recorded.",
   "sets": [
     {
       "in": "record/properties",
-      "id": "enforcing-needs-no-record",
-      "says": "Enforcing does not depend on recording.",
+      "id": "nothing-decided-unrecorded",
+      "says": "Silo makes no decision on a request and no change to traffic that it cannot record. When the room kept for them is full, a request that needs a new decision does not pass.",
       "kind": "safety",
       "check": [
         "simulator"

@@ -1,0 +1,18 @@
+{
+  "asks": "What happens when a computer reaches hundreds of hosts for the first time?",
+  "answer": "A rule that ships with Silo, switched on, alerts you when a computer reaches a host for the first time. You can narrow it or switch it off. Alerts of one kind in one computer that arrive close together reach you as one alert with a count.",
+  "replaces": [
+    "first-seen-host"
+  ],
+  "sets": [
+    {
+      "in": "boundary/properties",
+      "id": "new-host-raises-an-alert",
+      "says": "A rule that ships with Silo, switched on until you narrow it or switch it off, alerts you when a computer reaches a host for the first time.",
+      "kind": "safety",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}

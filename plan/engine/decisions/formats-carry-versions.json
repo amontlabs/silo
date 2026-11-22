@@ -1,4 +1,15 @@
 {
   "asks": "How does Silo read what an older version of it wrote?",
-  "answer": "Everything Silo writes to read later starts with the version of its format: record files, the engine's saved state, and the messages between the engine and its clients. A reader states the versions it reads, and refuses any other with a named error."
+  "answer": "Any newer Silo reads the records of any older version and never rewrites them. Silo's own working state may be rebuilt. Everything Silo writes to read later starts with the version of its format: record files, the engine's saved state, and the messages between the engine and its clients. A reader states the versions it reads, and refuses any other with a named error.",
+  "sets": [
+    {
+      "in": "record/properties",
+      "id": "old-records-stay-readable",
+      "says": "A newer Silo reads the record written by any older version, and never rewrites it.",
+      "kind": "safety",
+      "check": [
+        "test"
+      ]
+    }
+  ]
 }

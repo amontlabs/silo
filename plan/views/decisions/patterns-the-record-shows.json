@@ -1,0 +1,7 @@
+{
+  "asks": "Which repeats can the record show, when file reads are not recorded?",
+  "answer": "The record is a ground on which people notice patterns and improve them: repeated calls, repeated writes, the same content entering a model's context again, and the shape of agents' work.",
+  "replaces": [
+    "patterns-in-the-record"
+  ]
+}

@@ -10,7 +10,10 @@
     "alert-only-on-a-change",
     "record-of-a-computer",
     "processes-in-the-record",
-    "rule-actions-on-the-computer"
+    "rule-actions-on-the-computer",
+    "content-kept-of-what-was-sent",
+    "new-host-alert-is-a-rule",
+    "hosts-already-seen"
   ],
   "keeps": [
     "new-host-raises-an-alert",

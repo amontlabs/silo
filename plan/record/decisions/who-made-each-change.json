@@ -1,6 +1,6 @@
 {
-  "asks": "Does the record say who did each control fact?",
-  "answer": "Every control fact says who did it: you, a rule, a precaution, an extension or Silo.",
+  "asks": "Does the record say who made each change?",
+  "answer": "For a computer's rules, secrets, channels and state, always. Every control fact says who did it: you, a rule, a precaution, an extension or Silo. For files, when it is known. A file change with no known author is shown as \"unattributed\".",
   "sets": [
     {
       "in": "record/properties",

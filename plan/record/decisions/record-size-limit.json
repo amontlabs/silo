@@ -1,6 +1,9 @@
 {
   "asks": "What happens when the record reaches its size limit?",
   "answer": "A size limit the user sets. When it is reached, bulky content goes, recordings and then message text. The lines that point to it stay, and a fact says what was removed. No fact or report is removed to make room.",
+  "needs": [
+    "conversation-text-kept"
+  ],
   "sets": [
     {
       "in": "record/properties",

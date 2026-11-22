@@ -1,0 +1,15 @@
+{
+  "asks": "After a fork or a restore, which hosts count as already seen?",
+  "answer": "A fork starts with the hosts the computer it was forked from has seen when the fork is made. A restore leaves the list as it is, because those hosts were reached.",
+  "sets": [
+    {
+      "in": "boundary/properties",
+      "id": "seen-hosts-are-never-forgotten",
+      "says": "A fork starts with the hosts its parent has seen, and a restore forgets none.",
+      "kind": "safety",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}

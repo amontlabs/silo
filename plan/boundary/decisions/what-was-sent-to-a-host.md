@@ -8,3 +8,5 @@ connection (`ending-the-encrypted-connection`), so Silo also opens the traffic t
 secret is swapped in for. An agent pushes to GitHub with a token held as a secret, and the feature
 records only the size. The audit asks the owner to choose: say "and requests a secret is swapped
 into" in `hosts-reached-and-denied`, or narrow the property to "the model traffic Silo reads".
+
+The question is put to the owner in `content-kept-of-what-was-sent`, under "For the owner".

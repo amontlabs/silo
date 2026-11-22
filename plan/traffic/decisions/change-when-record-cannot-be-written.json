@@ -1,3 +1,7 @@
 {
-  "asks": "What happens to a change of traffic when the record cannot be written at that moment?"
+  "asks": "What happens to a change of traffic when the record cannot be written at that moment?",
+  "answer": "It waits in the room kept for Silo's changes and decisions. When that room is full, it is not made.",
+  "needs": [
+    "enforcing-and-recording"
+  ]
 }

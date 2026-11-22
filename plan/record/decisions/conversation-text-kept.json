@@ -1,3 +1,7 @@
 {
-  "asks": "Is the text of conversations kept?"
+  "asks": "Is the text of conversations kept?",
+  "answer": "Yes. The text of messages is kept once on your Mac, by hash, as bulky content. When the record reaches its size limit it is removed right after recordings, and a fact says so.",
+  "needs": [
+    "store-messages-once"
+  ]
 }

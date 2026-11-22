@@ -1,3 +1,8 @@
 {
-  "asks": "May a computer read its own record by default?"
+  "asks": "What may an agent inside a computer do and read, its computer's record included?",
+  "answer": "An agent inside a computer gets every tool, scoped by where it is: anything you could do in the app to that computer. It reads what the app shows of that computer, its record included, except, by default, the opinions and precautions about it. A computer cannot get more than it has, and anything that would grant it more asks you. Everything the app shows can be read with the `silo` command, as plain text that a program can parse: all of it on your Mac, and inside a computer only what that computer may read.",
+  "replaces": [
+    "what-an-agent-inside-may-do",
+    "silo-command-reads-the-app"
+  ]
 }
