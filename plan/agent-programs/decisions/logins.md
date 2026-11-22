@@ -8,18 +8,27 @@ an OpenAI API key. You make a fresh computer to run a task.
 The options:
 
 - Silo stays out of your logins (recommended). In the fresh computer you sign in to Claude Code
-  again, the vendor's own way. The API key is there already, because a rule of yours gives that
-  secret to the computer. Silo only keeps a login out of a fork unless you say so, and lets a
-  sign-in page open on your Mac. It costs a sign-in in each fresh computer where you use a
+  again, through Anthropic's own page, as on any new machine. Silo passes the login on with each
+  request and keeps it nowhere. The API key is there already, because a rule of yours gives that
+  secret to the computer. Silo says plainly that a subscription works in every computer and is not
+  supported as fully as an API key. It costs a sign-in in each fresh computer where you use a
   subscription.
-- Silo keeps your logins and puts them in each computer. You sign in once, and every computer has
-  the login. It costs the vendor's terms: Anthropic's, as read on 18 November 2026, forbid a product
-  to collect, store or pass on the login of a Claude subscription. Several computers that hold one
-  login can also sign each other out.
+- Silo keeps your logins and puts them in each computer. You sign in once on your Mac, and Silo adds
+  your login to the requests of every computer, as it does for an API key. It costs the vendor's
+  terms: Anthropic's, as read on 18 November 2026, forbid a developer to collect, store or
+  intermediate the login of a Claude subscription. One large product does it anyway, with no public
+  agreement with Anthropic. Several computers that hold one login can also sign each other out.
+- Promise nothing yet. Silo says nothing about subscriptions until logins are designed as a whole.
+  It costs anyone with a subscription knowing whether theirs works.
 
 Recommended: Silo stays out of your logins. It matches your words of 18 November, it fits the
 vendors' terms as read, and an API key, which Silo may hold for you, already works in every computer
-you choose.
+you choose. An account at risk costs more than signing in again.
+
+The answer also says that Silo never removes, disables or restricts a way of signing in built into
+an agent program. It is one of the two conditions of Anthropic's rule for a product that preinstalls
+or runs Claude Code, kept whether or not that rule applies to Silo. Silo plans no such change, so it
+costs nothing now.
 
 ## The owner's position
 
@@ -47,9 +56,13 @@ question that stays open is wider than logins: how agent apps connect to compute
 - Signing in again on every fresh machine is among what people mention most (Silo's research of
   18 November 2026).
 - Two mechanisms exist. Either the vendor's program keeps the login inside the computer, or Silo
-  holds it outside and swaps it in like a secret. The second makes one login work in every
-  computer and makes assigning an account a rule. Whether a subscription sign-in works with
-  substitution at all is to find out: `subscription-substitution`.
+  holds it outside and swaps it in like a secret. The second makes one login work in every computer
+  and makes assigning an account a rule. Whether a subscription sign-in works with substitution at
+  all was not tried, since Silo holds no subscription login. If this answer is ever replaced, a live
+  check answers it for a provider whose terms allow it: the computer holds a placeholder, Silo swaps
+  the real login into each request to the provider, and the check passes when requests succeed and
+  the login is renewed without the computer ever holding it. The renewal is where it is expected to
+  fail, since the program inside writes the new login itself.
 - The choice is tied to reading model traffic at the boundary (the part `traffic`): if Silo
   keeps logins, it already opens the traffic to model providers.
 - Anthropic's terms, read on 18 November 2026, say that a developer may not collect, store or pass
@@ -67,3 +80,16 @@ question that stays open is wider than logins: how agent apps connect to compute
 
 The owner called the sign-in whose page opens on the Mac "super important". It is the feature
 `sign-in-from-a-computer`, which holds no login.
+
+## What vendors do and say
+
+- Anthropic's own documentation recommends running Claude Code in a virtual machine, and lists
+  "cloud instances, local hypervisors, and microVMs". It names another company's product for it.
+  (Read on 19 November 2026.)
+- Several products, hosted and local, come with Claude Code already installed and let the user sign
+  in inside. That is this design's path.
+- Other products go further: at least one sandbox keeps a subscription's sign-in outside the machine
+  and injects it. That shows what a vendor ships, not what the terms allow, and this design does not
+  lean on it.
+- Anthropic's terms forbid a developer to "collect, store, or intermediate" a subscription's
+  sign-in: `anthropic-reads-intermediate`.

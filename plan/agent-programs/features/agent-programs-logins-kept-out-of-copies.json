@@ -5,8 +5,6 @@
     "agent-programs-run-unmodified",
     "login-handling",
     "logins",
-    "subscription-login",
-    "subscription-substitution",
     "where-the-token-lands",
     "disguising",
     "forking-a-computer",

@@ -18,3 +18,17 @@ The options:
 
 Recommended: build it. The few requests that change something elsewhere are what you want to see
 among a thousand that only fetch.
+
+## Notes
+
+Which requests change something elsewhere is not a fact. From outside the computer Silo sees a
+request, not what it changed on someone else's server. So an outside action is this classifier's
+opinion, and Silo lists outside actions marked as that opinion. The list can miss one or hold one
+wrongly.
+
+One use: before you restore main to 14:00, you want to know what an agent did after 14:00 that a
+restore cannot undo, such as an email sent or a pull request merged. The requests after 14:00 that
+this classifier calls outside actions are that list. Without it, you read every request after 14:00
+yourself.
+
+The record points at its section 5.3 for "outside actions".

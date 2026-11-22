@@ -1,4 +1,7 @@
 {
   "asks": "Does main copy from the Mac, or start from a guided recipe?",
-  "answer": "Main starts from a recipe, and the first run writes that recipe from your Mac. It lists the agent programs, tools and skills it found, you tick what to keep, and main is made from the recipe. Your settings and repositories are copied in once, as `first-run-offers-to-bring-in` says. What a recipe cannot describe, such as an app you installed by hand, is listed and not copied, and you install it in main yourself. Main then has a recipe from its first day, so it can be made again, and what is added to main later shows as not in its recipe. How many of the tools on a usual Mac a recipe can describe on macOS is to find out."
+  "answer": "Main starts from a recipe, and the first run writes that recipe from your Mac. It lists the agent programs, tools and skills it found, you tick what to keep, and main is made from the recipe. Your settings and repositories are copied in once, as `first-run-offers-to-bring-in` says. What a recipe cannot describe, such as an app you installed by hand, is listed and not copied, and you install it in main yourself. Main then has a recipe from its first day, so it can be made again, and what is added to main later shows as not in its recipe. How many of the tools on a usual Mac a recipe can describe on macOS is to find out.",
+  "needs": [
+    "first-run-offers-to-bring-in"
+  ]
 }

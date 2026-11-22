@@ -1,4 +1,4 @@
-# How a Linux computer is made beside a macOS main
+# How the code reaches a Linux computer beside a macOS main
 
 ## For the owner
 

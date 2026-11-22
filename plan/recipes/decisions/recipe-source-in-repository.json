@@ -1,6 +1,6 @@
 {
-  "asks": "May a recipe's source sit in a repository, and when do the rules it names take effect?",
-  "answer": "The source of a recipe may sit in a repository. It may name the rules and secrets its computer needs. They are proposals: Silo shows them, switches them on only with your yes, and asks again whenever they change. Silo stores the recipe it built from that source, as a property of the computer. The rules in force are kept by the engine, and never read from the repository.",
+  "asks": "When do the rules and secrets that a recipe in a repository names take effect?",
+  "answer": "A recipe whose source sits in a repository may name the rules and secrets its computer needs. They are proposals: Silo shows them, switches them on only with your yes, and asks again whenever they change. Silo stores the recipe it built from that source, as a property of the computer. The rules in force are kept by the engine, and never read from the repository.",
   "needs": [
     "repository-holds-recipes"
   ]

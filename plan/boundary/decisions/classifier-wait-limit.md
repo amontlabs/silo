@@ -1,21 +1,27 @@
-# Does a wait for a classifier's opinion end at Silo's limit
+# Does every wait at the boundary end at Silo's own limit
 
 ## For the owner
 
 An agent's part, 22 November 2026. You installed an extension that gives its opinion on each tool
-call of main before the call goes on. Its computer hangs while a call from main waits for it.
+call of main before the call goes on. Its computer hangs while a call from main waits for it, and
+the agent program that made the call has no time limit of its own.
 
 The options:
 
-- Silo's own limit (recommended). Silo ends the wait itself, at a limit it keeps. The request is
-  then denied or left to your rules, as the setting of that extension says. It costs a request that
-  is refused, or passed to the rules unchecked, when a slow extension would have answered a moment
-  later.
+- Silo's own limit, always (recommended). Silo ends the wait itself, at a limit it keeps, whatever
+  is stuck: the extension, your app or the agent program. The call is then denied or left to your
+  rules, as the setting of that extension says. A hold for your yes ends the same way. If the part
+  of Silo that holds the call crashes, the call fails with it and nothing passes. It costs a call
+  refused, or passed to the rules unchecked, when a slow extension would have answered a moment
+  later. On a crash, it also costs a broken connection, which the agent reads less well than a
+  refusal.
 - The extension's own limit. Each extension says how long it may take. It costs you control, since
   an extension that is stuck or hostile keeps your agents waiting for as long as it wrote.
+- Best effort. The wait ends when the opinion comes, or when the agent program gives up. It costs an
+  agent stuck for good behind an extension that hangs and a program that never gives up.
 
-Recommended: Silo's own limit. A hold already ends this way, and nothing you installed should be
-able to stop your agents for good.
+Recommended: Silo's own limit, always. A hold already ends this way, and a limit that depends on the
+extension or on the agent program does not end the wait when either of them is stuck.
 
 ## Notes
 
@@ -25,3 +31,6 @@ the default of 14.1, question 17." That default is asked in `extension-that-does
 
 The property it sets is row 35 of the record's section 10, whole. For a hold, the part in force
 is `hold-limit`.
+
+- That no wait at the boundary ends by best effort is the owner's, said of the limits on a hold and
+  on every wait at the boundary.

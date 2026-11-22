@@ -1,6 +1,6 @@
 {
-  "asks": "Does a wait for a classifier's opinion end at Silo's limit?",
-  "answer": "The wait for a classifier's opinion has a limit too, and Silo ends it itself. Silo keeps that limit, and the classifier or its extension cannot lengthen it. When the limit ends the wait, the request is denied or left to the rules, as the setting of that extension says.",
+  "asks": "Does every wait at the boundary end at Silo's own limit?",
+  "answer": "Yes, never by best effort. A hold already does (`hold-limit`). The wait for a classifier's opinion has a limit too, and Silo ends it itself. Silo keeps that limit, and the classifier or its extension cannot lengthen it. When the limit ends that wait, the request is denied or left to the rules, as the setting of that extension says. Each wait is ended by a timer that the part of Silo holding the request keeps itself. The timer starts when the wait starts. It does not depend on the classifier, the extension, the app or any program inside the computer answering. If that part of Silo stops, the connections it holds close, so no request is left waiting with nothing to end it. The simulator ends waits with each of those parts stuck or crashed, and checks that every wait ends and that a request passes only where a rule allows it. To find out: that every kind of connection closes when that part stops.",
   "needs": [
     "hold-limit"
   ],

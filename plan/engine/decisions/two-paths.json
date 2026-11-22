@@ -1,7 +1,0 @@
-{
-  "asks": "Do facts and reports take the same path through the engine as decisions?",
-  "answer": "The record adds a second path beside the first. The first decides. The second observes.",
-  "needs": [
-    "engine-shape"
-  ]
-}

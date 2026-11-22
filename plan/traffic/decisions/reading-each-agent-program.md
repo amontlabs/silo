@@ -114,7 +114,7 @@ Read directly on 19 November 2026. The pages show no date.
   requires agreeing to our Commercial Terms of Service". The program "must not be modified", and
   the product "may not remove, disable, or restrict any authentication method built into it". It
   "may not pay for, resell, or intermediate Claude usage" for its users. (same page) The decisions
-  are `anthropic-conditions-kept` and `recipe-under-preinstall-rule`.
+  are `unmodified-agent-programs`, `logins` and `recipe-under-preinstall-rule`.
 - Anthropic "reserves the right to take measures to enforce these restrictions and may do so
   without prior notice".
 - The Commercial Terms (effective 17 June 2025) and the Service Specific Terms (effective
@@ -186,7 +186,7 @@ sign-in and injects none.
 
 Silo's path is the common one, and it does less than some of these products. A recipe fetches
 Claude Code from Anthropic and Silo ships no copy (`claude-code-fetched-by-recipe`). The boundary
-forwards the sign-in inside each request and stores it nowhere (`program-and-sign-in-untouched`).
+forwards the sign-in inside each request and stores it nowhere (`logins`).
 
 ### How sure this is
 

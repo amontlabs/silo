@@ -1,8 +1,0 @@
-{
-  "name": "Export of the record",
-  "what": "Export of the record in standard formats.",
-  "suggest": {
-    "verdict": "drop",
-    "why": "The `silo` command printing the record as JSON lines already gives it, and a specific format can be an extension when someone asks."
-  }
-}

@@ -19,7 +19,7 @@ ship that precaution ready to switch on.
 ## Notes
 
 From the list of smaller features the owner put on the roadmap on 21 November 2026. The owner's
-words on the list are in `silos-own-extensions`.
+words on the list are in `what-ships-with-silo`.
 
 Split from the owner's line on pausing on a schedule: see `pause-on-a-schedule`.
 

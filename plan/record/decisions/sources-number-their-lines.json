@@ -1,9 +1,10 @@
 {
   "asks": "How does Silo know that lines are missing?",
-  "answer": "Every source numbers what it writes, before sending, and sends its lines in order on one channel. A missing number is a gap, which the recorder writes as a fact, since it saw the hole itself. A source that restarts says so and starts a new count, and a count that starts again without saying so is read as a restart too. The recorder writes the restart as a fact, with the last number of the old count it received: lines made after that one and lost in the restart cannot be counted, so a restart is never read as a count with no loss. A source with nothing to say sends its last number at a fixed interval, so that a loss at the end shows. When a source sends nothing for longer than that, the recorder writes that it fell silent, as a fact, and not a gap: a silence loses nothing by itself, as when a computer is paused or the Mac sleeps. The next line settles it: a number past the expected one is a gap, and a new count is a restart. A number that arrives twice is written once; when the two lines under it differ, the recorder writes that too, as a fact.",
+  "answer": "Every source numbers what it writes, before sending, and sends its lines in order on one channel. A missing number is a gap, which the recorder writes as a fact, since it saw the hole itself. A source that restarts says so and starts a new count, and a count that starts again without saying so is read as a restart too. The recorder writes the restart as a fact, with the last number of the old count it received: lines made after that one and lost in the restart cannot be counted, so a restart is never read as a count with no loss. A source with nothing to say sends its last number at a fixed interval, so that a loss at the end shows. When a source sends nothing for longer than that, the recorder writes that it fell silent, as a fact of the kind \"silence\", and not a gap: a silence loses nothing by itself, as when a computer is paused or the Mac sleeps. The next line settles it: a number past the expected one is a gap, and a new count is a restart. A number that arrives twice is written once; when the two lines under it differ, the recorder writes that too, as a fact.",
   "needs": [
     "word-line",
     "sources",
-    "word-gap"
+    "word-gap",
+    "kinds-of-lines"
   ]
 }

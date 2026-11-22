@@ -45,7 +45,7 @@ the browser are on different machines.
   find out.
 - Opening a link on your Mac is not one of the channels of `channel-list`. Whether it is a channel
   of its own is to settle there.
-- The sign-in stays the vendor's own flow, as `program-and-sign-in-untouched` proposes, and nothing
+- The sign-in stays the vendor's own flow, as `logins` proposes, and nothing
   is disguised (`disguising`). The provider's answer carries a code that works as a login for a
   short time. It passes through and stays out of the record, as the value of a secret does. How is
   to design.

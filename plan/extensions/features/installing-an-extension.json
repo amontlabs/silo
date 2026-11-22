@@ -1,6 +1,9 @@
 {
-  "name": "Installing an extension",
-  "what": "Installing an extension, and taking a grant back.",
+  "name": "Taking an extension back",
+  "what": "You can take back the tools an extension was granted, one at a time or all at once, and remove the extension. Once it is removed, its rules are switched off, its computer goes to the bin like any dropped computer, and its opinions go. The record keeps what it did.",
+  "needs": [
+    "importing-an-extension"
+  ],
   "suggest": {
     "verdict": "take",
     "why": "Without it an extension, once installed, keeps every tool it was granted."

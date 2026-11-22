@@ -34,5 +34,5 @@ An agent's note, of 21 November 2026. The plan calls three shapes an opinion tod
   of a leftover path;
 - an amount: heat, the number of runs that wrote a path.
 
-This decision's answer covers the first only. The other two are in the list put forward in
-`built-in-classifiers`.
+This decision's answer covers the first only. The other two are in the feature
+`which-run-did-it`.

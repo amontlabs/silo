@@ -21,4 +21,5 @@ line.
 
 ## Notes
 
-Marked Notes in the design record. The built-in classifiers are listed in `opinions`.
+Marked Notes in the design record. The state of a run is given by the feature
+`how-each-run-is-going`, in `opinions`.

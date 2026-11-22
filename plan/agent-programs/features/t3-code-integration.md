@@ -34,7 +34,7 @@ On sharing one subscription or account across computers:
 
 ## An agent's notes
 
-- Today T3 Code connects into one computer over SSH (`you-visit-a-computer`,
+- Today T3 Code connects into one computer over SSH (`computer-reached-over-ssh`,
   `agent-programs-reach-every-computer`). What a first-class client adds is not designed. The second
   sentence of `what` is an agent's wording.
 - The owner said on the same day that the view where you work with agents' threads is the client
@@ -45,14 +45,14 @@ On sharing one subscription or account across computers:
 Can one subscription or account be used from every computer with no work from the user?
 
 - The owner's idea is a proxy.
-- `program-and-sign-in-untouched` proposes the opposite for a subscription: "Silo holds, stores and
-  injects no subscription sign-in."
+- `logins` proposes the opposite for a subscription: "Silo holds no login of a
+  subscription, for any provider."
 - The notes of `logins` say why. Anthropic's terms, read on 18 November 2026, forbid a developer to
   collect, store or pass on the credentials of a Claude subscription. An API key held as a secret is
   allowed.
 - `login-handling`, taken, says a login must not end up in a fork or a shared computer by accident.
-- Whether a subscription sign-in works with substitution at all is open:
-  `subscription-substitution`.
+- Whether a subscription sign-in works with substitution at all was not
+  tried; the notes of `logins` say why.
 
 ## To weigh against other entries
 

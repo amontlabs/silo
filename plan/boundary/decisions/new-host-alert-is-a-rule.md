@@ -9,8 +9,9 @@ an alert, and the plan also proposes that Silo never sends you a stream of alert
 The options:
 
 - Grouped, and yours to switch (recommended). The alert is a rule that ships switched on. You can
-  narrow it or switch it off, and the 200 reach you as one alert with a count. It costs the promise
-  as it stands, since a new host stops alerting in a computer where you switched the rule off.
+  narrow it or switch it off, and the 200 reach you as one alert with a count, as
+  `alert-only-on-a-change` says of every alert. It costs the promise as it stands, since a new host
+  stops alerting in a computer where you switched the rule off.
 - Quiet while learning. A new host always alerts, except in a computer you set to run open to learn
   its rules, where new hosts are only marked in the record. It costs hearing of a host you would
   have refused during that time.

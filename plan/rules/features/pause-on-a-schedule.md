@@ -21,7 +21,7 @@ else waits for it.
 ## Notes
 
 From the list of smaller features the owner put on the roadmap on 21 November 2026. The owner's
-words on the list are in `silos-own-extensions`.
+words on the list are in `what-ships-with-silo`.
 
 The owner's list had this in one line with the alert on a run that is stuck. An agent split them:
 this one is a rule on a fact, and `stuck-run-alert` is a precaution on an opinion.

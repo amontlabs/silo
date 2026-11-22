@@ -1,4 +1,15 @@
 {
   "asks": "Which system does main run first?",
-  "answer": "Main is a macOS computer first. Its forks are macOS. A Linux computer beside it is a fresh computer."
+  "answer": "Main is a macOS computer first. Its forks are macOS. A Linux computer beside it is a fresh computer.",
+  "sets": [
+    {
+      "in": "computers/properties",
+      "id": "linux-never-copies-macos-main",
+      "says": "A Linux computer is never a copy of a macOS main.",
+      "kind": "safety",
+      "check": [
+        "types"
+      ]
+    }
+  ]
 }

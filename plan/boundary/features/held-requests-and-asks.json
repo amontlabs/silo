@@ -13,10 +13,10 @@
     "hold-sentence",
     "how-a-hold-ends",
     "program-gives-up-first",
-    "no-best-effort-wait",
+    "classifier-wait-limit",
     "meanings-for-the-boundary",
     "word-request",
-    "answered-asks-are-control-facts",
+    "kinds-of-lines",
     "allow-hold-or-deny"
   ],
   "suggest": {

@@ -3,7 +3,6 @@
   "what": "Classifiers that ship with Silo give each run its state: working, waiting on the model, waiting on a command, idle, or stuck. They also mark the stretches of a run as orienting, thrashing or progress. And they point out repeats: the same command, the same install, the same content entering context again.",
   "needs": [
     "opinions-beside-the-record",
-    "built-in-classifiers",
     "processes-in-the-record",
     "file-changes-in-the-record",
     "what-traffic-gives",

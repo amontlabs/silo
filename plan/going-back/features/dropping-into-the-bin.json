@@ -1,6 +1,6 @@
 {
   "name": "Drop and the bin",
-  "what": "You drop a fork or a fresh computer, and it waits in the bin. You can bring it back until its time in the bin ends. After that, nothing of it remains except its record.",
+  "what": "You drop a fork or a fresh computer, and it waits in the bin. You can bring it back until its time in the bin ends. After that, nothing of it remains except its record. You can also empty the bin before that time.",
   "needs": [
     "forking-a-computer",
     "how-a-fork-ends",

@@ -173,7 +173,7 @@ export const SILO_MAP: MapLayout = {
     { label: 'YOUR PHONE', full: [984, 296, 128, 100], corners: true, rests: ['phone-app', 'forwarding-to-a-phone'] },
   ],
   notes: [
-    { title: 'Your terminal', line: 'and your editor', full: [326, 44, 124, 40], rests: ['computer-reached-over-ssh', 'you-visit-a-computer', 'reaching-a-computer'] },
+    { title: 'Your terminal', line: 'and your editor', full: [326, 44, 124, 40], rests: ['computer-reached-over-ssh', 'reaching-a-computer'] },
     { title: 'A server or a cloud', line: 'where computers also run', full: [990, 21, 122, 52], rests: ['where-it-runs', 'many-forks-elsewhere'] },
     { title: 'Model providers', line: 'some of the hosts', full: [990, 96, 122, 40], fold: [878, 27, 144, 20], rests: ['part:traffic'] },
     { title: 'The internet', line: 'every other host', full: [990, 200, 122, 40], fold: [878, 71, 144, 20] },
@@ -192,7 +192,7 @@ export const SILO_MAP: MapLayout = {
     // The engine also runs computers on a server or in a cloud.
     { of: 'computers', d: 'M230 114V30H977', arrows: [[984, 30, 'r']], label: [640, 46, 'runs'], rests: ['linux-server-host', 'forks-on-a-cloud-machine'] },
     // Your own terminal and editor reach a computer over SSH, from the Mac.
-    { of: 'agent-programs', d: 'M336 88V150H365', arrows: [[372, 150, 'r']], label: [303, 104, 'SSH'], rests: ['computer-reached-over-ssh', 'you-visit-a-computer', 'reaching-a-computer'] },
+    { of: 'agent-programs', d: 'M336 88V150H365', arrows: [[372, 150, 'r']], label: [303, 104, 'SSH'], rests: ['computer-reached-over-ssh', 'reaching-a-computer'] },
     { of: 'recipes', d: 'M540 86V123', arrows: [[540, 130, 'd']], label: [549, 99, 'makes'], rests: ['what-a-recipe-sets-up'], fold: { d: 'M496 40V51', arrows: [[496, 58, 'd']] } },
     // A request leaves the computer through the boundary, which applies the network policy, to a host of the internet.
     {

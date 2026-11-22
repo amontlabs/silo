@@ -1,7 +1,4 @@
 {
   "asks": "What does the place Now show?",
-  "answer": "Now shows each run that is alive, one line each: what it runs, in which computer, since when, its state and what it has spent. Subagents show under the run that started them. The state is one of working, waiting on the model, waiting on a command, idle or stuck. It is the opinion of a classifier that ships with Silo, and is shown as one. What Silo cannot know for a run, such as the spend of a program whose traffic it cannot read, shows as not known and is never guessed. A run that ended leaves Now, and its receipt stays.",
-  "needs": [
-    "built-in-classifiers"
-  ]
+  "answer": "Now shows each run that is alive, one line each: what it runs, in which computer, since when, its state and what it has spent. Subagents show under the run that started them. The state is one of working, waiting on the model, waiting on a command, idle or stuck. It is the opinion of a classifier that ships with Silo, and is shown as one. What Silo cannot know for a run, such as the spend of a program whose traffic it cannot read, shows as not known and is never guessed. A run that ended leaves Now, and its receipt stays."
 }

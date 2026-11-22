@@ -3,7 +3,6 @@
   "what": "A classifier that ships with Silo says what would bring each path back if it vanished: a pull, a rebuild, or nothing, which is \"only here\". A path it cannot place counts as \"only here\", and each path also gets a coarse kind, such as code, build output, cache or credential-like. To say so, it may read inside the computer, such as the state of a Git repository.",
   "needs": [
     "opinions-beside-the-record",
-    "built-in-classifiers",
     "classifier-reads-inside",
     "classifier-mechanics",
     "what-would-bring-it-back",

@@ -10,7 +10,7 @@
     "no-hook-for-a-denial",
     "changed-reply-per-program",
     "terms-on-changing-a-reply",
-    "change-when-record-cannot-be-written",
+    "enforcing-and-recording",
     "what-silo-changes-in-traffic",
     "allow-hold-or-deny"
   ],

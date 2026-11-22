@@ -19,7 +19,7 @@ answers it with what Silo saw.
 
 ## An agent's notes (21 November 2026)
 
-From the owner's list of smaller features, where most are extensions (`silos-own-extensions`).
+From the owner's list of smaller features, where most are extensions (`what-ships-with-silo`).
 
 - For `spend-split-and-forecast`, `budgets-on-rates` and `plan-limit-reached`, each model call
   needs as facts: the effort level and speed mode requested, the cache reads and writes, and a

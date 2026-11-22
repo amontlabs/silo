@@ -16,6 +16,10 @@ The options:
 Recommended: said wherever the run is shown. Silo never fills a hole, and a hole you are not shown
 is one you fill yourself.
 
+A silence is not a loss. If your Mac sleeps for an hour while a run is going, the record says the
+probe was silent for that hour, and its next line shows that nothing was lost, so the run still
+looks whole.
+
 ## Notes
 
 The record checks the property with a simulator that has a faulty source.

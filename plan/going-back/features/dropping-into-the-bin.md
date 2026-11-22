@@ -8,8 +8,8 @@ Thursday you remember a script it wrote there. The fork is still in the bin, and
 The options:
 
 - Build it (recommended). A dropped fork or fresh computer waits in the bin for its time there, then
-  goes, and only its record stays. It costs disk on your Mac for each dropped computer while it
-  waits.
+  goes, and only its record stays. You can also empty the bin before that time. It costs disk on
+  your Mac for each dropped computer while it waits.
 - Leave it out. A drop removes the computer at once. It costs any drop made too soon: what was only
   in it is gone.
 

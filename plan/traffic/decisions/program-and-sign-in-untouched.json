@@ -1,4 +1,0 @@
-{
-  "asks": "Does Silo leave the sign-in to the agent program?",
-  "answer": "The user signs in to the unmodified program inside the computer, through the vendor's own flow. Silo holds, stores and injects no subscription sign-in. An API key held as a secret is the other case. Silo never disables or restricts a sign-in method of an agent program."
-}

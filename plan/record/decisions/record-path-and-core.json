@@ -1,6 +1,9 @@
 {
   "asks": "Do facts and reports pass through the core?",
-  "answer": "Facts and reports do not pass through the core. The core receives an input only when something has to be decided or its state has to change: something is held, a budget is reached, a source is lost or back, a checkpoint is done.",
+  "answer": "Facts and reports take a path of their own, beside the one where the core decides, and do not pass through the core. The core receives an input only when something has to be decided or its state has to change: something is held, a budget is reached, a source is lost or back, a checkpoint is done.",
+  "needs": [
+    "engine-shape"
+  ],
   "sets": [
     {
       "in": "record/properties",

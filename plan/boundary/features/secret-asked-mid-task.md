@@ -27,7 +27,7 @@ you in Silo's prompt. The `silo` command so far only reads (`silo-command-reads-
 asks to it.
 
 From the list of smaller features the owner put on the roadmap on 21 November 2026. The owner's
-words on the list are in `silos-own-extensions`.
+words on the list are in `what-ships-with-silo`.
 
 ## An agent's notes
 

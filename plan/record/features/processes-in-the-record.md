@@ -19,7 +19,7 @@ happened.
 
 ## An agent's notes (21 November 2026)
 
-From the owner's list of smaller features, where most are extensions (`silos-own-extensions`).
+From the owner's list of smaller features, where most are extensions (`what-ships-with-silo`).
 
 - For `stopping-a-run`, `memory-and-cpu-per-run` and `stuck-run-alert`, the record needs, per run,
   the tree of processes it started and the memory and CPU each used over time. The command and

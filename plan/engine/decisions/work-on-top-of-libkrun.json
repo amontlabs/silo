@@ -1,7 +1,8 @@
 {
   "asks": "What does Silo build on top of libkrun?",
-  "answer": "Outside libkrun, in the helper: the boundary, which takes the computer's traffic from libkrun's network device; disk checkpoints and forks that share blocks, made as `fork-shares-disk-blocks` says for each host filesystem, where the choice for a filesystem with no reflinks, such as ext4, goes to the owner, since a full copy or a slower layer costs disk or waiting; and the Mac window for the screen. Memory snapshots are not built on top; how they arrive is `forks-of-running-linux`. How a computer is reached is a separate decision.",
+  "answer": "Outside libkrun, in the helper: the boundary, which takes the computer's traffic from libkrun's network device; disk checkpoints and forks that share blocks, made as `fork-shares-disk-blocks` says for each host filesystem, ext4 included; and the Mac window for the screen. Memory snapshots are not built on top; how they arrive is `forks-of-running-linux`. How a computer is reached is `computer-reached-over-ssh`.",
   "needs": [
-    "linux-vm-engine"
+    "linux-vm-engine",
+    "fork-shares-disk-blocks"
   ]
 }

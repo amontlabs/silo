@@ -1,18 +1,7 @@
 {
-  "asks": "How is a Linux computer made beside a macOS main?",
-  "answer": "A Linux computer is never a copy of a macOS main. It is made from a recipe, and the code reaches it as a commit: one you name, or one Silo makes of main's current work, uncommitted changes included. Nothing else of main reaches it: build output, installed tools and files outside the repository stay in main.",
+  "asks": "How does the code reach a Linux computer beside a macOS main?",
+  "answer": "As a commit: one you name, or one Silo makes of main's current work, uncommitted changes included. Nothing else of main reaches it: build output, installed tools and files outside the repository stay in main.",
   "needs": [
     "main-on-macos-first"
-  ],
-  "sets": [
-    {
-      "in": "computers/properties",
-      "id": "linux-never-copies-macos-main",
-      "says": "A Linux computer is never a copy of a macOS main.",
-      "kind": "safety",
-      "check": [
-        "types"
-      ]
-    }
   ]
 }

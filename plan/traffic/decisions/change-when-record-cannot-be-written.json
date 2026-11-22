@@ -1,7 +1,0 @@
-{
-  "asks": "What happens to a change of traffic when the record cannot be written at that moment?",
-  "answer": "The change is made, and the record of it waits in the room kept for Silo's decisions and changes until the recorder writes it. When that room is full, the message the change is for waits at the boundary, as a request that needs a new decision does, until the room has space; then the change is made and the message passes. A message that needed a change never goes through without it. If the agent program stops waiting first, its connection ends with the same error as any request that does not pass. A reply kept back this way still counts in spend and in every budget, since the provider sent it.",
-  "needs": [
-    "enforcing-and-recording"
-  ]
-}

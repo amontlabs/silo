@@ -8,11 +8,12 @@ live, and it is either a macOS computer or a Linux one.
 The options:
 
 - macOS first (recommended). Your agents get a Mac of their own: they can build and test Mac and iOS
-  apps, use a Mac screen, and what you bring in from your Mac keeps its paths and tools. It costs a
-  first run that downloads macOS from Apple, over 10 GB, and installs it. A macOS computer takes
-  more disk and memory than a Linux one. Apple allows two macOS computers running on one Mac, so at
-  most one fork of main runs beside it. A fork of main starts from a copy of main's disk, so the
-  programs that were running in main are not running in it.
+  apps, use a Mac screen, and what you bring in from your Mac keeps its paths and tools. A Linux
+  computer beside main is never a copy of it: it is a fresh computer. It costs a first run that
+  downloads macOS from Apple, over 10 GB, and installs it. A macOS computer takes more disk and
+  memory than a Linux one. Apple allows two macOS computers running on one Mac, so at most one fork
+  of main runs beside it. A fork of main starts from a copy of main's disk, so the programs that
+  were running in main are not running in it.
 - Linux first. Main is lighter, gives idle memory back, and several forks can run beside it. It
   costs what makes Silo different: a Linux machine for agents is what cloud services already offer,
   and agents that build Mac software, Silo's own app included, cannot do it there.
@@ -52,7 +53,7 @@ From earlier work on macOS computers. Not yet a decision.
 
 The owner said "forks are macOS or Linux". A fork is a copy, so a Linux computer beside a macOS
 main is a fresh computer, not a copy, and the answer says so. `linux-beside-a-macos-main` says
-how a Linux computer is made beside a macOS main.
+how the code reaches it.
 
 ## What follows from it, put forward
 

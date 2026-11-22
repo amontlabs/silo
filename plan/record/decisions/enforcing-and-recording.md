@@ -1,8 +1,8 @@
 # Enforcing and recording
 
-What happens to a change of traffic when the record cannot be written is the decision
-`change-when-record-cannot-be-written` in the part `traffic`, which follows from this one. The record names no check for this
-sentence: `simulator` is put forward here.
+The record names no check for this sentence: `simulator` is put forward here. The answer keeps
+`no-silent-change-to-traffic`, in the part `traffic`: Silo makes a change to traffic only when it
+can record it.
 
 ## For the owner
 
@@ -13,16 +13,23 @@ and change to traffic is recorded.
 The options:
 
 - Nothing unrecorded (recommended). Silo keeps room for its own decisions. When that room is full, a
-  request that needs a new decision is blocked until the record catches up. It costs agents blocked
-  while the record is down.
+  request that needs a new decision is blocked until the record catches up, and so is a model's
+  reply that Silo has to change. It costs agents blocked while the record is down.
 - Carry on, record a gap. Rules keep applying and work goes on. The record shows only that there was
   a gap. It costs the three promises, since some refusals appear nowhere.
+
+A model's reply that Silo has to change waits the same way. Say Claude Code in main gets a reply
+that asks for `git push --force origin main`, which a rule denies: the reply stays at the boundary
+until the record has room, then the denial is made and the reply goes on. It could instead fail at
+once, with an error to Claude Code. That costs a second reply paid each time, even when the record
+would have caught up a second later. If Claude Code gives up while it waits, it gets the same error,
+and the reply it never received still counts in spend and in your budgets, since the provider
+charged for it.
 
 Recommended: nothing unrecorded. The record is the core of the product, and a refusal nobody can
 find afterwards is worse than a short block.
 
-This also answers `change-when-record-cannot-be-written`, which follows from it. How a request is
-blocked without a refusal going unrecorded is for the agents who build it.
+How a request is blocked without a refusal going unrecorded is for the agents who build it.
 
 ## From Guillotine
 
@@ -42,5 +49,5 @@ An agent's part. This would set "Enforcing does not depend on recording", with a
 the buffer is full. In force, Silo changes nothing in traffic without recording it
 (`denied-tool-call`) and each decision is recorded (`how-a-rule-is-enforced`). The recorder is down,
 the buffer is full, and a rule denies a tool call: the denial goes ahead and only a gap is recorded.
-The audit proposes that this entry needs `change-when-record-cannot-be-written` and says "except
-where Silo changes traffic: there the change is recorded or it is not made."
+The audit proposes that this entry says "except where Silo changes traffic: there the change is
+recorded or it is not made." The answer says so.

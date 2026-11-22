@@ -1,4 +1,0 @@
-{
-  "asks": "How do your own agent programs, providers and habits work inside your Silo computers?",
-  "answer": "Your agent programs, providers and habits come with you, unchanged. The first run finds on your Mac the agent programs Silo knows, their settings and skills, and your repositories, and offers to bring each into main. Each program then runs in main as it is, with the provider you already use, signed in the vendor's own way."
-}

@@ -1,11 +1,11 @@
 {
   "asks": "When the record cannot be written, does Silo keep deciding on requests and changing traffic?",
-  "answer": "Only as long as it can keep what it decides. The boundary enforces from the rules it was given, without waiting for the recorder. Its decisions and its changes to traffic wait in room kept for them, and are never lost in a gap. When that room is full, a request that needs a new decision does not pass until the record catches up, and a change to traffic is not made. What was allowed before carries on. Other facts and reports wait in a buffer of fixed size, and then a gap is recorded.",
+  "answer": "Only as long as it can keep what it decides. The boundary enforces from the rules it was given, without waiting for the recorder. Its decisions and its changes to traffic wait in room kept for them, and are never lost in a gap. When that room is full, a request that needs a new decision or a change to traffic waits at the boundary until there is room. It never passes without its decision or its change: a model's reply that carries a denied tool call waits, and the agent program does not get the call. If the agent program stops waiting first, its connection ends with the same error as any request that does not pass. A reply kept back this way still counts in spend and in every budget, since the provider sent it. What was allowed before carries on. Other facts and reports wait in a buffer of fixed size, and then a gap is recorded.",
   "sets": [
     {
       "in": "record/properties",
       "id": "nothing-decided-unrecorded",
-      "says": "Silo makes no decision on a request and no change to traffic that it cannot record. When the room kept for them is full, a request that needs a new decision does not pass.",
+      "says": "Silo makes no decision on a request and no change to traffic that it cannot record. When the room kept for them is full, a request that needs a new decision or a change to traffic does not pass until there is room.",
       "kind": "safety",
       "check": [
         "simulator"

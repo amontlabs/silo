@@ -1,4 +1,4 @@
-# Installing an extension
+# Taking an extension back
 
 ## For the owner
 

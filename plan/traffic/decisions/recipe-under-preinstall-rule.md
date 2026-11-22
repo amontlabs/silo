@@ -21,4 +21,4 @@ Recommended: act as if it does. It costs little, and Silo is then in order under
 
 ## Notes
 
-To find out, by asking. The rule is in the notes of `anthropic-conditions-kept`.
+To find out, by asking. The rule is in the notes of `unmodified-agent-programs`.

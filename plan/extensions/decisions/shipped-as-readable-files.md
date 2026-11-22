@@ -1,4 +1,4 @@
-# How are the classifiers and precautions that ship with Silo shipped
+# How the extensions that ship with Silo are shipped
 
 ## For the owner
 

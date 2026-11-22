@@ -20,7 +20,7 @@ own already gives the way back.
 ## Notes
 
 From the list of smaller features the owner put on the roadmap on 21 November 2026. The owner's
-words on the list are in `silos-own-extensions`.
+words on the list are in `what-ships-with-silo`.
 
 ## An agent's notes
 

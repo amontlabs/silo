@@ -1,26 +1,5 @@
 # How an extension's opinion is kept
 
-## For the owner
-
-An agent's part, 22 November 2026. An extension called Leftovers says how /work/app/node_modules on
-main would come back: by a rebuild. Another, Injection check, wants to say of each model call of
-main whether it looks like a prompt injection: yes, no or unsure. Silo has no such list of its own.
-
-The options:
-
-- Silo's lists and the extension's own (recommended). Leftovers uses Silo's list, so Disk shows its
-  opinion on that folder. Injection check brings its own list, which you see when you import it, and
-  its opinions show on the model calls they are about. You can set a precaution on "yes". It costs
-  one more thing to read when you import, and only Silo's own lists can sort a place such as Disk.
-- Silo's lists only. An extension gives opinions only where Silo has a list. It costs every
-  judgement Silo did not think of: Injection check could only alert you, and nothing could act on
-  what it found.
-
-Recommended: Silo's lists and the extension's own. Extensions exist because people hold different
-opinions, and a list fixed when you import the extension still lets a precaution act on a value
-known in advance. GitHub works this way: an app names its own check, and a rule of the repository
-acts on its result.
-
 ## The owner's words
 
 - On 21 November 2026, in the notes of `what-makes-a-classifier`: "I still don't know what the
@@ -39,7 +18,7 @@ fixed list. `extension-tools`, taken, says an extension uses only tools, and tha
 shows or protects. Only one tool takes an answer today: the one that protects a computer's
 requests, where Silo asks and the extension answers "let it go on", "deny" or "hold". Nothing says
 how any other value becomes an opinion that Silo keeps, such as the kind of a call or how a path
-would come back (`built-in-classifiers`).
+would come back (`how-a-path-comes-back`).
 
 ## The proposal: every opinion is an answer to a question Silo defines
 

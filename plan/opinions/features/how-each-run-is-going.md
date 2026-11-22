@@ -24,3 +24,7 @@ is the one place that can tell you a run is stuck or repeating itself.
 An agent's doubt, from drafting this feature on 21 November 2026.
 
 It holds three classifiers that ship with Silo: the state of a run, its stretches and its repeats. They could be three features.
+
+A run is stuck when it makes no model call and shows no process activity, while one of its processes
+sleeps or waits for input. The stretches of a run are read from exit codes and from what was read
+and written. That line comes from the plan's notes before 18 November 2026.

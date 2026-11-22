@@ -18,6 +18,6 @@ fails silently is how a promise breaks without anyone seeing.
 
 ## Notes
 
-The owner said it about the limit of a hold. That case is the decision `no-best-effort-wait`.
+The owner said it about the limit of a hold. That case is the decision `classifier-wait-limit`.
 
 The general sentence is an agent's, put forward on 20 November 2026. The owner has not answered it.

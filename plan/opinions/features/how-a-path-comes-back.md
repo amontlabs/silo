@@ -17,3 +17,8 @@ The options:
   drop.
 
 Recommended: build it. It is what lets you drop a fork knowing what you lose.
+
+## Notes
+
+The coarse kinds put forward are code, build output, dependency, cache, agent data, scratch, log,
+configuration and credential-like.
