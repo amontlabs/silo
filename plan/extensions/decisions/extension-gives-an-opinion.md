@@ -1,5 +1,25 @@
 # How an extension's opinion is kept
 
+## For the owner
+
+An agent's part, 22 November 2026. An extension called Leftovers says how /work/app/node_modules on
+main would come back: by a rebuild. You want to see that on the folder in Disk, and to let a
+precaution act on it.
+
+The options:
+
+- Through a tool, kept beside the record (recommended). You grant the extension a tool that gives
+  an opinion about lines of the record it reads, with a value from a list Silo fixes. The app shows
+  it on those lines as Leftovers' opinion, and a precaution you set can act on it. A value outside
+  the list is refused. It costs one more kind of tool to read when you import an extension.
+- No opinions from extensions. An extension can only alert you or draw a panel. It costs every
+  judgement an extension makes: nothing shows it where the record is, and no precaution can act on
+  it.
+
+Recommended: through a tool. Extensions exist because people hold different opinions, and an
+opinion is only useful where you look and where a precaution can read it. Which lists of values
+exist is asked in `who-fixes-the-values`.
+
 ## The owner's words
 
 - On 21 November 2026, in the notes of `what-makes-a-classifier`: "I still don't know what the
