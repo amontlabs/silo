@@ -1,8 +1,6 @@
 {
   "asks": "Where is a rule enforced?",
   "answer": "A rule is enforced by the engine, outside the computer, and each decision is recorded with the version of the rule.",
-  "adds": [
-    "rule-decisions-are-recorded"
-  ],
-  "verdict": "take"
+  "verdict": "take",
+  "replaced_by": "where-a-rule-is-enforced"
 }

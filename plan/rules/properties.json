@@ -55,7 +55,7 @@
   },
   {
     "id": "rule-decisions-are-recorded",
-    "says": "A rule is enforced by the engine, outside the computer, and each decision is recorded with the version of the rule.",
+    "says": "A rule is enforced outside the computer, and each decision is recorded with the version of the rule.",
     "kind": "safety",
     "check": [
       "simulator"
