@@ -1,6 +1,6 @@
 // An opened part: its title, line, one dot per feature and the counts on the left, All's rows on the right: its
-// features, each with the decisions it needs folded under it, then its decisions that none of its features needs. The
-// same two columns hold Product's decisions, a film and the suggestions.
+// features, each with the decisions it rests on folded under it, then its decisions that none of its features rests on.
+// The same two columns hold Product's decisions, a film and the suggestions.
 import type { ReactNode } from 'react';
 import { AllList } from './AllList';
 import { filmSections, partFilm, partSections, productSections } from './all';

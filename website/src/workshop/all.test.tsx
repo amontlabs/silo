@@ -4,10 +4,12 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { allSections, formatQuery, graphOf, kidOrder, locate, NO_QUERY, parseQuery } from './all';
+import { allSections, formatQuery, graphOf, kidOrder, locate, NO_QUERY, parseQuery, partSections, relationsOf, underKey } from './all';
 import type { Query } from './all';
 import { App } from './App';
-import { buildData, DECISIONS, FEATURES, liveState } from './fixtures';
+import { buildDataFrom } from './data';
+import { buildData, DECISIONS, FEATURES, liveState, planFiles } from './fixtures';
+import { NO_MAP } from './map';
 import { buildPlan } from './plan';
 import type { BuildData, Film } from './plan';
 import { POINT_MS } from './relation';
@@ -37,18 +39,23 @@ describe('the list in build order', () => {
   const plan = buildPlan(withNeeds(), null);
   const graph = graphOf(plan);
 
-  it('numbers every feature by its place in the plan, groups them by stage, and ends with the decisions no feature needs, one row per part', () => {
+  it('numbers every feature by its place in the plan and starts each stage with its decisions no feature rests on, one row per part', () => {
     const sections = allSections(plan, graph, withNeeds().stages, query());
-    expect(sections.map((section) => section.title)).toEqual(['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth', 'Eleventh', 'Twelfth', 'Gone', 'Other decisions']);
+    expect(sections.map((section) => section.title)).toEqual(['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth', 'Eleventh', 'Twelfth', 'Gone']);
     const steps = sections.flatMap((section) => section.items).flatMap((item) => (item.type === 'feature' ? [item.step] : []));
     expect(steps).toEqual(steps.map((_, index) => index + 1));
-    const loose = sections.at(-1)!.items.map((item) => (item.type === 'bundle' ? [item.title, item.kids.map((kid) => kid.key)] : null));
-    // one-way, security-properly and tamper-proof-logs are under the feature that needs them, not here.
+    const loose = sections.flatMap((section) => section.items.flatMap((item) => (item.type === 'bundle' ? [[section.title, item.title, item.kids.map((kid) => kid.key)]] : [])));
+    // one-way, security-properly and tamper-proof-logs are under the feature that rests on them, not here.
     expect(loose).toEqual([
-      ['Part A', ['entry-core-in-zig']],
-      ['Part E', ['entry-who-signs', 'entry-signed-logs', 'entry-old-format']],
-      ['The whole product', ['entry-one-host', 'entry-plain-logs']],
+      ['First', 'Part A', ['entry-core-in-zig']],
+      ['First', 'The whole product', ['entry-one-host', 'entry-plain-logs']],
+      ['Eighth', 'Part E', ['entry-who-signs', 'entry-signed-logs']],
+      ['Gone', 'Part E', ['entry-old-format']],
     ]);
+    for (const section of sections) {
+      const types = section.items.map((item) => item.type);
+      expect(types, section.title).toEqual([...types.filter((type) => type === 'bundle'), ...types.filter((type) => type === 'feature')]);
+    }
   });
 
   it('folds under a feature the decisions it needs: those not decided first, then the others, each in the plan\'s order', () => {
@@ -80,7 +87,86 @@ describe('the list in build order', () => {
     const sections = allSections(plan, graph, withNeeds().stages, query());
     expect(locate(sections, 'entry-fork', new Set())).toEqual({ instance: 'entry-fork', holder: null, more: false });
     expect(locate(sections, 'entry-one-way', new Set())).toEqual({ instance: 'entry-one-way@entry-fork-keeps', holder: 'entry-fork-keeps', more: false });
-    expect(locate(sections, 'entry-who-signs', new Set())).toEqual({ instance: 'entry-who-signs@bundle-part-e', holder: 'bundle-part-e', more: false });
+    expect(locate(sections, 'entry-who-signs', new Set())).toEqual({ instance: 'entry-who-signs@bundle-eighth.part-e', holder: 'bundle-eighth.part-e', more: false });
+  });
+});
+
+/** A small plan of its own: the example map names entries it does not hold, so it has no map. */
+const drawn = (options: Parameters<typeof planFiles>[0]) => buildDataFrom(planFiles(options), { map: NO_MAP });
+
+describe('what a feature rests on', () => {
+  // top needs end and base-feature; end needs middle, which needs deep, which needs settled. hidden is needed by
+  // base-feature and by side, a decision that nothing rests on; other needs side-feature, a feature.
+  const data = drawn({
+    features: [
+      { id: 'base-feature', stage: 'second', part: 'part-b', name: 'A base', what: 'x', needs: ['hidden'] },
+      { id: 'top', stage: 'third', part: 'part-a', name: 'A top', what: 'x', needs: ['end', 'base-feature', 'through'] },
+    ],
+    decisions: [
+      { id: 'settled', stage: 'first', part: null, asks: 'Settled?', answer: 'Yes.', verdict: 'take' },
+      { id: 'deep', stage: 'first', part: 'part-c', asks: 'Deep?', needs: ['settled'] },
+      { id: 'hidden', stage: 'first', part: 'part-a', asks: 'Hidden?' },
+      { id: 'early', stage: 'first', part: 'part-c', asks: 'Early?' },
+      { id: 'middle', stage: 'second', part: 'part-a', asks: 'Middle?', needs: ['deep'] },
+      { id: 'end', stage: 'second', part: 'part-a', asks: 'End?', needs: ['middle', 'deep'] },
+      { id: 'side', stage: 'second', part: 'part-c', asks: 'Side?', needs: ['hidden'] },
+      { id: 'through', stage: 'third', part: 'part-a', asks: 'Through?' },
+    ],
+  });
+  const plan = buildPlan(data, null);
+  const graph = graphOf(plan);
+  const keys = (ids: string[]) => ids.map((id) => `entry-${id}`);
+  const under = (id: string) => kidOrder(graph.decisions.get(`entry-${id}`)!).map((row) => row.key);
+
+  it('holds a decision reached only through another decision, and none reached only through a needed feature', () => {
+    expect(under('top')).toEqual(keys(['deep', 'middle', 'end', 'through', 'settled']));
+    expect(under('top')).not.toContain('entry-hidden');
+    expect(under('base-feature')).toEqual(keys(['hidden']));
+  });
+
+  it('follows no feature that a decision needs', () => {
+    const crossed = drawn({
+      features: [{ id: 'low', stage: 'first', part: 'part-a', name: 'Low', what: 'x', needs: ['under-low'] }, { id: 'high', stage: 'third', part: 'part-a', name: 'High', what: 'x', needs: ['joins'] }],
+      decisions: [{ id: 'under-low', stage: 'first', part: 'part-a', asks: 'Under low?' }, { id: 'joins', stage: 'second', part: 'part-a', asks: 'Joins?', needs: ['low'] }],
+    });
+    expect(graphOf(buildPlan(crossed, null)).decisions.get('entry-high')!.map((row) => row.key)).toEqual(['entry-joins']);
+  });
+
+  it('puts in a fold each decision still to decide after those of them it needs', () => {
+    for (const feature of graph.steps) {
+      const open = kidOrder(graph.decisions.get(feature.key)!).filter((row) => row.status === 'undecided').map((row) => row.key);
+      open.forEach((key, at) => {
+        for (const need of graph.needs.get(key)!) {
+          if (graph.rows.get(need)!.status === 'undecided') expect(open.slice(0, at), `${key} needs ${need}`).toContain(need);
+        }
+      });
+    }
+  });
+
+  it('counts the same set in the meter, the filters and where an entry stands', () => {
+    const sections = allSections(plan, graph, data.stages, query({ parts: ['part-c'] }));
+    const top = sections.flatMap((section) => section.items).find((item) => item.key === 'entry-top');
+    // Only a decision two needs away is of Part C.
+    expect(top?.type === 'feature' && [top.decided, top.kids.length, top.passing?.map((row) => row.key)]).toEqual([1, 5, ['entry-deep']]);
+    expect(locate(allSections(plan, graph, data.stages, query()), 'entry-deep', new Set())).toEqual({ instance: underKey('entry-deep', 'entry-top'), holder: 'entry-top', more: false });
+  });
+
+  it('lists a stage\'s decisions no feature rests on before its features, and gives no section to a stage with neither', () => {
+    const listed = allSections(plan, graph, data.stages, query()).map((section) => [section.title, section.items.map((item) => item.key)]);
+    expect(listed).toEqual([
+      ['First', ['bundle-first.part-c']],
+      ['Second', ['bundle-second.part-c', 'entry-base-feature']],
+      ['Third', ['entry-top']],
+    ]);
+  });
+
+  it('is the set a part\'s place lists under its features, and leaves the relations to the direct needs', () => {
+    const rows = plan.parts.find((group) => group.part.id === 'part-a')!.rows;
+    const sections = partSections(graph, rows);
+    expect(sections[0].items[0]).toMatchObject({ key: 'entry-top', decided: 1 });
+    expect(sections[1].items.map((item) => item.key)).toEqual(['entry-hidden']);
+    expect(relationsOf(graph, 'entry-top').needs).toEqual(keys(['end', 'base-feature', 'through']));
+    expect(relationsOf(graph, 'entry-deep').waits).toEqual([]);
   });
 });
 

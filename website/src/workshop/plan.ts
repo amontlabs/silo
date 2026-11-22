@@ -41,6 +41,8 @@ export interface Entry {
   built: string | null;
   /** Whether it has notes; their text is a chunk of its own (`virtual:workshop-notes`), loaded on demand. */
   notes: boolean;
+  /** Set on an entry with no verdict whose notes hold nothing but their choice, which it shows in place. */
+  choiceOnly?: true;
   /** Whether it has anything to show from `Facts` (the chunk `virtual:workshop-facts`), given its verdict. */
   more: boolean;
   /** What a closed History line says: its newest change and how many it has; null with no change. The changes themselves are `Histories`. */
@@ -97,8 +99,30 @@ export interface Statement {
   asks: string | null;
 }
 
-/** What an entry's file holds beyond what the rows need to be drawn. */
+/** One option of a choice. */
+export interface ChoiceOption {
+  name: string;
+  /** What it means; empty when the option says only what it costs. */
+  what: string;
+  cost?: string;
+  recommended?: true;
+}
+
+/** A choice as the opened row draws it. */
+export interface ChoiceTable {
+  /** Paragraphs, with a blank line between. */
+  case: string;
+  options: ChoiceOption[];
+  why: string;
+}
+
+/** The section "The choice" of an entry's notes (choice.ts): a table, or Markdown when it has another shape. */
+export type Choice = ChoiceTable | { text: string };
+
+/** What an entry's files hold beyond what the rows need to be drawn. */
 export interface EntryFacts {
+  /** The choice of an entry with no verdict. */
+  choice?: Choice;
   suggest?: { verdict: Verdict; why: string };
   /** What a yes would write into the lists, as statements. */
   sets?: Statement[];
@@ -115,8 +139,15 @@ export interface Facts {
   statements: Record<string, Statement>;
 }
 
+/** The notes of an entry with no verdict cut around their choice; put back together, they are the notes. */
+export interface SplitNotes {
+  before: string;
+  choice: string;
+  after: string;
+}
+
 /** The notes of the entries that have some, Markdown, by entry id. */
-export type Notes = Record<string, string>;
+export type Notes = Record<string, string | SplitNotes>;
 
 export interface Stage {
   id: string;
@@ -212,6 +243,8 @@ export interface Row {
   n: number | null;
   /** Whether the entry has notes. */
   notes: boolean;
+  /** Whether they hold nothing but a choice, which the row shows in place while it has no verdict. */
+  choiceOnly: boolean;
   /** Whether the entry has something to show from `Facts`. */
   more: boolean;
   /** The ids of the films that show this entry, in the films' order. */
@@ -352,7 +385,7 @@ function suggestionStatus(live: LiveIssue): Status {
 
 function baseRow(key: string, kind: RowKind, name: string): Row {
   return {
-    key, kind, of: null, name, what: null, issue: null, status: 'undecided', stage: null, part: null, n: null, notes: false, more: false, films: [], filmBehind: false, history: null, verdict: null, by: null, needs: [], started: null, built: null,
+    key, kind, of: null, name, what: null, issue: null, status: 'undecided', stage: null, part: null, n: null, notes: false, choiceOnly: false, more: false, films: [], filmBehind: false, history: null, verdict: null, by: null, needs: [], started: null, built: null,
     author: null, up: null, comments: null, replaces: [], replacedBy: null, date: null, closedAt: null, closed: false,
   };
 }
@@ -479,6 +512,7 @@ export function buildPlan(data: BuildData, live: LiveState | null, closedKeys: R
     row.part = entry.part;
     row.n = entry.position;
     row.notes = entry.notes;
+    row.choiceOnly = entry.choiceOnly === true;
     row.more = entry.more;
     row.history = entry.history;
     row.verdict = entry.verdict;

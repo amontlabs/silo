@@ -1,24 +1,25 @@
-// One row of a list, and what it shows once open: the text, what the entry says of the plan's lists, its state, its
-// notes, its history and its thread (comments, their votes) and the box; an entry with no thread yet says so and has the box too.
+// One row of a list, and what it shows once open: the text, its choice while it has no verdict, what the entry says of
+// the plan's lists, its state, its notes, its history and its thread (comments, their votes) and the box; an entry with
+// no thread yet says so and has the box too.
 // Opening never moves the row or the rows above: the open frame is an overlay and the body grows below.
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { hasSessionHint } from './api';
 import { DEFAULT_REPO, repoAddress } from '../../../tools/workshop/model/index.js';
-import { Markdown } from './Markdown';
-import { RichText, safeHref } from './RichText';
+import { Markdown, plainLinks } from './Markdown';
+import { inline, RichText, safeHref } from './RichText';
 import { byWho, changeLine, changePhrase, isDecided, relativeTime, shortDate } from './plan';
-import type { Change, EntryFacts, Facts, Row, Statement, Verdict } from './plan';
+import type { Change, Choice, ChoiceTable, EntryFacts, Facts, Row, Statement, Verdict } from './plan';
 import { formatHash, placeOf } from './routes';
 import type { Comment } from './api';
 import { pageConfig } from './useWorkshop';
 import type { Detail, Workshop } from './useWorkshop';
 
 /** How long a panel takes to open, to close and to follow what it holds (workshop.css: `.ws-more`). */
-const GROW_MS = 260;
+export const GROW_MS = 260;
 /** How long the closing body stays in place for its animation. */
 const CLOSE_MS = GROW_MS + 40;
-/** How long an opening panel waits for its comments, so it opens at its final size. */
+/** How long an opening panel waits for its details and comments, so it opens at its final size. */
 export const HOLD_MS = 180;
 
 export interface EntryContext {
@@ -90,7 +91,7 @@ export interface PanelProps {
 }
 
 /**
- * What a row shows once open. It opens at once and grows when its comments are in, or after HOLD_MS; its body stays
+ * What a row shows once open. It opens at once and grows when its details and comments are in, or after HOLD_MS; its body stays
  * mounted while it closes, so the close animates too.
  */
 export function Panel({ row, open, ctx, id, lead, vote = false }: PanelProps) {
@@ -98,9 +99,11 @@ export function Panel({ row, open, ctx, id, lead, vote = false }: PanelProps) {
   // The body stays mounted while it closes, so the close animates too.
   const [closing, setClosing] = useState(false);
   const [wasOpen, setWasOpen] = useState(open);
-  // The row shows itself open at once; its panel grows when the comments are in, or after HOLD_MS.
+  // The row shows itself open at once; its panel grows when the details and the comments are in, or after HOLD_MS.
   const detail = row.issue === null ? undefined : w.details[row.issue];
-  const ready = row.issue === null || row.issue <= 0 || !w.liveOk || typeof detail === 'object' || detail === 'error';
+  const detailsWait = row.more && (w.facts === undefined || w.facts === 'loading');
+  const commentsIn = row.issue === null || row.issue <= 0 || !w.liveOk || typeof detail === 'object' || detail === 'error';
+  const ready = commentsIn && !detailsWait;
   const [held, setHeld] = useState(false);
   if (wasOpen !== open) {
     setWasOpen(open);
@@ -128,10 +131,12 @@ export function Panel({ row, open, ctx, id, lead, vote = false }: PanelProps) {
   // Comments that arrive while the panel is opening wait, on their placeholders, until the opening has ended.
   const [wasGrown, setWasGrown] = useState(grown);
   const [opening, setOpening] = useState<{ detail: typeof detail } | null>(null);
+  const [detailsHeld, setDetailsHeld] = useState(false);
   if (wasGrown !== grown) {
     setWasGrown(grown);
     // Only a panel that opens on placeholders waits; one that opens on its comments shows every change at once.
     setOpening(grown && typeof detail !== 'object' ? { detail } : null);
+    setDetailsHeld(grown && detailsWait);
   }
   useEffect(() => {
     if (!opening) return;
@@ -139,6 +144,14 @@ export function Panel({ row, open, ctx, id, lead, vote = false }: PanelProps) {
     return () => clearTimeout(timer);
   }, [opening]);
   const shown = opening ? opening.detail : detail;
+  // The details too (the choice is several times the height of their placeholder): drawn while the panel opens, they
+  // would jump it to a share of their height. They wait on the placeholder, then the panel grows to them.
+  useEffect(() => {
+    if (!detailsHeld) return;
+    const timer = setTimeout(() => setDetailsHeld(false), GROW_MS);
+    return () => clearTimeout(timer);
+  }, [detailsHeld]);
+  const facts = detailsHeld ? 'loading' : w.facts;
 
   // When the comments arrive in a panel already open, it grows from its old height to the new one instead
   // of jumping; this also covers rows that appear open (from another place, Back and Forward).
@@ -149,7 +162,7 @@ export function Panel({ row, open, ctx, id, lead, vote = false }: PanelProps) {
   // their chunk arrives after its placeholder.
   const [extrasMoved, setExtrasMoved] = useState(0);
   const loaded = (chunk: unknown) => (typeof chunk === 'object' ? 'in' : String(chunk));
-  const chunks = `${loaded(w.facts)}|${loaded(w.notes)}|${loaded(w.histories)}|${extrasMoved}`;
+  const chunks = `${loaded(facts)}|${loaded(w.notes)}|${loaded(w.histories)}|${extrasMoved}`;
   const lastChunks = useRef(chunks);
   const settling = useRef<ReturnType<typeof setTimeout>>(undefined);
   // The panel's height as last laid out, kept current while it animates open (no render happens then).
@@ -204,7 +217,7 @@ export function Panel({ row, open, ctx, id, lead, vote = false }: PanelProps) {
 
   return (
     <div className={grown ? 'ws-more open' : 'ws-more'} id={id} aria-hidden={open ? undefined : true} inert={!open}>
-      <div className="ws-more-in" ref={inner}>{open || closing ? <Body row={row} ctx={ctx} detail={shown} lead={lead} vote={vote} onExtras={() => setExtrasMoved((n) => n + 1)} /> : null}</div>
+      <div className="ws-more-in" ref={inner}>{open || closing ? <Body row={row} ctx={ctx} detail={shown} facts={facts} lead={lead} vote={vote} onExtras={() => setExtrasMoved((n) => n + 1)} /> : null}</div>
     </div>
   );
 }
@@ -389,13 +402,13 @@ function VerdictButtons({ row, ctx, held = false }: { row: Row; ctx: EntryContex
  * are live only once the entry's details (what a yes would change) show, since the owner decides on them too; until
  * then their room is held.
  */
-function StateLine({ row, ctx, children }: { row: Row; ctx: EntryContext; children?: ReactNode }) {
+function StateLine({ row, ctx, facts, children }: { row: Row; ctx: EntryContext; facts: Workshop['facts']; children?: ReactNode }) {
   const text = stateText(row);
   const tone = isDecided(row) && row.status !== 'dropped' ? 'ws-yes' : 'ws-muted';
   const id = planId(row);
   const refusal = id ? ctx.w.verdictRefusals[id] : undefined;
   const offered = offersVerdict(row);
-  const detailsShown = !row.more || typeof ctx.w.facts === 'object';
+  const detailsShown = !row.more || typeof facts === 'object';
   return (
     <>
       <div className="ws-state">
@@ -670,18 +683,25 @@ function historySummary(row: Row): string {
   return `${changeLine(last.what, last.agents)}, ${shortDate(last.date)}${last.count > 1 ? ` · ${last.count} changes` : ''}`;
 }
 
-/** The entry's notes and its history, each closed until asked for; `onMove` tells the panel to grow or shrink to them. */
+/**
+ * The entry's notes and its history, each closed until asked for; `onMove` tells the panel to grow or shrink to them.
+ * While the choice shows in place, the notes are shown without it, and notes that hold nothing else have no button.
+ * When the choice could not load, the notes hold it as any other of their sections.
+ */
 function Extras({ row, ctx, onMove }: { row: Row; ctx: EntryContext; onMove: () => void }) {
   const { w } = ctx;
   const [shown, setShown] = useState(false);
   const [history, setHistory] = useState(false);
-  if (!row.notes && !row.history) return null;
+  const inPlace = row.verdict === null && w.facts !== 'error' && w.facts !== 'changed';
+  const hasNotes = row.notes && !(inPlace && row.choiceOnly);
+  if (!hasNotes && !row.history) return null;
   const id = row.key.slice('entry-'.length);
-  const notes = typeof w.notes === 'object' ? w.notes[id] : undefined;
+  const kept = typeof w.notes === 'object' ? w.notes[id] : undefined;
+  const notes = typeof kept !== 'object' ? kept : inPlace ? `${kept.before}${kept.after}` : `${kept.before}${kept.choice}${kept.after}`;
   return (
     <div className="ws-extras">
       <div className="ws-extras-bar">
-        {row.notes ? (
+        {hasNotes ? (
           <button
             type="button" className="ws-disc" aria-expanded={shown} aria-controls={`${row.key}-notes`}
             onPointerEnter={() => w.wantNotes()} onPointerDown={() => w.wantNotes()} onTouchStart={() => w.wantNotes()} onFocus={() => w.wantNotes()}
@@ -696,7 +716,7 @@ function Extras({ row, ctx, onMove }: { row: Row; ctx: EntryContext; onMove: () 
           >History<span> · {historySummary(row)}</span></button>
         ) : null}
       </div>
-      {row.notes && shown ? (
+      {hasNotes && shown ? (
         <div className="ws-extras-in" id={`${row.key}-notes`}>
           {notes ? <Markdown text={notes} /> : w.notes === 'error' || w.notes === 'changed' ? <ChunkFailed what="Notes" state={w.notes} w={w} /> : typeof w.notes === 'object' ? null : (
             <div className="ws-ph-notes" aria-busy="true">
@@ -733,6 +753,45 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
     </div>
   );
 }
+
+/** Paragraphs of a choice: inline code and web links, as in notes; any other link keeps only its label. */
+function ChoiceText({ text }: { text: string }) {
+  return <RichText text={plainLinks(text)} className="ws-fact-text" />;
+}
+
+/** A choice of the known shape: the case, the options with what each costs, and why the recommended one. */
+function ChoiceView({ choice }: { choice: ChoiceTable }) {
+  const costs = choice.options.some((option) => option.cost);
+  return (
+    <div className="ws-choice">
+      <div className="ws-fact ws-case">
+        <span className="ws-fact-label">The case</span>
+        <ChoiceText text={choice.case} />
+      </div>
+      <div className="ws-fact ws-options">
+        <div className="ws-options-head">
+          <span className="ws-fact-label">The options</span>
+          {costs ? <span className="ws-fact-label">The cost</span> : null}
+        </div>
+        <ul>
+          {choice.options.map((option, index) => (
+            <li key={index} className={option.recommended ? 'rec' : undefined}>
+              <span className="ws-option">
+                <b>{inline(plainLinks(option.name), `option-${index}`)}</b>
+                {option.recommended ? <span className="ws-tag">recommended</span> : null}
+              </span>
+              {option.what ? <p className={option.cost ? undefined : 'ws-span'}>{inline(plainLinks(option.what), `what-${index}`)}</p> : null}
+              {option.cost ? <p className="ws-cost">{inline(plainLinks(option.cost), `cost-${index}`)}</p> : null}
+            </li>
+          ))}
+        </ul>
+      </div>
+      <Fact label="Why this one"><ChoiceText text={choice.why} /></Fact>
+    </div>
+  );
+}
+
+const isTable = (choice: Choice | undefined): choice is ChoiceTable => choice !== undefined && !('text' in choice);
 
 /** What a yes would add, change and remove: the lines of an entry with no verdict that sets or removes statements. */
 function YesLines({ own, facts }: { own: EntryFacts; facts: Facts }) {
@@ -785,12 +844,12 @@ function YesLines({ own, facts }: { own: EntryFacts; facts: Facts }) {
 }
 
 /** What the open view says of the lists and of what the entry needs, in the order of the plan's model. */
-function OpenFacts({ row, ctx }: { row: Row; ctx: EntryContext }) {
+function OpenFacts({ row, ctx, state }: { row: Row; ctx: EntryContext; state: Workshop['facts'] }) {
   const { w } = ctx;
   const id = planId(row);
-  const facts = typeof w.facts === 'object' ? w.facts : null;
+  const facts = typeof state === 'object' ? state : null;
   const own = facts && id !== null ? facts.entries[id] : undefined;
-  const failed = row.more && (w.facts === 'error' || w.facts === 'changed') ? w.facts : null;
+  const failed = row.more && (state === 'error' || state === 'changed') ? state : null;
   const waiting = row.more && !facts && !failed;
   const open = row.verdict === null;
   const taken = row.verdict === 'take';
@@ -807,8 +866,12 @@ function OpenFacts({ row, ctx }: { row: Row; ctx: EntryContext }) {
       {failed ? <div className="ws-fact"><ChunkFailed what="Details" state={failed} w={w} /></div> : null}
       {open && own?.suggest ? (
         <Fact label={`Recommended: ${own.suggest.verdict}`}>
-          {own.suggest.why ? <p className="ws-fact-text">{own.suggest.why}</p> : null}
+          {/* A choice drawn as a table gives the reason under "Why this one". */}
+          {own.suggest.why && !isTable(own.choice) ? <p className="ws-fact-text">{own.suggest.why}</p> : null}
         </Fact>
+      ) : null}
+      {open && own?.choice ? (
+        isTable(own.choice) ? <ChoiceView choice={own.choice} /> : <div className="ws-fact"><Markdown text={own.choice.text} /></div>
       ) : null}
       {open && own && facts ? <YesLines own={own} facts={facts} /> : null}
       {adds.length ? (
@@ -838,15 +901,15 @@ function OpenFacts({ row, ctx }: { row: Row; ctx: EntryContext }) {
   );
 }
 
-function Body({ row, ctx, detail, lead, vote, onExtras }: { row: Row; ctx: EntryContext; detail: Detail | undefined; lead?: ReactNode; vote: boolean; onExtras: () => void }) {
+function Body({ row, ctx, detail, facts, lead, vote, onExtras }: { row: Row; ctx: EntryContext; detail: Detail | undefined; facts: Workshop['facts']; lead?: ReactNode; vote: boolean; onExtras: () => void }) {
   const { w } = ctx;
   const what = row.kind === 'entry' ? row.what : typeof detail === 'object' ? detail.body : null;
   return (
     <div className="ws-more-pad">
       {lead}
       {what ? <div className="ws-what"><RichText text={what} /></div> : null}
-      {row.kind === 'entry' ? <OpenFacts row={row} ctx={ctx} /> : null}
-      <StateLine row={row} ctx={ctx}>{vote ? <Side row={row} ctx={ctx} /> : null}</StateLine>
+      {row.kind === 'entry' ? <OpenFacts row={row} ctx={ctx} state={facts} /> : null}
+      <StateLine row={row} ctx={ctx} facts={facts}>{vote ? <Side row={row} ctx={ctx} /> : null}</StateLine>
       <ReplaceLines row={row} ctx={ctx} only={(label) => label === 'Replaced by'} />
       {row.kind === 'entry' ? <Extras row={row} ctx={ctx} onMove={onExtras} /> : null}
       <Talk row={row} ctx={ctx} detail={detail} />

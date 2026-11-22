@@ -434,12 +434,19 @@ What a person sees:
 - All (`?view=all`, `AllView.tsx`, its model in `all.ts`) lists every feature in
   the order it is built, numbered from 1 (its step), under the titles of the
   stages of `order.json`. A feature is one line: a caret, its step, its pip, its
-  name, a meter of its decisions decided ("2/16", a bar and the number), its part
-  and its votes ("👍 3" from one vote up). The decisions a feature needs fold
-  under it, those not decided first, then the others, each in the plan's order;
-  six show, then a line "N more" opens the rest. After the last feature come the
-  decisions no feature needs, one foldable row per part, under "Other
-  decisions". A dropped or replaced row is struck through. Above the list,
+  name, a meter of its decisions decided ("6/16", a bar and the number), its part
+  and its votes ("👍 3" from one vote up).
+  A feature rests on the decisions in its `needs`, on those they need, and so on
+  through decisions. A feature in a `needs` is not followed: for the first
+  feature, `engine-program-and-clients`, this puts `engine-shape` first. The
+  decisions a feature rests on fold under it, and its meter counts them. Those
+  not decided come first, then the others, each in the plan's order, so each
+  comes after those it needs among the ones still to decide. Six show, then a
+  line "N more" opens the rest.
+  A stage starts with its decisions that no feature rests on, one foldable row
+  per part, then its features. "The ground" has no feature, so its section holds
+  only such rows. A stage with no row has no section.
+  A dropped or replaced row is struck through. Above the list,
   under the header and staying there while it scrolls, are the line of controls
   and the strip.
 - The line of controls: Build order or Latest; Filter, a menu with a field and
@@ -479,14 +486,15 @@ What a person sees:
   waits for it (an arrowhead), and those rows take the ground of a row under
   the pointer, every drawing of each (a decision shown under two features is lit
   under both); the rail goes on dotted to the list's edge when some are out of
-  sight. For a decision, what waits is the features that need it. The pointer's
+  sight. Relations follow an entry's own `needs` only, never all that a feature
+  rests on. For a decision, what waits is the features that need it. The pointer's
   row wins over the focused one, and that one over the row opened last. An
   opened row holds no list of what it needs. All of it is drawn by hand on the
   page (`relation.ts`), so pointing renders no row.
 - A part's rows are All's rows: under "Features" its features with their steps,
-  pips and meters, each with the decisions it needs folded under it (a decision
+  pips and meters, each with the decisions it rests on folded under it (a decision
   of another part says its part), then under "Decisions" its decisions that none
-  of its features needs, one per line. Product's decisions are All's rows too, one
+  of its features rests on, one per line. Product's decisions are All's rows too, one
   per line and with no heading. A group with no row shows nothing, its heading
   included. The page without JavaScript and the plain list shown when the page
   fails list each part's features, then its decisions. What was left out is a
@@ -532,9 +540,11 @@ What a person sees:
   The row opened last is the one in the address. A row with a thread loads its
   comments when a pointer, a press or focus reaches it, and on every opening (a
   row with no thread yet loads nothing);
-  it shows itself open at once, its panel grows when the comments are in or
-  after 180 ms, and while they still load each one the count announces holds
-  its place. The panel opens and closes over 260 ms, and grows or shrinks over
+  it shows itself open at once, its panel grows when its details and comments
+  are in or after 180 ms, and while comments still load each one the count
+  announces holds its place. Details that are not in when the panel starts to
+  open keep their placeholder until it has opened, then the panel grows to
+  them. The panel opens and closes over 260 ms, and grows or shrinks over
   the same time and on the same curve (`--ease`) when Notes or History opens
   or closes, and when their text arrives after its placeholder. A comment
   being sent shows its 👍 disabled, so it keeps its height once confirmed, and
@@ -587,8 +597,8 @@ What a person sees:
   nothing fades on navigation or when a row opens, or with reduced motion.
 - An open entry shows, in this order, each part only when it has something: its
   text (a decision's answer, a feature's `what`); on an entry with no verdict,
-  "Recommended: take" or "Recommended: drop" and why (`suggest`), then "A yes
-  would add" (each item of `sets` whose id is not in force: its kind as a word,
+  "Recommended: take" or "Recommended: drop" and why (`suggest`), then its
+  choice (below), then "A yes would add" (each item of `sets` whose id is not in force: its kind as a word,
   then its text; a word and its meaning, a principle and the question it asks,
   a property), "A yes would change" (kind and id, then "Now" the text in force
   and "After" the new one) and "A yes would remove" (each id of `removes` with
@@ -602,7 +612,7 @@ What a person sees:
   with a "Copy id" button: a click writes it to the clipboard and the button
   says "Copied" for two seconds, in the same width; when the clipboard refuses,
   the id is selected for a hand copy and the button does not change. The change
-  is announced politely. What the parts say of the statements (suggest, sets,
+  is announced politely. What the parts show (the choice, suggest, sets,
   removes, adds, keeps, surfaces, and every statement in force) is a chunk of
   its own (`virtual:workshop-facts`, `Facts`), loaded the first time a pointer,
   a press or focus reaches a row that has something in it (`Row.more`, known
@@ -617,6 +627,28 @@ What a person sees:
   own (`virtual:workshop-notes`), loaded the first time a pointer, a press or
   focus reaches a "Notes"; the page's bundle only knows which entries have
   some.
+- The choice of an entry with no verdict is the section `## The choice` of its
+  notes (`plan/README.md`). It shows in place when the row opens, to every
+  reader. `choice.ts` reads it when the site is built, into the facts chunk.
+  - `plan/decisions/word-agent.md` has the plan's shape. It shows "The case",
+    then "The options" with "The cost", then "Why this one". Each option is a
+    row: its name, with "recommended" under the one recommended, what it means,
+    and what it costs. Under 760 px, and in a place's list too narrow for
+    three columns, the three stack inside each option.
+  - "An agent's part, <date>." is not shown. An option's cost starts at its
+    sentence "It costs" and runs to the end of the option. An option without
+    that sentence spans both columns.
+  - The option named after "Recommended:" is left out when it only names the
+    marked one. One that says more starts "Why this one": "Build it, in its
+    later stage."
+  - On a feature whose choice has that shape, "Recommended: take" stays as a
+    line and "Why this one" is its reason, so `suggest.why` is not shown.
+  - A section of another shape shows whole as Markdown in the same place. A
+    second case is one such shape, and so is a paragraph after "Recommended:".
+    `suggest.why` then stays.
+  - While the choice shows in place, Notes leaves that section out, and an
+    entry whose notes hold nothing else has no "Notes". Once the entry has a
+    verdict, or when its details could not load, the section is read under Notes.
 - "History" is on every entry that has at least one change, whether or not it has a
   thread. Closed, its line reads "History", the last change's phrases and
   its date, and "N changes" when there are several ("History · Decided, 20
@@ -827,8 +859,9 @@ Back and Forward move between places; opening a row replaces the address.
 | `MapView.tsx`, `Tiles.tsx`, `Films.tsx` | The map, the tiles, the films' line and a film's frame. |
 | `AllView.tsx`, `AllList.tsx`, `all.ts`, `relation.ts`, `Tips.tsx` | All: its controls, menus and strip; its rows and the rail, which a part's place, Product and a film draw too; its model and its address; which row's relations are drawn; the tooltips. |
 | `PartView.tsx`, `Suggest.tsx` | An opened part, Product's decisions and a film's place; the suggestions. |
-| `Entry.tsx` | A suggestion's row, and what any row shows open (`Panel`): the text, what the entry says of the plan's lists, its id and the button that copies it, the state, notes, history, and the thread with the votes on its comments. |
+| `Entry.tsx` | A suggestion's row, and what any row shows open (`Panel`): the text, its choice, what the entry says of the plan's lists, its id and the button that copies it, the state, notes, history, and the thread with the votes on its comments. |
 | `routes.ts`, `plan.ts`, `map.ts`, `data.ts` | Addresses; the rows, statuses, films, parts' counts and states on top of the plan's model; the drawing; the build-time reader, the films' order and when a film is behind. |
+| `choice.ts` | The section "The choice" of notes, read at build time: the table the opened row draws, or Markdown. |
 | `build-check.ts` | Every check that can stop the build on the plan's files: the plan tool's, the addresses the page keeps, the map's layout. The build runs it, and so does the server on the plan an owner's verdict would leave on `main`. |
 | `api.ts`, `writes.ts`, `memory.ts`, `RichText.tsx`, `Markdown.tsx`, `Boundary.tsx` | The API client, the page's own writes (a list of values set, kept a day; its comments six minutes), the remembered answer, person, view and order, text from GitHub, notes, the fallback list. |
 | `chunks.ts` | A chunk that fails: whether the site now serves another build. |
