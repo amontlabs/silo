@@ -1,0 +1,51 @@
+{
+  "asks": "What may a report or an opinion lead Silo to do?",
+  "answer": "A report or an opinion may trigger only protective actions.",
+  "replaces": [
+    "law-of-triggers"
+  ],
+  "sets": [
+    {
+      "in": "rules/properties",
+      "id": "rule-reads-only-facts",
+      "says": "A rule reads only facts.",
+      "kind": "safety",
+      "from": "less-sure-less-power",
+      "check": [
+        "simulator"
+      ]
+    },
+    {
+      "in": "rules/properties",
+      "id": "report-never-stored-as-fact",
+      "says": "A report or an opinion is never stored as a fact.",
+      "kind": "safety",
+      "from": "less-sure-less-power",
+      "check": [
+        "types"
+      ]
+    },
+    {
+      "in": "rules/properties",
+      "id": "precaution-grants-nothing",
+      "says": "A precaution grants nothing and destroys nothing.",
+      "kind": "safety",
+      "from": "less-sure-less-power",
+      "check": [
+        "types",
+        "simulator"
+      ]
+    },
+    {
+      "in": "rules/properties",
+      "id": "grant-needs-a-fact-or-you",
+      "says": "A grant, or anything destructive, needs a fact or you.",
+      "kind": "safety",
+      "from": "less-sure-less-power",
+      "check": [
+        "bounded exhaustive test",
+        "simulator"
+      ]
+    }
+  ]
+}
