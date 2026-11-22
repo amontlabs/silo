@@ -1,6 +1,6 @@
 {
   "asks": "What checks the real drivers and the real boundary?",
-  "answer": "The simulator checks the core against the fakes. The real drivers and the real boundary need their own hostile tests and live checks. A model is not the code, and the core is not the boundary. The virtual machine monitors that run the computers, libkrun and Apple's Virtualization framework, are checked by hostile tests on the real thing, and so is the network stack.",
+  "answer": "The simulator checks the core against the fakes. The real drivers and the real boundary need their own hostile tests and live checks. A model is not the code, and the core is not the boundary. Every virtual machine monitor, which is a program that runs the computers, is checked by hostile tests on the real thing, and so is the network stack.",
   "needs": [
     "core-simulator"
   ],
