@@ -1,4 +1,4 @@
 {
   "asks": "How is spend shown?",
-  "answer": "Spend is shown in dollars or as a share of a plan, never as raw tokens."
+  "answer": "Spend is shown in dollars at the provider's API prices, whether the program uses an API key or a subscription. With a subscription the app says so, and also shows how much of the plan's limits is used, as the provider reports it for the whole account. Spend is never shown as raw tokens. A single model call in the record shows its token counts, which explain its price. A model Silo has no price for shows its spend as unknown, never as zero."
 }

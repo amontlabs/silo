@@ -3,5 +3,9 @@
   "what": "Silo splits spend by effort level, by speed mode and by cache reads and writes. It also forecasts when the limits of a plan will run out.",
   "needs": [
     "spend-per-conversation"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The numbers that explain spend and a plan's limits are already in the traffic Silo reads, and running out in the middle of a week is a common surprise."
+  }
 }

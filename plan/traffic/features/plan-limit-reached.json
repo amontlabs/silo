@@ -6,5 +6,9 @@
     "checkpoints-taken-on-their-own",
     "alerts-on-a-change",
     "rule-actions-on-the-computer"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It is small, it rests on what the provider said, and it tells you when to come back."
+  }
 }

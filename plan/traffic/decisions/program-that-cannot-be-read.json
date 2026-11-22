@@ -1,4 +1,4 @@
 {
   "asks": "What does Silo know of an agent program whose traffic cannot be read?",
-  "answer": "If a program cannot be read, the boundary still gives hosts, sizes and timing, and the conversation would have to come from the program's own files inside the computer. Those lines would be reports."
+  "answer": "Silo reads the model traffic of the providers whose format it has. Traffic to any other provider is treated like any other connection: the rules allow or deny it, it stays encrypted and unread, and the record holds its hosts, sizes and timing as facts. Silo does not read an agent program's own files to fill in the conversation. The app says which programs' conversations are not read, and spend, budgets and denied tool calls do not cover that traffic. A model that runs inside the computer sends nothing across the boundary, so Silo has none of its conversation. A program that refuses Silo's certificate on a host Silo reads cannot reach that host, since nothing goes to such a host unread."
 }

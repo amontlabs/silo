@@ -1,3 +1,4 @@
 {
-  "asks": "Does a budget deny or hold at each threshold?"
+  "asks": "Does a budget deny or hold at each threshold?",
+  "answer": "A budget alerts you once when a share of it is spent, 80 percent unless you set another. At its limit, new metered requests are denied, and the agent program gets an error that says the budget is reached. A budget never holds. You go on by raising the budget, from the alert or in the app. An alert that cannot reach you waits in the app, and the limit applies anyway."
 }

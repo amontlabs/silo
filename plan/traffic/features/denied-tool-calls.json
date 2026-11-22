@@ -17,5 +17,9 @@
   "keeps": [
     "no-silent-change-to-traffic",
     "rule-decisions-are-recorded"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A few commands are worth denying before they run, by a rule the agent cannot remove and with a refusal the model understands."
+  }
 }

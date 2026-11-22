@@ -1,3 +1,4 @@
 {
-  "asks": "How does Anthropic read \"intermediate\" for a boundary that forwards a sign-in token and keeps nothing?"
+  "asks": "How does Anthropic read \"intermediate\" for a boundary that forwards a sign-in token and keeps nothing?",
+  "answer": "Anthropic's terms do not define the word, so Silo goes by the reading that Anthropic's own gateway page supports. That page describes a gateway that passes a subscription's traffic on to Anthropic, forwarding the sign-in as it came. The boundary does that and no more: it keeps the token nowhere and sends nothing with it of its own. Silo asks Anthropic in writing, with `recipe-under-preinstall-rule`, before anyone but its owner uses it. If Anthropic answers that this intermediates, Silo reads Anthropic traffic only in computers whose API key it holds as a secret. Other traffic to Anthropic then passes unread, as `program-that-cannot-be-read` says."
 }

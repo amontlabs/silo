@@ -1,3 +1,4 @@
 {
-  "asks": "How does Silo make the error for a denied tool call exist from where it sits?"
+  "asks": "How does Silo make the error for a denied tool call exist from where it sits?",
+  "answer": "To find out, by a live check per program. The way to try first is a stand-in. Silo keeps back the part of a reply that carries a tool call until it has read the call whole. When a rule denies it, Silo passes the reply on with the call's input replaced by a harmless stand-in for the same tool, which does nothing and ends in an error that says Silo denied the call. On every later request of that conversation, Silo puts the model's own call back, found by its identifier, with Silo's denial as its result. So the model sees its own call, unchanged, with the error. The agent program never receives the denied call, and Silo sends no request of its own. Both changes are recorded. A tool for which Silo has no stand-in cannot be named in a rule that denies, and Silo says so when the rule is written. When a later request no longer holds the stand-in, nothing is put back, and the record says so."
 }

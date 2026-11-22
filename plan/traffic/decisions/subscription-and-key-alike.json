@@ -1,4 +1,4 @@
 {
   "asks": "Does a subscription sign-in change how Silo reads traffic?",
-  "answer": "A subscription sign-in and an API key make no difference to reading. Both are requests to the provider over an encrypted connection, and they differ only in the credential they carry."
+  "answer": "No. Reading works the same way for both: the boundary ends the encrypted connection and reads the provider's format, whatever credential the request carries. A sign-in can change the host and the transport, though. Codex under a ChatGPT sign-in talks to chatgpt.com, and with an API key to api.openai.com. So the hosts Silo reads and their formats are listed per provider and per kind of sign-in, and a live check covers each pair."
 }

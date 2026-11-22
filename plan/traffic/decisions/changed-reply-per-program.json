@@ -1,3 +1,4 @@
 {
-  "asks": "How does each agent program take a reply that Silo changed?"
+  "asks": "How does each agent program take a reply that Silo changed?",
+  "answer": "To find out, by a live check per program, once `denied-tool-call-mechanism` is decided and before denied tool calls are offered for that program. The check denies one call of each tool a rule can name. It shows that the program runs nothing of the denied call, takes the reply without an error or a retry, and goes on working afterwards. It shows that the model sees its own call and the error on the next request, also when the conversation is resumed later. Denied tool calls are offered for a program only once it passes, and the check runs again for each new version a recipe pins."
 }

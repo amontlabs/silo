@@ -1,3 +1,4 @@
 {
-  "asks": "Can the boundary read the model traffic of each agent program?"
+  "asks": "Can the boundary read the model traffic of each agent program?",
+  "answer": "Yes for Claude Code 2.1.327 and Codex 0.170.0, read by an ordinary inspecting proxy on 19 November 2026. For each program Silo offers, a live check through Silo's own boundary shows four things. The program accepts Silo's certificate, from the computer's trust store or from a setting its recipe writes. Each transport it uses is read: plain requests, a stream, a persistent socket. Signing in from scratch and renewing a token work through the boundary. Requests leave byte for byte. The check runs again for each new version a recipe pins. A program that fails is listed as not read, and Silo treats it as `program-that-cannot-be-read` says."
 }

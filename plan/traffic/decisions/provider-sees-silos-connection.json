@@ -1,3 +1,4 @@
 {
-  "asks": "Does a provider treat a subscription's traffic differently when Silo's network stack makes the connection?"
+  "asks": "Does a provider treat a subscription's traffic differently when Silo's network stack makes the connection?",
+  "answer": "To find out, over real use. On 19 November 2026 both providers answered normally to one short run, which cannot show what happens over days or under heavy use. So Silo records as facts every answer from a provider that is not a normal reply: a challenge, a refused sign-in, an unusual error or limit. These are compared with the same programs used without Silo. A difference, or a warning from a provider, goes to the owner before anything more is built on reading a subscription's traffic."
 }

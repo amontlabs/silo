@@ -1,5 +1,23 @@
 # Budgets on rates and on usage outside a plan
 
+## For the owner
+
+An agent's part, 22 November 2026. You set main to at most 5 dollars in any hour. You also allow at
+most 20 dollars a month of usage billed beyond your Max plan.
+
+The options:
+
+- Build it (recommended). A loop at night can spend no more than 5 dollars an hour, and usage beyond
+  your plan has its own cap. It costs one more kind of budget to understand. How Silo tells usage
+  billed beyond a plan from usage inside it is still to find out.
+- Leave it out. Only the total budget limits a runaway. It costs the early catch: the runaway spends
+  all of the total first.
+
+Recommended: build it. A rate catches a runaway early, and usage beyond a plan is paid per call like
+an API key.
+
+## Notes
+
 From the list of smaller features the owner put on the roadmap on 21 November 2026. The owner's
 words on the list are in `silos-own-extensions`.
 

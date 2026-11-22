@@ -1,4 +1,4 @@
 {
   "asks": "Can a rule deny a tool call by its text?",
-  "answer": "A rule can deny a tool call too, by its exact text. Such a rule is exact about the text only: the same action written another way does not match it. The rule says so as its worst case."
+  "answer": "Yes. A rule can deny a tool call by the tool's name and a pattern on its text, for example the shell tool with a command that starts with `git push --force`. The match is exact on the text and on nothing else. The same action written another way, such as `git push -f` or the same command inside a script, does not match, and the rule says so as its worst case."
 }

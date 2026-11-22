@@ -14,5 +14,9 @@
   ],
   "keeps": [
     "report-never-stored-as-fact"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It answers why an agent did something with what Silo saw, not with what the agent program says."
+  }
 }

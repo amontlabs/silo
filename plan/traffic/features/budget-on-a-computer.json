@@ -5,7 +5,7 @@
     "spend-per-conversation",
     "budget-rule-or-precaution",
     "what-a-budget-promises",
-    "where-a-budget-is-enforced",
+    "where-limits-are-set",
     "budget-denies-or-holds",
     "budget-as-a-rate",
     "recognising-a-conversation",
@@ -14,10 +14,15 @@
     "allow-hold-or-deny",
     "held-requests-and-asks",
     "budgets-together",
-    "budget-of-a-fork"
+    "budget-of-a-fork",
+    "what-a-conversation-budget-promises"
   ],
   "keeps": [
     "rule-reads-only-facts",
     "deny-beats-hold-beats-allow"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A spending limit outside the agent's reach is what lets agents work unattended."
+  }
 }

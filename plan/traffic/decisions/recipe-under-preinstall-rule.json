@@ -1,3 +1,4 @@
 {
-  "asks": "Does a recipe fall under Anthropic's rule for a product that preinstalls or runs Claude Code?"
+  "asks": "Does a recipe fall under Anthropic's rule for a product that preinstalls or runs Claude Code?",
+  "answer": "Nobody knows yet, so Silo acts as if it does. Silo agrees to Anthropic's Commercial Terms, the terms under which businesses use Anthropic's API, and keeps the rule's two conditions, as `anthropic-conditions-kept` says. Silo also asks Anthropic, together with `anthropic-reads-intermediate`."
 }

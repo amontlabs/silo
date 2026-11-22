@@ -1,3 +1,4 @@
 {
-  "asks": "Does each agent program's own account match the boundary?"
+  "asks": "Does each agent program's own account match the boundary?",
+  "answer": "To find out per program, by a live check. A run of real work goes through the boundary, and the program's own account is compared with what the boundary saw, request by request, joined by the provider's request id. On 19 November 2026 Claude Code's account matched on every request: the same request id, model and token counts. Codex and the other programs are not checked yet. The check runs again for each new version a recipe pins. A program whose account does not match, or gives no request id, gets no check against its account, and the app says so."
 }

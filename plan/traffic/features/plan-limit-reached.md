@@ -1,5 +1,23 @@
 # When a plan's limit is reached
 
+## For the owner
+
+An agent's part, 22 November 2026. At 14:20 Claude Code in main reaches your Max plan's 5-hour
+limit, which Anthropic says resets at 17:00. Silo takes a checkpoint, alerts you, and alerts you
+again at 17:00 that main's agents can go on.
+
+The options:
+
+- Build it (recommended). It costs one more alert, and nothing more than the first alert when the
+  provider gives no reset time. Silo starts nothing again by itself.
+- Leave it out. Claude Code shows the limit and the reset time in its own window. It costs you
+  checking each program yourself to know when to come back.
+
+Recommended: build it. It is small, it rests on what the provider said, and it saves you keeping an
+eye on the clock.
+
+## Notes
+
 From the list of smaller features the owner put on the roadmap on 21 November 2026. The owner's
 words on the list are in `silos-own-extensions`.
 

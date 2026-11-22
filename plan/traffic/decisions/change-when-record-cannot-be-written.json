@@ -1,6 +1,6 @@
 {
   "asks": "What happens to a change of traffic when the record cannot be written at that moment?",
-  "answer": "It waits in the room kept for Silo's changes and decisions. When that room is full, it is not made.",
+  "answer": "The change is made, and the record of it waits in the room kept for Silo's decisions and changes until the recorder writes it. When that room is full, the change is not made, and the message it was for does not pass either. A reply with a denied tool call is not forwarded, and a request that needs a secret is not sent. The agent program gets an error, as for any request that does not pass. A message that needed a change never goes through without it.",
   "needs": [
     "enforcing-and-recording"
   ]

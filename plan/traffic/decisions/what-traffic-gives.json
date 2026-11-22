@@ -1,4 +1,4 @@
 {
   "asks": "What does Silo learn from model traffic?",
-  "answer": "Spend per conversation, budgets that deny, the model that really answered, the tool calls and the turns all come from the traffic between an agent program and its model provider. Telling \"stuck\" from \"working\" comes from that traffic together with the reports of processes."
+  "answer": "Model traffic gives Silo, as facts: each model call with the model that really answered, the effort and speed asked for, the token counts with cache reads and writes, the tool calls in the reply and their results in the next request, and what the provider says about a plan's limits, with the reset time when it gives one. Spend, turns and conversations are computed from these facts, and so is what each budget counts. Whether a run is stuck or working is an opinion, formed from this traffic together with the reports of processes."
 }

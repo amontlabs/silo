@@ -1,4 +1,0 @@
-{
-  "asks": "Where is a spending limit enforced?",
-  "answer": "A spending limit is enforced outside the agent, where model traffic leaves the computer."
-}

@@ -1,6 +1,6 @@
 {
   "asks": "Is the check against an agent program's own account optional?",
-  "answer": "It is extra processing, and the owner sees it as optional: the kind of thing a user opts into, or can at least turn off.",
+  "answer": "Yes. The check is off until you turn it on for a computer, and you can turn it off again at any time. It checks the requests made while it is on.",
   "needs": [
     "own-account-as-a-check"
   ]

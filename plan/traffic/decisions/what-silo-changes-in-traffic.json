@@ -1,4 +1,4 @@
 {
   "asks": "What does Silo change in model traffic?",
-  "answer": "Silo reads this traffic. It changes nothing in it except a secret it swaps in, and what it adds so that the model sees a denied tool call with an error that says it was denied."
+  "answer": "Silo reads model traffic and changes it in two ways only. It swaps a secret's real value in for its placeholder. It makes the changes that let the model see a denied tool call with an error that says it was denied. Each change is recorded, and the record never holds a secret's real value. A request that a rule or a budget denies is not changed: it is not sent, and the agent program gets an error."
 }

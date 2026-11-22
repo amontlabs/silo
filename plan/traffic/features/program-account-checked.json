@@ -14,5 +14,9 @@
   "keeps": [
     "precaution-grants-nothing",
     "report-never-stored-as-fact"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A disagreement between a program's account and what Silo saw is a rare sign of tampering, worth having as an option."
+  }
 }

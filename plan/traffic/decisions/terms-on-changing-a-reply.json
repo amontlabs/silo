@@ -1,3 +1,4 @@
 {
-  "asks": "Does any vendor's term bear on changing a reply?"
+  "asks": "Does any vendor's term bear on changing a reply?",
+  "answer": "To find out by reading the terms of each vendor whose program Silo offers, before denied tool calls are built. The reading of 19 November 2026 did not cover Anthropic's Consumer Terms and Usage Policy in full, or OpenAI's Sign in with ChatGPT Terms, so those are read first. The clauses already found are read against the case of a denied call: Anthropic's on reverse engineering its services, and OpenAI's on bypassing protective measures. The reading covers everything the chosen way of denying changes: a reply, later requests, or a request Silo sends itself. Each finding goes in this entry's notes, quoted and dated."
 }

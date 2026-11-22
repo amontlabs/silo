@@ -19,5 +19,9 @@
   ],
   "keeps": [
     "no-silent-change-to-traffic"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Turns, tool calls, spend and budgets all rest on reading model traffic, and the first test read both programs."
+  }
 }

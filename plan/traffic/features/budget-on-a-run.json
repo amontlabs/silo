@@ -11,5 +11,9 @@
   ],
   "keeps": [
     "precaution-grants-nothing"
-  ]
+  ],
+  "suggest": {
+    "verdict": "drop",
+    "why": "A fork with its own budget, or a budget on a conversation, limits a task exactly, where a budget on a run rests on a guess that can pause the wrong work."
+  }
 }

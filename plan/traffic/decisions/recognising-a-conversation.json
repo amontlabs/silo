@@ -1,3 +1,4 @@
 {
-  "asks": "How is a conversation recognised in each provider's traffic?"
+  "asks": "How is a conversation recognised in each provider's traffic?",
+  "answer": "By its content. The providers' APIs keep no conversation, so each request carries the whole conversation so far. A request continues a conversation when its messages begin with that conversation's last request and the reply to it, and it goes to the same model. Any other request starts a new conversation. When a request names an earlier reply itself, as OpenAI's API allows, that link is followed. A program that shortens a long history, as Claude Code does when it compacts, starts a new conversation by this test. The two are joined only when both requests carry the same session identifier of the program, and that join is exact about the identifier only."
 }
