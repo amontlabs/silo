@@ -20,6 +20,8 @@ interface FixtureFeature extends FixtureLists {
   name: string;
   what: string;
   verdict?: 'take' | 'drop';
+  /** Who wrote the verdict, when it was the agents. */
+  by?: 'agents';
   started?: string;
   built?: string;
   suggest?: { verdict: 'take' | 'drop'; why?: string };
@@ -36,6 +38,8 @@ export interface FixtureDecision extends FixtureLists {
   asks: string;
   answer?: string;
   verdict?: 'take' | 'drop';
+  /** Who wrote the verdict, when it was the agents. */
+  by?: 'agents';
   /** The decisions it takes the place of. */
   replaces?: string[];
   /** The decision that replaced it, as `plan take` writes it. */
@@ -203,6 +207,7 @@ export function planFiles({ features = FEATURES, notes = DEFAULT_NOTES, decision
     if (decision.adds) file.adds = decision.adds;
     if (decision.suggest) file.suggest = decision.suggest;
     if (decision.verdict) file.verdict = decision.verdict;
+    if (decision.by) file.by = decision.by;
     if (decision.replacedBy) file.replaced_by = decision.replacedBy;
     const path = decision.part ? `${decision.part}/decisions/${decision.id}` : `decisions/${decision.id}`;
     files.set(`${path}.json`, canonicalText(canonicalDecision(file)));
@@ -214,6 +219,7 @@ export function planFiles({ features = FEATURES, notes = DEFAULT_NOTES, decision
     // A suggestion always says why; the fixture gives one where its list leaves it out.
     if (feature.suggest) file.suggest = { verdict: feature.suggest.verdict, why: feature.suggest.why ?? 'It fits.' };
     if (feature.verdict) file.verdict = feature.verdict;
+    if (feature.by) file.by = feature.by;
     if (feature.started) file.started = feature.started;
     if (feature.built) file.built = feature.built;
     files.set(`${feature.part}/features/${feature.id}.json`, canonicalText(canonicalFeature(file)));

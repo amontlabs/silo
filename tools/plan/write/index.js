@@ -14,7 +14,11 @@ import { parsePlan } from '../read/index.js';
  * relative to `plan/`; it is empty unless `status` is `done`. A verdict deletes no file.
  * @typedef {{ status: 'done' | 'already' | 'refused', changed: Map<string, string>, message: string, errors?: Problem[] }} Outcome
  */
-/** @typedef {{ exists?: (path: string) => boolean }} Options */
+/**
+ * @typedef {{ exists?: (path: string) => boolean, by?: 'agents', ownerRuled?: (id: string) => boolean | null }} Options
+ * `by`: the agents write the verdict, not the owner. `ownerRuled(id)`: whether any commit of the
+ * merged history wrote the entry a verdict with no `by`, or null when the history is not whole (a shallow clone); the agents' verdict needs it.
+ */
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const refused = (message, errors) => ({ status: 'refused', changed: new Map(), message, ...(errors ? { errors } : {}) });
@@ -64,8 +68,41 @@ function finish(files, changed, options, message) {
   return { status: 'done', changed, message };
 }
 
+/**
+ * The refusal of an agents' verdict the agents may not write, or null: the entry is a feature, which
+ * is the owner's to decide; the entry was ruled on by the owner (`ownerRuled` is how the history
+ * says it; without it, or with a history that is not whole, the agents cannot tell, and do not
+ * write), or it sets, removes or adds principles, properties or words, which are the owner's.
+ * @param {any} entry @param {Options} options
+ */
+function agentsRefusal(entry, options) {
+  if (options.by !== 'agents') return null;
+  const { id } = entry;
+  if (entry.kind === 'feature') return refused(`${id} is a feature: a feature is the owner's to decide, so the owner rules on ${id}`);
+  if (typeof options.ownerRuled !== 'function') return refused(`${id}: the history is needed to tell whether the owner ruled on it, and none was given`);
+  const ruled = options.ownerRuled(id);
+  if (ruled === null) return refused(`${id}: the full history is needed to tell whether the owner ruled on it, and this repository's is not whole (a shallow clone, or a branch that cannot be read): fetch it all (git fetch --unshallow) and try again`);
+  if (ruled) {
+    return refused(`${id} was ruled on by the owner: agents never write a verdict on it. The way is ${entry.kind === 'decision' ? `a new decision that names ${id} in its replaces` : 'the owner deciding it'}`);
+  }
+  const statements = ['sets', 'removes', 'adds'].filter((key) => Array.isArray(entry[key]) && entry[key].length);
+  if (statements.length) return refused(`${id} ${statements.join(', ')} principles, properties or words: those are the owner's, so the owner rules on ${id}`);
+  return null;
+}
+
 /** @param {string} kind @param {any} value */
 const entryText = (kind, value) => canonicalText(kind === 'decision' ? canonicalDecision(value) : canonicalFeature(value));
+
+/**
+ * The owner's own word on a verdict the agents wrote: the same verdict with `by` removed, so the
+ * Workshop shows it as the owner's. Nothing else in the plan changes.
+ * @param {Map<string, string>} files @param {Map<string, any>} json @param {any} entry @param {string} file @param {Options} options @param {'take' | 'drop'} kind
+ */
+function confirm(files, json, entry, file, options, kind) {
+  const data = structuredClone(json.get(file));
+  delete data.by;
+  return finish(files, new Map([[file, entryText(entry.kind, data)]]), options, `${kind === 'take' ? 'took' : 'dropped'} ${entry.id}: the owner confirms what the agents decided`);
+}
 
 /**
  * The owner's yes. Puts each `sets` item in its list (the same id is replaced whole, in place; a
@@ -75,7 +112,11 @@ const entryText = (kind, value) => canonicalText(kind === 'decision' ? canonical
  * notes, and gets `replaced_by` with this entry's id: it is replaced, and no longer in force. The
  * take is refused when a decision it names is not taken or already replaced, when one would keep
  * an `adds`, and when a taken decision it does not name would be left with neither an `answer` nor
- * an `adds`.
+ * an `adds`. With `by: 'agents'` the verdict is written with `"by": "agents"`; it is refused on a
+ * feature, on a history that is not whole, on an
+ * entry the owner ruled on (a verdict with no `by`, now or in the history), on one that sets or removes
+ * statements, and a drop the owner wrote is not turned into a take. Without it, a take of an entry
+ * the agents took is the owner's confirmation: `by` is removed and nothing else changes.
  * @param {Map<string, string>} files @param {string} id @param {Options} [options] @returns {Outcome}
  */
 export function take(files, id, options = {}) {
@@ -83,6 +124,10 @@ export function take(files, id, options = {}) {
   if (loaded.refusal) return loaded.refusal;
   const { plan, json, entry, file } = loaded;
   if (entry.built) return refused(`${id} is built`);
+  const unfit = agentsRefusal(entry, options);
+  if (unfit) return unfit;
+  if (options.by === 'agents' && entry.verdict === 'drop' && entry.by === undefined) return refused(`${id} is dropped by the owner: only the owner can take it again`);
+  if (entry.verdict === 'take' && !options.by && entry.by === 'agents' && !replacedBy(entry)) return confirm(files, json, entry, file, options, 'take');
   if (entry.verdict === 'take') {
     const by = replacedBy(entry);
     return { status: 'already', changed: new Map(), message: by ? `${id} is already taken, and replaced by ${by}` : `${id} is already taken` };
@@ -184,6 +229,8 @@ export function take(files, id, options = {}) {
   if (setIds.length) data.adds = setIds;
   else delete data.adds;
   data.verdict = 'take';
+  if (options.by) data.by = options.by;
+  else delete data.by;
   changed.set(file, entryText(entry.kind, data));
   return finish(files, changed, options, `took ${id}`);
 }
@@ -193,13 +240,22 @@ export function take(files, id, options = {}) {
  * feature holds `started`, so a feature being built loses it in the same write, and the message
  * says so. Refused on a
  * replaced decision, on a taken entry that has `adds` (its statements are in force), and on a taken
- * decision that has `replaces` (the decisions it replaced would be in force again).
+ * decision that has `replaces` (the decisions it replaced would be in force again). With
+ * `by: 'agents'` the verdict is written with `"by": "agents"`, a feature and a history that is
+ * not whole are refused, and a verdict the owner wrote (no
+ * `by`) is refused: only the owner overrules the owner; so is an entry the owner ruled on, in the
+ * history, and one that sets, removes or adds statements. Without it, `by` is removed, and a drop
+ * of an entry the agents dropped is the owner's confirmation: nothing else changes.
  * @param {Map<string, string>} files @param {string} id @param {Options} [options] @returns {Outcome}
  */
 export function drop(files, id, options = {}) {
   const loaded = load(files, id, options);
   if (loaded.refusal) return loaded.refusal;
   const { plan, json, entry, file } = loaded;
+  const unfit = agentsRefusal(entry, options);
+  if (unfit) return unfit;
+  if (options.by === 'agents' && entry.verdict !== undefined && entry.by === undefined) return refused(`${id} is ${entry.verdict === 'take' ? 'taken' : 'dropped'} by the owner: only the owner can change that`);
+  if (entry.verdict === 'drop' && !options.by && entry.by === 'agents') return confirm(files, json, entry, file, options, 'drop');
   if (entry.verdict === 'drop') return { status: 'already', changed: new Map(), message: `${id} is already dropped` };
   if (entry.built) return refused(`${id} is built`);
   const by = replacedBy(entry);
@@ -216,6 +272,8 @@ export function drop(files, id, options = {}) {
   }
   const data = structuredClone(json.get(file));
   data.verdict = 'drop';
+  if (options.by) data.by = options.by;
+  else delete data.by;
   const building = data.started !== undefined;
   delete data.started;
   return finish(files, new Map([[file, entryText(entry.kind, data)]]), options, building ? `dropped ${id}, which was being built: its started date is removed` : `dropped ${id}`);

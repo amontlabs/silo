@@ -13,8 +13,8 @@ Node 26, no dependency, no network call. `npm test` runs the tests, which use th
 |---|---|
 | `plan` | Shows the first entry in the order with no verdict (its kind, its question or its name, and `suggest`; for a decision its `answer`, or when it has none the statements it sets, and each decision it names in `replaces` with its `answer`, or the ids it adds when it has none), the features being built, the features ready to build, and the features that wait and for what. |
 | `plan show <id>` | For an entry: first its state, then the entry whole (its keys, its `sets` in full, its stage and position, each need with its status, what needs it, its notes), then what binds it, compact: every principle and the properties of the root, of its part and in `keeps` (id and `says`); the taken decisions in force of its part and in `needs` (id and `answer`, or the ids it adds when it has none); the other taken decisions in force of the root as ids only, which `--all` prints in full. A decision in force is taken and not replaced. A replaced decision, one that has `replaced_by`, prints `Replaced by: <id>` first. A need that is replaced prints `replaced by <id>`. Each decision named in `replaces` prints with its `answer`, or the ids it adds. For a part: its title and line (and the word of the same id with its meaning, when there is one), its taken entries in force (and its replaced and dropped ones) as a count and their ids, then each entry with no verdict in the order of `order.json` (id, kind, status, and its `asks` or `name`), the first marked `next`, then its properties (id and `says`). For a statement: the statement, the entry whose `adds` brought it, the features that keep it, and the entries that would replace or remove it. `--json` gives everything, whatever `--all`. |
-| `plan take <id>` | The owner's yes. It writes what is listed under the table, in one commit named `Owner: take <id>`. |
-| `plan drop <id>` | The owner's no. Writes `"verdict": "drop"`, keeps `sets`, `removes` and `replaces`, and commits `Owner: drop <id>`. On a feature being built it removes `started` in the same write, since only a taken feature holds `started`, and its message says so. |
+| `plan take <id> [--by agents]` | The owner's yes. It writes what is listed under the table, in one commit named `Owner: take <id>`. On an entry the agents took, it is the owner's confirmation: it removes `by` and nothing else. With `--by agents` it is the agents' yes: the same write plus `"by": "agents"`, in a commit named `Agents: take <id>`. |
+| `plan drop <id> [--by agents]` | The owner's no. Writes `"verdict": "drop"`, keeps `sets`, `removes` and `replaces`, and commits `Owner: drop <id>`. On an entry the agents dropped, it is the owner's confirmation: it removes `by` and nothing else. With `--by agents` it is the agents' no: it also writes `"by": "agents"` and commits `Agents: drop <id>`. On a feature being built it removes `started` in the same write, since only a taken feature holds `started`, and its message says so. |
 | `plan check` | Checks the plan. The merge gate and the site's build run it. |
 
 What `plan take <id>` writes:
@@ -23,12 +23,22 @@ What `plan take <id>` writes:
 2. Each statement the entry removes leaves its list.
 3. Those ids leave the `adds` of the entries that had them.
 4. In the entry, `adds` (the ids it set) takes the place of `sets` and `removes`, and
-   `"verdict": "take"` is written. `replaces` stays.
+   `"verdict": "take"` is written, then `"by": "agents"` with `--by agents`. `replaces` stays.
 5. Each decision the entry names in `replaces` gets `"replaced_by": "<id>"`.
 
 It commits only the files it changed, and deletes none.
 
-`plan --help` lists them. `plan`, `plan show` and `plan check` take `--json`; `plan show` on an entry takes `--all`. Exit codes: 0 done,
+`--by` takes `agents` and nothing else; without it the verdict is the owner's, and a `by` the entry had (from an earlier agents' verdict) is removed. `plan take` of an entry the agents took, and `plan drop` of one they dropped, change only that: the owner's confirmation. A confirmed entry that was replaced stays "already taken". `--by agents` is refused on:
+
+- an entry the owner ruled on: any commit reachable from `HEAD` or the base (`origin/main`, else `HEAD`) wrote it a verdict with no `by`, so an edit that took the verdict away changes nothing. The message names the way: a new decision that names it in `replaces`;
+- an entry whose `sets` or `removes` (or `adds`) hold a principle, a property or a word, which are the owner's;
+- a feature: a feature is the owner's to decide, and `plan check` refuses an `Agents:` verdict on one;
+- a history that is not whole: the repository is shallow (`git rev-parse --is-shallow-repository`) or the history of `HEAD` or the base cannot be read. The message says the full history is needed (`git fetch --unshallow`); `plan check` refuses an `Agents:` verdict it cannot verify the same way. CI checks out with `fetch-depth: 0`. A verdict with no `by` behaves as before;
+- a verdict the owner wrote (no `by`) that the history does not know, such as one in a plan with no history.
+
+The pure `take` and `drop` need `ownerRuled(id)` in their options with `by: 'agents'`, and refuse without it. It answers true or false, or null when the history is not whole, which refuses too.
+
+Two strict edges are deliberate. The owner cannot confirm a decision that has since been replaced: it stays "already taken", and what replaced it is the owner's to rule on. The scan for the owner's verdicts covers `HEAD` as well as the base, so a verdict the owner wrote on a branch that is not merged yet also keeps the agents out. `plan --help` lists them. `plan`, `plan show` and `plan check` take `--json`; `plan show` on an entry takes `--all`. Exit codes: 0 done,
 1 refused or errors found, 2 wrong use.
 
 `plan take` refuses when the plan fails the check, when `plan/` has uncommitted changes, when the
@@ -109,15 +119,17 @@ Each problem names the file, the field, what is wrong and the fix.
     (the remote's old plan, until the first push).
 
   Neither applies to an entry whose file holds what the owner ruled on. The evidence is the latest
-  commit since the base, on any merged branch, named `Owner: take <id>` or `Owner: drop <id>` (for
-  a verdict typed in, the one of its kind). Of two such commits, one made on top of the other is
+  commit since the base, on any merged branch, named `Owner: take <id>` or `Owner: drop <id>`, or
+  `Agents: take <id>` or `Agents: drop <id>` (for a verdict typed in, the one of its kind). The
+  commit's file and its subject agree on who wrote the verdict: `Agents:` with `"by": "agents"`,
+  `Owner:` with no `by`. A `by` added or removed by hand while the verdict stayed is refused too. An entry with `"by": "agents"` is refused when it is a feature, when the history cannot be read whole (`ownerRuledBefore` answers null), when the history of `HEAD` or the base ever gave it a verdict with no `by` (`ownerRuledBefore`), whatever the commit subjects say, and when it sets, removes or adds statements. Of two such commits, one made on top of the other is
   the later, whatever their dates. That commit must have written the entry's file, found in it by its id
   wherever the file was then. The entry's file now, committed or not, must agree with that version
   on the verdict and on the keys above. A merge, a move, a change of other keys (`adds`,
   `replaced_by`, `suggest`, as a take of another entry or a suggestion does) or a change that was
   put back come between without effect; a later ruling replaces an earlier one. The check does not
-  catch `plan take` run without the owner's word, a commit named `Owner: take <id>` written by
-  hand, or an owner's commit amended or squashed with another change.
+  catch `plan take` run without the owner's word, a commit named `Owner: take <id>` or
+  `Agents: take <id>` written by hand, or an owner's commit amended or squashed with another change.
 
 A malformed value is a problem like any other: the check never throws on one.
 
@@ -133,7 +145,7 @@ replaced decision.
 | `read/` | Reads `plan/` from a directory or a git ref into one plan object. |
 | `check/` | `checkFiles(files, { exists })` for a tree, `checkChange(files, baseFiles)` against the merged plan, `formatProblem`. |
 | `write/` | `take(files, id)` and `drop(files, id)`: pure functions, files in and changed files out, so the Workshop can call them. |
-| `history/` | `readSteps(root)` reads from git the commits that changed an entry, and `entryHistory(steps)` turns them into each entry's changes. Neither is a command. `entryHistory` and the names it uses import no `node:` module, so the site can use them. |
+| `history/` | `readSteps(root)` reads from git the commits that changed an entry, and `entryHistory(steps)` turns them into each entry's changes, and `ownerRuled(steps)` into the ids of the entries that held a verdict with no `by` in any step. `readSteps(root, ref)` reads the history as of `ref` (`HEAD` by default). None is a command. `entryHistory` and the names it uses import no `node:` module, so the site can use them. |
 | `cli/` | The command: arguments, the checkout, git. |
 | `bin/plan` | The entry point. |
 
@@ -145,7 +157,7 @@ A step is a commit of the first-parent chain of `HEAD` that changed an entry's f
 
 `entryHistory(steps)` returns a `Map` from an entry's id to its changes, newest first. An entry is followed by the name of its file (`decisions/<id>.json`, `<part>/decisions/<id>.json` or `<part>/features/<id>.json`), wherever the file is, and its notes are the `<id>.md` beside it. Any other path is ignored.
 
-A change is `{ commit, date, what }`, with `text` or `by` when `what` names them. `commit` is the full hash and `date` the committer date in UTC. `what` lists one or more of these names, in this order, and `WHAT` exports them:
+A change is `{ commit, date, what }`, with `text` or `by` when `what` names them, and `agents: true` when it is `taken` or `dropped` and the verdict has `"by": "agents"`. `commit` is the full hash and `date` the committer date in UTC. `what` lists one or more of these names, in this order, and `WHAT` exports them:
 
 | Name | The step |
 |---|---|
@@ -155,7 +167,7 @@ A change is `{ commit, date, what }`, with `text` or `by` when `what` names them
 | `sets` | changes `sets`, `removes` or `replaces` of an entry with no verdict before and after it. |
 | `needs`, `keeps`, `surfaces`, `suggest` | changes that key. |
 | `notes` | changes the notes, adds them or deletes them. |
-| `taken`, `dropped` | gives the entry that verdict. |
+| `taken`, `dropped` | gives the entry that verdict, or the same verdict from another hand: the owner confirming what the agents took or dropped, or the agents writing again over the owner's, is a `taken` or `dropped` too. |
 | `cleared` | takes the verdict `take` or `drop` away. |
 | `replaced` | adds `replaced_by`. `by` is its value. |
 | `started` | adds `started`. |

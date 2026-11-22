@@ -41,7 +41,7 @@ const verdictOf = (value) => (value.verdict === 'take' || value.verdict === 'dro
 
 /**
  * The names a step gives to an entry that was there before it.
- * @param {Snapshot} before @param {Snapshot} after @returns {{ what: string[], text?: object, by?: unknown }}
+ * @param {Snapshot} before @param {Snapshot} after @returns {{ what: string[], text?: object, by?: unknown, agents?: true }}
  */
 function compare(before, after) {
   const was = before.value;
@@ -56,8 +56,11 @@ function compare(before, after) {
   if (differ('sets', 'removes', 'replaces') && verdictBefore === null && verdictAfter === null) names.add('sets');
   for (const key of ['needs', 'keeps', 'surfaces', 'suggest']) if (differ(key)) names.add(key);
   if (before.notes !== after.notes) names.add('notes');
-  if (verdictAfter === 'take' && verdictBefore !== 'take') names.add('taken');
-  if (verdictAfter === 'drop' && verdictBefore !== 'drop') names.add('dropped');
+  // Who decided is part of the verdict: the owner confirming what the agents took is a `taken` again.
+  const decider = (value) => (verdictOf(value) === null ? undefined : (value.by ?? null));
+  const who = decider(was) !== decider(now);
+  if (verdictAfter === 'take' && (verdictBefore !== 'take' || who)) names.add('taken');
+  if (verdictAfter === 'drop' && (verdictBefore !== 'drop' || who)) names.add('dropped');
   if (verdictBefore !== null && verdictAfter === null) names.add('cleared');
   if (was.replaced_by === undefined && now.replaced_by !== undefined) names.add('replaced');
   if (was.started === undefined && now.started !== undefined) names.add('started');
@@ -69,23 +72,17 @@ function compare(before, after) {
     extra.text = { before: side(was), after: side(now) };
   }
   if (names.has('replaced')) extra.by = now.replaced_by;
+  // A verdict the agents wrote, not the owner: `by` in the file says so.
+  if ((names.has('taken') || names.has('dropped')) && now.by === 'agents') extra.agents = true;
   return { what, ...extra };
 }
 
 /**
- * The history of each entry: what each step that changed it did, newest first.
- *
- * `steps` are the commits that changed `plan/`, oldest first. `files` maps a path relative to
- * `plan/` to the file's text before and after the step, null when it did not exist. An entry's
- * file is `decisions/<id>.json`, `<part>/decisions/<id>.json` or `<part>/features/<id>.json`, and
- * its notes the `<id>.md` beside it; other paths are ignored. A step where the entry's file is
- * not a JSON object is skipped for that entry. A step that deletes the file gives no change, and
- * the file coming back is `added` again. A step that changes none of the names of `WHAT` gives no change.
- *
- * @param {{ commit: string, date: string, files: Record<string, { before: string | null, after: string | null }> }[]} steps
- * @returns {Map<string, { commit: string, date: string, what: string[], text?: object, by?: unknown }[]>}
+ * Walks the steps in order and calls `visit(id, before, now, commit, date)` for each entry a step
+ * changed, with the entry as it was (null when it was not there) and as the step left it.
+ * See `entryHistory` for the steps.
  */
-export function entryHistory(steps) {
+function walk(steps, visit) {
   /** @type {Map<string, string | null>} the text of each entry file and notes file, by path, as of the steps seen */
   const tree = new Map();
   /** @type {Set<string>} */
@@ -94,8 +91,6 @@ export function entryHistory(steps) {
   const live = new Map();
   /** @type {Map<string, Snapshot | null>} the last version of each entry that parsed; null when it is gone */
   const last = new Map();
-  /** @type {Map<string, any[]>} */
-  const history = new Map();
 
   const livePaths = (id) => {
     let set = live.get(id);
@@ -147,12 +142,47 @@ export function entryHistory(steps) {
       if (now === undefined) continue;
       last.set(id, now);
       if (now === null) continue;
-      const change = before === null ? { what: ['added'] } : compare(before, now);
-      if (!change.what.length) continue;
-      const list = history.get(id) ?? [];
-      list.unshift({ commit, date, ...change });
-      history.set(id, list);
+      visit(id, before, now, commit, date);
     }
   }
+}
+
+/**
+ * The history of each entry: what each step that changed it did, newest first.
+ *
+ * `steps` are the commits that changed `plan/`, oldest first. `files` maps a path relative to
+ * `plan/` to the file's text before and after the step, null when it did not exist. An entry's
+ * file is `decisions/<id>.json`, `<part>/decisions/<id>.json` or `<part>/features/<id>.json`, and
+ * its notes the `<id>.md` beside it; other paths are ignored. A step where the entry's file is
+ * not a JSON object is skipped for that entry. A step that deletes the file gives no change, and
+ * the file coming back is `added` again. A step that changes none of the names of `WHAT` gives no change.
+ *
+ * @param {{ commit: string, date: string, files: Record<string, { before: string | null, after: string | null }> }[]} steps
+ * @returns {Map<string, { commit: string, date: string, what: string[], text?: object, by?: unknown, agents?: true }[]>}
+ */
+export function entryHistory(steps) {
+  /** @type {Map<string, any[]>} */
+  const history = new Map();
+  walk(steps, (id, before, now, commit, date) => {
+    const change = before === null ? { what: ['added'] } : compare(before, now);
+    if (!change.what.length) return;
+    const list = history.get(id) ?? [];
+    list.unshift({ commit, date, ...change });
+    history.set(id, list);
+  });
   return history;
+}
+
+/**
+ * The ids of the entries the owner ruled on: those that held a verdict with no `by` in any step.
+ * An agents' verdict never reaches such an entry. The steps are those of `entryHistory`.
+ * @param {Parameters<typeof entryHistory>[0]} steps @returns {Set<string>}
+ */
+export function ownerRuled(steps) {
+  /** @type {Set<string>} */
+  const ids = new Set();
+  walk(steps, (id, _before, now) => {
+    if (verdictOf(now.value) !== null && now.value.by === undefined) ids.add(id);
+  });
+  return ids;
 }

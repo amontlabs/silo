@@ -18,6 +18,9 @@ export const STATEMENT_KINDS = Object.freeze(['word', 'principle', 'property']);
 
 export const VERDICTS = Object.freeze(['take', 'drop']);
 
+/** Who wrote a verdict, when it was not the owner: `by` holds this and nothing else, and only beside a verdict. */
+export const BYS = Object.freeze(['agents']);
+
 /** A property's `kind`: it never happens, it always ends up happening, or a number we commit to. */
 export const PROPERTY_KINDS = Object.freeze(['safety', 'liveness', 'measured']);
 
@@ -28,8 +31,8 @@ export const CHECKS = Object.freeze(['types', 'bounded exhaustive test', 'simula
 export const WORD_KEYS = Object.freeze(['word', 'means', 'not']);
 export const PRINCIPLE_KEYS = Object.freeze(['id', 'says', 'asks', 'known_as', 'why']);
 export const PROPERTY_KEYS = Object.freeze(['id', 'says', 'kind', 'from', 'check', 'at']);
-export const DECISION_KEYS = Object.freeze(['asks', 'answer', 'needs', 'replaces', 'sets', 'removes', 'adds', 'suggest', 'suggested_in', 'verdict', 'replaced_by']);
-export const FEATURE_KEYS = Object.freeze(['name', 'what', 'needs', 'sets', 'removes', 'adds', 'keeps', 'surfaces', 'suggest', 'suggested_in', 'verdict', 'started', 'built']);
+export const DECISION_KEYS = Object.freeze(['asks', 'answer', 'needs', 'replaces', 'sets', 'removes', 'adds', 'suggest', 'suggested_in', 'verdict', 'by', 'replaced_by']);
+export const FEATURE_KEYS = Object.freeze(['name', 'what', 'needs', 'sets', 'removes', 'adds', 'keeps', 'surfaces', 'suggest', 'suggested_in', 'verdict', 'by', 'started', 'built']);
 export const SUGGEST_KEYS = Object.freeze(['verdict', 'why']);
 export const SURFACES_KEYS = Object.freeze(['app', 'cli']);
 export const PART_KEYS = Object.freeze(['id', 'title', 'line']);

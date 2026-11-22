@@ -7,7 +7,7 @@
 
 import {
   CHECKS, DECISION_KEYS, FEATURE_KEYS, ID_PATTERN, ORDER_KEYS, PART_KEYS, PRINCIPLE_KEYS, PROPERTY_KEYS, PROPERTY_KINDS,
-  REQUIRED_KEYS, STAGE_KEYS, SUGGEST_KEYS, SURFACES_KEYS, VERDICTS, WORD_KEYS, isDate, listKind, wordId,
+  REQUIRED_KEYS, STAGE_KEYS, SUGGEST_KEYS, SURFACES_KEYS, VERDICTS, BYS, WORD_KEYS, isDate, listKind, wordId,
 } from '../model/names.js';
 import {
   canonicalDecision, canonicalFeature, canonicalOrder, canonicalPart, canonicalPrinciple, canonicalProperty, canonicalText, canonicalWord,
@@ -244,6 +244,15 @@ export function checkFiles(files, { exists } = {}) {
     for (const key of ['asks', 'answer', 'name', 'what', 'replaced_by']) if (keys.includes(key)) textKey(file, '', data, key);
     for (const key of ['needs', 'replaces', 'removes', 'adds', 'keeps']) if (keys.includes(key)) textList(file, key, data[key], 'ids');
     if (Object.hasOwn(data, 'verdict') && !VERDICTS.includes(data.verdict)) add(file, 'verdict', `"${shown(data.verdict)}" is not a verdict`, `write ${VERDICTS.join(' or ')}, or leave it out`);
+    if (Object.hasOwn(data, 'by')) {
+      if (!BYS.includes(data.by)) add(file, 'by', `"${shown(data.by)}" is not a value of by`, `write ${BYS.map((by) => `"${by}"`).join(' or ')}, or leave it out: no by means the owner`);
+      else if (!VERDICTS.includes(data.verdict)) add(file, 'by', 'by without a verdict', 'remove by: it says who wrote a verdict, and there is none');
+      else if (kind === 'feature') {
+        add(file, 'by', 'a verdict by the agents on a feature', 'a feature is the owner\'s to decide: the owner rules on it, with plan take or plan drop and no --by');
+      } else if (['sets', 'removes', 'adds'].some((key) => Array.isArray(data[key]) && data[key].length)) {
+        add(file, 'by', 'a verdict by the agents on an entry that sets, removes or adds principles, properties or words', 'those are the owner\'s: the owner rules on this entry, with plan take or plan drop and no --by');
+      }
+    }
     if (Object.hasOwn(data, 'suggest') && !isEmpty(data.suggest)) {
       if (!isObject(data.suggest)) add(file, 'suggest', 'not an object', 'write { verdict, why }');
       else {
@@ -562,8 +571,8 @@ export function checkFiles(files, { exists } = {}) {
 const ENTRY_TEXT_KEYS = ['asks', 'answer', 'name', 'what', 'replaces', 'sets', 'removes'];
 
 /**
- * Whether two versions of an entry file differ in what the owner rules on: the verdict or a key of
- * rule 11. `adds` is left out: a take of another entry rewrites it when it moves a statement. A
+ * Whether two versions of an entry file differ in what the owner rules on: the verdict, who wrote it
+ * (`by`) or a key of rule 11. `adds` is left out: a take of another entry rewrites it when it moves a statement. A
  * version that is missing, not JSON or not an object counts as none, unlike any object.
  * @param {string | null} before @param {string | null} after the texts of the file
  */
@@ -579,7 +588,7 @@ export function ruledKeysDiffer(before, after) {
   };
   const [a, b] = [parse(before), parse(after)];
   if (a === null || b === null) return a !== b;
-  return ['verdict', ...ENTRY_TEXT_KEYS].some((key) => JSON.stringify(a[key]) !== JSON.stringify(b[key]));
+  return ['verdict', 'by', ...ENTRY_TEXT_KEYS].some((key) => JSON.stringify(a[key]) !== JSON.stringify(b[key]));
 }
 
 /** @param {Map<string, string>} files @returns {Map<string, { file: string, value: any }>} the entries that parse, by id */
@@ -611,25 +620,50 @@ function entriesOf(files) {
  * since the base (its verdict and those keys, as of the owner's latest take or drop commit): the
  * owner ruled on this text, and the rule does not apply. With a `verdict`, the owner's take or drop
  * of that kind.
+ * A verdict by the agents on an entry the owner ever ruled on is refused too: `ownerRuledBefore(id)`
+ * says whether any commit of the merged history wrote the entry a verdict with no `by`. Null, a
+ * history that is not whole (a shallow clone), refuses the verdict: it cannot be checked.
  * @param {Map<string, string>} files the plan as it is @param {Map<string, string>} baseFiles the merged plan
- * @param {{ ruledByOwner?: (id: string, file: string, verdict?: string) => boolean }} [options]
+ * @param {{ ruledByOwner?: (id: string, file: string, verdict?: string) => boolean, ownerRuledBefore?: (id: string) => boolean | null }} [options]
  * @returns {{ errors: Problem[] }}
  */
-export function checkChange(files, baseFiles, { ruledByOwner } = {}) {
+export function checkChange(files, baseFiles, { ruledByOwner, ownerRuledBefore } = {}) {
   /** @type {Problem[]} */
   const errors = [];
   const base = entriesOf(baseFiles);
   for (const [id, { file, value }] of entriesOf(files)) {
     const before = base.get(id)?.value;
+    const agentsVerdict = value.by === 'agents' && VERDICTS.includes(value.verdict);
+    const ownerRuledIt = agentsVerdict && ownerRuledBefore?.(id);
+    if (agentsVerdict && ownerRuledBefore?.(id) === null) {
+      errors.push({
+        file,
+        field: 'by',
+        message: `"${id}" has a verdict by the agents, which cannot be checked against the history: it is not whole`,
+        fix: 'fetch the full history (git fetch --unshallow; in CI, fetch-depth: 0 on the checkout) and check again',
+      });
+    }
+    if (ownerRuledIt) {
+      errors.push({
+        file,
+        field: 'by',
+        message: `"${id}" has a verdict by the agents, and the owner ruled on it before`,
+        fix: `undo the change; agents never write a verdict on an entry the owner ruled on: the way is a new decision that names ${id} in its replaces`,
+      });
+    }
     if (base.size && VERDICTS.includes(value.verdict) && before?.verdict !== value.verdict && !ruledByOwner?.(id, file, value.verdict)) {
       errors.push({
         file,
         field: 'verdict',
-        message: `"${id}" has the verdict ${value.verdict}, which the owner's command did not write`,
-        fix: `undo that change; the owner's ${value.verdict === 'take' ? 'yes' : 'no'} is the command plan ${value.verdict} ${id}`,
+        message: `"${id}" has the verdict ${value.verdict}, which ${value.by === 'agents' ? "the agents' command" : "the owner's command"} did not write`,
+        fix: `undo that change; the ${value.by === 'agents' ? "agents' " : "owner's "}${value.verdict === 'take' ? 'yes' : 'no'} is the command plan ${value.verdict} ${id}${value.by === 'agents' ? ' --by agents' : ''}`,
       });
     }
     if (!before || before.verdict === undefined || before.verdict !== value.verdict) continue;
+    // Who wrote the verdict is part of it: adding or removing `by` by hand moves a verdict from the owner to the agents or back.
+    if (before.by !== value.by && !ownerRuledIt && !ruledByOwner?.(id, file, value.verdict)) {
+      errors.push({ file, field: 'by', message: `"${id}" changed its by while its verdict stayed ${shown(before.verdict)}`, fix: 'undo the change: who wrote a verdict is written with it, by plan take or plan drop' });
+    }
     const changed = ENTRY_TEXT_KEYS.filter((key) => JSON.stringify(before[key]) !== JSON.stringify(value[key]));
     if (changed.length && ruledByOwner?.(id, file)) continue;
     for (const key of changed) {

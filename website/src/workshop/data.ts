@@ -32,6 +32,7 @@ interface RawEntry {
   answer?: string;
   needs?: string[];
   verdict?: string;
+  by?: string;
   replaces?: string[];
   replaced_by?: string;
   started?: string;
@@ -85,7 +86,7 @@ export function toNotes(plan: RawPlan): Notes {
 
 /** What a closed History line needs of an entry's changes (newest first): the newest and how many there are. */
 function summaryOf(changes: Change[] | undefined): Entry['history'] {
-  return changes?.length ? { date: changes[0].date, what: changes[0].what, count: changes.length } : null;
+  return changes?.length ? { date: changes[0].date, what: changes[0].what, ...(changes[0].agents ? { agents: true as const } : {}), count: changes.length } : null;
 }
 
 const list = (value: unknown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []);
@@ -206,6 +207,7 @@ export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null, fil
     what: (raw.kind === 'decision' ? raw.answer : raw.what) ?? null,
     needs: Array.isArray(raw.needs) ? raw.needs : [],
     verdict: (raw.verdict ?? null) as Verdict | null,
+    by: raw.verdict && raw.by === 'agents' ? 'agents' : null,
     replaces: Array.isArray(raw.replaces) ? raw.replaces : [],
     replacedBy: typeof raw.replaced_by === 'string' ? raw.replaced_by : null,
     started: raw.started ?? null,

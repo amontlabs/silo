@@ -40,7 +40,7 @@ describe('the plan by part', () => {
   });
 
   it('says a status in the page\'s words, through the plan\'s model', () => {
-    const entry = (fields: Partial<Entry>): Entry => ({ id: 'x', kind: 'feature', part: 'p', stage: 's', position: 1, name: 'X', what: 'X.', needs: [], verdict: null, replaces: [], replacedBy: null, started: null, built: null, notes: false, more: false, history: null, ...fields });
+    const entry = (fields: Partial<Entry>): Entry => ({ id: 'x', kind: 'feature', part: 'p', stage: 's', position: 1, name: 'X', what: 'X.', needs: [], verdict: null, by: null, replaces: [], replacedBy: null, started: null, built: null, notes: false, more: false, history: null, ...fields });
     const status = (fields: Partial<Entry>, others: Entry[] = []) => entryStatuses([entry(fields), ...others]).get('x');
     expect(status({})).toBe('undecided');
     expect(status({ verdict: 'take' })).toBe('decided');
@@ -244,7 +244,7 @@ describe('the line under the title', () => {
 });
 
 describe('a replaced decision', () => {
-  const decision = (fields: Partial<Entry>): Entry => ({ id: 'x', kind: 'decision', part: 'p', stage: 's', position: 1, name: 'X?', what: 'Yes.', needs: [], verdict: 'take', replaces: [], replacedBy: null, started: null, built: null, notes: false, more: false, history: null, ...fields });
+  const decision = (fields: Partial<Entry>): Entry => ({ id: 'x', kind: 'decision', part: 'p', stage: 's', position: 1, name: 'X?', what: 'Yes.', needs: [], verdict: 'take', by: null, replaces: [], replacedBy: null, started: null, built: null, notes: false, more: false, history: null, ...fields });
   const status = (fields: Partial<Entry>) => entryStatuses([decision(fields)]).get('x');
 
   it('has the status replaced once its file names the decision that replaced it, and is decided before', () => {

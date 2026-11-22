@@ -111,7 +111,26 @@ verdict sets it. The word then has the meaning that decision gives it.
 | `take` | `plan take <id>` | Yes to exactly what the entry showed: its text, what it sets and what it removes. |
 | `drop` | `plan drop <id>` | No to what the entry showed. A no does not say what should be true instead. The entry stays in its file, and the tool skips it. |
 
-- Only these two commands write a verdict, and only when the owner said so.
+- Only these two commands write a verdict, and only when the owner said so. The one exception is an
+  entry about how Silo is built: agents decide those, as `owners-part-on-engine` says, and write
+  the verdict with `plan take <id> --by agents` or `plan drop <id> --by agents`. The entry then
+  holds `"by": "agents"` beside its verdict, and the commit is named `Agents: take <id>` or
+  `Agents: drop <id>`. Only agents use `--by agents`, and only for such an entry.
+  - Agents never write a verdict on an entry the owner ruled on: one that, in any commit of the
+    merged history, held a verdict with no `by`, whether it still holds it or an edit took it away.
+    `--by agents` refuses it and `plan check` refuses an `Agents:` verdict on it. The way is a new
+    decision that names it in `replaces`; such a decision may be taken `--by agents`.
+  - Agents never write a verdict on an entry that sets, removes or adds a principle, a property or
+    a word. Those are the owner's, and a property's sentence is written by a person.
+  - Agents never decide a feature: `--by agents` refuses it and `plan check` refuses an `Agents:`
+    verdict on it. A feature is the owner's to decide.
+  - Agents write a verdict only where the whole history can be read. In a shallow clone, or when
+    the integration branch cannot be read, `--by agents` refuses and `plan check` refuses an
+    `Agents:` verdict it cannot verify; CI checks out the full history.
+  - The owner confirms what agents decided with the plain command: `plan take <id>` on an entry
+    agents took, `plan drop <id>` on one they dropped. It removes `by` and commits
+    `Owner: take <id>` or `Owner: drop <id>`; the Workshop then shows the verdict as the
+    owner's, and its History shows the confirmation.
 - An answer in an entry with no verdict is a proposal, and nobody has to follow it. When the
   owner leans towards an answer without saying yes, write it as the entry's answer and say in the
   notes that it is a lean.
@@ -222,8 +241,8 @@ Keys are written in this order. A key in brackets is optional: when it has no va
 | Word | `word`, `means`, [`not`] |
 | Principle | `id`, `says`, `asks`, [`known_as`], [`why`] |
 | Property | `id`, `says`, `kind`, [`from`], `check`, [`at`] |
-| Decision | `asks`, [`answer`], [`needs`], [`replaces`], [`sets`], [`removes`], [`adds`], [`suggest`], [`suggested_in`], [`verdict`], [`replaced_by`] |
-| Feature | `name`, `what`, [`needs`], [`sets`], [`removes`], [`adds`], [`keeps`], [`surfaces`], [`suggest`], [`suggested_in`], [`verdict`], [`started`], [`built`] |
+| Decision | `asks`, [`answer`], [`needs`], [`replaces`], [`sets`], [`removes`], [`adds`], [`suggest`], [`suggested_in`], [`verdict`], [`by`], [`replaced_by`] |
+| Feature | `name`, `what`, [`needs`], [`sets`], [`removes`], [`adds`], [`keeps`], [`surfaces`], [`suggest`], [`suggested_in`], [`verdict`], [`by`], [`started`], [`built`] |
 
 - `not`: the words not to write when you mean this word. A writer would naturally reach for them,
   and they would be wrong there. No check looks for them, so a listed word keeps its everyday
@@ -240,6 +259,8 @@ Keys are written in this order. A key in brackets is optional: when it has no va
 - `suggest`: what is recommended to the owner, as `{ "verdict", "why" }`. A recommended answer to
   a decision goes in `answer`.
 - `suggested_in`: the number of the visitor's suggestion the entry came from.
+- `by`: who wrote the verdict, when it was not the owner: only `agents`, and only beside a
+  `verdict`. No `by` means the owner. `plan take --by agents` and `plan drop --by agents` write it.
 - `replaced_by`: the id of the decision that replaced this one. `plan take` writes it.
 - `sets` and `removes` exist only before a take, and `adds` only after it. `replaces` stays.
 
@@ -260,7 +281,9 @@ These keys hold ids of other items, or paths. The check refuses an id that does 
 ### States
 
 The tool gives each entry a state. The Workshop says how far an entry is in one set of words:
-not decided, decided, being built, built.
+not decided, decided, being built, built. For an entry whose verdict has `"by": "agents"` it
+says "decided by agents" where it says "decided", and "dropped by agents" where it says "dropped".
+`by` changes no state.
 
 | Kind | State | When | The Workshop says |
 |---|---|---|---|
@@ -284,6 +307,6 @@ not decided, decided, being built, built.
 |---|---|
 | `plan` | Prints what is next: the first entry with no verdict, the features being built, the features ready to build, and the features that wait, each with what it waits for. |
 | `plan show <id>` | Prints one entry or one statement, with what it links to and what applies to it. This is the brief for whoever works on it. With the id of a part, it prints what is next in that part. |
-| `plan take <id>` | Writes the owner's yes. |
-| `plan drop <id>` | Writes the owner's no. |
+| `plan take <id> [--by agents]` | Writes the owner's yes, which also confirms an entry the agents took; with `--by agents`, the agents' yes (commit `Agents: take <id>`), refused on an entry the owner ruled on and on one that sets statements. |
+| `plan drop <id> [--by agents]` | Writes the owner's no, which also confirms an entry the agents dropped; with `--by agents`, the agents' no (commit `Agents: drop <id>`), refused on an entry the owner ruled on and on one that sets, removes or adds statements. |
 | `plan check` | Checks that the plan's files fit together. The merge gate and the site's build run it. |

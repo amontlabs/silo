@@ -3,7 +3,7 @@
 // address holds all of it (all.ts).
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
-import { AllList, PIP_WORDS } from './AllList';
+import { AllList, pipWord } from './AllList';
 import { countOf, DEFAULT_SHOW, narrowed, PRODUCT, relationsOf, rowKeyOf, STATE_WORDS, STATES, stripKept } from './all';
 import type { Graph, Query, Section, Show } from './all';
 import type { EntryContext } from './Entry';
@@ -347,7 +347,7 @@ function Strip({ graph, kept, store, onOpen }: { graph: Graph; kept: ReadonlySet
             <li key={row.key}>
               <button
                 type="button" className={`wa-sp ${row.status}${out ? ' out' : ''}`} data-row={row.key} tabIndex={index === stop ? 0 : -1}
-                aria-label={`${step} ${row.name}, ${PIP_WORDS[row.status]}`} data-label={`${step} ${row.name}, ${PIP_WORDS[row.status]}`} data-tip={`${step}  ${row.name}`}
+                aria-label={`${step} ${row.name}, ${pipWord(row)}`} data-label={`${step} ${row.name}, ${pipWord(row)}`} data-tip={`${step}  ${row.name}`}
                 onFocus={() => { setStop(index); store.focus(row.key); }} onBlur={() => store.focus(null)}
                 onPointerEnter={() => store.point(row.key)} onPointerLeave={() => store.point(null)}
                 onClick={() => go(row.key)}
