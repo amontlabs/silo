@@ -8,7 +8,7 @@ import { DEFAULT_REPO, repoAddress } from '../../../tools/workshop/model/index.j
 import { Markdown } from './Markdown';
 import { RichText, safeHref } from './RichText';
 import { byWho, changeLine, changePhrase, isDecided, relativeTime, shortDate } from './plan';
-import type { Change, EntryFacts, Facts, Row, Statement } from './plan';
+import type { Change, EntryFacts, Facts, Row, Statement, Verdict } from './plan';
 import { formatHash, placeOf } from './routes';
 import type { Comment } from './api';
 import { pageConfig } from './useWorkshop';
@@ -292,11 +292,120 @@ function CopyId({ id }: { id: string }) {
   );
 }
 
-function StateLine({ row, children }: { row: Row; children?: ReactNode }) {
+/** How long a pressed Take or Drop waits for its second press. */
+export const ARM_MS = 4000;
+/** A second press sooner than this after the first is part of the same gesture (a double click), never the confirm. */
+export const CONFIRM_AFTER_MS = 400;
+
+/**
+ * Whether the owner may take or drop the entry from the page: it has no verdict, or the agents wrote its verdict and
+ * the owner's confirms or overrules it. Undoing a verdict, a replaced entry and a built one are not done here.
+ */
+export function offersVerdict(row: Row): boolean {
+  if (row.kind !== 'entry') return false;
+  return row.status === 'undecided' || (row.by === 'agents' && (row.status === 'decided' || row.status === 'dropped'));
+}
+
+const VERDICT_WORDS: Record<Verdict, { idle: string; pending: string }> = {
+  take: { idle: 'Take', pending: 'Taking…' },
+  drop: { idle: 'Drop', pending: 'Dropping…' },
+};
+const ARMED = 'Confirm';
+
+/**
+ * The owner's Take and Drop. A first press arms the button ("Confirm") and a second confirms it; an armed button goes
+ * back after ARM_MS or when the focus leaves the pair. The confirm is a separate activation: a key held down repeats,
+ * and Chromium clicks on each repeat of Enter, so a repeated key does nothing until it is let go, and a press sooner
+ * than CONFIRM_AFTER_MS after arming is ignored. While the server writes the verdict, the pressed one says so
+ * and both are disabled. Each button keeps the width of its longest word, so nothing moves as it changes. `held`
+ * draws the same buttons as placeholders, inert, while `me` has not answered for the owner remembered, or the entry's
+ * details have not shown yet.
+ */
+function VerdictButtons({ row, ctx, held = false }: { row: Row; ctx: EntryContext; held?: boolean }) {
+  const { w } = ctx;
+  const id = planId(row) as string;
+  const pending = w.verdictPending[id];
+  const [armed, setArmed] = useState<Verdict | null>(null);
+  const armedAt = useRef(0);
+  // A key held down on a button: its repeats, and the clicks they make, are not presses.
+  const repeating = useRef(false);
+  useEffect(() => {
+    if (!armed) return;
+    const timer = setTimeout(() => setArmed(null), ARM_MS);
+    return () => clearTimeout(timer);
+  }, [armed]);
+  const press = (verdict: Verdict) => {
+    if (pending || repeating.current) return;
+    if (armed !== verdict) {
+      setArmed(verdict);
+      armedAt.current = Date.now();
+      return;
+    }
+    if (Date.now() - armedAt.current < CONFIRM_AFTER_MS) return;
+    setArmed(null);
+    void w.sendVerdict(row, verdict);
+  };
+  if (held) {
+    return (
+      <span className="ws-verdict ws-held" aria-hidden="true" inert>
+        {(['take', 'drop'] as const).map((verdict) => (
+          <span key={verdict} className={`ws-vbtn ${verdict}`}>{[VERDICT_WORDS[verdict].idle, ARMED, VERDICT_WORDS[verdict].pending].map((word) => <span key={word}>{word}</span>)}</span>
+        ))}
+      </span>
+    );
+  }
+  return (
+    <span className="ws-verdict" role="group" aria-label="Your verdict" onBlur={(event) => {
+      repeating.current = false;
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setArmed(null);
+    }}>
+      {(['take', 'drop'] as const).map((verdict) => {
+        const words = VERDICT_WORDS[verdict];
+        const now = pending === verdict ? words.pending : armed === verdict ? ARMED : words.idle;
+        return (
+          <button
+            key={verdict} type="button" className={`ws-vbtn ${verdict}${armed === verdict ? ' armed' : ''}`}
+            aria-label={armed === verdict ? `${ARMED} ${verdict}` : undefined}
+            aria-busy={pending === verdict || undefined} disabled={Boolean(pending)} onClick={() => press(verdict)}
+            onKeyDown={(event) => {
+              repeating.current = event.repeat;
+              if (event.repeat) event.preventDefault();
+            }}
+            onKeyUp={() => { repeating.current = false; }}
+          >
+            <span>{now}</span>
+            {[words.idle, ARMED, words.pending].filter((word) => word !== now).map((word) => <span key={word} aria-hidden="true">{word}</span>)}
+          </button>
+        );
+      })}
+    </span>
+  );
+}
+
+/**
+ * The state of a row: its words, with the owner's Take and Drop at the end of their line, or of a line of their own
+ * under them when both do not fit (workshop.css), and under that the id, the button that copies it and the votes. The
+ * buttons come after `me` answers; for the owner remembered their room is held until then, so they move nothing. They
+ * are live only once the entry's details (what a yes would change) show, since the owner decides on them too; until
+ * then their room is held.
+ */
+function StateLine({ row, ctx, children }: { row: Row; ctx: EntryContext; children?: ReactNode }) {
   const text = stateText(row);
   const tone = isDecided(row) && row.status !== 'dropped' ? 'ws-yes' : 'ws-muted';
   const id = planId(row);
-  return <div className="ws-state"><span className={tone}>{text}</span>{id ? <CopyId id={id} /> : null}{children}</div>;
+  const refusal = id ? ctx.w.verdictRefusals[id] : undefined;
+  const offered = offersVerdict(row);
+  const detailsShown = !row.more || typeof ctx.w.facts === 'object';
+  return (
+    <>
+      <div className="ws-state">
+        <span className={`ws-state-text ${tone}`}>{text}</span>
+        {offered && (ctx.w.mayDecide || ctx.w.verdictHeld) ? <VerdictButtons row={row} ctx={ctx} held={!ctx.w.mayDecide || !detailsShown} /> : null}
+        {id || children ? <span className="ws-state-more">{id ? <CopyId id={id} /> : null}{children}</span> : null}
+      </div>
+      {refusal ? <p className="ws-refused" role="alert">{refusal}</p> : null}
+    </>
+  );
 }
 
 /**
@@ -737,7 +846,7 @@ function Body({ row, ctx, detail, lead, vote, onExtras }: { row: Row; ctx: Entry
       {lead}
       {what ? <div className="ws-what"><RichText text={what} /></div> : null}
       {row.kind === 'entry' ? <OpenFacts row={row} ctx={ctx} /> : null}
-      <StateLine row={row}>{vote ? <Side row={row} ctx={ctx} /> : null}</StateLine>
+      <StateLine row={row} ctx={ctx}>{vote ? <Side row={row} ctx={ctx} /> : null}</StateLine>
       <ReplaceLines row={row} ctx={ctx} only={(label) => label === 'Replaced by'} />
       {row.kind === 'entry' ? <Extras row={row} ctx={ctx} onMove={onExtras} /> : null}
       <Talk row={row} ctx={ctx} detail={detail} />

@@ -40,12 +40,15 @@ test('anonymous reads cannot make a signed-in person\'s request answer 429', asy
   } finally { await t.close(); }
 });
 
-test('me answers the login and the avatar and nothing else; a 401 clears the hint cookie', async () => {
+test('me answers the login, the avatar and, for the owner alone, owner; a 401 clears the hint cookie', async () => {
   const t = await setup();
   try {
     const c = t.client();
     await c.signIn('owner-fake');
-    assert.deepEqual((await c.call('GET', 'me')).json, { login: 'owner-fake', avatar: 'https://avatars.example.test/owner-fake.png' });
+    assert.deepEqual((await c.call('GET', 'me')).json, { login: 'owner-fake', avatar: 'https://avatars.example.test/owner-fake.png', owner: true });
+    const visitor = t.client();
+    await visitor.signIn('visitor-fake');
+    assert.deepEqual((await visitor.call('GET', 'me')).json, { login: 'visitor-fake', avatar: 'https://avatars.example.test/visitor-fake.png' });
 
     const hinted = t.client();
     hinted.jar.set('workshop-hint', '1');

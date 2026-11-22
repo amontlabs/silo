@@ -1,9 +1,12 @@
 // A fake GitHub for the Workshop's tests and for `workshop-dev.mjs --fake`:
 // the App and installation tokens, the user authorization flow with expiring
 // tokens and PKCE, the issue, comment, reaction and label endpoints the
-// Workshop uses, and the one GraphQL query it sends. State lives in memory.
+// Workshop uses, the git data a verdict reads (refs, blobs, and trees and texts
+// through GraphQL; fake-git.mjs), the GraphQL queries it sends and the one
+// mutation, createCommitOnBranch, that writes a verdict. State lives in memory.
 import { createHash, generateKeyPairSync, randomBytes, verify } from 'node:crypto';
 import { createServer } from 'node:http';
+import { createFakeGit } from './fake-git.mjs';
 
 export const FAKE_APP = { appId: '1001', slug: 'silo-workshop', clientId: 'Iv1.fakeclient', installationId: 7, repoId: 4242 };
 
@@ -36,6 +39,20 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     // removed less than this ago is still returned, without the label in its own `labels`. 0: no lag.
     listLag: 0,
     requests: [],
+    // The repository's git data: main's ref, its commits, trees and blobs.
+    git: createFakeGit(),
+    // The App's permission Contents, which a person's token of the App carries: 'write', or 'read' (no write).
+    contents: 'write',
+    // The type of the GraphQL error GitHub answers a write of contents the token may not make: FORBIDDEN, or NOT_FOUND.
+    contentsDenied: 'FORBIDDEN',
+    // GraphQL cuts a blob's text past this many bytes (isTruncated), as GitHub does for large files.
+    truncateOver: Infinity,
+    // A test's change to the answer of the plan's read (GraphQL PlanAt), as GitHub may give it in part: (answer) => answer.
+    planAnswer: null,
+    // The same for the follow-up read of the folders the first one cut (GraphQL Deeper).
+    deeperAnswer: null,
+    // Each createCommitOnBranch asked for: its input, as sent.
+    commitInputs: [],
   };
   let baseUrl = '';
   const pem = privateKey.export({ type: 'pkcs1', format: 'pem' });
@@ -221,6 +238,7 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
   }
 
   async function readBody(req) {
+    if (req.workshopBody) return req.workshopBody;
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     const text = Buffer.concat(chunks).toString();
@@ -234,6 +252,13 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     const path = url.pathname;
     const who = caller(req);
     const record = { method: req.method, path, query: url.search, wall: Date.now(), kind: who?.kind ?? 'anonymous', login: who?.user?.login ?? null };
+    // A GraphQL call is read first, so a test's hook can tell its operation: the query's name, or the mutation's field.
+    if (path === '/graphql' && req.method === 'POST') {
+      const body = await readBody(req);
+      req.workshopBody = body;
+      const named = /^(?:query|mutation)\s+(\w+)/.exec(body.query || '');
+      record.graphql = /createCommitOnBranch\(/.test(body.query || '') ? 'createCommitOnBranch' : named?.[1] ?? null;
+    }
     state.requests.push(record);
     // When the answer was sent, to see which calls were in flight together.
     res.on('finish', () => { record.done = Date.now(); });
@@ -243,6 +268,16 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     // `until`: a promise the test settles; the call is held until then, however long that is.
     if (hooked?.until) await hooked.until;
     if (hooked?.status) return json(res, hooked.status, hooked.body ?? { message: 'hooked' }, hooked.headers);
+    // `lose`: the call is done, and its answer lost on the way: replaced by that status, or 'drop', the connection closed.
+    if (hooked?.lose) {
+      const { lose } = hooked;
+      res.writeHead = () => res;
+      res.end = () => {
+        if (lose === 'drop') res.socket?.destroy();
+        else { delete res.writeHead; delete res.end; json(res, lose, { message: 'lost' }); }
+        return res;
+      };
+    }
 
     // User authorization (github.com)
     if (path === '/login/oauth/authorize') {
@@ -353,9 +388,42 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
       const issue = addIssue({ title: body.title, body: body.body || '', labels, author: who.kind === 'user' ? who.user.login : null });
       return json(res, 201, issueJson(issue));
     }
-    // The one query the Workshop sends: the person's 👍 on the latest 100 comments of an issue.
+    // The Workshop's two queries: the plan at a commit for a verdict, and the person's 👍 on the latest 100 comments of an issue.
     if (path === '/graphql' && req.method === 'POST') {
       const body = await readBody(req);
+      if (record.graphql === 'createCommitOnBranch') return json(res, 200, commitOnBranch(who, body.variables?.input));
+      if (/^query Exists\(/.test(body.query || '')) {
+        const { owner, name } = body.variables || {};
+        if (`${owner}/${name}` !== repo) return json(res, 200, { data: { repository: null }, errors: [{ type: 'NOT_FOUND', message: 'Could not resolve to a Repository.' }] });
+        const git = state.git;
+        const repository = {};
+        for (const [, alias, expression] of body.query.matchAll(/(\w+): object\(expression: ("(?:[^"\\]|\\.)*")\)/g)) {
+          const found = git.resolve(JSON.parse(expression));
+          repository[alias] = !found ? null : found.object.type === 'tree' ? { __typename: 'Tree', ...git.graph(found, 0) } : { __typename: found.object.type === 'blob' ? 'Blob' : 'Commit' };
+        }
+        return json(res, 200, { data: { repository } });
+      }
+      // The folders of plan/ the first read cut, each read with three levels more; and one file's text at a commit.
+      if (/^query (?:Deeper|EntryAt)\(/.test(body.query || '')) {
+        const { owner, name } = body.variables || {};
+        if (`${owner}/${name}` !== repo) return json(res, 200, { data: { repository: null }, errors: [{ type: 'NOT_FOUND', message: 'Could not resolve to a Repository.' }] });
+        const git = state.git;
+        const options = { truncateOver: state.truncateOver };
+        const repository = {};
+        for (const [, alias, expression] of body.query.matchAll(/(\w+): object\(expression: ("(?:[^"\\]|\\.)*")\)/g)) {
+          repository[alias] = git.graph(git.resolve(JSON.parse(expression)), 3, options);
+        }
+        const answer = { data: { repository } };
+        return json(res, 200, state.deeperAnswer && /^query Deeper\(/.test(body.query) ? state.deeperAnswer(answer) : answer);
+      }
+      if (/^query PlanAt\(/.test(body.query || '')) {
+        const { owner, name, commit, plan, built, builtPlan } = body.variables || {};
+        if (`${owner}/${name}` !== repo) return json(res, 200, { data: { repository: null }, errors: [{ type: 'NOT_FOUND', message: 'Could not resolve to a Repository.' }] });
+        const git = state.git;
+        const options = { truncateOver: state.truncateOver };
+        const answer = { data: { repository: { commit: git.graph(git.resolve(commit), 0, options), plan: git.graph(git.resolve(plan), 3, options), built: git.graph(git.resolve(built), 0, options), builtPlan: git.graph(git.resolve(builtPlan), 3, options) } } };
+        return json(res, 200, state.planAnswer ? state.planAnswer(answer) : answer);
+      }
       if (who.kind !== 'user') return json(res, 403, { message: 'Forbidden' });
       const { owner, name, number } = body.variables || {};
       if (!/comments\(last: 100\)/.test(body.query || '') || `${owner}/${name}` !== repo) return json(res, 200, { errors: [{ message: 'unknown query' }] });
@@ -402,6 +470,18 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
       }
       return json(res, 404, { message: 'Not Found' });
     }
+
+    // Whether a commit is in another's history, as the verdict asks: `status` of base...head.
+    const compareMatch = path.match(new RegExp(`^/repos/${repo}/compare/([0-9a-f]{40})\\.\\.\\.([0-9a-f]{40})$`));
+    if (compareMatch && req.method === 'GET') {
+      const [, base, head] = compareMatch;
+      const git = state.git;
+      if (git.objects.get(base)?.type !== 'commit' || git.objects.get(head)?.type !== 'commit') return json(res, 404, { message: 'Not Found' });
+      const status = base === head ? 'identical' : git.isAncestor(base, head) ? 'ahead' : git.isAncestor(head, base) ? 'behind' : 'diverged';
+      return json(res, 200, { status, commits: [] });
+    }
+    const gitMatch = path.match(new RegExp(`^/repos/${repo}/git/(ref|blobs)/(.+)$`));
+    if (gitMatch) return gitAnswer(req, res, who, gitMatch[1], gitMatch[2]);
 
     const issueMatch = path.match(new RegExp(`^/repos/${repo}/issues/(\\d+)(/.*)?$`));
     if (!issueMatch) return json(res, 404, { message: 'Not Found' });
@@ -476,6 +556,57 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     return json(res, 404, { message: 'Not Found' });
   }
 
+  // The git data a verdict reads: main's ref and a blob. Writing goes through createCommitOnBranch alone.
+  async function gitAnswer(req, res, who, kind, rest) {
+    const git = state.git;
+    if (kind === 'ref' && req.method === 'GET') {
+      const sha = git.refs.get(rest);
+      return sha ? json(res, 200, { ref: `refs/${rest}`, object: { sha, type: 'commit' } }) : json(res, 404, { message: 'Not Found' });
+    }
+    if (kind === 'blobs' && req.method === 'GET') {
+      const object = git.objects.get(rest);
+      if (object?.type !== 'blob') return json(res, 404, { message: 'Not Found' });
+      return json(res, 200, { sha: rest, size: object.content.length, encoding: 'base64', content: object.content.toString('base64') });
+    }
+    return json(res, 404, { message: 'Not Found' });
+  }
+
+  /**
+   * createCommitOnBranch: one commit of the files given on the branch's head, made by the token's user, and the branch
+   * moved to it, only when the head is still `expectedHeadOid`. Writing needs a person's token, write access to the
+   * repository and the App's Contents: write; an installation token never writes contents (the Workshop requests it
+   * with issues and metadata only).
+   */
+  function commitOnBranch(who, input) {
+    const git = state.git;
+    const fail = (type, message) => ({ data: { createCommitOnBranch: null }, errors: [{ type, path: ['createCommitOnBranch'], message }] });
+    state.commitInputs.push(input);
+    if (!(who.kind === 'user' && canWrite(who) && state.contents === 'write')) {
+      return fail(state.contentsDenied, state.contentsDenied === 'NOT_FOUND' ? `Could not resolve to a Repository with the name '${repo}'.` : 'Resource not accessible by integration');
+    }
+    const branch = input?.branch?.branchName;
+    if (input?.branch?.repositoryNameWithOwner !== repo || typeof branch !== 'string') return fail('NOT_FOUND', 'Could not resolve to a Branch.');
+    const current = git.refs.get(`heads/${branch}`);
+    if (!current) return fail('NOT_FOUND', 'Could not resolve to a Branch.');
+    if (input.expectedHeadOid !== current) return fail('STALE_DATA', `Expected branch to point to "${input.expectedHeadOid}" but it did not. Pull and try again.`);
+    const headline = input.message?.headline;
+    if (typeof headline !== 'string' || !headline) return fail('UNPROCESSABLE', 'A commit needs a headline.');
+    const additions = input.fileChanges?.additions ?? [];
+    const deletions = input.fileChanges?.deletions ?? [];
+    const tree = git.createTree({
+      base_tree: git.objects.get(current).tree,
+      tree: [
+        ...additions.map((file) => ({ path: file.path, type: 'blob', mode: '100644', content: Buffer.from(String(file.contents), 'base64').toString('utf8') })),
+        ...deletions.map((file) => ({ path: file.path, type: 'blob', sha: null })),
+      ],
+    });
+    if (!tree) return fail('UNPROCESSABLE', 'The changes name what does not exist.');
+    const message = input.message.body ? `${headline}\n\n${input.message.body}` : headline;
+    const sha = git.commit({ tree, parents: [current], message, author: who.user.login, madeAs: who.kind });
+    git.refs.set(`heads/${branch}`, sha);
+    return { data: { createCommitOnBranch: { commit: { oid: sha } } } };
+  }
+
   const server = createServer((req, res) => {
     handle(req, res).catch((error) => { if (process.env.FAKE_GITHUB_DEBUG) console.error(error); json(res, 500, { message: 'fake error' }); });
   });
@@ -494,6 +625,7 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     react,
     reactToComment,
     repo,
+    get git() { return state.git; },
     get url() { return baseUrl; },
     async listen(port = 0, host = '127.0.0.1') {
       await new Promise((resolve) => server.listen(port, host, resolve));
@@ -514,6 +646,8 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
         WORKSHOP_SESSION_SECRET: randomBytes(32).toString('base64'),
         WORKSHOP_REPO: repo,
         WORKSHOP_SITE_ORIGIN: origin,
+        // owner-fake, once seedDemo added it, is the owner.
+        ...(state.users.has('owner-fake') ? { WORKSHOP_OWNER_ID: String(state.users.get('owner-fake').id) } : {}),
       };
     },
   };

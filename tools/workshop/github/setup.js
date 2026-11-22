@@ -24,11 +24,13 @@ export function manifest({ site, redirectUrl }) {
   return {
     name: 'Silo Workshop',
     url: `${site}/workshop`,
-    description: 'Votes, comments and suggestions on the Silo plan, stored as issues of amontlabs/silo.',
+    description: 'Votes, comments and suggestions on the Silo plan, stored as issues of amontlabs/silo, and the owner\'s verdicts, committed to its main.',
     redirect_url: redirectUrl,
     callback_urls: [`${site}/api/workshop/callback`],
     public: true,
-    default_permissions: { issues: 'write', metadata: 'read' },
+    // Contents: the owner's Take and Drop on the Workshop commit to main with the owner's token, which can do
+    // no more than the App may. The installation token is still requested with issues and metadata alone.
+    default_permissions: { contents: 'write', issues: 'write', metadata: 'read' },
     default_events: [],
     request_oauth_on_install: false,
   };

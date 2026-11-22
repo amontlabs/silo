@@ -7,7 +7,7 @@ import { checkChange, checkFiles, formatProblem } from '../check/index.js';
 import { entryStatus, hasSets, replacedBy, waitingFor } from '../model/status.js';
 import { BYS } from '../model/names.js';
 import { PlanError, parsePlan } from '../read/index.js';
-import { drop, take } from '../write/index.js';
+import { drop, take, verdictSubject } from '../write/index.js';
 import { Refused, UsageError, parseArgs } from './args.js';
 import { baseFiles, existsIn, findRoot, git, planFiles, ownerRuledIn, ruledByOwner, uncommitted, unwatched } from './repo.js';
 
@@ -445,7 +445,7 @@ function verdict(ctx, argv, kind) {
     const left = restore(written);
     throw new Refused(`could not write plan/${written.at(-1)} (${/** @type {Error} */ (error).message}); ${left ? `the files written were put back${left}` : 'nothing changed'}`);
   }
-  const subject = `${by ? 'Agents' : 'Owner'}: ${kind} ${id}`;
+  const subject = verdictSubject(kind, id, by);
   const committed = git(root, ['add', '--', ...paths]) !== null && git(root, ['commit', '-q', '-m', subject, '--', ...paths]) !== null;
   if (!committed) {
     git(root, ['reset', '-q', '--', ...paths]);

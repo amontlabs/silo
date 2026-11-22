@@ -64,7 +64,7 @@ npm --prefix website run dev
 The page preview is at http://127.0.0.1:4173. The Workshop there has no API.
 To look at a later state without the API, open
 `http://127.0.0.1:4173/workshop/?fixture=today`; add `&as=in` to
-be signed in (`&login=<name>` for another login), `&delay=2000` to hold the live state and the sign-in answer back,
+be signed in (`&login=<name>` for another login, `&owner=1` as the owner, whose Take and Drop answer after a second), `&delay=2000` to hold the live state and the sign-in answer back,
 and `&detail=700` to hold each entry's comments back. The page's memory of the last visit is off with a fixture,
 so `&delay=` shows a first visit; `&memory=1` turns it on. This exists only in
 development builds (`devFixture.ts`, loaded when `import.meta.env.DEV`); a
@@ -85,8 +85,13 @@ the other rows have no thread yet and can be tried; the first comment of the fir
 It also holds two issues with the retired label
 `workshop:decision` (outside the Workshop), a suggestion, comments, 👍 votes,
 an ordinary issue and a pull request.
-Sign-in goes through the fake's page, which offers two people: `owner-fake`
-and `visitor-fake`. Everything lives in memory and resets on restart.
+Sign-in goes through the fake's page, which offers two people: `owner-fake`,
+who is the owner (`WORKSHOP_OWNER_ID`), and `visitor-fake`. The fake's `main`
+holds `plan/` as `HEAD` has it, under `HEAD`'s id, so a site built from a
+clean checkout can take and drop entries there; a verdict is a commit of the
+fake's own `main`, and the checkout does not change. Built from another plan's
+folder, or with changes under `plan/` not committed, the page offers no verdict.
+Everything lives in memory and resets on restart.
 
 Without `--fake`, the server uses GitHub with the `WORKSHOP_*` variables of the
 environment (a development App, see [The GitHub App](#the-github-app)); its origin is always
@@ -345,8 +350,8 @@ is a made-up layout of five parts that shows every kind of thing a layout can
 hold, a wire that is not decided among them; the tests draw their fixture plan (`fixtures.ts`) with it, and the page
 never shows it.
 
-The page has no way to take or drop an entry and the server has no verdict route:
-decisions and features are taken or dropped with `plan take` and `plan drop`.
+The owner takes or drops an entry on the page as well as with `plan take` and
+`plan drop`: see [The owner's verdict](#the-owners-verdict).
 
 `npm run build` then runs `scripts/prerender.mjs`, which renders the plain
 address `/workshop` (`src/workshop/prerender.tsx`: nothing remembered, nobody
@@ -824,6 +829,7 @@ Back and Forward move between places; opening a row replaces the address.
 | `PartView.tsx`, `Suggest.tsx` | An opened part, Product's decisions and a film's place; the suggestions. |
 | `Entry.tsx` | A suggestion's row, and what any row shows open (`Panel`): the text, what the entry says of the plan's lists, its id and the button that copies it, the state, notes, history, and the thread with the votes on its comments. |
 | `routes.ts`, `plan.ts`, `map.ts`, `data.ts` | Addresses; the rows, statuses, films, parts' counts and states on top of the plan's model; the drawing; the build-time reader, the films' order and when a film is behind. |
+| `build-check.ts` | Every check that can stop the build on the plan's files: the plan tool's, the addresses the page keeps, the map's layout. The build runs it, and so does the server on the plan an owner's verdict would leave on `main`. |
 | `api.ts`, `writes.ts`, `memory.ts`, `RichText.tsx`, `Markdown.tsx`, `Boundary.tsx` | The API client, the page's own writes (a list of values set, kept a day; its comments six minutes), the remembered answer, person, view and order, text from GitHub, notes, the fallback list. |
 | `chunks.ts` | A chunk that fails: whether the site now serves another build. |
 | `prerender.tsx`, `NoScript.tsx`, `takeover.ts` | The markup the build writes into the page, the list for a reader without JavaScript, and the script's takeover. |
@@ -831,7 +837,8 @@ Back and Forward move between places; opening a row replaces the address.
 ## Storage
 
 GitHub issues of `amontlabs/silo` are the only storage. There is no database,
-and nothing is written at run time apart from GitHub issues.
+and nothing is written at run time apart from GitHub issues and the owner's
+verdicts, which are commits on `main` (see [The owner's verdict](#the-owners-verdict)).
 
 | Label | What the issue is |
 | --- | --- |
@@ -907,6 +914,7 @@ JSON.
 | `POST vote {n, on}`, `POST vote {entry, on}` | signed in | Adds or removes that person's 👍. Answers `{ "ok": true, up }`: `up` is the 👍 count from the issue's reaction summary in the read made before writing, plus 1 when GitHub created the reaction (a 👍 already there adds nothing), minus the person's 👍 removed, never below 0; absent when that read gave no count. Neither answer costs a GitHub call of its own. With `entry`, see "Writing to an entry" below. |
 | `POST comment-vote {n, comment, on}` | signed in | Adds or removes that person's 👍 on comment `comment` of issue `n`, with their token. `n` must be a Workshop issue and `comment` one of its comments, else 404. Answers `{ "ok": true, up }`, `up` counted as `POST vote` counts it, from the comment read before the write. |
 | `POST suggest {title, text}` | signed in | Opens an issue as that person and labels it `workshop:suggestion`. Returns `{ number }`. |
+| `POST verdict {entry, verdict, built}` | the owner | Takes (`"take"`) or drops (`"drop"`) the entry `entry`, as one commit on `main` made with the owner's token. `built` is the commit the page was built from. Answers `{ "ok": true, entry, verdict, commit, message }`, `commit` the new commit; `"already": true` and `commit: null` when the entry already has that verdict. See [The owner's verdict](#the-owners-verdict). |
 
 A comment that the same person posted on that issue in the last five minutes is
 not posted again.
@@ -1038,6 +1046,148 @@ Comments are limited to 5,000 characters, titles to 120
 characters on one line (no control characters or line breaks). Unicode
 direction controls (U+202A–U+202E, U+2066–U+2069) are removed from titles and
 text.
+
+### The owner's verdict
+
+The owner takes or drops an entry on the page, and the result is the commit
+`plan take <id>` or `plan drop <id>` would have made and pushed to `main`. The
+owner is the GitHub account whose id is in `WORKSHOP_OWNER_ID`; `GET me` answers
+`"owner": true` for that account alone, and every other account, signed in or
+not, sees no button and is refused.
+
+On the page: an open entry with no verdict, or whose verdict the agents wrote
+(`"by": "agents"`), shows Take and Drop at the end of the row of its state. The first
+press arms the button, which then says "Confirm"; a second, separate press
+sends the verdict. A key held down never confirms: Chromium clicks on each
+repeat of Enter, so the repeats of a key are ignored until it is let go, and
+a press less than 0.4 seconds after the first is ignored too. An armed button
+goes back after four seconds, or when the focus leaves the pair. While the server works, the pressed button says "Taking…" or
+"Dropping…" and both are disabled. On success the entry shows its verdict at
+once, as the owner's: "Decided." or "Dropped.", and "by agents" goes. The page
+keeps the verdict in its own memory of its writes (`writes.ts`) and shows it
+over whatever build it is, across reloads, until a build's plan shows that
+verdict for the entry: pushes to `main` deploy production, and the deploy of
+another push may go live before the one that carries the verdict. Then the
+page forgets it, and after a day it forgets it anyway. When the answer is lost
+(no connection, none within 20 seconds, or the connection cut while the answer is read), the page asks once more before it
+shows a failure: the verdict may be on `main` already, and the server then
+answers "already". A refusal shows its message under the state line, in the
+plan tool's words, and the entry stays as it was. Undoing a verdict, "not now" and "yes, but" are not
+done on the page, and neither is a verdict on a part, a word, a principle or a
+property.
+
+The page learns that the person is the owner only when `me` answers, so the
+buttons come after it. They go at the end of the line of the state's words
+when both fit on it, and at the end of a line of their own under the words
+when not, as on a phone; the words are never cut. The id, Copy id and the
+votes are on the line under them. When the person signed in last was the
+owner, the buttons' room shows placeholders until `me` answers, so their
+arrival moves nothing at any width. On a first visit (nothing remembered of
+the person), it moves nothing where the buttons fit beside the words, and adds
+their line where they do not (`scripts/verdict-layout.test.mjs` measures both
+in a real browser). The buttons are live only once the entry's details show (what a
+yes would change, from the facts chunk): the owner decides on them too, so
+until they show, the buttons' room holds placeholders.
+
+What the page sends: `{ "entry": "fork-computers", "verdict": "take", "built":
+"<commit>" }`, and nothing else. `built` is the commit the site was built from
+(`scripts/build-commit.mjs`): `HEAD`, when the plan is `plan/` and git sees no
+change under it; otherwise the page has none and offers no verdict. An unknown
+key, a verdict other than `take` or `drop`, or a `built` that is not a commit
+id answers 400.
+
+What the server does, with the owner's own token and nothing else:
+
+1. It reads `main`'s commit (`GET /repos/{repo}/git/ref/heads/main`).
+2. In one GraphQL call it reads the names in that commit's root folder, the
+   text of every file of `plan/` at it, and the id of every file of `plan/` at
+   `built`. A file GitHub gives cut short
+   is read whole from its blob. That call gives the files of `plan/` three
+   folders down; a folder below that is read by one more call, three folders
+   more at a time, so `plan/` is read to its full depth (a folder 27 or more
+   folders below `plan/` refuses the verdict). `plan/` is read as `tools/plan/read`
+   reads it: a link or a submodule anywhere under it, a folder whose name
+   starts with a dot included, refuses the verdict; a file under a dot name is
+   not read. An answer with any error, even beside data, or a folder or a file
+   it gives without its contents anywhere, under a dot name too, or `plan/`
+   named in the root folder without its contents, or a blob GitHub does not
+   give, answers 502 `partial`: "GitHub answered in part, so nothing was
+   written. Try again." A part of `plan/` is never taken for all of it.
+3. When the entry's file on `main` already holds the verdict asked, with no
+   `by`, it answers 200 with `"already": true` and writes nothing, before
+   anything else is compared: the page asks again after an answer it lost,
+   and the verdict may be on `main` by then.
+4. A verdict is for the text the owner saw. The server refuses with 409
+   `changed`, "This entry changed since the page was built: reload the page.",
+   when `built` is not a commit of `main`'s history (GitHub's compare of
+   `built...main`), or when any of these files differs between `main` and
+   `built`: the entry's file and its notes, the files of the decisions it
+   replaces (the page shows their answer), the lists that hold a statement it
+   sets, removes, adds or keeps (the page shows each one's text as it is now),
+   and every file the verdict writes. The files the page showed are those of
+   `built` and those of `main` both: a statement shown at `built` and removed
+   from `main` since, or a decision it replaces deleted since, refuses too
+   (the text of a list that differs is read at `built` to know). A change to
+   any other file does not matter.
+5. It runs `take(files, id)` or `drop(files, id)` of `tools/plan/write`, the
+   same functions `plan take` and `plan drop` run, with the options `plan take`
+   passes, and always as the owner, never `by: agents`. Its `exists`, whether
+   each `at` names a regular file of the repository, is answered from `main`:
+   the names of the folders those paths are in, in one more GraphQL call. A
+   path through a link, or a link, is not followed and counts as no file, so
+   the server refuses where `plan take` might follow it. A refusal answers 409 `refused` with the tool's own
+   message, such as "model-tool has no answer and sets nothing: write its
+   answer first". "Already" answers 200 with `"already": true` and writes
+   nothing.
+6. It runs on the plan the verdict leaves every check that can stop the
+   site's build (`website/src/workshop/build-check.ts`, which the build runs
+   too): the plan tool's check, the addresses the page keeps, and the map's
+   layout. A verdict the plan tool accepts can still break the build: taking a
+   decision that replaces one a wire of the map rests on, or dropping a
+   feature a zone rests on. Such a verdict answers 409 `refused` with the
+   build's own message, and nothing is written. The layout is code
+   (`SILO_MAP` in `map.ts`), not a file of `main`, so the server checks the one
+   it was deployed with: a change to the map pushed to `main` and not yet
+   deployed is not seen.
+7. In one GraphQL call, `createCommitOnBranch`, it makes the commit and moves
+   `main` to it: the changed files of `plan/` on the `main` it read, the
+   message `Owner: take <id>` or `Owner: drop <id>` with no body, as `plan`
+   writes it, and `expectedHeadOid`, the commit read in step 1. GitHub makes
+   the commit with the owner's token, so it records the owner as its author,
+   and moves `main` only if its head is still that commit: a compare-and-swap.
+   A push to `main` meanwhile, or a reset of `main` to an older commit, is
+   never undone. A file of `plan/` that is not a plain file (mode `100644`) on
+   `main` refuses the verdict, since the call writes plain files only.
+8. When `main` was not where the call expected it (GitHub answers 409, an
+   error saying the branch did not point to `expectedHeadOid` (`STALE_DATA`),
+   even with `main` back at the commit read by then, or an error after which
+   `main` is no longer the commit read), it starts again from step 1 on the
+   new `main`. After three tries it answers 409 `busy`: "Main kept changing
+   while the verdict was written. Try again." After a call whose outcome is
+   not known (no answer, none in time, a 5xx, an answer that says nothing
+   sure), the commit may be on `main`: before it answers `busy` or any error,
+   it reads the entry's file on `main` again (one GraphQL call), and when it
+   holds the verdict asked, with no `by`, answers "already".
+
+The call either moves `main` to the new commit or changes nothing. When GitHub
+refuses the write itself (a `FORBIDDEN` or `NOT_FOUND` error, or 403 or 404 to
+the call), as it does when the App lacks Contents: Read and write or the
+account cannot write to the repository, the answer is 403 `forbidden`, which
+says so. Without
+`WORKSHOP_OWNER_ID`, or for another account, the answer is 403 `not_owner`
+before any call to GitHub. The origin, cookie and header rules of the other
+writes apply, a verdict counts as a write, and the owner may send 6 verdicts a
+minute per instance.
+
+A verdict costs 4 calls with the owner's token (the ref, the GraphQL read, the
+compare, the write), one more when an `at` names a file in a folder, one more to read the
+ref when the write fails, 3 more for each time
+`main` moved, and one more for each file GitHub cut. The installation token is not used.
+
+`tools/plan/check` rule 11, which `plan take` runs against `origin/main`
+before it commits, has nothing to compare here: the plan the verdict is
+computed on is `main` itself. CI runs the whole `plan check` on `main` after
+the push.
 
 ### The snapshot: a visitor never causes a call to GitHub
 
@@ -1304,6 +1454,7 @@ snapshots catch up when the hour resets.
 | `website/server/entries.mjs` | Reads `plan-entries.json`, the plan's entries the server knows. |
 | `website/server/snapshot.mjs` | The in-memory snapshot that answers every anonymous read, and its refresh. |
 | `website/server/workshop.mjs` | Every endpoint, independent of the HTTP server. |
+| `website/server/verdicts.mjs` | The owner's verdict: main's `plan/` read in one GraphQL call, `take` or `drop` of `tools/plan/write`, and the commit made and put on `main` in one compare-and-swap call (`createCommitOnBranch`). |
 | `website/server/node.mjs` | Adapter for Node's `req`/`res`, used by Vercel and the local server. |
 | `website/api/workshop.cjs` | Vercel's entry point. |
 | `website/scripts/prepare-vercel.mjs` | Writes the Build Output (static site, function, routes). |
@@ -1315,6 +1466,8 @@ snapshots catch up when the hour resets.
 | `website/scripts/plan-entries.mjs` | Makes the list of the plan's entries from `plan/`, for `prepare-vercel.mjs` and the local server. |
 | `website/scripts/workshop-dev.mjs` | Local server for the site and the API. |
 | `website/scripts/fake-github.mjs` | Fake GitHub used by the tests and by `--fake`. |
+| `website/scripts/fake-git.mjs` | The fake GitHub's git data: blobs, trees and commits hashed as git hashes them, refs, and the reads a verdict makes. |
+| `website/scripts/build-commit.mjs` | The commit the page is built from, which a verdict names. |
 | `website/scripts/workshop-test-support.mjs` | Shared test setup: the fake GitHub on a controllable clock and a client with a cookie jar. |
 | `website/scripts/workshop-server.test.mjs` | Endpoints, sign-in, sessions, refusals, configuration, packaging and the local server. |
 | `website/scripts/workshop-snapshot.test.mjs` | The snapshot: reads without GitHub calls, conditional refreshes, changes, patches, bounds. |
@@ -1322,12 +1475,13 @@ snapshots catch up when the hour resets.
 | `website/scripts/workshop-refresh.test.mjs` | Refreshes started by writes, coalescing, the floor, the idle refresh, what each read waits for and its headers, the parallel refresh and its failures. |
 | `website/scripts/workshop-abuse.test.mjs` | What a visitor or a replayed cookie can make the server do, memory, waits and retries. |
 | `website/scripts/workshop-threads.test.mjs` | Entries' threads: opening, finding, sharing, the `open` ceiling, failures, closed threads, `suggested_in`; votes on comments. |
+| `website/scripts/workshop-verdicts.test.mjs` | The owner's verdict: the commit on `main` and who makes it, the same tree as `plan take` makes and the real `plan check` on it, every refusal, and a model of `main` under random verdicts, pushes and failures. |
 
 All of them run with the website's `npm test`.
 
 The server uses Node's standard library (`crypto`, `fetch`, `http`) and no
 package. `prepare-vercel.mjs` refuses a file the function would load from
-`website/node_modules/`, and the whole function is 15 files, about 170 KB, of which 70 KB are `plan-entries.json`.
+`website/node_modules/`, and the whole function is 23 files, about 280 KB, of which 90 KB are `plan-entries.json`.
 
 ## Films
 
@@ -1439,9 +1593,15 @@ following Vercel's
   (`.vc-config.json`: runtime `nodejs24.x`, handler
   `website/api/workshop.cjs`, launcher `Nodejs`). It holds the files it loads
   at their paths in the repository: `website/api/` and `website/server/` at
-  any depth, and the Workshop's
+  any depth, the Workshop's
   model, `tools/workshop/model/*.js` with `tools/workshop/package.json` (which
-  makes it ESM). The script finds what loads by loading the entry point in a separate
+  makes it ESM), the files of `tools/plan/` the owner's verdict loads
+  (`write/`, `check/`, `model/` and `read/`, with `tools/plan/package.json`),
+  and the site's build checks it runs on a verdict's plan:
+  `website/src/workshop/build-check.ts` and the files of that folder it loads
+  (`map.ts`, `map-fit.ts`, `routes.ts`), TypeScript that Node loads with its
+  types stripped.
+  The script finds what loads by loading the entry point in a separate
   process with a resolve hook, and refuses by name, before writing anything,
   any other file it loads, in `website/` or outside it. Beside the server it
   writes `website/server/plan-entries.json`, the plan's entries made from
@@ -1511,7 +1671,7 @@ GitHub Apps → New GitHub App):
 | Request user authorization (OAuth) during installation | Off |
 | Enable Device Flow | Off |
 | Webhook | Inactive |
-| Repository permissions | Issues: Read and write. Metadata: Read-only. Nothing else. |
+| Repository permissions | Contents: Read and write. Issues: Read and write. Metadata: Read-only. Nothing else. |
 | Organization and account permissions | None |
 | Where can this GitHub App be installed | Any account (public) |
 
@@ -1520,6 +1680,15 @@ authorize a private App, so a private one would stop every visitor from signing
 in. Being public means anyone may install the App on their own repositories.
 That gives them nothing: the server only ever uses the installation on
 `WORKSHOP_REPO`, and it requests user tokens for that repository only.
+
+Contents: Read and write is for the owner's verdicts, which commit to `main`
+with the owner's token: a person's token of the App can do no more than the App
+may. It also lets the App's private key mint an installation token that can
+write the repository's contents: the Workshop never asks for one (it requests
+installation tokens with issues and metadata only), but whoever holds the key
+can. An App created before it lacks it: add it in the App's settings
+(Permissions & events), then accept the new permission on the installation.
+`workshop doctor` reports an App without it.
 
 Then generate a private key and a client secret, and install the App on
 `amontlabs/silo` only ("Only select repositories"). `workshop setup`
@@ -1551,6 +1720,7 @@ the API answers 503 and the page shows the plan without live data.
 | `WORKSHOP_PRIVATE_KEY` | The App's private key, PEM. Newlines may be written as `\n`. |
 | `WORKSHOP_SESSION_SECRET` | Exactly 32 random bytes in standard base64: `openssl rand -base64 32`. Changing it signs everyone out. |
 | `WORKSHOP_REPO` | Optional, default `amontlabs/silo`. |
+| `WORKSHOP_OWNER_ID` | Optional: the numeric id of the owner's GitHub account (`gh api user --jq .id`), the one account that may take or drop an entry. The id, not the login, since a login can change. Without it nobody is the owner. |
 | `WORKSHOP_SITE_ORIGIN` | Optional, default `https://silo.amontlabs.com`: a bare origin, no path. Writes are accepted only from this origin, and cookies are `__Host-` and `Secure` only when it is `https`. |
 
 A missing or invalid value (a secret that is not 32 bytes of base64, a key that is not an RSA private key, a malformed repository or origin) leaves the API answering 503 `not_configured`. The response never says which value is wrong; the server log names the variable, never its value.
@@ -1598,9 +1768,15 @@ no CORS headers). The cookies are `SameSite=Lax`, so cross-site subrequests do
 not carry them. Writes from preview deployments are refused because their
 origin differs.
 
-**Identities and scope.** The App can only read and write issues of the one
-repository, and the installation token is requested for that repository with
-those two permissions. The installation token serves only the snapshot refresh,
+**Identities and scope.** The App can read and write issues and contents of
+the one repository. The Workshop requests its installation token for that
+repository with issues and metadata only, so no token it asks for with the
+App's key writes contents. The key itself can: since the installation has
+Contents: Read and write, whoever holds the private key, which Vercel holds
+as `WORKSHOP_PRIVATE_KEY`, can mint an installation token that writes the
+repository's code and pushes to `main`, without the owner's session. A leak of
+the key puts the repository's contents at risk, not only its issues: rotate it
+in the App's settings at once, and look at `main`'s history. The installation token serves only the snapshot refresh,
 the repository lookup at sign-in, labelling a suggestion
 (which a visitor cannot do) and opening an entry's thread, with the reads of
 entry issues before and after it. Everything else done for a signed-in person,
@@ -1619,6 +1795,21 @@ the status and GitHub's status only. Errors sent to the browser are fixed
 sentences; nothing from a GitHub response body is passed on. No token, code,
 cookie, client secret or private key is logged or returned; a test asserts
 this on every response and log line of a session that includes failures.
+
+**The owner's verdict.** Only the account `WORKSHOP_OWNER_ID` names reaches the
+write; the id is compared with the one GitHub gave at sign-in, sealed in the
+session cookie. The page sends the entry's id, the verdict and the commit it
+was built from, never a path, a file's text or a commit message: the server
+looks the id up in the plan it shipped with, reads `main` itself and runs the
+plan tool on it. The write is made with the owner's token, so GitHub checks
+that the owner may write to the repository and records the owner as the
+author; the installation token never writes contents. `main` moves only from
+the commit the server read to the one it made on it, in the same call that
+makes it. *Limits:* a stolen
+session cookie of the owner can take and drop entries until it expires, the
+owner signs out, or the secret is changed. Branch protection on `main` that
+refuses such a commit (required reviews, required signatures) makes every
+verdict answer 403 or 400.
 
 **Rate limits.** The snapshot, the ceilings and the caches are per function
 instance, in memory; several instances together can make more calls than one,
@@ -1642,6 +1833,19 @@ services:
   Functions (the code does not depend on it);
 - that a Vercel build gets the whole history (its clone is shallow, with no
   remote), until a deploy has shown it;
+- the owner's verdict on the real GitHub: that `object(expression:
+  "<commit>:plan")` gives each file's text in one GraphQL call, that
+  `object(expression: "<commit>:<folder>")` with `__typename` gives a folder's
+  names, that the compare of `<built>...<main>` answers `ahead` or
+  `identical` for a build of `main`'s history and 404 for a commit GitHub does
+  not hold, that a user
+  token of the App with Contents: Read and write runs `createCommitOnBranch`,
+  that a stale `expectedHeadOid` changes nothing and answers an error, that a
+  headline with no body gives the message `plan` writes, and that GitHub
+  records the owner as the commit's author;
+- that Vercel's `nodejs24.x` runtime loads the TypeScript files of the site's
+  build checks (`build-check.ts`, `map.ts`) with their types stripped, as Node
+  24 does by default;
 - that GitHub answers `304` to the conditional issue and comment list pages as
   documented, and that the reaction summary in the issue list moves the page's
   ETag when a vote changes.
@@ -1656,7 +1860,11 @@ services:
   one repository.
 - **A database of our own** is something to run, secure and back up. Issues
   keep the history, the authorship and the moderation tools on GitHub.
-- **Verdicts in the plan's files only.** The owner takes or drops an entry with
-  `plan take` and `plan drop`, which commit the file; the site has no verdict
-  route, so the App's key, held by Vercel, never gets write access to the code.
-  See `tools/plan/README.md`.
+- **Verdicts in the plan's files only.** A verdict is a commit of the plan's
+  files, whether `plan take` and `plan drop` make it or the Workshop does. The
+  Workshop runs the plan tool's own `take` and `drop` and commits with the
+  owner's token, so there is one writer of what a verdict changes, and the
+  Workshop never writes the code with the App's own tokens: it requests them
+  with issues and metadata only. The App's key, held by Vercel, could mint one
+  that writes contents, since the installation has Contents: Read and write
+  (see "Identities and scope"). See `tools/plan/README.md`.

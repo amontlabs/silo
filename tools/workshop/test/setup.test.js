@@ -51,7 +51,7 @@ test('setup registers the App from a manifest, stores the credentials and writes
     redirect_url: `${new URL(local).origin}/callback`,
     callback_urls: ['https://silo.amontlabs.com/api/workshop/callback'],
     public: true,
-    default_permissions: { issues: 'write', metadata: 'read' },
+    default_permissions: { contents: 'write', issues: 'write', metadata: 'read' },
     default_events: [],
     request_oauth_on_install: false,
   });
@@ -341,6 +341,10 @@ test('doctor: sources only, the App public and installed, its permissions, the l
   const found = JSON.parse(twice.stdout);
   assert.deepEqual(found.duplicates, { fork: [first.number, second.number] });
   assert.match(found.problems.join('\n'), new RegExp(`the entry fork has several issues: #${first.number}, #${second.number}\\. #${first.number} is its thread`));
+  // Without Contents: write, the owner's verdicts cannot reach main.
+  fake.installationPermissions = { issues: 'write', metadata: 'read' };
+  const noContents = JSON.parse((await run(['doctor', '--json'], { fake, box })).stdout);
+  assert.match(noContents.problems.join('\n'), /^the App cannot write contents: the owner's Take and Drop on the Workshop need the permission Contents: Read and write/m);
   fake.public = false;
   assert.match((await run(['doctor'], { fake, box })).stdout, /Public: no/);
 });

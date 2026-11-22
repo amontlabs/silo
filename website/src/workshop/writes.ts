@@ -10,8 +10,11 @@
 // for a comment's vote.
 // A write that opened an entry's thread says so (`opens`): the answer a cached state gave does not hold the thread yet,
 // so the thread is added to it, never replacing one it already has.
+// The owner's verdicts are kept too: a verdict changes the plan, which only a new build of the site carries, so it is
+// shown over whatever build the page is, until a build's plan shows that verdict for the entry (the deploy of another
+// push may go live first), and then forgotten; after a day it is forgotten anyway.
 import type { Comment } from './api';
-import type { LiveIssue, LiveState } from './plan';
+import type { LiveIssue, LiveState, Verdict } from './plan';
 
 /** How long the page's own comments are added to an answer. */
 export const KEEP_MS = 6 * 60_000;
@@ -35,14 +38,22 @@ export interface Write {
   opens?: { entry: string; issue: LiveIssue };
 }
 
+/** A verdict the owner wrote from this page: the entry, the verdict, and when. */
+export interface KeptVerdict {
+  entry: string;
+  verdict: Verdict;
+  at: number;
+}
+
 interface Store {
   writes: Write[];
+  verdicts: KeptVerdict[];
   comments: { n: number; at: number; comment: Comment }[];
   /** The 👍 count of a comment as the server answered it for the person's own vote. */
   ups: { n: number; id: string | number; at: number; up: number }[];
 }
 
-const empty = (): Store => ({ writes: [], comments: [], ups: [] });
+const empty = (): Store => ({ writes: [], verdicts: [], comments: [], ups: [] });
 // The store as last written, used only once storage has refused it: the page keeps its writes until it reloads.
 let held: Store | null = null;
 let refused = false;
@@ -50,6 +61,7 @@ let refused = false;
 function fresh(store: Store, now: number): Store {
   return {
     writes: store.writes.filter((write) => now >= write.at && now - write.at < KEEP_FIELDS_MS),
+    verdicts: store.verdicts.filter((kept) => now >= kept.at && now - kept.at < KEEP_FIELDS_MS),
     comments: store.comments.filter((kept) => now >= kept.at && now - kept.at < KEEP_MS),
     ups: store.ups.filter((kept) => now >= kept.at && now - kept.at < KEEP_MS),
   };
@@ -58,7 +70,9 @@ function fresh(store: Store, now: number): Store {
 function valid(raw: unknown): Store {
   const store = empty();
   if (typeof raw !== 'object' || raw === null) return store;
-  const { writes, comments, ups } = raw as Partial<Store>;
+  const { writes, verdicts, comments, ups } = raw as Partial<Store>;
+  // A store an older page wrote has no verdicts.
+  if (Array.isArray(verdicts)) store.verdicts = verdicts.filter((v) => v && typeof v.entry === 'string' && (v.verdict === 'take' || v.verdict === 'drop') && typeof v.at === 'number');
   if (Array.isArray(writes)) store.writes = writes.filter((w) => w && typeof w.n === 'number' && typeof w.at === 'number' && typeof w.set === 'object' && w.set !== null);
   if (Array.isArray(comments)) store.comments = comments.filter((c) => c && typeof c.n === 'number' && typeof c.at === 'number' && c.comment);
   if (Array.isArray(ups)) store.ups = ups.filter((u) => u && typeof u.n === 'number' && typeof u.at === 'number' && typeof u.up === 'number' && (typeof u.id === 'number' || typeof u.id === 'string'));
@@ -113,6 +127,27 @@ export function keep(write$: Omit<Write, 'at'>, now: number, comment?: Comment, 
   store.writes.push({ ...write$, at });
   if (comment) store.comments.push({ n: write$.n, at, comment });
   write(store);
+}
+
+/** Keeps a verdict the server wrote on main; a later one on the same entry replaces it. */
+export function keepVerdict(verdict: Omit<KeptVerdict, 'at'>, now: number) {
+  const store = read(now);
+  store.verdicts = [...store.verdicts.filter((kept) => kept.entry !== verdict.entry), { ...verdict, at: now }];
+  write(store);
+}
+
+/**
+ * The verdicts kept, by entry. One the page's built plan already shows (`carried`) is forgotten: the plan holds it now,
+ * whatever build the page is, and a build served after it shows its own plan.
+ */
+export function keptVerdicts(carried: (entry: string, verdict: Verdict) => boolean, now: number): Map<string, Verdict> {
+  const store = read(now);
+  const left = store.verdicts.filter((kept) => !carried(kept.entry, kept.verdict));
+  if (left.length !== store.verdicts.length) {
+    store.verdicts = left;
+    write(store);
+  }
+  return new Map(left.map((kept) => [kept.entry, kept.verdict]));
 }
 
 /** Keeps the 👍 count the server answered for the person's vote on a comment. */

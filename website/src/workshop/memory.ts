@@ -61,16 +61,19 @@ export function rememberState(state: LiveState) {
   write(STATE, rest);
 }
 
-/** The person signed in last, while the session marker says a session may still be there. */
+/**
+ * The person signed in last, while the session marker says a session may still be there. `owner` only holds the
+ * room of the owner's buttons until `me` answers: nothing is allowed on it.
+ */
 export function recallPerson(): Me | null {
   if (!hasSessionHint()) return null;
   const person = read(PERSON);
   if (!isObject(person) || typeof person.login !== 'string' || !person.login || typeof person.avatar !== 'string') return null;
-  return { login: person.login, avatar: person.avatar };
+  return { login: person.login, avatar: person.avatar, ...(person.owner === true ? { owner: true as const } : {}) };
 }
 
 export function rememberPerson(person: Me | null) {
-  write(PERSON, person ? { login: person.login, avatar: person.avatar } : null);
+  write(PERSON, person ? { login: person.login, avatar: person.avatar, ...(person.owner ? { owner: true } : {}) } : null);
 }
 
 const VIEW = 'silo-workshop-view';

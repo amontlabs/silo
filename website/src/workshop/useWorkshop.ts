@@ -5,10 +5,10 @@ import type { FormEvent } from 'react';
 import { api, ApiError, hasSessionHint } from './api';
 import type { Comment, IssueDetail, Me, MyVotes, Target } from './api';
 import { recallPerson, recallState, rememberPerson, rememberState } from './memory';
-import { applyKept, keep, keepCommentUp, keptComments, newerAnswer } from './writes';
+import { applyKept, keep, keepCommentUp, keptComments, keepVerdict, keptVerdicts, newerAnswer } from './writes';
 import type { Write } from './writes';
-import { allRows, buildPlan } from './plan';
-import type { BuildData, Facts, Histories, LiveIssue, LiveState, Notes, Row } from './plan';
+import { allRows, buildPlan, withVerdicts } from './plan';
+import type { BuildData, Facts, Histories, LiveIssue, LiveState, Notes, Row, Verdict } from './plan';
 import { SiteChanged } from './chunks';
 
 /** A chunk of the page as it loads: not asked for yet, under way, in, failed, or gone with a newer deployment. */
@@ -114,6 +114,19 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   // The rows whose thread the server refused a comment on because it is closed on GitHub.
   const [closedKeys, setClosedKeys] = useState<ReadonlySet<string>>(new Set());
   const [signinFailed] = useState(takeSigninFailure);
+  // The owner's verdicts: the one being sent on each entry, the refusal each last got, and a tick when one is kept.
+  const [verdictPending, setVerdictPending] = useState<Record<string, Verdict>>({});
+  const [verdictRefusals, setVerdictRefusals] = useState<Record<string, string>>({});
+  const [verdictsTick, setVerdictsTick] = useState(0);
+  /** The plan as built, with the owner's verdicts written since that it does not show yet laid over it. */
+  const shownData = useMemo(() => {
+    const carried = (id: string, verdict: Verdict) => data.entries.some((entry) => entry.id === id && entry.verdict === verdict && entry.by === null);
+    return withVerdicts(data, keptVerdicts(carried, Date.now()));
+  }, [data, verdictsTick]);
+  /** The owner may take and drop: `me` said so on this visit, and the page knows the commit it was built from. */
+  const mayDecide = typeof answer === 'object' && answer !== null && answer.owner === true && data.builtFrom !== null;
+  /** The owner was signed in last and `me` has not answered yet: the room of the buttons is held, so they move nothing. */
+  const verdictHeld = answer === undefined && remembered?.owner === true && data.builtFrom !== null;
 
   /** A state is shown, from memory or from the server. */
   const liveOk = live.state !== null;
@@ -125,7 +138,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   liveRefOk.current = liveOk;
   // The changes of the entries: loaded once, the first time a pointer, a press or focus reaches a History.
   const [histories, wantHistory] = useChunk(loadHistory);
-  const plan = useMemo(() => buildPlan(data, live.state, closedKeys), [data, live.state, closedKeys]);
+  const plan = useMemo(() => buildPlan(shownData, live.state, closedKeys), [shownData, live.state, closedKeys]);
   const rows = useMemo(() => allRows(plan), [plan]);
   const rowByKey = useMemo(() => new Map(rows.map((row) => [row.key, row])), [rows]);
 
@@ -491,7 +504,51 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
    * write still being sent. Reload then asks for a second press (Entry.tsx `ChunkFailed`).
    */
   const unsent = Object.values(drafts).some((draft) => draft !== '') || suggestDraft.title !== '' || suggestDraft.text !== ''
-    || Object.values(sending).some((list) => list.length > 0) || suggestionsSending.length > 0 || votePending.size > 0 || commentVotePending.size > 0;
+    || Object.values(sending).some((list) => list.length > 0) || suggestionsSending.length > 0 || votePending.size > 0 || commentVotePending.size > 0
+    || Object.keys(verdictPending).length > 0;
+
+  const verdictsRef = useRef(new Set<string>());
+  /**
+   * The owner's verdict on an entry. Pending while the server writes it on main; then shown at once and kept (writes.ts)
+   * until a new build carries it. A lost answer is asked once more before it counts as a failure. A refusal leaves the
+   * entry as it was and says why, in the plan tool's words.
+   */
+  const sendVerdict = async (row: Row, verdict: Verdict) => {
+    const id = row.kind === 'entry' ? row.key.slice('entry-'.length) : null;
+    const built = data.builtFrom;
+    if (!id || !built || !mayDecide || verdictsRef.current.has(id)) return;
+    verdictsRef.current.add(id);
+    setVerdictPending((current) => ({ ...current, [id]: verdict }));
+    setVerdictRefusals((current) => {
+      const { [id]: _gone, ...rest } = current;
+      return rest;
+    });
+    setAnnounce(verdict === 'take' ? 'Taking' : 'Dropping');
+    try {
+      try {
+        await api.verdict(id, verdict, built);
+      } catch (error) {
+        // An answer lost on the way (no connection, or none in time), or GitHub not answering the server in time, may
+        // hide a verdict written on main: asked once more, the server answers "already" when it is there.
+        const lost = error instanceof ApiError && (error.status === 0 || (error.status === 502 && error.code === 'github_failed'));
+        if (!lost) throw error;
+        await api.verdict(id, verdict, built);
+      }
+      keepVerdict({ entry: id, verdict }, Date.now());
+      setVerdictsTick((tick) => tick + 1);
+      setAnnounce(verdict === 'take' ? 'Taken' : 'Dropped');
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) signedOut();
+      else setVerdictRefusals((current) => ({ ...current, [id]: error instanceof ApiError ? error.message : 'Something went wrong.' }));
+      setAnnounce('');
+    } finally {
+      verdictsRef.current.delete(id);
+      setVerdictPending((current) => {
+        const { [id]: _gone, ...rest } = current;
+        return rest;
+      });
+    }
+  };
 
   const sendSuggestion = async (event: FormEvent) => {
     event.preventDefault();
@@ -539,7 +596,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     live, liveOk, waiting, offline, settled, me, retry, plan, rowByKey, details, prefetch, notes, wantNotes, facts, wantFacts, histories, wantHistory, fetchNow, sending, votePending, voteOwn,
     votes, commentVotes, commentVotePending, toggleCommentVote, suggestionsSending, notice, drafts, setDrafts, suggestDraft,
     setSuggestDraft, announce, setAnnounce, signinFailed, sendComment, toggleVote,
-    sendSuggestion, signOut, unsent,
+    sendSuggestion, signOut, unsent, mayDecide, verdictHeld, verdictPending, verdictRefusals, sendVerdict,
   };
 }
 

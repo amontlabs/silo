@@ -12,21 +12,29 @@ import { planDir as defaultPlanDir, planEntries } from './plan-entries.mjs';
 // routes that serve the Workshop page at /workshop and /workshop/, and each film's page at /films/<id>/.
 //
 // The function holds the files it loads at the paths they have in the
-// repository: website/api/ and website/server/ at any depth, and
+// repository: website/api/ and website/server/ at any depth,
 // tools/workshop/model/ (the Workshop's model, with tools/workshop/package.json,
-// which makes it ESM). Any other file it would load, in website/ or outside it,
-// stops the packaging: a package in website/node_modules/ is one of them.
+// which makes it ESM), and the plan tool's write/, check/, model/ and read/ that
+// the owner's verdict runs (with tools/plan/package.json), and the site's
+// build checks it runs on a verdict's plan: website/src/workshop/build-check.ts
+// and the files of that folder it loads (the map), which Node loads as they
+// are, its types stripped. Any other file it would load, in website/ or outside
+// it, stops the packaging: a package in website/node_modules/ is one of them.
 // Beside the server goes plan-entries.json, the plan's entries made from the
 // plan at build time (scripts/plan-entries.mjs), which the server reads.
-export const ENDPOINTS = ['state', 'me', 'issue', 'login', 'callback', 'logout', 'comment', 'comment-vote', 'vote', 'suggest'];
+export const ENDPOINTS = ['state', 'me', 'issue', 'login', 'callback', 'logout', 'comment', 'comment-vote', 'vote', 'suggest', 'verdict'];
 export const RUNTIME = 'nodejs24.x';
 export const HANDLER = 'website/api/workshop.cjs';
 
 const website = fileURLToPath(new URL('..', import.meta.url));
 // Vercel's Git build reads .vercel/output in the project's root directory, the repository root.
 export const DEFAULT_OUTPUT = join(website, '..', '.vercel', 'output');
-/** The one folder outside website/ the function may load from, relative to the repository. */
+/** The folder of the Workshop's model, relative to the repository: the function ships all of it. */
 export const MODEL_DIR = join('tools', 'workshop', 'model');
+/** The folders of the plan tool the owner's verdict loads (server/verdicts.mjs), relative to the repository. */
+export const PLAN_DIRS = ['write', 'check', 'model', 'read'].map((name) => join('tools', 'plan', name));
+/** The folder of the site's build checks the owner's verdict loads (src/workshop/build-check.ts), relative to website/. */
+export const SITE_CHECK_DIR = join('src', 'workshop');
 
 async function exists(path) {
   return stat(path).then(() => true, () => false);
@@ -54,14 +62,19 @@ function functionFiles(siteDir) {
   const site = realpathSync(resolve(siteDir));
   const root = dirname(site);
   const model = join(root, MODEL_DIR) + sep;
+  const plan = PLAN_DIRS.map((dir) => join(root, dir) + sep);
+  const checks = join(site, SITE_CHECK_DIR) + sep;
   const files = new Set();
   for (const file of loadedFiles(site)) {
-    if (file.startsWith(model) && !file.slice(model.length).includes(sep)) {
+    const allowed = [model, ...plan].find((dir) => file.startsWith(dir));
+    if (allowed && !file.slice(allowed.length).includes(sep)) {
       files.add(file);
     } else if (file.startsWith(join(site, 'server') + sep) || file.startsWith(join(site, 'api') + sep)) {
       files.add(file);
+    } else if (file.startsWith(checks) && !file.slice(checks.length).includes(sep) && file.endsWith('.ts')) {
+      files.add(file);
     } else if (file.startsWith(site + sep)) {
-      throw new Error(`The function would load ${file}, in website/ but outside website/server/ and website/api/.`);
+      throw new Error(`The function would load ${file}, in website/ but outside website/server/, website/api/ and the site's checks of website/src/workshop/.`);
     } else {
       throw new Error(`The function would load ${file}, outside website/.`);
     }
@@ -69,6 +82,7 @@ function functionFiles(siteDir) {
   // The whole model ships, and the package.json that makes it ESM.
   for (const name of readdirSync(join(root, MODEL_DIR))) if (name.endsWith('.js')) files.add(join(root, MODEL_DIR, name));
   files.add(join(root, 'tools', 'workshop', 'package.json'));
+  files.add(join(root, 'tools', 'plan', 'package.json'));
   for (const name of readdirSync(join(site, 'server'))) if (name.endsWith('.mjs') && !name.endsWith('.test.mjs')) files.add(join(site, 'server', name));
   files.add(join(site, 'api', 'workshop.cjs'));
   return { root, files: [...files].sort() };

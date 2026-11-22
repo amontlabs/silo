@@ -39,7 +39,7 @@ export async function startFake({ appId = '4242', slug = 'silo-workshop', repo =
     pageSize: 100,
     installed: true,
     public: true,
-    installationPermissions: { issues: 'write', metadata: 'read' },
+    installationPermissions: { contents: 'write', issues: 'write', metadata: 'read' },
     labels: [],
     issues: new Map(),
     comments: [],

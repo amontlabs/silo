@@ -26,6 +26,13 @@ const refused = (message, errors) => ({ status: 'refused', changed: new Map(), m
 /** The path of an entry's file, relative to `plan/`. @param {{ id: string, kind: string, part: string | null }} entry */
 export const entryFile = (entry) => `${entry.part ? `${entry.part}/` : ''}${entry.kind === 'decision' ? 'decisions' : 'features'}/${entry.id}.json`;
 
+/**
+ * The subject of the commit that records a verdict: `Owner: take <id>`, or `Agents: take <id>` with `by`.
+ * `plan take`, `plan drop` and the Workshop write it, and the check reads it back (cli/repo.js `ruledByOwner`).
+ * @param {'take' | 'drop'} kind @param {string} id @param {'agents'} [by]
+ */
+export const verdictSubject = (kind, id, by) => `${by ? 'Agents' : 'Owner'}: ${kind} ${id}`;
+
 /** The file of a list a `sets` item names (`words`, `principles`, `properties`, `<part>/properties`). @param {string} list */
 const listFile = (list) => `${list}.json`;
 

@@ -1,5 +1,5 @@
 // `workshop doctor`: where each credential comes from (never a value), whether the App is public and
-// installed, its permissions, whether the labels the site sets exist, and entries named by several issues.
+// installed, its permissions (Issues and Contents write), whether the labels the site sets exist, and entries named by several issues.
 import { lookup } from './credentials.js';
 import { CREDENTIAL_NAMES } from './names.js';
 import { ENTRY_LABEL, SET_LABELS } from '../model/names.js';
@@ -36,6 +36,9 @@ export async function doctor({ deps, gh, credentials }) {
   report.installed = true;
   report.permissions = gh.installation.permissions ?? {};
   if (report.permissions?.issues !== 'write') report.problems.push('the App cannot write issues');
+  if (report.permissions?.contents !== 'write') {
+    report.problems.push('the App cannot write contents: the owner\'s Take and Drop on the Workshop need the permission Contents: Read and write. Give it in the App\'s settings (Permissions & events), then accept it on the installation');
+  }
   const existing = new Set((await gh.paginate(gh.repoPath('/labels'))).map((label) => String(label.name).toLowerCase()));
   report.labels = Object.fromEntries(SET_LABELS.map((label) => [label.name, existing.has(label.name.toLowerCase())]));
   const missing = SET_LABELS.filter((label) => !report.labels?.[label.name]).map((label) => label.name);

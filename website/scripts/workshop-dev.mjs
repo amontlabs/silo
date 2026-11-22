@@ -12,7 +12,8 @@ import { readConfig } from '../server/config.mjs';
 import { createNodeHandler, FRAME_HEADERS } from '../server/node.mjs';
 import { FILM_FRAME_HEADERS } from './prepare-vercel.mjs';
 import { createWorkshop } from '../server/workshop.mjs';
-import { readPlan } from '../../tools/plan/read/index.js';
+import { loadRef, readPlan } from '../../tools/plan/read/index.js';
+import { buildCommit } from './build-commit.mjs';
 import { createFakeGitHub, seedDemo } from './fake-github.mjs';
 import { readPlanEntries } from '../server/entries.mjs';
 import { planEntries } from './plan-entries.mjs';
@@ -90,6 +91,10 @@ export async function startDev({ fake = false, planDir = PLAN, port = 4174, host
     // The first comment of the first thread has votes: one of the person who signs in as owner-fake, one of visitor-fake.
     const first = fakeGitHub.state.issues.get(1)?.comments[0];
     if (first) for (const login of ['visitor-fake', 'owner-fake']) fakeGitHub.reactToComment(first.id, login);
+    // main holds plan/ as HEAD has it, under HEAD's id: the commit a build of this checkout names, so owner-fake's
+    // verdicts work. Another plan's folder, or plan/ with changes not committed, has no commit and no verdict.
+    const commit = buildCommit(join(website, '..'), planDir);
+    if (commit) fakeGitHub.git.seed(new Map([...loadRef(join(website, '..'), commit)].map(([name, text]) => [`plan/${name}`, text])), { sha: commit });
     config = readConfig(fakeGitHub.workshopEnv(origin), { apiBase: fakeGitHub.url, webBase: fakeGitHub.url });
   } else {
     config = readConfig({ ...env, WORKSHOP_SITE_ORIGIN: origin });
