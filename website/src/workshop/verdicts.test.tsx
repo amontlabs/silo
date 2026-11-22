@@ -1,13 +1,13 @@
 // The owner's Take and Drop on an open entry: who sees them, the press that arms and the press that sends, the
 // pending state, the verdict shown at once and kept across a reload until a build carries it, and a refusal.
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { apiConfig } from './api';
 import type { Me } from './api';
-import { ARM_MS } from './Entry';
+import { ARM_MS, CONFIRM_AFTER_MS } from './Entry';
 import { buildData, DECISIONS } from './fixtures';
 import type { BuildData } from './plan';
-import { mockApi, ok, owner, posts, refused, renderApp, rowButton, visitor, withheldTimers } from './test-support';
+import { clock, mockApi, ok, owner, posts, refused, renderApp, rowButton, visitor, withheldTimers } from './test-support';
 import type { Reply } from './test-support';
 
 const BUILT = 'c'.repeat(40);
@@ -33,6 +33,11 @@ async function openCreate(data: BuildData, me: Me | null, verdict: () => Reply =
 }
 
 const item = () => document.getElementById(`entry-${key}`) as HTMLElement;
+/** The second press, the confirm, made a moment after the first as a person makes it. */
+function confirm(name: RegExp) {
+  vi.spyOn(Date, 'now').mockReturnValue(Date.now() + CONFIRM_AFTER_MS);
+  fireEvent.click(button(name) as HTMLElement);
+}
 const button = (name: RegExp) => within(item()).queryByRole('button', { name });
 const stateLine = () => item().querySelector('.ws-state > span')?.textContent;
 
@@ -79,10 +84,42 @@ describe('the owner\'s verdict', () => {
     fireEvent.click(button(/^Drop$/) as HTMLElement);
     expect(button(/^Take$/)).not.toBeNull();
     expect(button(/^Confirm drop$/)).not.toBeNull();
-    fireEvent.click(button(/^Confirm drop$/) as HTMLElement);
+    confirm(/^Confirm drop$/);
     await waitFor(() => expect(posts(calls, 'verdict')).toHaveLength(1));
     expect(posts(calls, 'verdict')[0].body).toEqual({ entry: 'create', verdict: 'drop', built: BUILT });
     expect(posts(calls, 'verdict')[0].headers).toMatchObject({ 'X-Workshop': '1' });
+  });
+
+  it('a held key never confirms: its repeats are ignored, and so is a press sooner than a moment after arming', async () => {
+    const time = clock();
+    const calls = await openCreate(built(), theOwner);
+    await waitFor(() => expect(button(/^Take$/)).not.toBeNull());
+    // Enter held on Take: the first keydown's click arms it; Chromium clicks again on each repeat of the key.
+    fireEvent.click(button(/^Take$/) as HTMLElement);
+    const armed = button(/^Confirm take$/) as HTMLElement;
+    time.advance(CONFIRM_AFTER_MS * 10);
+    expect(fireEvent.keyDown(armed, { key: 'Enter', repeat: true }), 'the repeat\'s default, its click, is prevented').toBe(false);
+    fireEvent.click(armed);
+    expect(posts(calls, 'verdict')).toHaveLength(0);
+    expect(button(/^Confirm take$/)).not.toBeNull();
+    // The key let go, a new press confirms.
+    fireEvent.keyUp(armed, { key: 'Enter' });
+    fireEvent.keyDown(armed, { key: 'Enter' });
+    fireEvent.click(armed);
+    await waitFor(() => expect(posts(calls, 'verdict')).toHaveLength(1));
+    cleanup();
+    localStorage.clear();
+
+    // A second press sooner than CONFIRM_AFTER_MS after arming is the same gesture: ignored, and the button stays armed.
+    const again = await openCreate(built(), theOwner);
+    await waitFor(() => expect(button(/^Drop$/)).not.toBeNull());
+    fireEvent.click(button(/^Drop$/) as HTMLElement);
+    time.advance(CONFIRM_AFTER_MS - 1);
+    fireEvent.click(button(/^Confirm drop$/) as HTMLElement);
+    expect(posts(again, 'verdict')).toHaveLength(0);
+    time.advance(1);
+    fireEvent.click(button(/^Confirm drop$/) as HTMLElement);
+    await waitFor(() => expect(posts(again, 'verdict')).toHaveLength(1));
   });
 
   it('an armed button goes back after a while without a second press', async () => {
@@ -105,7 +142,7 @@ describe('the owner\'s verdict', () => {
     await waitFor(() => expect(button(/^Take$/)).not.toBeNull());
     expect(stateLine()).toBe('Not decided.');
     fireEvent.click(button(/^Take$/) as HTMLElement);
-    fireEvent.click(button(/^Confirm take$/) as HTMLElement);
+    confirm(/^Confirm take$/);
     const sending = await waitFor(() => button(/^Taking…$/) as HTMLElement);
     expect(sending).toBeDisabled();
     expect(sending).toHaveAttribute('aria-busy', 'true');
@@ -131,7 +168,7 @@ describe('the owner\'s verdict', () => {
     await waitFor(() => expect(button(/^Take$/)).not.toBeNull());
     expect(stateLine()).toBe('Decided by agents.');
     fireEvent.click(button(/^Take$/) as HTMLElement);
-    fireEvent.click(button(/^Confirm take$/) as HTMLElement);
+    confirm(/^Confirm take$/);
     await waitFor(() => expect(stateLine()).toBe('Decided.'));
     expect(button(/^Drop$/)).toBeNull();
   });
@@ -141,13 +178,13 @@ describe('the owner\'s verdict', () => {
     await openCreate(built(), theOwner, () => ({ status: 409, body: { error: 'refused', message } }));
     await waitFor(() => expect(button(/^Take$/)).not.toBeNull());
     fireEvent.click(button(/^Take$/) as HTMLElement);
-    fireEvent.click(button(/^Confirm take$/) as HTMLElement);
+    confirm(/^Confirm take$/);
     await waitFor(() => expect(within(item()).getByRole('alert')).toHaveTextContent(message));
     expect(stateLine()).toBe('Not decided.');
     expect(button(/^Take$/)).toBeEnabled();
     // The next press clears it.
     fireEvent.click(button(/^Drop$/) as HTMLElement);
-    fireEvent.click(button(/^Confirm drop$/) as HTMLElement);
+    confirm(/^Confirm drop$/);
     await waitFor(() => expect(within(item()).getByRole('alert')).toHaveTextContent(message));
   });
 
@@ -164,7 +201,7 @@ describe('the owner\'s verdict', () => {
         });
         await waitFor(() => expect(button(/^Take$/)).not.toBeNull());
         fireEvent.click(button(/^Take$/) as HTMLElement);
-        fireEvent.click(button(/^Confirm take$/) as HTMLElement);
+        confirm(/^Confirm take$/);
         await waitFor(() => expect(stateLine()).toBe('Decided.'));
         expect(posts(calls, 'verdict')).toHaveLength(2);
         expect(posts(calls, 'verdict')[1].body).toEqual(posts(calls, 'verdict')[0].body);
@@ -179,7 +216,7 @@ describe('the owner\'s verdict', () => {
     const calls = await openCreate(built(), theOwner, () => Promise.reject(new TypeError('Failed to fetch')));
     await waitFor(() => expect(button(/^Take$/)).not.toBeNull());
     fireEvent.click(button(/^Take$/) as HTMLElement);
-    fireEvent.click(button(/^Confirm take$/) as HTMLElement);
+    confirm(/^Confirm take$/);
     await waitFor(() => expect(within(item()).getByRole('alert')).toHaveTextContent('No connection.'));
     expect(posts(calls, 'verdict')).toHaveLength(2);
     expect(stateLine()).toBe('Not decided.');
@@ -189,7 +226,7 @@ describe('the owner\'s verdict', () => {
     await openCreate(built(), theOwner, () => refused(401, 'Sign in again.'));
     await waitFor(() => expect(button(/^Take$/)).not.toBeNull());
     fireEvent.click(button(/^Take$/) as HTMLElement);
-    fireEvent.click(button(/^Confirm take$/) as HTMLElement);
+    confirm(/^Confirm take$/);
     await waitFor(() => expect(button(/^Take$/)).toBeNull());
     expect(stateLine()).toBe('Not decided.');
   });

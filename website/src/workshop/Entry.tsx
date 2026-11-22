@@ -294,6 +294,8 @@ function CopyId({ id }: { id: string }) {
 
 /** How long a pressed Take or Drop waits for its second press. */
 export const ARM_MS = 4000;
+/** A second press sooner than this after the first is part of the same gesture (a double click), never the confirm. */
+export const CONFIRM_AFTER_MS = 400;
 
 /**
  * Whether the owner may take or drop the entry from the page: it has no verdict, or the agents wrote its verdict and
@@ -312,7 +314,9 @@ const ARMED = 'Confirm';
 
 /**
  * The owner's Take and Drop. A first press arms the button ("Confirm") and a second confirms it; an armed button goes
- * back after ARM_MS or when the focus leaves the pair. While the server writes the verdict, the pressed one says so
+ * back after ARM_MS or when the focus leaves the pair. The confirm is a separate activation: a key held down repeats,
+ * and Chromium clicks on each repeat of Enter, so a repeated key does nothing until it is let go, and a press sooner
+ * than CONFIRM_AFTER_MS after arming is ignored. While the server writes the verdict, the pressed one says so
  * and both are disabled. Each button keeps the width of its longest word, so nothing moves as it changes. `held`
  * draws the same buttons as placeholders, inert, while `me` has not answered for the owner remembered.
  */
@@ -321,17 +325,22 @@ function VerdictButtons({ row, ctx, held = false }: { row: Row; ctx: EntryContex
   const id = planId(row) as string;
   const pending = w.verdictPending[id];
   const [armed, setArmed] = useState<Verdict | null>(null);
+  const armedAt = useRef(0);
+  // A key held down on a button: its repeats, and the clicks they make, are not presses.
+  const repeating = useRef(false);
   useEffect(() => {
     if (!armed) return;
     const timer = setTimeout(() => setArmed(null), ARM_MS);
     return () => clearTimeout(timer);
   }, [armed]);
   const press = (verdict: Verdict) => {
-    if (pending) return;
+    if (pending || repeating.current) return;
     if (armed !== verdict) {
       setArmed(verdict);
+      armedAt.current = Date.now();
       return;
     }
+    if (Date.now() - armedAt.current < CONFIRM_AFTER_MS) return;
     setArmed(null);
     void w.sendVerdict(row, verdict);
   };
@@ -345,7 +354,10 @@ function VerdictButtons({ row, ctx, held = false }: { row: Row; ctx: EntryContex
     );
   }
   return (
-    <span className="ws-verdict" role="group" aria-label="Your verdict" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setArmed(null); }}>
+    <span className="ws-verdict" role="group" aria-label="Your verdict" onBlur={(event) => {
+      repeating.current = false;
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setArmed(null);
+    }}>
       {(['take', 'drop'] as const).map((verdict) => {
         const words = VERDICT_WORDS[verdict];
         const now = pending === verdict ? words.pending : armed === verdict ? ARMED : words.idle;
@@ -354,6 +366,11 @@ function VerdictButtons({ row, ctx, held = false }: { row: Row; ctx: EntryContex
             key={verdict} type="button" className={`ws-vbtn ${verdict}${armed === verdict ? ' armed' : ''}`}
             aria-label={armed === verdict ? `${ARMED} ${verdict}` : undefined}
             aria-busy={pending === verdict || undefined} disabled={Boolean(pending)} onClick={() => press(verdict)}
+            onKeyDown={(event) => {
+              repeating.current = event.repeat;
+              if (event.repeat) event.preventDefault();
+            }}
+            onKeyUp={() => { repeating.current = false; }}
           >
             <span>{now}</span>
             {[words.idle, ARMED, words.pending].filter((word) => word !== now).map((word) => <span key={word} aria-hidden="true">{word}</span>)}

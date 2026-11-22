@@ -1057,9 +1057,11 @@ not, sees no button and is refused.
 
 On the page: an open entry with no verdict, or whose verdict the agents wrote
 (`"by": "agents"`), shows Take and Drop at the end of its state line. The first
-press arms the button, which then says "Confirm"; a second press sends the
-verdict. An armed button goes back after four seconds, or when the focus
-leaves the pair. While the server works, the pressed button says "Taking…" or
+press arms the button, which then says "Confirm"; a second, separate press
+sends the verdict. A key held down never confirms: Chromium clicks on each
+repeat of Enter, so the repeats of a key are ignored until it is let go, and
+a press less than 0.4 seconds after the first is ignored too. An armed button
+goes back after four seconds, or when the focus leaves the pair. While the server works, the pressed button says "Taking…" or
 "Dropping…" and both are disabled. On success the entry shows its verdict at
 once, as the owner's: "Decided." or "Dropped.", and "by agents" goes. The page
 keeps the verdict in its own memory of its writes (`writes.ts`) with the commit
