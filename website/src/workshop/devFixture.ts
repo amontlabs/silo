@@ -1,4 +1,4 @@
-// Development only (`?fixture=today`, with `&as=in` to be signed in): the page on a made-up
+// Development only (`?fixture=today`, with `&as=in` to be signed in, `&owner=1` as the owner): the page on a made-up
 // live state, without the API. The page's memory of the last visit is off unless `&memory=1`, so `&delay=<ms>` shows
 // a first visit. main.tsx loads this only when import.meta.env.DEV, so a production build has none of it.
 import { api } from './api';
@@ -64,7 +64,10 @@ export function installFixture(data: BuildData, params: URLSearchParams): void {
   const detail = Number(params.get('detail') ?? 0);
   // `login=<name>` replaces the fake login, to see a long one.
   const login = params.get('login');
-  api.me = async () => wait(delay, as === 'in' ? { login: login ?? 'visitor-fake', avatar: '' } : null);
+  const owner = params.get('owner') === '1';
+  api.me = async () => wait(delay, as === 'in' ? { login: login ?? (owner ? 'owner-fake' : 'visitor-fake'), avatar: '', ...(owner ? { owner: true as const } : {}) } : null);
+  // A verdict is answered after a second, so its pending state shows.
+  api.verdict = async () => wait(1000, { commit: '0'.repeat(40) });
   api.issue = async (n: number) => wait(detail, {
     number: n, title: state.issues[n]?.title ?? '', body: '', url: `https://github.com/amontlabs/silo/issues/${n}`, up: state.issues[n]?.up ?? 0,
     comments: comments.get(n) ?? [],

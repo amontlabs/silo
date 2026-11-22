@@ -13,6 +13,7 @@ import type { LayoutPlan, MapLayout } from './map.ts';
 import { RESERVED_ADDRESSES } from './routes.ts';
 import { playableFilms } from '../../scripts/films.mjs';
 import { readFilms } from '../../../films/tools/behind.mjs';
+import { buildCommit } from '../../scripts/build-commit.mjs';
 import type { BuildData, Change, Entry, EntryFacts, Facts, Film, Histories, Notes, Statement, Verdict } from './plan.ts';
 
 export const PLAN_DIR = 'plan';
@@ -68,6 +69,8 @@ export interface BuildOptions {
   films?: string[];
   /** What each film of films/ says of itself and which of its entries it is behind (`readFilms`), in the order films/README.md gives; none by default. */
   filmInfo?: FilmInfo[];
+  /** The commit the plan was read from (scripts/build-commit.mjs); none by default. */
+  builtFrom?: string | null;
 }
 
 /** A film as films/<id>/film.json describes it, with the ids of the entries it shows that changed after it. */
@@ -196,7 +199,7 @@ export function partDepends(parts: { id: string }[], entries: Pick<Entry, 'id' |
 }
 
 /** The plan object of tools/plan/read, as the page holds it: decisions and features in the order of order.json. */
-export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null, films = [], filmInfo = [] }: BuildOptions = {}): BuildData {
+export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null, films = [], filmInfo = [], builtFrom = null }: BuildOptions = {}): BuildData {
   const entries: Entry[] = ordered(plan).map((raw) => ({
     id: raw.id,
     kind: raw.kind,
@@ -224,6 +227,7 @@ export function toBuildData(plan: RawPlan, { map = SILO_MAP, history = null, fil
     map: pageLayout(map, layoutPlanOf(plan)),
     shallow: history?.shallow === true,
     films: filmInfo.map((film) => ({ ...film, playable: films.includes(film.id) })),
+    builtFrom,
   };
 }
 
@@ -367,7 +371,8 @@ export function readBuildData(repository: string, map: MapLayout = planDir(repos
   const history = readHistory(repository);
   // Another plan's folder is not this repository's: its films are not shown with it.
   const filmInfo = history ? readFilms(repository, history.shallow) : [];
-  return buildDataFrom(planFilesIn(planDir(repository)), { map, history, films, filmInfo }, (path) => existsSync(join(repository, path)));
+  const builtFrom = buildCommit(repository, planDir(repository));
+  return buildDataFrom(planFilesIn(planDir(repository)), { map, history, films, filmInfo, builtFrom }, (path) => existsSync(join(repository, path)));
 }
 
 /** Reads the plan of `repository` and returns its facts, or throws. */

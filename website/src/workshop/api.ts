@@ -1,11 +1,13 @@
 // The browser side of the Workshop's HTTP contract (`/api/workshop/`).
-import type { LiveState } from './plan';
+import type { LiveState, Verdict } from './plan';
 
 export const API = '/api/workshop';
 
 export interface Me {
   login: string;
   avatar: string;
+  /** The owner, who takes and drops entries (`POST verdict`); `me` says so, and nothing remembers it. */
+  owner?: true;
 }
 
 export interface Comment {
@@ -134,6 +136,12 @@ export const api = {
   /** `up`: the comment's 👍 count after the vote, when the server says. */
   commentVote: (n: number, comment: string | number, on: boolean) => post<{ up?: unknown }>('comment-vote', { n, comment, on }),
   suggest: (title: string, text: string) => post<{ number: number }>('suggest', { title, text }),
+  /**
+   * The owner's verdict on an entry, written on main as `plan take` or `plan drop` would. `built` is the commit the
+   * page was built from: the server refuses when the entry changed on main since. `commit` is the commit made, null
+   * when the entry already had that verdict.
+   */
+  verdict: (entry: string, verdict: Verdict, built: string) => post<{ commit?: unknown; already?: unknown }>('verdict', { entry, verdict, built }),
   logout: () => post<unknown>('logout', {}),
 };
 

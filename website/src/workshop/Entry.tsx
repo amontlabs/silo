@@ -8,7 +8,7 @@ import { DEFAULT_REPO, repoAddress } from '../../../tools/workshop/model/index.j
 import { Markdown } from './Markdown';
 import { RichText, safeHref } from './RichText';
 import { byWho, changeLine, changePhrase, isDecided, relativeTime, shortDate } from './plan';
-import type { Change, EntryFacts, Facts, Row, Statement } from './plan';
+import type { Change, EntryFacts, Facts, Row, Statement, Verdict } from './plan';
 import { formatHash, placeOf } from './routes';
 import type { Comment } from './api';
 import { pageConfig } from './useWorkshop';
@@ -292,11 +292,80 @@ function CopyId({ id }: { id: string }) {
   );
 }
 
-function StateLine({ row, children }: { row: Row; children?: ReactNode }) {
+/** How long a pressed Take or Drop waits for its second press. */
+export const ARM_MS = 4000;
+
+/**
+ * Whether the owner may take or drop the entry from the page: it has no verdict, or the agents wrote its verdict and
+ * the owner's confirms or overrules it. Undoing a verdict, a replaced entry and a built one are not done here.
+ */
+export function offersVerdict(row: Row): boolean {
+  if (row.kind !== 'entry') return false;
+  return row.status === 'undecided' || (row.by === 'agents' && (row.status === 'decided' || row.status === 'dropped'));
+}
+
+const VERDICT_WORDS: Record<Verdict, { idle: string; armed: string; pending: string }> = {
+  take: { idle: 'Take', armed: 'Confirm take', pending: 'Taking…' },
+  drop: { idle: 'Drop', armed: 'Confirm drop', pending: 'Dropping…' },
+};
+
+/**
+ * The owner's Take and Drop. A first press arms the button and a second confirms it; an armed button goes back after
+ * ARM_MS or when the focus leaves the pair. While the server writes the verdict, the pressed one says so and both
+ * are disabled. Each button keeps the width of its longest word, so nothing moves as it changes.
+ */
+function VerdictButtons({ row, ctx }: { row: Row; ctx: EntryContext }) {
+  const { w } = ctx;
+  const id = planId(row) as string;
+  const pending = w.verdictPending[id];
+  const [armed, setArmed] = useState<Verdict | null>(null);
+  useEffect(() => {
+    if (!armed) return;
+    const timer = setTimeout(() => setArmed(null), ARM_MS);
+    return () => clearTimeout(timer);
+  }, [armed]);
+  const press = (verdict: Verdict) => {
+    if (pending) return;
+    if (armed !== verdict) {
+      setArmed(verdict);
+      return;
+    }
+    setArmed(null);
+    void w.sendVerdict(row, verdict);
+  };
+  return (
+    <span className="ws-verdict" role="group" aria-label="Your verdict" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setArmed(null); }}>
+      {(['take', 'drop'] as const).map((verdict) => {
+        const words = VERDICT_WORDS[verdict];
+        const now = pending === verdict ? words.pending : armed === verdict ? words.armed : words.idle;
+        return (
+          <button
+            key={verdict} type="button" className={`ws-btn ws-vbtn${verdict === 'take' ? ' go' : ''}${armed === verdict ? ' armed' : ''}`}
+            aria-busy={pending === verdict || undefined} disabled={Boolean(pending)} onClick={() => press(verdict)}
+          >
+            <span>{now}</span>
+            {[words.idle, words.armed, words.pending].filter((word) => word !== now).map((word) => <span key={word} aria-hidden="true">{word}</span>)}
+          </button>
+        );
+      })}
+    </span>
+  );
+}
+
+function StateLine({ row, ctx, children }: { row: Row; ctx: EntryContext; children?: ReactNode }) {
   const text = stateText(row);
   const tone = isDecided(row) && row.status !== 'dropped' ? 'ws-yes' : 'ws-muted';
   const id = planId(row);
-  return <div className="ws-state"><span className={tone}>{text}</span>{id ? <CopyId id={id} /> : null}{children}</div>;
+  const refusal = id ? ctx.w.verdictRefusals[id] : undefined;
+  return (
+    <>
+      <div className="ws-state">
+        <span className={tone}>{text}</span>{id ? <CopyId id={id} /> : null}{children}
+        {ctx.w.mayDecide && offersVerdict(row) ? <VerdictButtons row={row} ctx={ctx} /> : null}
+      </div>
+      {refusal ? <p className="ws-refused" role="alert">{refusal}</p> : null}
+    </>
+  );
 }
 
 /**
@@ -737,7 +806,7 @@ function Body({ row, ctx, detail, lead, vote, onExtras }: { row: Row; ctx: Entry
       {lead}
       {what ? <div className="ws-what"><RichText text={what} /></div> : null}
       {row.kind === 'entry' ? <OpenFacts row={row} ctx={ctx} /> : null}
-      <StateLine row={row}>{vote ? <Side row={row} ctx={ctx} /> : null}</StateLine>
+      <StateLine row={row} ctx={ctx}>{vote ? <Side row={row} ctx={ctx} /> : null}</StateLine>
       <ReplaceLines row={row} ctx={ctx} only={(label) => label === 'Replaced by'} />
       {row.kind === 'entry' ? <Extras row={row} ctx={ctx} onMove={onExtras} /> : null}
       <Talk row={row} ctx={ctx} detail={detail} />

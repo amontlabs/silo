@@ -143,6 +143,11 @@ export interface BuildData {
   shallow: boolean;
   /** The films of films/, in the order films/README.md gives. */
   films: Film[];
+  /**
+   * The commit the plan was read from, which the owner's verdict names (`POST verdict`); null when the page shows text
+   * no commit holds (another plan's folder, changes under plan/ not committed), and then the page offers no verdict.
+   */
+  builtFrom: string | null;
 }
 
 /** A film of films/: what its film.json says, and whether the site plays it. */
@@ -416,6 +421,32 @@ export function stateWords(group: { state: PartState; counts: Counts }): string 
     case 'decided': return built ? `${built}/${built + decided} built` : `${decided} decided`;
     default: return '';
   }
+}
+
+/**
+ * The build's data with the owner's verdicts written since (writes.ts `keptVerdicts`) laid over it, as the page shows
+ * them until a new build carries them: the verdict, the owner's (no `by`); a drop ends a build (`started`); a taken
+ * decision replaces the decisions it names in `replaces`.
+ */
+export function withVerdicts(data: BuildData, verdicts: ReadonlyMap<string, Verdict>): BuildData {
+  if (!verdicts.size) return data;
+  const replacedBy = new Map<string, string>();
+  for (const entry of data.entries) {
+    if (verdicts.get(entry.id) === 'take' && entry.kind === 'decision') for (const id of entry.replaces) replacedBy.set(id, entry.id);
+  }
+  return {
+    ...data,
+    entries: data.entries.map((entry) => {
+      const verdict = verdicts.get(entry.id);
+      const replaced = replacedBy.get(entry.id);
+      if (!verdict && !replaced) return entry;
+      return {
+        ...entry,
+        ...(verdict ? { verdict, by: null, ...(verdict === 'drop' ? { started: null } : {}) } : {}),
+        ...(replaced ? { replacedBy: replaced } : {}),
+      };
+    }),
+  };
 }
 
 /** @param closedKeys the rows whose thread the server refused a write on as closed, before the state says so */

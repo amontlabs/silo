@@ -367,6 +367,15 @@
 .ws .ws-btn.go:hover:not(:disabled) { background: var(--accent-hover); border-color: #d68200; }
 .ws .ws-btn:focus-visible { outline-offset: 2px; }
 .ws .ws-btn:disabled { opacity: .5; }
+/* The owner's Take and Drop, at the end of an entry's state line and as tall as it. Each button keeps the width of its
+   longest word (Take, Confirm take, Taking…), so nothing moves when it is armed or sent; an armed one is outlined. */
+.ws-verdict { display: inline-flex; gap: 8px; margin-left: auto; }
+.ws .ws-btn.ws-vbtn { display: inline-grid; justify-items: center; }
+.ws-vbtn > span { grid-area: 1 / 1; }
+.ws-vbtn > span[aria-hidden] { visibility: hidden; }
+.ws .ws-btn.ws-vbtn.armed { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.ws .ws-btn.ws-vbtn[aria-busy] { cursor: progress; }
+.ws-refused { margin-top: 6px; font-size: 14px; color: var(--no); overflow-wrap: anywhere; }
 .ws-notice { position: fixed; z-index: 30; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: min(560px, calc(100vw - 32px)); padding: 9px 14px; border: 1px solid var(--no); border-radius: 3px; background: var(--paper); box-shadow: 0 6px 18px #0000001f; color: var(--no); font-size: 13.5px; animation: ws-appear .2s var(--ease-out) both; }
 .ws-pending { opacity: .55; }
 .ws-item.ws-pending .ws-line:hover { background: none; }
