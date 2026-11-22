@@ -29,8 +29,8 @@ export function splitNotes(notes: string): SplitNotes | null {
   return { before: lines.slice(0, from).join(''), choice: lines.slice(from, to).join(''), after: lines.slice(to).join('') };
 }
 
-/** Whether nothing but headings stands beside the section. */
-export const holdsOnlyChoice = (notes: SplitNotes): boolean => `${notes.before}\n${notes.after}`.split('\n').every((line) => !line.trim() || /^#{1,6}\s/.test(line));
+/** Whether nothing but white space stands beside the section, under the notes' title (which the row says already). */
+export const holdsOnlyChoice = (notes: SplitNotes): boolean => !notes.after.trim() && !notes.before.trim().replace(/^#[ \t].*/, '').trim();
 
 const PART_LINE = /^An agent's part, \d{1,2} [A-Z][a-z]+ \d{4}\.(?: |$)/;
 const OPTIONS = 'The options:';

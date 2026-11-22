@@ -706,7 +706,8 @@ function historySummary(row: Row): string {
 
 /**
  * The entry's notes and its history, each closed until asked for; `onMove` tells the panel to grow or shrink to them.
- * While the choice shows in place, the notes are shown without it, and notes that hold nothing else have no button.
+ * While the choice shows in place, the notes are shown without it, and notes that hold nothing else but their title
+ * have no button.
  * When the choice could not load, the notes hold it as any other of their sections.
  */
 function Extras({ row, ctx, onMove }: { row: Row; ctx: EntryContext; onMove: () => void }) {
@@ -895,7 +896,7 @@ function OpenFacts({ row, ctx, state }: { row: Row; ctx: EntryContext; state: Wo
         </Fact>
       ) : null}
       {open && own?.choice ? (
-        isTable(own.choice) ? <ChoiceView choice={own.choice} /> : <div className="ws-fact"><Markdown text={own.choice.text} /></div>
+        isTable(own.choice) ? <ChoiceView choice={own.choice} /> : <Fact label="The choice"><Markdown text={own.choice.text} /></Fact>
       ) : null}
       {open && own && facts ? <YesLines own={own} facts={facts} /> : null}
       {adds.length ? (

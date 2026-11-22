@@ -100,6 +100,13 @@ Recommended: one computer. Nobody wants the second.
     expect(within(item).queryByRole('button', { name: 'Notes' })).not.toBeInTheDocument();
   });
 
+  it('leaves Notes to show a heading that follows it, alone', async () => {
+    const item = await openFrom('#part-b/create', 'Create and delete a computer', withChoice({ create: `${CHOICE}\n## Open questions\n` }));
+    await within(item).findByText('The case');
+    await userEvent.click(within(item).getByRole('button', { name: 'Notes' }));
+    expect(await within(item).findByText('Open questions')).toBeInTheDocument();
+  });
+
   it('is read under Notes once the entry has a verdict', async () => {
     const item = await openFrom('#part-a/core', 'The engine runs on its own', withChoice({ core: CHOICE }));
     expect(within(item).queryByText('The case')).not.toBeInTheDocument();
@@ -128,6 +135,8 @@ Recommended: one computer. Nobody wants the second.
     await within(item).findByText('A second case: you press it three times.');
     inOrder(item, ['Key records by id.', "An agent's part", 'The options:', 'Two computers.', 'Recommended: one computer.', 'A second case']);
     expect(within(item).queryByText('The case')).not.toBeInTheDocument();
+    const whole = within(item).getByText('A second case: you press it three times.').closest('.ws-fact') as HTMLElement;
+    expect(whole.querySelector('.ws-fact-label')?.textContent).toBe('The choice');
   });
 
   it('holds the panel briefly for the details, so it opens at its final size', async () => {

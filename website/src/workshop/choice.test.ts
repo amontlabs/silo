@@ -192,9 +192,16 @@ describe('the notes around the choice', () => {
     }
   });
 
-  it('say whether anything but headings stands beside it', () => {
-    expect(holdsOnlyChoice(splitNotes(SPEND)!)).toBe(false);
-    expect(holdsOnlyChoice(splitNotes(SPEND.slice(0, SPEND.indexOf('## Notes')))!)).toBe(true);
+  it('say whether anything but white space stands beside it, under the notes\' title', () => {
+    const only = SPEND.slice(0, SPEND.indexOf('## Notes'));
+    const holds = (notes: string) => holdsOnlyChoice(splitNotes(notes)!);
+    expect(holds(SPEND)).toBe(false);
+    expect(holds(only)).toBe(true);
+    expect(holds(only.replace('# Spend', ''))).toBe(true);
+    expect(holds(`${only}\n \n`)).toBe(true);
+    expect(holds(`${only}## Open questions\n`)).toBe(false);
+    expect(holds(only.replace('## The choice', '## Before it\n\n## The choice'))).toBe(false);
+    expect(holds(only.replace('# Spend', '# Spend\n\n# Another'))).toBe(false);
   });
 
   it('take no heading inside a code block for the section, and none for an empty one', () => {
