@@ -18,7 +18,9 @@ import { planDir as defaultPlanDir, planEntries } from './plan-entries.mjs';
 // the owner's verdict runs (with tools/plan/package.json), and the site's
 // build checks it runs on a verdict's plan: website/src/workshop/build-check.ts
 // and the files of that folder it loads (the map), which Node loads as they
-// are, its types stripped. Any other file it would load, in website/ or outside
+// are, its types stripped, as ES modules by website/package.json, which ships
+// too: Vercel's runtime has a package.json saying CommonJS at the function's
+// root, which would otherwise apply. Any other file it would load, in website/ or outside
 // it, stops the packaging: a package in website/node_modules/ is one of them.
 // Beside the server goes plan-entries.json, the plan's entries made from the
 // plan at build time (scripts/plan-entries.mjs), which the server reads.
@@ -83,6 +85,7 @@ function functionFiles(siteDir) {
   for (const name of readdirSync(join(root, MODEL_DIR))) if (name.endsWith('.js')) files.add(join(root, MODEL_DIR, name));
   files.add(join(root, 'tools', 'workshop', 'package.json'));
   files.add(join(root, 'tools', 'plan', 'package.json'));
+  files.add(join(site, 'package.json'));
   for (const name of readdirSync(join(site, 'server'))) if (name.endsWith('.mjs') && !name.endsWith('.test.mjs')) files.add(join(site, 'server', name));
   files.add(join(site, 'api', 'workshop.cjs'));
   return { root, files: [...files].sort() };

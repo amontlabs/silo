@@ -818,8 +818,8 @@ test('Build Output layout: static site, one Node.js function at every endpoint, 
     assert.match(vc.runtime, /^nodejs(22|24|26)\.x$/);
     assert.deepEqual((await readdir(main)).sort(), ['.vc-config.json', 'tools', 'website']);
     // No package ships: the server runs on Node's standard library. Of the page's code, only the site's build checks
-    // a verdict runs on the plan it leaves, and the map they check.
-    assert.deepEqual((await readdir(join(main, 'website'))).sort(), ['api', 'server', 'src']);
+    // a verdict runs on the plan it leaves, and the map they check, with the package.json that makes them ES modules.
+    assert.deepEqual((await readdir(join(main, 'website'))).sort(), ['api', 'package.json', 'server', 'src']);
     assert.deepEqual((await listFiles(join(main, 'website', 'src'))).sort(), ['workshop/build-check.ts', 'workshop/map-fit.ts', 'workshop/map.ts', 'workshop/routes.ts']);
     // The Workshop's model ships beside the server, at its place in the repository, as ESM; of the plan tool, the
     // files the owner's verdict loads (write/ and what it imports), as ESM too.
@@ -830,10 +830,14 @@ test('Build Output layout: static site, one Node.js function at every endpoint, 
     assert.equal(JSON.parse(await readFile(join(main, 'tools', 'workshop', 'package.json'), 'utf8')).type, 'module');
     assert.equal(JSON.parse(await readFile(join(main, 'tools', 'plan', 'package.json'), 'utf8')).type, 'module');
 
-    // The packaged function runs on its own, from a clean folder with nothing above it to resolve from.
+    assert.equal(JSON.parse(await readFile(join(main, 'website', 'package.json'), 'utf8')).type, 'module');
+
+    // The packaged function runs on its own, from a clean folder with nothing above it to resolve from, under a
+    // package.json that says CommonJS at its root, as Vercel's runtime has one there.
     const clean = await mkdtemp(join(tmpdir(), 'workshop-func-'));
     try {
       await cp(main, join(clean, 'state.func'), { recursive: true });
+      await writeFile(join(clean, 'state.func', 'package.json'), '{"type":"commonjs"}\n');
       const saved = Object.fromEntries(Object.keys(process.env).filter((k) => k.startsWith('WORKSHOP_')).map((k) => [k, process.env[k]]));
       for (const key of Object.keys(saved)) delete process.env[key];
       try {
@@ -1159,7 +1163,7 @@ test('packaging ships server/ and api/ at any depth, the model of the Workshop a
   try {
     const site = join(root, 'website');
     const here = new URL('..', import.meta.url).pathname;
-    for (const part of ['server', 'api', 'src/workshop']) await cp(join(here, part), join(site, part), { recursive: true });
+    for (const part of ['server', 'api', 'src/workshop', 'package.json']) await cp(join(here, part), join(site, part), { recursive: true });
     await cp(new URL('../../tools/workshop/model', import.meta.url).pathname, join(root, 'tools', 'workshop', 'model'), { recursive: true });
     await cp(new URL('../../tools/workshop/package.json', import.meta.url).pathname, join(root, 'tools', 'workshop', 'package.json'));
     for (const part of ['write', 'check', 'model', 'read', 'package.json']) await cp(new URL(`../../tools/plan/${part}`, import.meta.url).pathname, join(root, 'tools', 'plan', part), { recursive: true });
@@ -1169,6 +1173,7 @@ test('packaging ships server/ and api/ at any depth, the model of the Workshop a
       assert.ok(fine.files.includes(join('tools', 'workshop', 'model', 'markers.js')));
       assert.ok(fine.files.includes(join('tools', 'plan', 'write', 'index.js')));
       assert.ok(fine.files.includes(join('website', 'src', 'workshop', 'build-check.ts')));
+      assert.ok(fine.files.includes(join('website', 'package.json')));
       // Another folder of the plan tool is refused.
       await mkdir(join(root, 'tools', 'plan', 'history'), { recursive: true });
       await writeFile(join(root, 'tools', 'plan', 'history', 'x.js'), 'export const x = 1;\n');
