@@ -1,6 +1,6 @@
 {
   "name": "The first run",
-  "what": "Silo needs no account, no sign-up and no key, and the first run proposes the rules your agent programs need, switched on with your yes. It sets up only what will work, and asks you where it would otherwise guess. While macOS downloads and installs, it shows something worth looking at.",
+  "what": "Silo needs no account, no sign-up and no key, and the first run asks how main's network starts, then proposes the rules your agent programs need where that does not already let them through, switched on with your yes. It sets up only what will work, and asks you where it would otherwise guess. While macOS downloads and installs, it shows something worth looking at.",
   "needs": [
     "agent-programs-run-unmodified",
     "nothing-to-set-up",

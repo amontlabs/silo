@@ -18,3 +18,8 @@ The options:
 
 Recommended: build it. A handful of commands are worth denying before they run, and a model that is
 told its call was denied goes on with its work.
+
+## Notes
+
+Deny acts on a request, so a tool call that waits in a reply has to count as one. The question is put
+to the owner in `classifier-asked-synchronously`, under "The choice".

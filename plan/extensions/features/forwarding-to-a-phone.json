@@ -1,6 +1,10 @@
 {
   "name": "Forwarding to a phone",
   "what": "Alerts and asks forwarded to your phone.",
+  "needs": [
+    "extension-that-reads-and-alerts",
+    "forwarding-tool"
+  ],
   "suggest": {
     "verdict": "take",
     "why": "Agents work while you are away, and a hold nobody sees ends as a refusal."

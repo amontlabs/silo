@@ -1,6 +1,6 @@
 {
   "name": "Published measurements",
-  "what": "Silo publishes a measurement once it holds, dated and taken on a named machine.",
+  "what": "Silo publishes the measurement of every speed target at each release, met or missed, dated and taken on a named machine. A target not measured yet is shown as not measured.",
   "needs": [
     "speed-against-budgets",
     "publishing-measurements",

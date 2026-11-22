@@ -8,7 +8,7 @@ computer floods the record with lines. After each step the check asks whether th
 its promises: a gap shows as a gap, and what the runs are shown to have written still adds up to
 what changed.
 
-This is what `record-fakes`, which you took, already says. Taking it is a yes to building it when
+This is what `record-fakes`, which agents took, already says. Taking it is a yes to building it when
 its stage comes.
 
 The options:
@@ -16,7 +16,7 @@ The options:
 - Build it (recommended). It costs three more fakes to keep in step with the real sources of the
   record. As its notes say, it could also be built as part of `simulated-core-histories`.
 - Leave it out. It costs the check of the record's promises under failure, and it goes against a
-  decision you took.
+  decision in force.
 
 Recommended: build it. A record that is checked only when nothing goes wrong cannot be trusted on
 the day an agent does something wrong.

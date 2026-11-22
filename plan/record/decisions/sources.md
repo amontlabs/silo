@@ -19,7 +19,7 @@ you need every time, and which part saw it only when something looks wrong.
 
 ## Notes
 
-It needs `sources-number-their-lines`, which sets the word "line".
+It needs `word-line`, which sets the word "line".
 
 | Source | What it sees | What it writes |
 |---|---|---|

@@ -1,4 +1,7 @@
 {
   "asks": "May an agent ask for a fork or a fresh computer?",
-  "answer": "Yes. An agent asks with the `silo` command inside its computer, as you would in the app: for a fork of its own computer, or for a fresh computer made from a recipe. What it makes never has more than the computer that asked: no secret, login or rule that computer lacks, unless you say yes. What it spends counts against the budget of the computer that asked. Each computer it makes counts against the Mac's maximum of running computers; at the maximum the request is refused with that reason, and nothing waits. Each computer an agent made shows which agent and which computer asked for it, and it is dropped to the bin like any other."
+  "answer": "Yes. An agent asks with the `silo` command inside its computer, as you would in the app: for a fork of its own computer, or for a fresh computer made from a recipe. What it makes never has more than the computer that asked: no secret, login or rule that computer lacks, unless you say yes. What it spends counts against the budget of the computer that asked. Each computer it makes counts against the Mac's maximum of running computers; at the maximum the request is refused with that reason, and nothing waits. Each computer an agent made shows which agent and which computer asked for it, and it is dropped to the bin like any other.",
+  "needs": [
+    "computer-reads-its-record"
+  ]
 }

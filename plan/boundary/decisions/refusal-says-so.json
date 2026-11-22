@@ -1,6 +1,6 @@
 {
   "asks": "What comes back to a computer when Silo refuses a request?",
-  "answer": "When Silo refuses a request, what comes back says so: denied, or not answered. A computer sees nothing else of what watches it.",
+  "answer": "When Silo refuses a request, what comes back says so: denied, or not answered. By default a computer sees nothing else of what watches it.",
   "sets": [
     {
       "in": "words",

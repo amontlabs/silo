@@ -1,13 +1,12 @@
 {
   "name": "Budgets on a computer or a conversation",
-  "what": "You set a budget on a computer or on a conversation, and it is enforced where model traffic leaves the computer. Once it is reached, no further metered request leaves: it is denied or held.",
+  "what": "You set a budget on a computer or on a conversation, and it is enforced where model traffic leaves the computer. Once it is reached, no further metered request leaves: it is denied, with an error that says the budget is reached.",
   "needs": [
     "spend-per-conversation",
     "budget-rule-or-precaution",
     "what-a-budget-promises",
     "where-limits-are-set",
     "budget-denies-or-holds",
-    "budget-as-a-rate",
     "recognising-a-conversation",
     "word-budget",
     "where-rules-run",

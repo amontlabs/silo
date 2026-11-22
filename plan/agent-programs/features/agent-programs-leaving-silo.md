@@ -3,7 +3,8 @@
 ## The choice
 
 An agent's part, 22 November 2026. You stop using Silo. You export main as a disk image that another
-virtual machine app starts, and your recipes and rules as text files.
+virtual machine app starts, your recipes and rules as text files, and the record of what your agents
+did as lines of JSON.
 
 The options:
 
@@ -11,7 +12,7 @@ The options:
   costs Silo keeping those formats documented, and an export of main as large as its disk. Whether a
   macOS computer starts in another app is still to find out.
 - Leave it out. Your code leaves through Git as always, and the rest stays in Silo. It costs your
-  setup, your rules and your recipes when you go.
+  setup, your rules, your recipes and the record when you go.
 
 Recommended: build it. A tool you can leave is easier to trust with full access to your work.
 

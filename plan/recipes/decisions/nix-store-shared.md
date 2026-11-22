@@ -24,7 +24,8 @@ and the disk it costs is only what two recipes have in common.
 
 ## Notes
 
-To find out. Linux computers can share one store, read-only (research of 18 November 2026, in
-`nix-under-recipes`).
+Linux computers can share one store, read-only (research of 18 November 2026, in
+`nix-under-recipes`). The answer does not use this, since nothing from your device is shared into a
+computer.
 
 Also to find out: what the first build of a recipe costs in time and disk.

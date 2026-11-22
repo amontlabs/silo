@@ -9,9 +9,9 @@ did.
 The options:
 
 - Everything leaves in open formats (recommended). You take main as a disk image that another
-  virtual machine app can start, your recipes and rules as text, and the record in the formats of
-  its export. It costs Silo keeping those formats documented and stable. Whether a macOS computer
-  starts in another app is still to find out.
+  virtual machine app can start, your recipes and rules as text, and the record as the lines of JSON
+  that the `silo` command prints. It costs Silo keeping those formats documented and stable. Whether
+  a macOS computer starts in another app is still to find out.
 - Only what is already yours elsewhere. Your code leaves through Git, as it always can, and the rest
   stays in Silo. It costs you your setup, your rules and the record when you go.
 

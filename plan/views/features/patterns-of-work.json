@@ -10,7 +10,8 @@
     "mac-app-language",
     "how-each-run-is-going",
     "which-run-did-it",
-    "patterns-the-record-shows"
+    "patterns-the-record-shows",
+    "app-as-text"
   ],
   "suggest": {
     "verdict": "take",

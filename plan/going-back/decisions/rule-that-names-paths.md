@@ -1,4 +1,4 @@
-# Whether Silo offers a rule that names the paths to leave out of long history
+# Whether Silo offers a rule that names the paths to leave out of checkpoints
 
 ## The choice
 

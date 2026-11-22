@@ -1,4 +1,4 @@
-# Speed measured against budgets
+# Speed measured against targets
 
 ## The choice
 

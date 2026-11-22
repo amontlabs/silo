@@ -1,6 +1,9 @@
 {
   "name": "A place to share",
   "what": "A place where people share recipes, rules and extensions.",
+  "needs": [
+    "importing-an-extension"
+  ],
   "suggest": {
     "verdict": "take",
     "why": "People write the same rules and extensions again unless they can find each other's, and a list of Git repositories is a cheap start."

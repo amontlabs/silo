@@ -10,7 +10,8 @@ The options:
 - Each tool call waits for the opinion (recommended). The classifier says "not safe", the call is
   denied before it runs, and the model sees that. It costs time on every tool call and the
   classifier's own model calls, which you pay. It is off unless you set it, and a classifier can be
-  fooled.
+  fooled. It also means that a tool call waiting in a reply counts as a request at the boundary,
+  which is what can be denied or held.
 - The classifier looks after the call. Nothing waits. On "not safe" the precaution pauses main and
   alerts you. It costs the first bad call, which has already run.
 

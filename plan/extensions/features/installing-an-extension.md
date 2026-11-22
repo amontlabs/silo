@@ -22,3 +22,6 @@ should not install.
 
 Set aside for later by the owner. What installing grants is put forward in
 `import-then-install`.
+
+Whether this is brought forward to be built with installing: the question is put to the owner in
+`importing-an-extension`, under "The choice".

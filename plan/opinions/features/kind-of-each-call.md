@@ -1,4 +1,4 @@
-# The kind of each call
+# The kind of each request
 
 ## The choice
 

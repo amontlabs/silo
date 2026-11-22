@@ -1,6 +1,6 @@
 {
   "asks": "When a computer and a conversation in it each have a budget, which one counts?",
-  "answer": "Both. Each budget applies to what it covers, and whichever is reached first denies or holds new metered requests for what it covers.",
+  "answer": "Both. Each budget applies to what it covers, and once the first one is reached, no further metered request it covers leaves.",
   "needs": [
     "what-a-budget-promises"
   ],
@@ -8,7 +8,7 @@
     {
       "in": "traffic/properties",
       "id": "every-budget-applies",
-      "says": "Every budget that covers a metered request applies to it: the first one reached denies or holds it.",
+      "says": "Every budget that covers a metered request applies to it: once any one of them is reached, the request does not leave.",
       "kind": "safety",
       "check": [
         "simulator"

@@ -7,8 +7,8 @@ engine: three computers, forks and checkpoints, a virtual machine that dies, a d
 reply that never comes. It checks every promise after every step and plays millions of such nights.
 When one fails, it cuts the night down to the few steps that still fail.
 
-This is what `core-simulator` and `simulator-faults`, which you took, already ask for. Taking it is
-a yes to building it when its stage comes.
+This is what `core-simulator` and `simulator-faults`, which agents took, already ask for. Taking it
+is a yes to building it when its stage comes.
 
 The options:
 
@@ -16,8 +16,8 @@ The options:
   with the shortest way to reproduce it. It costs fake virtual machines, disks and networks that
   fail on purpose and must be kept in step with the real ones. It checks the engine only: the real
   virtual machines and network need tests of their own.
-- Leave it out. It costs the main way Silo's promises are checked, and it goes against decisions you
-  took.
+- Leave it out. It costs the main way Silo's promises are checked, and it goes against decisions in
+  force.
 
 Recommended: build it. Most of what Silo promises is about what happens when something goes wrong,
 and only a simulator tries enough of those cases.

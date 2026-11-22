@@ -1,6 +1,6 @@
 {
   "name": "Phone app",
-  "what": "A phone app.",
+  "what": "On your phone: what needs you, with asks you can answer and alerts.",
   "suggest": {
     "verdict": "take",
     "why": "An ask has to reach you where you are, and answering it from your phone keeps agents from being refused while you are away."

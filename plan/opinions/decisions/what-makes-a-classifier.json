@@ -1,6 +1,6 @@
 {
   "asks": "What makes an extension a classifier?",
-  "answer": "An extension that answers from a fixed list is a classifier. So is a pattern or a small function of Silo's own that runs inside Silo and gives its opinion from such a list. \"Classifier\" is not the name for all extensions.",
+  "answer": "An extension that answers from a fixed list is a classifier. So is a pattern or a small function of Silo's own that runs inside Silo and gives its opinion from such a list. A classifier reads the record and the opinions you gave. \"Classifier\" is not the name for all extensions.",
   "needs": [
     "extension-manifest",
     "built-in-classifiers-run-inside"

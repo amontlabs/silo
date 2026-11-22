@@ -1,5 +1,5 @@
 {
-  "asks": "Does Silo offer a rule that names the paths to leave out of long history?",
+  "asks": "Does Silo offer a rule that names the paths to leave out of checkpoints?",
   "answer": "Yes, once a way to build it is found. A rule you set names paths, such as `node_modules` or a Rust `target` folder, and the checkpoints taken while it is in force leave them out. A saved checkpoint never changes, so the rule acts only on checkpoints taken after it is set. Leaving paths out is destructive, so only you or a rule you set do it. Silo can propose such a rule from its opinion of what a rebuild brings back, and the proposal changes nothing until you accept it. A checkpoint that left paths out says so (`partial-checkpoint-says-so`). How to leave a folder out of a checkpoint of the whole disk, while it stays an ordinary folder for the programs that use it, is to find out. If no way is found, the rule is not offered.",
   "needs": [
     "opinion-never-chooses-what-is-kept",

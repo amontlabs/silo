@@ -1,6 +1,6 @@
 {
   "name": "Budgets on rates and on usage outside a plan",
-  "what": "You set a budget as a rate, such as spend per hour or new conversations per minute. You also set a budget on the metered usage that is billed outside your plan.",
+  "what": "You set a budget as a rate, such as spend per hour. You also set a budget on the metered usage that is billed outside your plan. A limit on a count, such as new conversations per minute, is set as a rule and is not a budget.",
   "needs": [
     "budget-on-a-computer",
     "budget-as-a-rate"

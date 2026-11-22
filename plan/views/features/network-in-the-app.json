@@ -1,6 +1,6 @@
 {
   "name": "Network",
-  "what": "The place Network shows where a computer connected, what it sent, what it installed and what it spent.",
+  "what": "The place Network shows where a computer connected, what it sent, what it spent, and, for the registries whose traffic Silo reads, the packages it installed.",
   "needs": [
     "network-place",
     "kinds-look-different",
@@ -8,7 +8,8 @@
     "how-spend-is-shown",
     "what-traffic-gives",
     "hosts-reached-and-denied",
-    "spend-per-conversation"
+    "spend-per-conversation",
+    "app-as-text"
   ],
   "keeps": [
     "never-shown-as-a-fact"

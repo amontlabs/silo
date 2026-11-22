@@ -21,3 +21,12 @@ does a precaution do when its classifier answers unsure?". If Silo should bound 
 say (deny or hold, never let go on), that is a new decision naming this one.
 
 The question is put to the owner in `extension-that-does-not-answer`, under "The choice".
+
+## Raised on 22 November 2026, by an agent
+
+`extensions-in-sequence`, not decided, has a pattern inside Silo that is unsure about a tool call
+wake an extension that asks a small model. That opinion is not a time, a new line of the record, a
+click or a waiting request, so with this answer nothing wakes the extension. If the feature is
+wanted, "an opinion of a classifier the manifest names" joins what wakes an extension.
+`extension-that-does-not-answer` already replaces this decision and repeats the same list, so it
+can carry the change.

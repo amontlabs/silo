@@ -1,6 +1,6 @@
 {
   "name": "Processes in the record",
-  "what": "The processes a computer ran are in the record as reports from inside: the command, its parent, and how it ended.",
+  "what": "The processes a computer ran are in the record as reports from inside: the command, its parent, the processor and memory it used while it ran, sampled, and how it ended.",
   "needs": [
     "record-of-a-computer",
     "processes-from-inside-linux",

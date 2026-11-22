@@ -1,6 +1,6 @@
 {
   "name": "Model calls in the record",
-  "what": "Each model call is in the record as a fact: the model that really answered, the tool calls in its reply, and their results in the next request, grouped into turns and conversations. The model's hidden reasoning is never opened; the record says that it passed, and its size. For a program whose traffic cannot be read, the record still has the hosts, sizes and timing.",
+  "what": "Each model call is in the record as a fact: the model that really answered, the effort and speed asked for, the token counts with cache reads and writes, what the provider said of a plan's limits, the tool calls in its reply, and their results in the next request, grouped into turns and conversations. The model's hidden reasoning is never opened; the record says that it passed, and its size. For a program whose traffic cannot be read, the record still has the hosts, sizes and timing.",
   "needs": [
     "model-traffic-read",
     "tool-calls-from-traffic",

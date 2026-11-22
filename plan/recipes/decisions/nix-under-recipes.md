@@ -45,11 +45,6 @@ and machines that can be rebuilt exactly." The answer is a proposal built on the
   was found for the other agent programs.
 - The Nix store is heavy. Linux computers can share one store, read-only (`nix-store-shared`).
 
-## Against it
-
-`recipe-format` says a recipe is written in an existing format that people know. This answer says
-a user picks pieces and writes a short list. The two are to be squared.
-
 ## How sure the research is
 
 - Each claim of the researchers carries its source. Some rest only on a search summary.

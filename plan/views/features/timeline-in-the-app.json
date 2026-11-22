@@ -1,6 +1,6 @@
 {
   "name": "Timeline",
-  "what": "The place Timeline shows one line of time for each computer, with its checkpoints, turns, commands, asks and recordings. A routine stretch collapses into one line with a count, and decisions and thrashing stay visible.",
+  "what": "The place Timeline shows one line of time for each computer, with its checkpoints, turns, commands, asks, alerts and recordings. A routine stretch collapses into one line with counts, decided from facts and reports only, and the line says when a classifier calls part of it thrashing. From a moment on the line you fork, or restore the computer to it.",
   "needs": [
     "timeline-place",
     "routine-stretch-collapses",
@@ -12,7 +12,8 @@
     "checkpoints-taken-on-their-own",
     "how-each-run-is-going",
     "forking-a-computer",
-    "restore-to-a-checkpoint"
+    "restore-to-a-checkpoint",
+    "app-as-text"
   ],
   "keeps": [
     "never-shown-as-a-fact"

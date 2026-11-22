@@ -1,6 +1,6 @@
 {
   "name": "Receipts",
-  "what": "Each run, task or fork has a receipt: an account made from the record, not by the agent, that a person can judge in a minute. It holds what you asked the agent word for word, the commands and their exit codes, the checks and their results, the files that changed and what is only here, the hosts reached and what was sent to them, the secrets used by name, the model calls and their spend, the time split between work and waiting, the asks and their answers, recordings of the screen, and what could not be attributed or is missing. The agent's own summary can be shown beside it, marked as the agent's.",
+  "what": "Each run, task or fork has a receipt: an account made from the record, not by the agent, that a person can judge in a minute. It holds what you asked the agent word for word, the commands and their exit codes, for a task, the checks Silo ran and their results, the files that changed and what is only here, the hosts reached, how much was sent to each and, where Silo reads the traffic, what was sent, the secrets used by name, the model calls and their spend, the time split between work and waiting, the asks and their answers, recordings of the screen, and what could not be attributed or is missing. The agent's own summary can be shown beside it, marked as the agent's.",
   "needs": [
     "what-a-receipt-is",
     "what-a-receipt-holds",
@@ -15,7 +15,8 @@
     "hosts-reached-and-denied",
     "model-calls-in-the-record",
     "spend-per-conversation",
-    "how-a-path-comes-back"
+    "how-a-path-comes-back",
+    "app-as-text"
   ],
   "keeps": [
     "never-shown-as-a-fact",

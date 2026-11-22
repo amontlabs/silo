@@ -13,7 +13,8 @@
     "timeline-in-the-app",
     "disk-in-the-app",
     "network-in-the-app",
-    "held-requests-and-asks"
+    "held-requests-and-asks",
+    "app-as-text"
   ],
   "keeps": [
     "never-shown-as-a-fact"

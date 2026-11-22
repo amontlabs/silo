@@ -1,6 +1,6 @@
 {
   "name": "Forks",
-  "what": "You fork a computer, or one of its checkpoints, and the fork lives its own life with its own display, while the computer it came from loses nothing. The fork gets a new identity, with its scheduled jobs and named services off, so it never repeats what its source does. It gets no secrets, no access to repositories of its own and no push unless you, or a rule you set, give it more, and never more than its parent has.",
+  "what": "You fork a computer, or one of its checkpoints, and the fork lives its own life with its own display, while the computer it came from loses nothing. A fork you ask for is refused, with the reason, when the Mac already runs as many computers as it may, or when the fork is macOS and two macOS computers already run. The fork gets a new identity, with its scheduled jobs and named services off, so it never repeats what its source does. It gets no secrets, no access to repositories of its own and no push unless you, or a rule you set, give it more, and never more than its parent has.",
   "needs": [
     "checkpoints-taken-on-their-own",
     "fork-from-the-moment",

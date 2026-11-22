@@ -1,6 +1,6 @@
 {
   "name": "Precautions on reports and opinions",
-  "what": "You set a precaution on a report or on a classifier's opinion. It can alert you, take a checkpoint, pause the computer, take back a secret, close a network or another channel, and deny or hold a request still waiting; it never allows, resumes or stops a computer. It says what it rests on, the app shows it as not exact, and by default the computer sees nothing of it.",
+  "what": "You set a precaution on a report or on a classifier's opinion, or on an opinion that has lasted a time you set. It can alert you, take a checkpoint, pause the computer, take back a secret, close a network or another channel, and deny or hold a request still waiting; it never allows, resumes or stops a computer. It says what it rests on, the app shows it as not exact, and by default the computer sees nothing of it.",
   "needs": [
     "allow-hold-or-deny",
     "what-a-report-may-trigger",

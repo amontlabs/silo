@@ -1,6 +1,6 @@
 {
   "name": "Disk",
-  "what": "The place Disk shows what takes space and who put it there, what changed, and what was produced.",
+  "what": "The place Disk shows what takes space on your Mac (each computer, its checkpoints and the bin) and, inside a computer, who put it there, what changed, what is only here, and what was produced.",
   "needs": [
     "disk-place",
     "kinds-look-different",
@@ -8,7 +8,8 @@
     "file-changes-in-the-record",
     "what-each-run-wrote",
     "which-run-did-it",
-    "how-a-path-comes-back"
+    "how-a-path-comes-back",
+    "app-as-text"
   ],
   "keeps": [
     "never-shown-as-a-fact",

@@ -9,7 +9,7 @@ the bin, by itself.
 The options:
 
 - As filed (recommended). Bringing a computer back from the bin, copying a fork's files into its
-  parent, and giving an extension the tool that forwards alerts and asks are granting. Purging
+  parent, and giving an extension a tool that reads the record of a computer are granting. Purging
   files, putting back paths, removing a checkpoint, emptying the bin, leaving paths out of
   checkpoints, and removing content from the record's store at its size limit are destructive. So
   each of them needs you or a rule, and no opinion can do any of them. A copy into main first saves

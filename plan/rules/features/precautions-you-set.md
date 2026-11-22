@@ -9,7 +9,8 @@ wrong and resume.
 The options:
 
 - Build it (recommended). Something that can be wrong may still protect: it pauses, alerts, takes a
-  checkpoint, takes back a secret or closes a network, and it never grants or ends anything. It
+  checkpoint, takes back a secret or closes a network, and it never grants or ends anything. It can
+  act at once, or only when an opinion has lasted a time you set, such as "stuck for 15 minutes". It
   costs time when it is wrong. In this scene the night's work waited until morning for nothing.
 - Leave it out. Only rules act, on what Silo saw itself. It costs every case that a fact cannot
   describe, such as "this run looks like it is being steered by what it read".

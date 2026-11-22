@@ -1,6 +1,6 @@
 {
   "name": "Promises with passing checks",
-  "what": "Silo promises in public only the properties whose check has run and passed. Each result says what was checked and how, such as \"checked on every sequence of up to N calls\", and never \"proven\".",
+  "what": "Silo promises in public only the properties whose checks pass on the version it describes, and a promise whose check fails comes off until it passes again. Each result says what was checked and how, such as \"checked on every sequence of up to N calls\", and what the check does not look at. It never says \"proven\".",
   "needs": [
     "public-promises",
     "how-results-are-said",

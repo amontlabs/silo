@@ -1,11 +1,11 @@
 {
   "asks": "What does \"unattributed\" mean?",
-  "answer": "Said of what the boundary saw happen and no run is shown to have done.",
+  "answer": "Said of what the boundary saw happen and neither a run nor you is shown to have done.",
   "sets": [
     {
       "in": "words",
       "word": "unattributed",
-      "means": "Said of what the boundary saw happen and no run is shown to have done."
+      "means": "Said of what the boundary saw happen and neither a run nor you is shown to have done."
     }
   ]
 }

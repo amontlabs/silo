@@ -1,4 +1,4 @@
 {
   "asks": "Can a budget be a rate?",
-  "answer": "Yes. Besides a total, a budget can limit what is spent in any hour or in any day. Like any budget on a computer or a conversation it is a rule, since Silo sees each model call and its time exactly. When it is reached, new metered requests are denied or held as for any budget, until what was spent in the last hour, or the last day, is under the limit again. A limit on something other than spend, such as new conversations per minute, is a rule on a count and not a budget."
+  "answer": "Yes. Besides a total, a budget can limit what is spent in any hour or in any day. Like any budget on a computer or a conversation it is a rule, since Silo sees each model call and its time exactly. When it is reached, no further metered request leaves, as for any budget, until what was spent in the last hour, or the last day, is under the limit again. A limit on something other than spend, such as new conversations per minute, is a rule on a count and not a budget."
 }

@@ -1,11 +1,11 @@
 {
   "asks": "What does a budget on a computer or on a conversation promise at the moment it is reached?",
-  "answer": "A budget on a computer or on a conversation denies or holds what it meters: once it is reached, no further metered request leaves. The calls already under way finish, even past the budget, and none is cut midway. So what is spent can end over the budget by those calls at most.",
+  "answer": "Once a budget on a computer or on a conversation is reached, no further request it meters leaves; `budget-denies-or-holds` says what then happens to that request. The calls already under way finish, even past the budget, and none is cut midway. So what is spent can end over the budget by those calls at most. A call to a model Silo has no price for does not leave when a budget covers it, since the budget could not count it, and the agent program gets an error that says so.",
   "sets": [
     {
       "in": "traffic/properties",
       "id": "budget-stops-what-it-meters",
-      "says": "A budget on a computer or on a conversation denies or holds what it meters: once it is reached, no further metered request leaves, and only the calls already under way may end past it.",
+      "says": "Once a budget on a computer or on a conversation is reached, no further request it meters leaves, and only the calls already under way may end past it.",
       "kind": "safety",
       "check": [
         "hostile test"

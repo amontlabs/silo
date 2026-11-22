@@ -22,8 +22,8 @@ or a report of a known kind.
 | Kind | What it says | Fact or report |
 |---|---|---|
 | control | A computer was created, started, paused, resumed, stopped or dropped. A checkpoint, a fork, a restore. A rule or a precaution was set. An ask was raised, and answered yes or no, or ended without your answer, with the reason it ended. A question was put to you and answered. An alert was raised. A classifier gave an opinion. A precaution acted. A secret was given or taken back. An extension was granted a tool. Each with who did it. An answer to an ask and a grant also say what Silo did and what came of it. | Fact |
-| process | Started: command, parent, user. Exited: code, and totals of processor, memory and disk use. | Report |
-| file | Created, changed, deleted or renamed: path and change in size. | Fact. Which process did it is a separate report that points to it. |
+| process | Started: command, parent, user. While it runs: processor and memory, sampled. Exited: code, and totals of processor, memory and disk use. | Report |
+| file | Created, changed or deleted: path and change in size. A rename is a delete and a create (`file-changes-from-outside`). | Fact. Which process did it is a separate report that points to it. |
 | connection | Host, port, bytes each way. Allowed, denied or held, and what decided it: a rule or a precaution with its version, your answer, Silo's limit on a hold, or no rule at all. For opened traffic: method, path, status and sizes. The secret used, by name. | Fact. Which process owned it is a separate report. |
 | model call | Provider and login by name. Model asked and model that answered. Tokens in, out and cached, and cost. Conversation and turn. The tool calls the reply asked for, and the result sent back for each, which includes the output of commands. A refusal or a reroute. What the provider says is left of a limit. | Fact, when the traffic can be read. An agent program's own account of a call is a separate report. |
 | screen | A stretch of recording while an agent drives the screen, and the input events. | Fact |

@@ -37,7 +37,7 @@ Everything below is an agent's proposal. The owner has not ruled on it.
 fixed list. `extension-tools`, taken, says an extension uses only tools, and that a tool reads,
 shows or protects. Only one tool takes an answer today: the one that protects a computer's
 requests, where Silo asks and the extension answers "let it go on", "deny" or "hold". Nothing says
-how any other value becomes an opinion that Silo keeps, such as the kind of a call or how a path
+how any other value becomes an opinion that Silo keeps, such as the kind of a request or how a path
 would come back (`how-a-path-comes-back`).
 
 ## The proposal: every opinion is an answer to a question Silo defines

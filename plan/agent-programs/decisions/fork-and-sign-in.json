@@ -1,6 +1,6 @@
 {
   "asks": "Does a fork carry the sign-in of an agent program?",
-  "answer": "No. A fork is made without the sign-ins that agent programs keep on the disk, as it is made without secrets, unless you, or a rule you set, let it carry one. In a fork without one, you sign in again.",
+  "answer": "No. A fork is made without the sign-ins that agent programs keep on the disk, as it is made without secrets, unless you, or a rule you set, let it carry one. In a fork without one, you sign in again. Silo can leave out only the sign-in of a program it knows: for another, the fork may carry it, and Silo says so before the fork is made.",
   "needs": [
     "login-handling"
   ]

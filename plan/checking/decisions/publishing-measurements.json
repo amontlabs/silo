@@ -1,6 +1,6 @@
 {
   "asks": "When are measurements published?",
-  "answer": "Every speed budget is measured at each release and published, met or missed. Each measurement gives its 99th percentile and its worst case, the number of interleaved runs, the workload, the machine and its system, the version of Silo and the date. A budget not measured yet is shown as not measured.",
+  "answer": "Every speed target is measured at each release and published, met or missed. Each measurement gives its 99th percentile and its worst case, the number of interleaved runs, the workload, the machine and its system, the version of Silo and the date. A target not measured yet is shown as not measured.",
   "needs": [
     "how-speed-is-measured"
   ]

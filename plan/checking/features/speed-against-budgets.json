@@ -1,6 +1,6 @@
 {
-  "name": "Speed measured against budgets",
-  "what": "Forking, starting a computer, taking a checkpoint and the memory of an idle computer each have a budget, written before their code as a 99th percentile and a worst case. Each is measured as a distribution over repeated interleaved runs, and so is the cost of keeping the record, on a build and a parallel test suite, in a computer and on a plain machine. Recovery time after a crash is measured too.",
+  "name": "Speed measured against targets",
+  "what": "Forking, starting a computer, taking a checkpoint and the memory of an idle computer each have a target, written before their code as a 99th percentile and a worst case. Each is measured as a distribution over repeated interleaved runs, and so is the cost of keeping the record, on a build and a parallel test suite, in a computer and on a plain machine. Recovery time after a crash is measured too.",
   "needs": [
     "speed-budgets",
     "how-speed-is-measured",

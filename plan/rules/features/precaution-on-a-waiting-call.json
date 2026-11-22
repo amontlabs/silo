@@ -1,6 +1,6 @@
 {
   "name": "A precaution on a tool call that waits",
-  "what": "An extension granted the tool that protects a computer's requests can be asked about each tool call in that computer's model replies, and the call waits for its answer. If it denies the call, the model sees its own call with an error that says it was denied. If it holds the call, the ask you get shows its answer as an opinion.",
+  "what": "An extension granted the tool that protects a computer's requests can be asked about each tool call in that computer's model replies, and that tool call waits for its answer. If it denies the tool call, the model sees its own tool call with an error that says it was denied. If it holds the tool call, the ask you get shows its answer as an opinion.",
   "needs": [
     "precautions-you-set",
     "classifier-asked-synchronously",

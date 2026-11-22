@@ -1,6 +1,6 @@
 {
   "name": "File changes in the record",
-  "what": "Every file a computer created, changed, deleted or renamed is in the record as a fact, seen from outside the computer.",
+  "what": "The files a computer created, changed or deleted from one checkpoint to the next are in the record as facts, seen from outside the computer. A rename shows as a delete and a create. A file created and deleted between two checkpoints is not in the record.",
   "needs": [
     "record-of-a-computer",
     "file-reads",

@@ -1,6 +1,6 @@
 {
   "name": "Importing and installing an extension",
-  "what": "You import an extension, and before anything changes you see the rules it adds, the computer it would make, what wakes that computer, and the tools it may use with the paths they add: from which computer data can reach which host. Installing it switches all of that on at once, on the computers you choose, and makes its computer from the recipe its manifest names, with the secrets that recipe asks you for. Silo holds the extension to its manifest, you can always see its computer and what wakes it, and what that computer spends is your choice, metered like any computer.",
+  "what": "You import an extension, and before anything changes you see the rules it adds, the computer it would make, what wakes that computer, and the tools it may use with the paths they add: from which computer data can reach which host, your Mac or another computer. Installing it switches all of that on at once, on the computers you choose, and makes its computer from the recipe its manifest names, with the secrets that recipe asks you for. Silo holds the extension to its manifest, you can always see its computer and what wakes it, and what that computer spends is your choice, metered like any computer.",
   "needs": [
     "extension-manifest",
     "import-then-install",

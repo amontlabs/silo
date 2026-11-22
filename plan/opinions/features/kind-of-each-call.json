@@ -1,6 +1,6 @@
 {
-  "name": "The kind of each call",
-  "what": "A classifier that ships with Silo sorts each call a computer makes: model, package registry, Git, an outside action that changes something elsewhere, or other. Whether a host is seen for the first time is not part of it: that is counted from facts.",
+  "name": "The kind of each request",
+  "what": "A classifier that ships with Silo sorts each request a computer makes: model, package registry, Git, an outside action that changes something elsewhere, or other. Whether a host is seen for the first time is not part of it: that is counted from facts.",
   "needs": [
     "opinions-beside-the-record",
     "as-sure-as-least-sure",

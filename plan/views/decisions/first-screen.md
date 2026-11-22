@@ -16,3 +16,11 @@ interface rules.
                              claude #1  1 h 12 · $6.40 · 38 files · tests passed [receipt]
  [Checkpoint] [Fork] [Pause all]                     Now · Disk · Network · Timeline
 ```
+
+## Raised on 22 November 2026, by an agent
+
+Claude finishes its work in the computer client-a. Its line on the first screen opens a receipt,
+which is none of the four places, and a line that asks is answered on the line, with allow or
+deny. The answer here says "Each line of the list opens one of the four places below". An answer
+that covers both: "Each line is answered in place, or opens one of the four places or a receipt."
+`one-queue`, not decided, already assumes this. No decision replaces this one yet.

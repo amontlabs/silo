@@ -11,7 +11,10 @@ The options:
 
 - Build it (recommended). Nothing an extension does is a surprise, and you choose which computers it
   touches. It costs a list to read before each install, and a computer of its own on your Mac for
-  each extension that runs code.
+  each extension that runs code. Taking an extension back is set aside for later
+  (`installing-an-extension`), so until that is built, what you granted stays granted: if you want
+  Disk watch gone, you can only stop its computer. An agent recommends bringing that feature forward
+  to be built with this one, and it moves only if you say so.
 - Leave it out. No extension can be added. It costs every other feature of this part, which all
   start with an installed extension.
 

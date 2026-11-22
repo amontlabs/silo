@@ -1,8 +1,8 @@
 {
   "name": "Hostile tests on the real thing",
-  "what": "The real drivers and the real boundary, the virtual machine monitors that run the computers (libkrun and Apple's Virtualization framework) and the network stack among them, are checked by hostile tests and live checks on the real thing. Each test tries to break a property's sentence, the same sentence the user is told and the simulator checks.",
+  "what": "The real drivers and the real boundary, the virtual machine monitors that run the computers (libkrun and Apple's Virtualization framework) and the network stack among them, are checked by hostile tests and live checks on the real thing. Each test tries to break a property's sentence, the same sentence the user is told and its other checks test.",
   "needs": [
-    "checks-on-the-real-thing",
+    "what-checks-the-real-drivers",
     "property-serves-three-times",
     "how-results-are-said",
     "computers-main-on-a-mac",
@@ -10,6 +10,6 @@
   ],
   "suggest": {
     "verdict": "take",
-    "why": "The simulator checks Silo's engine against fakes, and only tests on the real computers and the real network show that an agent inside cannot get around a promise; `checks-on-the-real-thing`, taken, already asks for them."
+    "why": "The simulator checks Silo's engine against fakes, and only tests on the real computers and the real network show that an agent inside cannot get around a promise; `what-checks-the-real-drivers`, taken, already asks for them."
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "Which run did it",
-  "what": "Classifiers that ship with Silo say which run each conversation belongs to, and whether something was done by you or by an agent: whatever does not descend from an agent program is you. For each path, they say which run wrote it last and whether that run is still alive. They also say which paths many runs wrote.",
+  "what": "Classifiers that ship with Silo say which run each conversation belongs to, and whether something was done by you or by an agent: what descends from a session opened over SSH from outside the computer, and not from an agent program, is you, and what neither a run nor you is shown to have done is unattributed. For each path, they say which run wrote it last and whether that run is still alive. They also say which paths many runs wrote.",
   "needs": [
     "opinions-beside-the-record",
     "you-or-an-agent",

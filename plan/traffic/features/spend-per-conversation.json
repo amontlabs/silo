@@ -1,6 +1,6 @@
 {
   "name": "Spend",
-  "what": "Silo shows what each conversation and each computer spent, in dollars or as a share of a plan, never as raw tokens.",
+  "what": "Silo shows what each conversation and each computer spent, in dollars at the provider's API prices and never as raw tokens. With a subscription, it also shows how much of the plan's limits is used, for the whole account.",
   "needs": [
     "model-calls-in-the-record",
     "how-spend-is-shown",

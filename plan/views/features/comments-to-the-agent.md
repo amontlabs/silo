@@ -15,3 +15,7 @@ The options:
 
 Recommended: leave it out. You said that working with the agents is the job of the client app, such
 as T3 Code, and Silo's window is where you see the work.
+
+## Notes
+
+The question is put to the owner in `what-silo-does-not-build`, under "The choice".

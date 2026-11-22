@@ -1,11 +1,12 @@
 {
   "name": "Leaving Silo",
-  "what": "When you leave Silo, you take each computer as a standard disk image, and each recipe and rule as text.",
+  "what": "When you leave Silo, you take each computer as a standard disk image, each recipe and rule as text, and the record as the lines of JSON that the `silo` command prints.",
   "needs": [
     "leaving-silo",
     "computers-main-on-a-mac",
     "made-from-a-recipe",
-    "allow-hold-or-deny"
+    "allow-hold-or-deny",
+    "record-of-a-computer"
   ],
   "suggest": {
     "verdict": "take",

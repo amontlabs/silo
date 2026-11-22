@@ -4,7 +4,7 @@ Proposed, as a property checked by a hostile test.
 
 - The design record's sentence goes on: "A budget on a run is a precaution and promises nothing." That part is the answer of `budget-rule-or-precaution`, in force.
 - Whether a budget denies or holds at each threshold: `budget-denies-or-holds`, open.
-- Whether a program can get around a budget on a conversation by starting a new one: `recognising-a-conversation`.
+- Whether a program can get around a budget on a conversation by starting a new one: `what-a-conversation-budget-promises`.
 
 ## The choice
 
@@ -22,6 +22,18 @@ The options:
 
 Recommended: running calls finish. A cut answer is paid for and useless, and the overshoot is at
 most the calls already running.
+
+A second case: Claude Code in main switches to a model released yesterday, and Silo has no price for
+it yet, so the budget of 50 dollars cannot count its calls.
+
+The options:
+
+- Deny that model's calls (recommended). They get an error that says why, and other models go on. It
+  costs a wait for the price, or taking the budget off main to use that model.
+- Let them pass uncounted, and say so. The agent works on. It costs the limit, since main can then
+  spend far past 50 dollars with nothing to end it.
+
+Recommended: deny that model's calls. A budget that a change of model gets around is not a limit.
 
 The lesson from Guillotine below admits each call against what remains of the budget. Where that
 keeps a call from starting before the budget is reached, it is the third option.

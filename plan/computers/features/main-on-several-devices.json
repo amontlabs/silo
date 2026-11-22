@@ -1,6 +1,6 @@
 {
   "name": "Main on several devices",
-  "what": "The same main on several devices.",
+  "what": "You reach one main from several devices. It runs on one of them.",
   "suggest": {
     "verdict": "take",
     "why": "Developers work from more than one machine, and one main reached from each keeps one place where the agents live."

@@ -1,6 +1,6 @@
 {
   "asks": "Can a classifier be asked about each tool call before it runs?",
-  "answer": "Yes, when you set a precaution that says so. Silo then asks the classifier about the tool calls in each reply of the model before the reply reaches the agent program, and the reply waits for the opinion. With no such precaution nothing waits. The wait has Silo's limit. When no opinion comes before it, the wait ends as the precaution says: the tool call is denied, or it is left to the rules. This works only for an agent program whose model traffic Silo can read; for another one the precaution cannot be set, and Silo says so. How a reply that streams is made to wait is to find out.",
+  "answer": "Yes, when you set a precaution that says so. Silo then asks the classifier about the tool calls in each reply of the model before the reply reaches the agent program, and the reply waits for the opinion. Each tool call in the waiting reply counts as a request, since it asks to cross the boundary into the computer, so the precaution can deny or hold it. With no such precaution nothing waits. The wait has Silo's limit. When no opinion comes before it, the wait ends as the precaution says: the tool call is denied, or it is left to the rules. This works only for an agent program whose model traffic Silo can read; for another one the precaution cannot be set, and Silo says so. How a reply that streams is made to wait is to find out.",
   "needs": [
     "what-a-precaution-may-do"
   ]

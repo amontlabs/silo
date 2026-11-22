@@ -11,7 +11,10 @@ The options:
 
 - Build it (recommended). Each step wakes only when the one before is unsure, so the costly one sees
   a few calls a day. It costs time when a request waits for all three, since they share one limit
-  and the last may not get its turn, and you set up each step.
+  and the last may not get its turn, and you set up each step. It also costs a change to
+  what you decided wakes an extension (`what-wakes-an-extension`), which is a time, a new line of
+  the record, your click or a request that waits. The opinion of a pattern inside Silo is none of
+  these.
 - Leave it out. Each extension looks at everything it is woken for. It costs tokens: an agent asked
   about 2,000 calls a day, or only the small model's opinion.
 

@@ -11,6 +11,7 @@ The options:
 - Build it (recommended). Any computer, or any of its checkpoints, can be forked. It costs a cold
   start: the fork boots, and the agent program starts again in it, where you may have to sign in. On
   a Mac, Apple allows two macOS computers at once, so a macOS main can run one macOS fork at a time.
+  A second is refused, with the reason, until one of the two stops.
 - Leave it out. Risky work happens in main, or in a fresh computer made from a recipe. It costs main
   itself when the try goes wrong, or the time to set up again everything that is not in a recipe.
 

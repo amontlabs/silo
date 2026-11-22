@@ -12,7 +12,8 @@ The options:
 - Build it (recommended). For each path the app says which run wrote it last and whether that run is
   still going, which conversation belongs to which run, which paths several runs wrote, and what you
   did yourself. It costs certainty: each answer is Silo's opinion, from which program started which,
-  and an agent inside can bend that. What no run explains stays unattributed.
+  and an agent inside can bend that. What neither a run nor you explains
+  stays unattributed.
 - Leave it out. It costs the answer to "who did this?", and the features that need it: putting back
   one run's work, a budget on a run, and the map of hot files.
 
