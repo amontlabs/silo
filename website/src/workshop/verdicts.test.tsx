@@ -48,11 +48,31 @@ describe('the owner\'s verdict', () => {
     }
   });
 
+  it('holds the room of the buttons for the owner remembered until me answers, then draws them in it, or nothing for another', async () => {
+    for (const [answered, shown] of [[theOwner, true], [visitor, false]] as const) {
+      localStorage.setItem('silo-workshop-me', JSON.stringify({ login: 'polarzero', avatar: '', owner: true }));
+      let answerMe: (reply: Reply) => void = () => {};
+      mockApi({ me: theOwner, routes: { 'GET me': () => new Promise((resolve) => { answerMe = resolve; }) } });
+      history.replaceState(null, '', '/workshop#part-b/create');
+      await renderApp(built());
+      await waitFor(() => expect(rowButton(NAME)).toHaveAttribute('aria-expanded', 'true'));
+      const held = item().querySelector('.ws-verdict.ws-held');
+      expect(held).not.toBeNull();
+      expect(held).toHaveAttribute('aria-hidden', 'true');
+      expect(button(/^Take$/)).toBeNull();
+      await act(async () => answerMe(ok(answered)));
+      await waitFor(() => expect(item().querySelector('.ws-verdict.ws-held')).toBeNull());
+      expect(button(/^Take$/) !== null).toBe(shown);
+      cleanup();
+      localStorage.clear();
+    }
+  });
+
   it('arms on the first press and sends on the second: the id, the verdict and the build, nothing else', async () => {
     const calls = await openCreate(built(), theOwner);
     await waitFor(() => expect(button(/^Take$/)).not.toBeNull());
     fireEvent.click(button(/^Take$/) as HTMLElement);
-    expect(button(/^Confirm take$/)).not.toBeNull();
+    expect(button(/^Confirm take$/)).toHaveTextContent(/^Confirm/);
     expect(posts(calls, 'verdict')).toHaveLength(0);
     // Pressing the other arms it instead.
     fireEvent.click(button(/^Drop$/) as HTMLElement);

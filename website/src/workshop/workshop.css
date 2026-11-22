@@ -367,14 +367,21 @@
 .ws .ws-btn.go:hover:not(:disabled) { background: var(--accent-hover); border-color: #d68200; }
 .ws .ws-btn:focus-visible { outline-offset: 2px; }
 .ws .ws-btn:disabled { opacity: .5; }
-/* The owner's Take and Drop, at the end of an entry's state line and as tall as it. Each button keeps the width of its
-   longest word (Take, Confirm take, Taking…), so nothing moves when it is armed or sent; an armed one is outlined. */
-.ws-verdict { display: inline-flex; gap: 8px; margin-left: auto; }
-.ws .ws-btn.ws-vbtn { display: inline-grid; justify-items: center; }
+/* The owner's Take and Drop, at the end of an entry's state line, in the family of Copy id. Each button keeps the width
+   of its longest word (Drop, Confirm, Dropping…), so nothing moves when it is armed or sent; an armed one is outlined
+   in the ink. While `me` has not answered for the owner remembered, the same boxes hold their room as placeholders. */
+.ws-verdict { display: inline-flex; gap: 6px; margin-left: auto; }
+.ws .ws-vbtn { display: inline-grid; justify-items: center; padding: 2px 8px; border: 1px solid var(--line); border-radius: 3px; font: 12px/16px var(--mono); color: var(--muted); }
+.ws .ws-vbtn.take { color: var(--accent-ink); }
+.ws .ws-vbtn:hover:not(:disabled) { color: var(--ink); border-color: var(--faint); }
+.ws .ws-vbtn.armed, .ws .ws-vbtn.armed:hover:not(:disabled) { color: var(--ink); border-color: var(--ink); }
+.ws .ws-vbtn:focus-visible { outline-offset: 2px; }
+.ws .ws-vbtn:disabled { opacity: .5; }
+.ws .ws-vbtn[aria-busy] { cursor: progress; }
 .ws-vbtn > span { grid-area: 1 / 1; }
-.ws-vbtn > span[aria-hidden] { visibility: hidden; }
-.ws .ws-btn.ws-vbtn.armed { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
-.ws .ws-btn.ws-vbtn[aria-busy] { cursor: progress; }
+.ws-vbtn > span + span, .ws-vbtn > span[aria-hidden] { visibility: hidden; }
+.ws-verdict.ws-held .ws-vbtn > span { visibility: hidden; }
+.ws-verdict.ws-held .ws-vbtn { border-color: transparent; background: color-mix(in srgb, var(--line) 40%, transparent); animation: ws-pulse 1.6s ease-in-out infinite; }
 .ws-refused { margin-top: 6px; font-size: 14px; color: var(--no); overflow-wrap: anywhere; }
 .ws-notice { position: fixed; z-index: 30; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: min(560px, calc(100vw - 32px)); padding: 9px 14px; border: 1px solid var(--no); border-radius: 3px; background: var(--paper); box-shadow: 0 6px 18px #0000001f; color: var(--no); font-size: 13.5px; animation: ws-appear .2s var(--ease-out) both; }
 .ws-pending { opacity: .55; }

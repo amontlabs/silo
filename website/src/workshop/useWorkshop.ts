@@ -122,6 +122,8 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   const shownData = useMemo(() => withVerdicts(data, keptVerdicts(data.builtFrom, Date.now())), [data, verdictsTick]);
   /** The owner may take and drop: `me` said so on this visit, and the page knows the commit it was built from. */
   const mayDecide = typeof answer === 'object' && answer !== null && answer.owner === true && data.builtFrom !== null;
+  /** The owner was signed in last and `me` has not answered yet: the room of the buttons is held, so they move nothing. */
+  const verdictHeld = answer === undefined && remembered?.owner === true && data.builtFrom !== null;
 
   /** A state is shown, from memory or from the server. */
   const liveOk = live.state !== null;
@@ -582,7 +584,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     live, liveOk, waiting, offline, settled, me, retry, plan, rowByKey, details, prefetch, notes, wantNotes, facts, wantFacts, histories, wantHistory, fetchNow, sending, votePending, voteOwn,
     votes, commentVotes, commentVotePending, toggleCommentVote, suggestionsSending, notice, drafts, setDrafts, suggestDraft,
     setSuggestDraft, announce, setAnnounce, signinFailed, sendComment, toggleVote,
-    sendSuggestion, signOut, unsent, mayDecide, verdictPending, verdictRefusals, sendVerdict,
+    sendSuggestion, signOut, unsent, mayDecide, verdictHeld, verdictPending, verdictRefusals, sendVerdict,
   };
 }
 

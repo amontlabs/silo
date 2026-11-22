@@ -304,17 +304,19 @@ export function offersVerdict(row: Row): boolean {
   return row.status === 'undecided' || (row.by === 'agents' && (row.status === 'decided' || row.status === 'dropped'));
 }
 
-const VERDICT_WORDS: Record<Verdict, { idle: string; armed: string; pending: string }> = {
-  take: { idle: 'Take', armed: 'Confirm take', pending: 'Taking…' },
-  drop: { idle: 'Drop', armed: 'Confirm drop', pending: 'Dropping…' },
+const VERDICT_WORDS: Record<Verdict, { idle: string; pending: string }> = {
+  take: { idle: 'Take', pending: 'Taking…' },
+  drop: { idle: 'Drop', pending: 'Dropping…' },
 };
+const ARMED = 'Confirm';
 
 /**
- * The owner's Take and Drop. A first press arms the button and a second confirms it; an armed button goes back after
- * ARM_MS or when the focus leaves the pair. While the server writes the verdict, the pressed one says so and both
- * are disabled. Each button keeps the width of its longest word, so nothing moves as it changes.
+ * The owner's Take and Drop. A first press arms the button ("Confirm") and a second confirms it; an armed button goes
+ * back after ARM_MS or when the focus leaves the pair. While the server writes the verdict, the pressed one says so
+ * and both are disabled. Each button keeps the width of its longest word, so nothing moves as it changes. `held`
+ * draws the same buttons as placeholders, inert, while `me` has not answered for the owner remembered.
  */
-function VerdictButtons({ row, ctx }: { row: Row; ctx: EntryContext }) {
+function VerdictButtons({ row, ctx, held = false }: { row: Row; ctx: EntryContext; held?: boolean }) {
   const { w } = ctx;
   const id = planId(row) as string;
   const pending = w.verdictPending[id];
@@ -333,18 +335,28 @@ function VerdictButtons({ row, ctx }: { row: Row; ctx: EntryContext }) {
     setArmed(null);
     void w.sendVerdict(row, verdict);
   };
+  if (held) {
+    return (
+      <span className="ws-verdict ws-held" aria-hidden="true" inert>
+        {(['take', 'drop'] as const).map((verdict) => (
+          <span key={verdict} className={`ws-vbtn ${verdict}`}>{[VERDICT_WORDS[verdict].idle, ARMED, VERDICT_WORDS[verdict].pending].map((word) => <span key={word}>{word}</span>)}</span>
+        ))}
+      </span>
+    );
+  }
   return (
     <span className="ws-verdict" role="group" aria-label="Your verdict" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setArmed(null); }}>
       {(['take', 'drop'] as const).map((verdict) => {
         const words = VERDICT_WORDS[verdict];
-        const now = pending === verdict ? words.pending : armed === verdict ? words.armed : words.idle;
+        const now = pending === verdict ? words.pending : armed === verdict ? ARMED : words.idle;
         return (
           <button
-            key={verdict} type="button" className={`ws-btn ws-vbtn${verdict === 'take' ? ' go' : ''}${armed === verdict ? ' armed' : ''}`}
+            key={verdict} type="button" className={`ws-vbtn ${verdict}${armed === verdict ? ' armed' : ''}`}
+            aria-label={armed === verdict ? `${ARMED} ${verdict}` : undefined}
             aria-busy={pending === verdict || undefined} disabled={Boolean(pending)} onClick={() => press(verdict)}
           >
             <span>{now}</span>
-            {[words.idle, words.armed, words.pending].filter((word) => word !== now).map((word) => <span key={word} aria-hidden="true">{word}</span>)}
+            {[words.idle, ARMED, words.pending].filter((word) => word !== now).map((word) => <span key={word} aria-hidden="true">{word}</span>)}
           </button>
         );
       })}
@@ -361,7 +373,7 @@ function StateLine({ row, ctx, children }: { row: Row; ctx: EntryContext; childr
     <>
       <div className="ws-state">
         <span className={tone}>{text}</span>{id ? <CopyId id={id} /> : null}{children}
-        {ctx.w.mayDecide && offersVerdict(row) ? <VerdictButtons row={row} ctx={ctx} /> : null}
+        {offersVerdict(row) && (ctx.w.mayDecide || ctx.w.verdictHeld) ? <VerdictButtons row={row} ctx={ctx} held={!ctx.w.mayDecide} /> : null}
       </div>
       {refusal ? <p className="ws-refused" role="alert">{refusal}</p> : null}
     </>
