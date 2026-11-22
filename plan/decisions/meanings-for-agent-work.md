@@ -20,6 +20,8 @@ and "run" is defined through it. The other two are read as written either way: a
 thing a turn asked for: a command, a file edit, a search", and a login is "a sign-in to a model
 provider, by subscription or by key".
 
+## Notes
+
 The record's word list (section 2) carries no mark. A word's meaning is in force only where a
 line marked Decided or Agreed, or settled in STATE, holds it. What this decision sets is the
 word list's own meaning, which replaces the word in `words.json` when taken.

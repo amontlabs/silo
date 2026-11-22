@@ -20,6 +20,8 @@ Recommended: kept apart. Computers die and Macs restart, and an app that shows a
 when it is not is worse than one that says it does not know yet. Kubernetes and NATS manage what
 they run this way.
 
+## Notes
+
 - The record checks `wanted-and-seen-agree` with the simulator.
 - What the engine does when a computer stops by itself is `computer-stops-by-itself`, in the
   part `computers`.

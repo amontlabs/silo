@@ -17,6 +17,8 @@ The options:
 Recommended: build it, in the stage "later", and for the same files only. Silo alerts and offers,
 and it moves no run and gives no work to anyone.
 
+## Notes
+
 From the list of smaller features the owner put on the roadmap on 21 November 2026. The owner's
 words on the list are in `silos-own-extensions`.
 

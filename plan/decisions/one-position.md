@@ -16,6 +16,8 @@ The options:
 Recommended: one position. It is true, it is short, and it explains what an agent program's own
 rules cannot do from inside.
 
+## Notes
+
 The design record gives this with no mark, and this comparison:
 
 | | A boundary the agent cannot touch | An account of what happened |

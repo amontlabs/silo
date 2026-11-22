@@ -17,5 +17,7 @@ The options:
 Recommended: the whole computer, with what was not seen marked. "Only agents work there" is your
 sentence and stays first. "Complete" is a promise nobody knows how to keep.
 
+## Notes
+
 The owner said the first sentence, "Only agents work there." The sentences after it explain it and
 carry no mark.

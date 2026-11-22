@@ -15,5 +15,7 @@ The options:
 
 Recommended: add the reason. A rule with its reason is followed where its wording runs out.
 
+## Notes
+
 The reason is worded by whoever wrote the plan. The design record gives the principle and its
 question, not a reason.

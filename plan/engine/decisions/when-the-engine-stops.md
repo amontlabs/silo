@@ -18,6 +18,8 @@ Recommended: computers keep running. Losing an agent's work to a fault in Silo i
 two, and the rules still apply while you wait. Whether the engine finds its computers again after it
 restarts is still to find out by a trial.
 
+## Notes
+
 - Suggested in the notes.
 - If the engine stops, in the record's table of processes: "Changes wait. A hold still ends at its
   limit, which the helper keeps." A hold's limit is `hold-limit`, in the part `boundary`.

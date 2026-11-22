@@ -17,4 +17,6 @@ The options:
 Recommended: developers and teams who run many agents and move fast. You said it, and the record and
 going back matter most to people who cannot read every step.
 
+## Notes
+
 The owner said this.

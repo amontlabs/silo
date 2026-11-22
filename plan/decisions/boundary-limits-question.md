@@ -15,6 +15,8 @@ The options:
 
 Recommended: a principle. Full access inside is the product, so a limit kept inside is not a limit.
 
+## Notes
+
 The sentence is in force: `where-limits-are-set`. The question is worded by whoever wrote the
 plan.
 

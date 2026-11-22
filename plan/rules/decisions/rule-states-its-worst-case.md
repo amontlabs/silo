@@ -17,6 +17,8 @@ The options:
 Recommended: every rule. A precaution already says its worst case when it is set, and a rule can do
 more than a precaution.
 
+## Notes
+
 An agent's part. Until 21 November 2026 the plan asked this twice: here, and as `rule-worst-case`,
 whose answer was the first sentence of this one and whose notes read "A proposal the design relies
 on, not yet decided." The two were made one, and this one moved from The boundary to this part,

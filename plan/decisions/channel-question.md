@@ -15,5 +15,7 @@ The options:
 Recommended: a principle. Full access inside is only acceptable because the ways out are few, listed
 and yours to open.
 
+## Notes
+
 Question 1 of the design record's section 12, marked Notes. The sentence is the first of 4.2,
 marked Notes. The reason is a concept of section 12, "A boundary is as strong as it is narrow".

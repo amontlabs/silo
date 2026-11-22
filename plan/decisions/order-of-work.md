@@ -16,6 +16,8 @@ The options:
 Recommended: the record first. It is what you fixed line by line in the discussion, and it puts
 first what sets Silo apart.
 
+## Notes
+
 The answer is worded by whoever wrote the plan. What the discussion said about order, with the
 design record's marks:
 

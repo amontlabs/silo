@@ -17,6 +17,8 @@ The options:
 Recommended: a principle. Asking is cheap, and the fix can wait for its stage. Not asking is how a
 note becomes a way to trick you.
 
+## Notes
+
 The sentence is decided, in `security-framing`. The question is worded by whoever wrote the plan.
 
 Once it is taken, `flood-never-removes-older-lines` follows from it: its writer named it in `from`,

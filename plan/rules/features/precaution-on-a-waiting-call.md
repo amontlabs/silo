@@ -18,6 +18,8 @@ The options:
 Recommended: build it. It is off until you install such an extension, and it is caution on top of
 the rules, never in place of them.
 
+## Notes
+
 An agent's doubt, from drafting this feature on 21 November 2026.
 
 A tool call is something the model's reply asks for, and the reply comes into the computer. Whether

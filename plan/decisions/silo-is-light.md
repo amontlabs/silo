@@ -16,6 +16,8 @@ The options:
 Recommended: a principle. You asked on 21 November that anything of Silo's be as light as possible,
 and a virtual machine is already heavy enough.
 
+## Notes
+
 Agent, 22 November 2026, from Guillotine and guillotine-mini (evmts), two Zig codebases by one
 maintainer.
 

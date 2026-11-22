@@ -17,4 +17,6 @@ The options:
 Recommended: a principle. The sentence is in force, and it only works if it is asked while a feature
 is designed.
 
+## Notes
+
 The sentence is in force: `bad-state`. The question is worded by whoever wrote the plan.

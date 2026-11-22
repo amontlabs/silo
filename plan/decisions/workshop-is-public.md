@@ -15,6 +15,8 @@ The options:
 Recommended: anyone signed in. Building in public is worth little if nobody can answer, and the
 verdicts stay yours.
 
+## Notes
+
 Decided on 16 November 2026, in these words:
 
 > The Workshop is a public page of silo.amontlabs.com that shows the plan as a map of the

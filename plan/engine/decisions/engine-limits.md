@@ -19,6 +19,8 @@ The options:
 Recommended: fixed limits. An agent can read a refusal with a reason and act on it, which it cannot
 do with a Mac out of memory. TigerBeetle is built this way.
 
+## Notes
+
 The record checks `nothing-grows-without-limit` with assertions.
 
 ## From Guillotine

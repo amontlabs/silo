@@ -18,6 +18,8 @@ The options:
 Recommended: finished or rolled back. Checkpoint, restore, fork and drop all have several steps, and
 you should not have to know them.
 
+## Notes
+
 The record checks `crash-finishes-or-rolls-back` with the simulator, with crashes.
 
 ## From Guillotine

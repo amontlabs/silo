@@ -16,6 +16,8 @@ The options:
 Recommended: leave it out as a feature. You get the same alert through a precaution, and Silo can
 ship that precaution ready to switch on.
 
+## Notes
+
 From the list of smaller features the owner put on the roadmap on 21 November 2026. The owner's
 words on the list are in `silos-own-extensions`.
 

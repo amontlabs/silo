@@ -18,6 +18,8 @@ The options:
 Recommended: slower, and nothing forgotten. Calls to the engine are rare next to what happens inside
 a computer, so the write is not what you will wait for.
 
+## Notes
+
 The record checks `accepted-call-never-forgotten` with the simulator, with crashes.
 
 ## From Guillotine

@@ -17,6 +17,8 @@ The options:
 Recommended: the seven answers. The objections are known from the research, and a short true answer
 is better found now than under a post.
 
+## Notes
+
 Proposed in the design record:
 
 | Objection | Answer |

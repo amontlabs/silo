@@ -16,5 +16,7 @@ The options:
 Recommended: a principle. What a thing does not have, it cannot leak or be tricked into using, and
 this is the rule security engineers call least privilege.
 
+## Notes
+
 Not in the design record: it was written for the sample of this plan. Its standard name, least
 privilege, is put forward in `standard-names`.

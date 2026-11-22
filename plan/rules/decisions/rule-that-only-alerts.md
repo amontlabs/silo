@@ -17,6 +17,8 @@ The options:
 Recommended: an alert decides nothing. Rules have no order and no rule means deny, and both stay
 simple only if an alert is never read as an allow.
 
+## Notes
+
 The owner asked this on 19 November 2026. The answer put forward follows from rules having no
 order and from "no rule means deny" (`which-rule-wins`).
 

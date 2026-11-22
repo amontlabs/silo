@@ -16,6 +16,8 @@ The options:
 Recommended: a principle. The record is only worth reading if a blank in it always means nothing
 happened.
 
+## Notes
+
 The sentence is in force: `holes`. The question is worded by whoever wrote the plan.
 
 Once it is taken, `books-balance` and `every-loss-is-a-gap` follow from it: their writers named it in

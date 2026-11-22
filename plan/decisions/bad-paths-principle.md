@@ -17,6 +17,8 @@ The options:
 Recommended: a principle. You said it on 19 November, and it is the one of the three questions that
 has no principle behind it yet.
 
+## Notes
+
 The sentence is principle 19 of the record's 9.4, marked Owner inside a section marked Notes
 (l.1629–1634). What is Agreed is question 5 of section 12 (l.2025–2027), which the taken
 `questions-for-an-addition` holds.

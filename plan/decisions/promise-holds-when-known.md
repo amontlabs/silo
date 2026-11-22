@@ -17,6 +17,8 @@ The options:
 Recommended: a principle. Silo's source and the user's rules are readable, so a promise that needs
 them hidden is not one. Security engineers know this as no security through obscurity.
 
+## Notes
+
 The owner said it about rules: "whether it knows or not the rules it can't go around them". That case is the decision `rule-holds-when-known`.
 
 The general sentence is an agent's, put forward on 20 November 2026. The owner has not answered it.

@@ -16,6 +16,8 @@ The options:
 Recommended: a principle. These are your own words, and it is the split security engineers make
 between prevention and detection.
 
+## Notes
+
 The owner said this: "A classifier can be fooled, and a rule at the boundary cannot be got around.
 So the rules are the promise, and a precaution is extra caution on top of them."
 

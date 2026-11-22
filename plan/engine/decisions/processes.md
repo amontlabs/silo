@@ -19,6 +19,8 @@ The options:
 Recommended: separate programs. An agent is treated as hostile, so the program that faces it should
 hold one computer and nothing more. The entry also sets the words for two of these programs.
 
+## Notes
+
 | Process | What it holds | If it stops |
 |---|---|---|
 | **Engine** (core and server) | State and decisions | Running computers keep running under the rules they had. Changes wait. A hold still ends at its limit, which the helper keeps. |

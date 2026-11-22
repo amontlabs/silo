@@ -17,4 +17,6 @@ The options:
 Recommended: revoke. A word that can be read as another is replaced, and "take back" sits too close
 to going back, which is half of what Silo does.
 
+## Notes
+
 The meaning is worded by whoever wrote the plan, from lines in force. The design record's section 12 gives the concept with "grant": `word-grant`.

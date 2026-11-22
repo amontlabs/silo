@@ -19,6 +19,8 @@ The options:
 Recommended: the computer's own screen. A macOS computer is already shown this way, and the two are
 to stay consistent. How well it works is to find out by a trial before the Linux desktop is built.
 
+## Notes
+
 To find out. A macOS computer's screen is native.
 
 - A Linux computer needs a desktop in the computer. libkrun hands over each frame; the window is

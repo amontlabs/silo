@@ -19,6 +19,8 @@ The options:
 Recommended: hold it for you, as the default, with the other two as settings. It is what you
 described, and "unsure" is the one answer where a person adds something.
 
+## Notes
+
 A default to settle when it is built, with how it is shown and changed. The owner said this.
 
 In the owner's example of a classifier asked about each tool call, "unsure" holds the tool call

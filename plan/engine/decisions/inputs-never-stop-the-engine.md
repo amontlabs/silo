@@ -19,6 +19,8 @@ The options:
 Recommended: a bad input is refused. An agent is treated as hostile, so nothing it can send may stop
 Silo for the other computers.
 
+## Notes
+
 Agent, 22 November 2026, from Guillotine and guillotine-mini (evmts), two Zig codebases by one
 maintainer.
 

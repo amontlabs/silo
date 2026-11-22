@@ -22,6 +22,8 @@ The options:
 Recommended: deciding apart from doing. What Silo promises about crashes and repeated actions can
 only be checked this way, and TigerBeetle and FoundationDB are built like this for the same reason.
 
+## Notes
+
 ```text
 calls (app, command, agents) ──┐
 driver results ────────────────┼─▶ one queue ─▶ core(state, input) ─▶ new state

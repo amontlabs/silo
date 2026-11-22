@@ -20,6 +20,8 @@ second word for it would be one more to learn. The nine other words are read as 
 a pause freezes a computer and loses nothing, a drop sends a fork or a fresh computer to the bin,
 and a checkpoint is a saved moment that never changes.
 
+## Notes
+
 The record's word list (section 2) carries no mark. A word's meaning is in force only where a
 line marked Decided or Agreed, or settled in STATE, holds it. What this decision sets is the
 word list's own meaning, which replaces the word in `words.json` when taken.

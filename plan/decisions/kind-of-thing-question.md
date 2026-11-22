@@ -16,5 +16,7 @@ The options:
 Recommended: a principle. You run a macOS main with Linux forks, so you are the first to meet any
 difference.
 
+## Notes
+
 The sentence is in force: `one-kind-of-computer`. The question is worded by whoever wrote the
 plan.

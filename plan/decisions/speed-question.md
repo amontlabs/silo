@@ -16,4 +16,6 @@ The options:
 Recommended: a principle. It says in one sentence what Silo is for, and it gives a reason to say
 "later".
 
+## Notes
+
 Question 6 of the design record's section 12, marked Notes.

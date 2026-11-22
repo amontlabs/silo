@@ -24,6 +24,8 @@ Recommended: libkrun, which is your own view of 19 November. Five measurements c
 relied on, among them whether systemd and Docker run and how long a cold fork takes. If one fails,
 the question comes back to you.
 
+## Notes
+
 The answer is the owner's view, given on 19 November 2026, and not yet taken. The owner also said
 it is decided when the time comes. In the owner's words: everything is open source, and patches
 are cheap to write with agents; what Silo would add is mostly convenience: snapshots, the screen,

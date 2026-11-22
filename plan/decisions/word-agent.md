@@ -19,5 +19,7 @@ The options:
 Recommended: the everyday word, never counted. People will keep saying "agent" for all three, so the
 word that counts must be another one, and "run" and "conversation" are already in force.
 
+## Notes
+
 The design record uses "agent" throughout and never defines it: section 2 has rows for "agent
 program" and "run", none for "agent".

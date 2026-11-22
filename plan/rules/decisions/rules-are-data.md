@@ -16,4 +16,6 @@ The options:
 Recommended: rules are data. The policy languages that last are the ones a tool can read and reason
 about, and a rule you can set in one step is one you actually set.
 
+## Notes
+
 A proposal the design relies on, not yet decided.

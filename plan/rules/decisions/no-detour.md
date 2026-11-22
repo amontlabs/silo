@@ -19,6 +19,8 @@ The options:
 Recommended: a rule ignores what a precaution did. Otherwise an opinion, which can be wrong, stops a
 computer through a rule, and a stop ends programs that nothing brings back.
 
+## Notes
+
 That a classifier gave an opinion (which classifier, which version and when, not what it
 thinks), or that a precaution acted (which one, and what it rested on), is itself recorded as a
 control fact. The opinion's content stays apart from the record. A rule triggered by such a fact

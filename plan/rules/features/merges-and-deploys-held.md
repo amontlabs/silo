@@ -19,6 +19,8 @@ The options:
 Recommended: build it, in the stage "later" where it sits. These are ordinary rules shipped as a
 set, off until you switch it on, and no destination is treated as special.
 
+## Notes
+
 From the list of smaller features the owner put on the roadmap on 21 November 2026. The owner's
 words on the list are in `silos-own-extensions`.
 

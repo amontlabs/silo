@@ -17,6 +17,8 @@ The options:
 Recommended: each tool call waits. You asked for what some agent programs offer as a mode, for any
 agent program, and the point of that mode is that the call does not run.
 
+## Notes
+
 The owner said this. Some agent programs have a mode in which a classifier looks at each action
 before it runs. The owner wants the same for any agent program.
 

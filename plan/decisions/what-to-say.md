@@ -19,6 +19,8 @@ The options:
 Recommended: what you get. You asked for accurate, simple words, and five things a person can
 picture are that. The answer is the same five lines as before, written as full sentences.
 
+## Notes
+
 These five lines carry no mark in the design record.
 
 The owner's instruction, for all of it: phrase the product in accurate, simple words backed by the

@@ -15,5 +15,7 @@ The options:
 Recommended: named sets. Firewalls have profiles and agent programs have permission modes for the
 same reason, and since rules have no order a set cannot hide a surprise in how it combines.
 
+## Notes
+
 A proposal the design relies on, not yet decided. What Silo
 shows before a set is switched on is a separate proposal: `rule-set-shows-grants`.

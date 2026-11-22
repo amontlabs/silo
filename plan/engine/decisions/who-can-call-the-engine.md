@@ -20,6 +20,8 @@ The options:
 Recommended: every call proves where it comes from. It is cheap to build in from the first call and
 hard to add later.
 
+## Notes
+
 Agent, 22 November 2026, from Guillotine and guillotine-mini (evmts), two Zig codebases by one
 maintainer.
 
