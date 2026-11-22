@@ -1,11 +1,11 @@
 {
   "asks": "May keeping the record make a computer wait?",
-  "answer": "Observing never makes a computer wait. Enforcing may: a connection waits for its rule. So may a synchronous precaution.",
+  "answer": "Nothing in a computer waits for a fact or a report to be written. When a source cannot keep up, it merges what it writes, then loses some, and records a gap. Enforcing may make a request wait: a connection waits for its rule, and a request waits for a synchronous precaution. Keeping the record still costs some speed, and `record-overhead-limit` bounds it.",
   "sets": [
     {
       "in": "record/properties",
       "id": "observing-never-waits",
-      "says": "Observing never makes a computer wait.",
+      "says": "Nothing in a computer waits for a fact or a report to be written.",
       "kind": "safety",
       "check": [
         "live check"

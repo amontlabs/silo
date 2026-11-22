@@ -1,4 +1,4 @@
 {
   "asks": "Can the record be queried with ordinary tools?",
-  "answer": "The record can be queried with ordinary tools, for example through a read-only export."
+  "answer": "Yes, through the `silo` command. It prints facts and reports as JSON, one line each, which ordinary tools read: grep, jq, a database. It only reads: no command edits a line. The record's own files are not the way in, because their format can change from one version to the next."
 }

@@ -1,0 +1,11 @@
+{
+  "asks": "What is one fact or one report in the record called?",
+  "answer": "A line.",
+  "sets": [
+    {
+      "in": "words",
+      "word": "line",
+      "means": "One fact or one report, as it is written in the record."
+    }
+  ]
+}

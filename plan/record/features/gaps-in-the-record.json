@@ -5,5 +5,9 @@
     "record-of-a-computer",
     "losses-show",
     "enforcing-and-recording"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A record that hides its losses cannot be relied on, and Silo never fills a hole."
+  }
 }

@@ -11,5 +11,9 @@
   ],
   "keeps": [
     "books-balance"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It answers which agent wrote what, the question the owner asked of the record first, and six features need it."
+  }
 }

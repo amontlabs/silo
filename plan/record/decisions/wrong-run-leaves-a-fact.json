@@ -1,3 +1,4 @@
 {
-  "asks": "Can attributing work to the wrong run be made impossible without an act that leaves a fact?"
+  "asks": "Can attributing work to the wrong run be made impossible without an act that leaves a fact?",
+  "answer": "To find out per system, by a hostile test, and the likely answer is no. A fact is seen from outside the computer. With root inside, a process can leave its run's group, lose its parent by starting again, or have the probe stopped, and none of these crosses the boundary or has to change the disk. So which run did something stays a result computed from reports: unverified, as `word-unverified` says. What can be kept is narrower: a file change or a connection that the reports do not account for is shown as unattributed, and a report that the facts contradict gets a mismatch. To find out: whether, on Linux, a kernel that comes from outside the computer's disk and refuses such moves makes the act impossible. That would make the target reachable on Linux and not on macOS. The test lists each way an agent moved work to another run, and what each left behind."
 }

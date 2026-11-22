@@ -1,3 +1,4 @@
 {
-  "asks": "What does Silo do when the record's size limit is still reached once bulky content has gone?"
+  "asks": "What does Silo do when the record's size limit is still reached once bulky content has gone?",
+  "answer": "Silo removes no line by itself. It warns you when the lines alone pass a share of the limit, a share set once `record-disk-size` is measured. At the limit it asks you: raise the limit, or remove the whole record of computers that have left the bin. Until you answer, `enforcing-and-recording` applies: a request that needs a new decision does not pass, what was allowed before carries on, and other facts and reports are lost, with a gap recorded. Room for that gap and for your answer is kept aside, outside the limit."
 }

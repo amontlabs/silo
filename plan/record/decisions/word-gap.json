@@ -1,11 +1,11 @@
 {
   "asks": "What does \"gap\" mean?",
-  "answer": "What was not seen, recorded as such.",
+  "answer": "Facts or reports that were lost, recorded as lost.",
   "sets": [
     {
       "in": "words",
       "word": "gap",
-      "means": "What was not seen, recorded as such."
+      "means": "Facts or reports that were lost, recorded as lost."
     }
   ]
 }

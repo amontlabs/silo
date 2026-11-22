@@ -1,6 +1,6 @@
 {
   "asks": "What happens when the record reaches its size limit?",
-  "answer": "A size limit the user sets. When it is reached, bulky content goes, recordings and then message text. The lines that point to it stay, and a fact says what was removed. No fact or report is removed to make room.",
+  "answer": "You set a size limit. When it is reached, bulky content goes: recordings first, then message text, the oldest first in each. The lines that point to it stay, and a fact says what was removed. No fact or report is removed to make room. The default limit is set once `record-disk-size` is measured. What happens when the lines alone reach the limit is `record-full-after-bulk`.",
   "needs": [
     "conversation-text-kept"
   ],

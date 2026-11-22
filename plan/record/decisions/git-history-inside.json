@@ -1,4 +1,4 @@
 {
   "asks": "Can Git history inside a computer serve as the record?",
-  "answer": "Git history inside a computer is content the agent controls. It never serves as the record."
+  "answer": "Git history inside a computer is content the agent controls: it can be rewritten. It is never a source of facts or reports. A classifier may read it to give an opinion, as `how-a-path-comes-back` does."
 }

@@ -1,3 +1,4 @@
 {
-  "asks": "How is a report matched to a fact, and a process to a run?"
+  "asks": "How is a report matched to a fact, and a process to a run?",
+  "answer": "A report is matched to a fact by exact keys, never by nearness in time alone. A file report matches a file fact when the computer and the path are the same and the report's time falls between the two moments the fact covers. A connection report matches a connection fact when the computer, the local port, the host and the port are the same and the times overlap. A process belongs to a run when a walk up its parents, or its group where the system has one, reaches the launch of an agent program. A fact with no report stays unattributed. A report that the facts contradict gets a mismatch, and a report with nothing to compare it with stays simply unverified. A process whose chain is broken, by a gap or a missing parent, belongs to no run, and what it wrote is unattributed. When several runs report writing the same path between the same two moments, the change is not shared out: it is unattributed, and the runs that reported it are named. Tests with reports made up by a hostile program check each case."
 }

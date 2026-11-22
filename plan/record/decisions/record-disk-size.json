@@ -1,3 +1,4 @@
 {
-  "asks": "How much disk does the record take on real work?"
+  "asks": "How much disk does the record take on real work?",
+  "answer": "To find out by measuring: several days of real work in main with agents, and one run built to flood. The result is bytes per day for each kind of line, after merging and compression, with message text and recordings counted apart. The rough estimates in the notes stay estimates until then. The numbers inform the default size limit and the share at which Silo warns, which are the owner's to choose."
 }

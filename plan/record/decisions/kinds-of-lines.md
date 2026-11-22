@@ -1,5 +1,24 @@
 # Kinds of facts and reports
 
+## For the owner
+
+An agent's part, 22 November 2026. An extension that follows your deployments wants to write
+"deployed to production" into the record of main, as a kind of line of its own.
+
+The options:
+
+- Eight kinds, fixed (recommended). Control, process, file, connection, model call, screen, meter
+  and gap. What an extension has to say is an opinion, kept beside the record. It costs extensions a
+  place of their own in the record.
+- A list that extensions add to. The record also holds kinds that each extension invents. It costs
+  every view, rule and receipt having to cope with kinds it does not know, and a record that no
+  longer holds only what Silo saw or was told.
+
+Recommended: eight kinds, fixed. The record is worth what it is because every line in it is a fact
+or a report of a known kind.
+
+## Notes
+
 | Kind | What it says | Fact or report |
 |---|---|---|
 | control | A computer was created, started, paused, resumed, stopped or dropped. A checkpoint, a fork, a restore. A rule or a precaution was set. An ask was raised and answered. A question was put to you and answered. An alert was raised. A classifier gave an opinion. A precaution acted. A secret was given or taken back. An extension was granted a tool. Each with who did it. | Fact |

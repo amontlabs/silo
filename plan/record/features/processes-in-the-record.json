@@ -5,5 +5,9 @@
     "record-of-a-computer",
     "processes-from-inside-linux",
     "processes-from-inside-macos"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Nine other features need to know which processes ran, among them stopping a run and the timeline."
+  }
 }

@@ -1,3 +1,4 @@
 {
-  "asks": "What does keeping the record cost in speed?"
+  "asks": "What does keeping the record cost in speed?",
+  "answer": "To find out by measuring, the way `speed-budgets` says: a build and a parallel test suite, in a computer with the record on and with it off, and on a plain machine, as distributions over repeated interleaved runs. The cost is given for each source apart, because the trials of `file-changes-from-outside` show that the route for file changes decides most of it: a build ran 1.6 to 2.1 times slower when the engine served the folder, and no slower when disks were compared at checkpoints. The numbers go in this entry's notes, and `record-overhead-limit` is checked against them."
 }

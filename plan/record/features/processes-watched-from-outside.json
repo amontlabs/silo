@@ -1,4 +1,8 @@
 {
   "name": "Processes watched from outside",
-  "what": "Watching processes from outside a computer."
+  "what": "Watching processes from outside a computer.",
+  "suggest": {
+    "verdict": "drop",
+    "why": "Nobody knows how to do it on a macOS computer, which main is, and a feature should not promise what has no known way."
+  }
 }

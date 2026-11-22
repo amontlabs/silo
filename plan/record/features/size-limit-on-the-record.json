@@ -8,5 +8,9 @@
     "record-disk-use-shown",
     "record-full-after-bulk",
     "record-disk-size"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Without a limit the record grows until the Mac's disk is full."
+  }
 }

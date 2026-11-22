@@ -1,4 +1,4 @@
 {
   "asks": "Which kinds of facts and reports does the record hold?",
-  "answer": "Control, process, file, connection, model call, screen, meter and gap, as the table in the notes gives them. The list is meant to stay short and fixed."
+  "answer": "Control, process, file, connection, model call, screen, meter and gap, as the table in the notes gives them. The list is short and fixed, and an extension adds no kind. A process line also gives the processor and memory that a run's processes use while they run, sampled, as a report."
 }

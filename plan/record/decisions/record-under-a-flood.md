@@ -1,5 +1,22 @@
 # A flood
 
+## For the owner
+
+An agent's part, 22 November 2026. An agent creates 2 million files in a loop in main. A large build
+can do the same.
+
+The options:
+
+- Coarser now, the past untouched (recommended). The new lines are merged: one line says "410,000
+  files created under target/" and is marked as merged. It costs detail about the flood itself.
+- The oldest lines make room. Every new line is kept in full and old ones are removed. It costs the
+  trail, since noise erases what came before it.
+
+Recommended: coarser now, the past untouched. Whoever floods the record should lose detail about the
+flood, and nothing else.
+
+## Notes
+
 The record's principles for the record path say it again: "Everything has a limit. Under pressure
 a source merges what it writes before it loses any, and marks it as merged. It never merges a fact
 with a report, and lines already written never change." Its first sentence is the property

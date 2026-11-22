@@ -1,3 +1,4 @@
 {
-  "asks": "Can a macOS computer give processes and file events with no clicks?"
+  "asks": "Can a macOS computer give processes and file events with no clicks?",
+  "answer": "To find out, by a trial on a macOS computer, in this order. First, Endpoint Security, with its permission already granted in the image Silo makes, so that no computer made from it asks anything. Whether Apple grants Silo the entitlement, and whether an approval written into the image holds in every fork, are both unknown. Second, the system's own tool, `eslogger`, run as root with full disk access granted the same way. Third, with no permission at all, the probe reads the process table at intervals and watches exits. That misses a process that lives less than one interval and names no process for a file change. If only the third works, process reports on macOS say they are sampled, and which process wrote a file is not reported there. If the first or the second needs a click, it is asked once per image and not per computer, and that click goes to the owner as a question of its own."
 }

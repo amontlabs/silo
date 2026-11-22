@@ -1,3 +1,4 @@
 {
-  "asks": "Where are the engine's events kept until the recorder has them?"
+  "asks": "Where are the engine's events kept until the recorder has them?",
+  "answer": "In a journal of the engine's own, on disk. The engine appends each event to it, numbered as `numbered-events` says, before the event counts as put out. The recorder acknowledges the highest number it has written, and the engine frees the journal up to there. After a crash of either one, the engine sends again from the last acknowledged number, and the recorder writes a number it already holds only once. The journal holds only what the recorder has not written yet, so it is not history and it has a fixed size. When it is full, or cannot be written because the disk is full or fails, a call that would add an event is refused with a named error and changes nothing, which is what `enforcing-and-recording` asks. This is the known practice of a write-ahead log emptied by its reader. To find out: what forcing each write to disk costs on a Mac, and whether writes have to be grouped."
 }

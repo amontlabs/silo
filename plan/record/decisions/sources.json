@@ -1,8 +1,8 @@
 {
   "asks": "Does each line of the record say where it came from?",
-  "answer": "Each line says where it was seen or who told it, and the app shows it.",
+  "answer": "Each line says its source: where it was seen, or who told it. The app tells a fact from a report at a glance, and names the exact source when you open the line.",
   "needs": [
-    "sources-number-their-lines"
+    "word-line"
   ],
   "sets": [
     {

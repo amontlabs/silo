@@ -1,4 +1,8 @@
 {
   "name": "Recordings of computer use",
-  "what": "Recordings of computer use on both systems."
+  "what": "Recordings of computer use on both systems.",
+  "suggest": {
+    "verdict": "take",
+    "why": "Agents may drive the screen by a decision in force, and nothing else in the record says what they clicked."
+  }
 }

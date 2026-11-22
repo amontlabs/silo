@@ -1,11 +1,11 @@
 {
   "asks": "Can anything change what the record already holds?",
-  "answer": "Nothing written inside a computer can change what the record already holds. A report adds a line; it never edits one.",
+  "answer": "Nothing that happens in a computer can change or remove what the record already holds. A report adds a line; it never edits one. A restore or a drop leaves the record as it is. Nobody edits a line, you included. You alone can remove the whole record of a computer that has left the bin, from your Mac, and a fact says that you did. Where that fact is kept once the computer's record is gone is to find out.",
   "sets": [
     {
       "in": "record/properties",
       "id": "no-call-changes-the-record",
-      "says": "A fact or a report is never changed or removed by a call.",
+      "says": "A fact or a report is never changed. Nothing that happens in a computer removes one.",
       "kind": "safety",
       "check": [
         "simulator"

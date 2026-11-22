@@ -1,6 +1,6 @@
 {
   "asks": "Which rules may a driver enforce?",
-  "answer": "A driver enforces only rules the core issued, identified by a version. Each decision names the version. What is wanted and what is seen applies to rules as to everything else.",
+  "answer": "A driver enforces only rules the core issued, identified by a version. Each decision in the record names the version that decided it. A driver that has not yet received the newest version enforces the one it holds, and its decisions name that one; the core sees the difference and issues the newest again, as it does for anything wanted and seen. A driver refuses a version the core did not issue, and a fact says so.",
   "sets": [
     {
       "in": "record/properties",

@@ -1,11 +1,9 @@
 {
   "asks": "How does Silo know that lines are missing?",
-  "answer": "Every source numbers what it writes. A missing number is a gap, and a gap is a fact.",
-  "sets": [
-    {
-      "in": "words",
-      "word": "line",
-      "means": "One row of the record."
-    }
+  "answer": "Every source numbers what it writes, before sending. A missing number is a gap, which the recorder writes as a fact, since it saw the hole itself. A source that restarts says so and starts a new count, so that a restart neither reads as a loss nor hides one. A source with nothing to say sends its last number from time to time, so that a loss at the end shows. A number that arrives twice is written once.",
+  "needs": [
+    "word-line",
+    "sources",
+    "word-gap"
   ]
 }

@@ -1,6 +1,6 @@
 {
   "asks": "What does the record say when Silo missed something?",
-  "answer": "A source that loses facts or reports records a gap. What Silo shows of a run says how it was captured and how complete it is.",
+  "answer": "A source that loses facts or reports records a gap, with the count when it is known. When a source stops altogether, the recorder writes the gap, since it saw the silence itself. What Silo shows of a run says how it was captured and how complete it is, so a run with a gap in it never looks whole.",
   "sets": [
     {
       "in": "record/properties",

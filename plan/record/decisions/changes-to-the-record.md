@@ -1,5 +1,23 @@
 # Can anything change what the record already holds
 
+## For the owner
+
+An agent's part, 22 November 2026. You dropped ten forks last spring and emptied the bin. Their
+record is still on your Mac, with the conversations you had in them.
+
+The options:
+
+- Only you, once the computer is gone (recommended). Nothing an agent does, no restore and no drop
+  can change or remove a line. You can remove the whole record of a computer that has left the bin,
+  and a line says you did. It costs the sentence "the record is never removed", which becomes "never
+  by a computer".
+- Nobody, ever. The record of every computer you ever had stays on your Mac. It costs disk that only
+  grows, and the only way to remove a conversation you regret is to delete Silo's files by hand,
+  which leaves no trace.
+
+Recommended: only you, once the computer is gone. The promise that matters is that an agent cannot
+erase its trail. It is your Mac, and a record you cannot remove ends up removed by hand.
+
 ## From Guillotine
 
 Agent, 22 November 2026. Lessons from Guillotine and guillotine-mini (evmts) that apply to this

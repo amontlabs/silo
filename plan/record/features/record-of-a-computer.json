@@ -10,6 +10,7 @@
     "changes-to-the-record",
     "kinds-of-lines",
     "who-made-each-change",
+    "word-line",
     "sources-number-their-lines",
     "sources",
     "record-file-format",
@@ -20,5 +21,9 @@
     "record-overhead-limit",
     "engine-program-and-clients",
     "computers-main-on-a-mac"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The record is what the plan calls the core of the product, and fifteen other features read it."
+  }
 }

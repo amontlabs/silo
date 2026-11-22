@@ -1,5 +1,26 @@
 # File changes, seen from outside
 
+## For the owner
+
+An agent's part, 22 November 2026. An agent runs a build with 8 jobs in a computer, then unpacks
+50,000 small files. Two trials on 21 November measured both ways of seeing those changes from
+outside.
+
+The options:
+
+- Compare at each checkpoint (recommended). Nothing is slowed. The record learns of file changes at
+  each checkpoint, not as they happen, and a file created and deleted between two checkpoints never
+  appears. It costs the live view of files, and 3 to 22 seconds of comparing per checkpoint for
+  200,000 files in the trials.
+- Watch every file operation live. Every create and delete is seen as it happens, and none is lost.
+  It costs a build 1.6 to 2.1 times slower, and the 50,000 files 12.6 to 192 times slower in the
+  trials.
+
+Recommended: compare at each checkpoint. A computer that builds twice as slowly will not be used.
+Neither way has been measured on a macOS computer, which main is, so this is a lean until then.
+
+## Notes
+
 To find out, on Linux and on macOS computers. It is the main research question for the record.
 What each route costs is part of it.
 

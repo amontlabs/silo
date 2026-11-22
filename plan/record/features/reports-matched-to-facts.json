@@ -9,5 +9,9 @@
     "matching-reports-to-facts",
     "word-unverified",
     "opinions-beside-the-record"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A mismatch is the first sign that something inside a computer interferes with what is reported."
+  }
 }

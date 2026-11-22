@@ -5,5 +5,9 @@
     "record-of-a-computer",
     "file-reads",
     "file-changes-from-outside"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Disk, receipts and what each run wrote all rest on file changes that an agent cannot hide."
+  }
 }
