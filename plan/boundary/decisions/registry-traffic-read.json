@@ -1,4 +1,7 @@
 {
   "asks": "Can the boundary read the traffic to package registries?",
-  "answer": "Yes, in the way it reads model traffic. For the registry hosts a rule on package age names, and only for those, the boundary ends the encrypted connection with a certificate the computer trusts, and reads which package and version is asked for. It takes the age from what the registry itself says. If the program inside does not accept the certificate, its connection fails and nothing is fetched, so the rule fails closed. To find out: which package managers keep a certificate store of their own (pip, Node and Java each do), and whether the age is read from the answer passing through or asked of the registry separately."
+  "answer": "Yes, in the way it reads model traffic. For the registry hosts a rule on package age names, and only for those, the boundary ends the encrypted connection with a certificate the computer trusts, and reads which package and version is asked for. It takes the age from what the registry itself says. If the program inside does not accept the certificate, its connection fails and nothing is fetched, so the rule fails closed. To find out: which package managers keep a certificate store of their own (pip, Node and Java each do), and whether the age is read from the answer passing through or asked of the registry separately.",
+  "needs": [
+    "ending-the-encrypted-connection"
+  ]
 }

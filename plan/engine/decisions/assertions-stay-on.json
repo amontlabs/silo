@@ -2,6 +2,7 @@
   "asks": "Do assertions stay on in release builds?",
   "answer": "Assertions stay on in release builds. On a broken assumption the engine stops and restarts from saved state. The engine is built in ReleaseSafe, where a broken assertion always stops, and the build that is checked is the build that ships. Before it stops, the loop that feeds the core prints its most recent inputs and effects from a fixed-size ring.",
   "needs": [
-    "when-the-engine-stops"
+    "when-the-engine-stops",
+    "engine-saved-state"
   ]
 }

@@ -3,7 +3,8 @@
   "answer": "No. An assertion states only what no input can break. Anything an input can reach is a named error, refused like any other bad input. After a restart, an input that stopped the engine is set aside and fails with that reason.",
   "needs": [
     "assertions-stay-on",
-    "engine-inputs"
+    "engine-inputs",
+    "engine-saved-state"
   ],
   "sets": [
     {

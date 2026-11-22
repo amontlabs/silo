@@ -10,7 +10,8 @@
     "synchronous-or-asynchronous",
     "kinds-of-action",
     "alert-only-on-a-change",
-    "computers-stopped-and-paused"
+    "computers-stopped-and-paused",
+    "no-detour"
   ],
   "keeps": [
     "grant-needs-a-fact-or-you",
