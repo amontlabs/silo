@@ -4,7 +4,7 @@
 import type { ReactNode } from 'react';
 import { AllList } from './AllList';
 import { filmSections, partFilm, partSections, productSections } from './all';
-import type { Graph, Section } from './all';
+import type { Graph, Placed, Section } from './all';
 import { Entry, pipClass } from './Entry';
 import type { EntryContext } from './Entry';
 import { FilmControl, FilmFrame } from './Films';
@@ -52,6 +52,7 @@ export function Rows({ rows, ctx }: { rows: Row[]; ctx: EntryContext }) {
 export interface PlaceList {
   plan: Plan;
   graph: Graph;
+  placed: Placed;
   ctx: EntryContext;
   store: RelationStore;
   folds: ReadonlyMap<string, boolean>;
@@ -110,7 +111,7 @@ function Tallies({ rows }: { rows: Row[] }) {
 
 export function PartPlace({ group, list, onBack, notes, onFilm }: { group: PartGroup; list: PlaceList; onBack: () => void; notes?: ReactNode; onFilm: (film: string) => void }) {
   const film = partFilm(list.plan, group.part.id);
-  const sections = partSections(list.graph, group.rows);
+  const sections = partSections(list.graph, group.rows, list.placed);
   return (
     <Block
       num={String(group.number).padStart(2, '0')} title={group.part.title} line={group.part.line} onBack={onBack} notes={notes}

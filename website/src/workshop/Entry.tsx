@@ -334,7 +334,7 @@ const ARMED = 'Confirm';
  * draws the same buttons as placeholders, inert, while `me` has not answered for the owner remembered, or the entry's
  * details have not shown yet.
  */
-function VerdictButtons({ row, ctx, held = false }: { row: Row; ctx: EntryContext; held?: boolean }) {
+function VerdictButtons({ row, ctx, held = false, onSend }: { row: Row; ctx: EntryContext; held?: boolean; onSend: () => void }) {
   const { w } = ctx;
   const id = planId(row) as string;
   const pending = w.verdictPending[id];
@@ -356,6 +356,7 @@ function VerdictButtons({ row, ctx, held = false }: { row: Row; ctx: EntryContex
     }
     if (Date.now() - armedAt.current < CONFIRM_AFTER_MS) return;
     setArmed(null);
+    onSend();
     void w.sendVerdict(row, verdict);
   };
   if (held) {
@@ -401,6 +402,9 @@ function VerdictButtons({ row, ctx, held = false }: { row: Row; ctx: EntryContex
  * buttons come after `me` answers; for the owner remembered their room is held until then, so they move nothing. They
  * are live only once the entry's details (what a yes would change) show, since the owner decides on them too; until
  * then their room is held.
+ *
+ * The line whose button sent a verdict stays where it is on screen when the new state shows: the choice over it goes
+ * then, several screens tall at times, and the result would leave the screen with it.
  */
 function StateLine({ row, ctx, facts, children }: { row: Row; ctx: EntryContext; facts: Workshop['facts']; children?: ReactNode }) {
   const text = stateText(row);
@@ -409,11 +413,21 @@ function StateLine({ row, ctx, facts, children }: { row: Row; ctx: EntryContext;
   const refusal = id ? ctx.w.verdictRefusals[id] : undefined;
   const offered = offersVerdict(row);
   const detailsShown = !row.more || typeof facts === 'object';
+  const line = useRef<HTMLDivElement>(null);
+  const sentFrom = useRef<Row['status'] | null>(null);
+  // Read while rendering: the page still shows the state before this one.
+  const wasAt = sentFrom.current !== null && sentFrom.current !== row.status ? line.current?.getBoundingClientRect().top : undefined;
+  useLayoutEffect(() => {
+    if (wasAt === undefined || !line.current) return;
+    sentFrom.current = null;
+    const moved = line.current.getBoundingClientRect().top - wasAt;
+    if (moved) scrollBy({ top: moved, behavior: 'instant' });
+  }, [wasAt]);
   return (
     <>
-      <div className="ws-state">
+      <div className="ws-state" ref={line}>
         <span className={`ws-state-text ${tone}`}>{text}</span>
-        {offered && (ctx.w.mayDecide || ctx.w.verdictHeld) ? <VerdictButtons row={row} ctx={ctx} held={!ctx.w.mayDecide || !detailsShown} /> : null}
+        {offered && (ctx.w.mayDecide || ctx.w.verdictHeld) ? <VerdictButtons row={row} ctx={ctx} held={!ctx.w.mayDecide || !detailsShown} onSend={() => { sentFrom.current = row.status; }} /> : null}
         {id || children ? <span className="ws-state-more">{id ? <CopyId id={id} /> : null}{children}</span> : null}
       </div>
       {refusal ? <p className="ws-refused" role="alert">{refusal}</p> : null}

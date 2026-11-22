@@ -792,6 +792,15 @@ What a person sees:
   it: through any change of filter, search or order its feature stays unfolded,
   and it stays shown past the first six. When a search or a filter takes an open
   entry out of the list, the address stops naming it.
+- A row that is open keeps its place when its state changes: press Take on
+  `engine-shape` under "not decided" and the row stays there, open, now decided.
+  It is not sorted again, moved behind "N more" or removed by the filter. This
+  holds in All, in a fold, in a part's place and in Product's. Meters and counts
+  follow the new state at once. The line that says "Decided." stays where Take
+  was pressed, though the choice over it goes. Once the row closes, or the person changes the
+  order, a filter, the search or the view, the list follows its rules again.
+  A change in Display is none of these, so the row stays listed. When a row
+  that closes leaves or moves, the focus goes to the row that takes its place.
 - The films: one control per film on the line between the title row and the map
   or the tiles, in the order of `films/README.md`, at every width (it scrolls
   sideways under 760 px). Pointing at a film, or focusing it, marks its parts on

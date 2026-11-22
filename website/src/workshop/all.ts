@@ -130,14 +130,25 @@ export function graphOf(plan: Plan): Graph {
 }
 
 /**
+ * The state a list places some rows by, by key: a row that is open keeps the one it had when it opened, so it keeps its
+ * place whatever becomes of it. Every other row is placed by its state, and what is counted always is.
+ */
+export type Placed = ReadonlyMap<string, Status>;
+const AS_IS: Placed = new Map();
+const placedState = (row: Row, placed: Placed): Status => placed.get(row.key) ?? row.status;
+
+/**
  * A feature's decisions as it unfolds them: those not decided first, then the others, each in the plan's order. The
  * plan's order puts an entry after what it needs, so none waits for one still to decide under it.
  */
-export const kidOrder = (rows: Row[]): Row[] => [...rows.filter((row) => row.status === 'undecided'), ...rows.filter((row) => row.status !== 'undecided')];
+export function kidOrder(rows: Row[], placed: Placed = AS_IS): Row[] {
+  const open = (row: Row) => placedState(row, placed) === 'undecided';
+  return [...rows.filter(open), ...rows.filter((row) => !open(row))];
+}
 
 /** Whether an entry passes the filters and the search. */
-export function passes(row: Row, query: Query): boolean {
-  if (query.states.length && !query.states.includes(row.status)) return false;
+export function passes(row: Row, query: Query, placed: Placed = AS_IS): boolean {
+  if (query.states.length && !query.states.includes(placedState(row, placed))) return false;
   if (query.parts.length && !query.parts.includes(row.part ?? PRODUCT)) return false;
   if (query.films.length && !row.films.some((id) => query.films.includes(id))) return false;
   const q = query.q.trim().toLowerCase();
@@ -195,9 +206,9 @@ export interface Section {
 /** How many of some decisions are decided. */
 const decidedOf = (rows: Row[]) => rows.filter((row) => row.status === 'decided').length;
 
-function featureItem(row: Row, graph: Graph, query: Query, foldable: boolean, change?: string): FeatureItem {
-  const kids = kidOrder(graph.decisions.get(row.key) ?? []);
-  const passing = filtered(query) ? kids.filter((kid) => passes(kid, query)) : null;
+function featureItem(row: Row, graph: Graph, query: Query, placed: Placed, foldable: boolean, change?: string): FeatureItem {
+  const kids = kidOrder(graph.decisions.get(row.key) ?? [], placed);
+  const passing = filtered(query) ? kids.filter((kid) => passes(kid, query, placed)) : null;
   return { type: 'feature', key: row.key, row, step: graph.step.get(row.key) ?? 0, kids, passing, decided: decidedOf(kids), foldable: foldable && kids.length > 0, ...(change ? { change } : {}) };
 }
 
@@ -210,7 +221,8 @@ export const partTitle = (plan: Plan, part: string | null): string => (part ? pl
  * feature when it or one of its decisions passes. A search, and Latest, list every match on its own line, Latest newest
  * change first under a title per day.
  */
-export function allSections(plan: Plan, graph: Graph, stages: Stage[], query: Query): Section[] {
+export function allSections(plan: Plan, graph: Graph, stages: Stage[], query: Query, placed: Placed = AS_IS): Section[] {
+  const listed = (row: Row) => passes(row, query, placed);
   const sections: Section[] = [];
   const features = query.show.includes('feature');
   const decisions = query.show.includes('decision');
@@ -221,13 +233,13 @@ export function allSections(plan: Plan, graph: Graph, stages: Stage[], query: Qu
   const entries = [...graph.rows.values()].filter((row) => (row.of === 'feature' ? features : decisions));
 
   if (query.order === 'latest') {
-    const dated = entries.filter((row) => row.history && passes(row, query)).sort((a, b) => Date.parse(b.history!.date) - Date.parse(a.history!.date) || (a.n ?? 0) - (b.n ?? 0));
+    const dated = entries.filter((row) => row.history && listed(row)).sort((a, b) => Date.parse(b.history!.date) - Date.parse(a.history!.date) || (a.n ?? 0) - (b.n ?? 0));
     let current: Section | null = null;
     for (const row of dated) {
       const day = shortDate(row.history!.date);
       if (!current || current.title !== day) sections.push((current = { key: `day-${row.history!.date.slice(0, 10)}`, title: day, items: [] }));
       const change = changeLine(row.history!.what, row.history!.agents);
-      current.items.push(row.of === 'feature' ? featureItem(row, graph, query, false, change) : { type: 'decision', key: row.key, row, change });
+      current.items.push(row.of === 'feature' ? featureItem(row, graph, query, placed, false, change) : { type: 'decision', key: row.key, row, change });
     }
     return sections;
   }
@@ -244,20 +256,20 @@ export function allSections(plan: Plan, graph: Graph, stages: Stage[], query: Qu
 
   // A search lists every match on its own line, in build order.
   if (query.q.trim()) {
-    inStages(entries.filter((row) => passes(row, query)), (row) => (row.of === 'feature' ? featureItem(row, graph, query, false) : { type: 'decision', key: row.key, row }));
+    inStages(entries.filter(listed), (row) => (row.of === 'feature' ? featureItem(row, graph, query, placed, false) : { type: 'decision', key: row.key, row }));
     return sections;
   }
 
   if (!features) {
-    inStages(entries.filter((row) => passes(row, query)), (row) => ({ type: 'decision', key: row.key, row }));
+    inStages(entries.filter(listed), (row) => ({ type: 'decision', key: row.key, row }));
     return sections;
   }
 
-  const kept = graph.steps.map((row) => featureItem(row, graph, query, decisions)).filter((item) => passes(item.row, query) || (decisions && item.passing?.length));
+  const kept = graph.steps.map((row) => featureItem(row, graph, query, placed, decisions)).filter((item) => listed(item.row) || (decisions && item.passing?.length));
   const loose = decisions ? looseOf(graph) : [];
   for (const stage of stages) {
     const items = [
-      ...bundlesOf(plan, stage.id, loose.filter((row) => row.stage === stage.id), query),
+      ...bundlesOf(plan, stage.id, loose.filter((row) => row.stage === stage.id), query, placed),
       ...kept.filter((item) => item.row.stage === stage.id),
     ];
     if (items.length) sections.push({ key: `stage-${stage.id}`, title: stage.title, items });
@@ -272,12 +284,12 @@ function looseOf(graph: Graph): Row[] {
 }
 
 /** One foldable row per part for a stage's decisions that no feature rests on; under a filter, those where one passes. */
-function bundlesOf(plan: Plan, stage: string, rows: Row[], query: Query): BundleItem[] {
+function bundlesOf(plan: Plan, stage: string, rows: Row[], query: Query, placed: Placed): BundleItem[] {
   const bundles: BundleItem[] = [];
   for (const part of [...plan.parts.map((group) => group.part.id), null]) {
-    const kids = kidOrder(rows.filter((row) => row.part === part));
+    const kids = kidOrder(rows.filter((row) => row.part === part), placed);
     if (!kids.length) continue;
-    const passing = filtered(query) ? kids.filter((kid) => passes(kid, query)) : null;
+    const passing = filtered(query) ? kids.filter((kid) => passes(kid, query, placed)) : null;
     if (passing && !passing.length) continue;
     // A stage's id and a part's hold no dot, so no two rows share a key.
     bundles.push({ type: 'bundle', key: `bundle-${stage}.${part ?? PRODUCT}`, part, title: partTitle(plan, part), kids, passing, decided: decidedOf(kids) });
@@ -326,9 +338,9 @@ export const underKey = (rowKey: string, holder: string) => `${rowKey}@${holder}
 export const rowKeyOf = (instance: string) => instance.split('@')[0];
 
 /** Features of some rows, each with the decisions it rests on folded under it (or none, `foldable` false). */
-export function featureItemsOf(graph: Graph, rows: Row[], foldable = true): Item[] {
+export function featureItemsOf(graph: Graph, rows: Row[], foldable = true, placed: Placed = AS_IS): Item[] {
   return rows.filter((row) => row.of === 'feature').map((row) => {
-    const kids = foldable ? kidOrder(graph.decisions.get(row.key) ?? []) : [];
+    const kids = foldable ? kidOrder(graph.decisions.get(row.key) ?? [], placed) : [];
     return { type: 'feature', key: row.key, row, step: graph.step.get(row.key) ?? 0, kids, passing: null, decided: decidedOf(kids), foldable: kids.length > 0 };
   });
 }
@@ -336,8 +348,8 @@ export function featureItemsOf(graph: Graph, rows: Row[], foldable = true): Item
 const decisionItemsOf = (rows: Row[]): Item[] => rows.filter((row) => row.of === 'decision').map((row) => ({ type: 'decision', key: row.key, row }));
 
 /** A part's place: its features with the decisions they rest on, then its decisions that none of its features rests on. */
-export const partSections = (graph: Graph, rows: Row[]): Section[] => [
-  { key: 'features', title: 'Features', items: featureItemsOf(graph, rows) },
+export const partSections = (graph: Graph, rows: Row[], placed: Placed = AS_IS): Section[] => [
+  { key: 'features', title: 'Features', items: featureItemsOf(graph, rows, true, placed) },
   { key: 'decisions', title: 'Decisions', items: decisionItemsOf(looseOfPart(graph, rows)) },
 ].filter((section) => section.items.length);
 
