@@ -30,5 +30,9 @@ Read this before you build a page or a screen: the site, the Workshop, the app.
 - Design the wait out first: show the last answer from a cache, and never wait on the server on
   purpose. A few seconds to load is a defect.
 - Check the first load with the data source slowed down.
+- A page's scripted check (text cut or overlapping, sideways scroll, smallest text size, nothing
+  moving the layout while it plays) runs in Playwright's Firefox, Chromium and WebKit. An agent
+  looks at pictures in one browser only, and opens another browser's pictures only when the script
+  fails there.
 - A change to what the user sees or does is proven by driving the real built app through the
   flow, on throwaway `e2e-*` computers, never on the owner's own.
