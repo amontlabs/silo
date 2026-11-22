@@ -16,7 +16,8 @@
     "work-on-top-of-libkrun",
     "libkrun-patches",
     "network-stack",
-    "made-from-a-recipe"
+    "made-from-a-recipe",
+    "storage-between-computers"
   ],
   "suggest": {
     "verdict": "take",

@@ -4,7 +4,8 @@
   "needs": [
     "record-of-a-computer",
     "processes-from-inside-linux",
-    "processes-from-inside-macos"
+    "processes-from-inside-macos",
+    "macos-ships-facts-first"
   ],
   "suggest": {
     "verdict": "take",

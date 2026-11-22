@@ -11,7 +11,8 @@
     "multi-step-operations",
     "engine-under-failure",
     "engine-takes-back-helpers",
-    "helper-on-broken-assumption"
+    "helper-on-broken-assumption",
+    "inputs-never-stop-the-engine"
   ],
   "suggest": {
     "verdict": "take",

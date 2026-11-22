@@ -20,7 +20,9 @@
     "observing-and-waiting",
     "record-overhead-limit",
     "engine-program-and-clients",
-    "computers-main-on-a-mac"
+    "computers-main-on-a-mac",
+    "measuring-the-store",
+    "formats-carry-versions"
   ],
   "suggest": {
     "verdict": "take",

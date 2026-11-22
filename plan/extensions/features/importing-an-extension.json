@@ -20,7 +20,9 @@
     "secrets-held-outside",
     "ways-out-shown",
     "spend-per-conversation",
-    "when-an-extension-runs"
+    "when-an-extension-runs",
+    "shipped-as-readable-files",
+    "extension-tools-for-agents"
   ],
   "keeps": [
     "importing-changes-nothing",

@@ -17,7 +17,9 @@
     "call-ids",
     "engine-states-and-failures",
     "how-the-engine-is-built",
-    "core-simulator"
+    "core-simulator",
+    "who-can-call-the-engine",
+    "formats-carry-versions"
   ],
   "suggest": {
     "verdict": "take",

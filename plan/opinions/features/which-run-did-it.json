@@ -11,7 +11,8 @@
     "what-traffic-gives",
     "model-calls-in-the-record",
     "agent-program-data-file",
-    "hot-files"
+    "hot-files",
+    "word-unattributed"
   ],
   "keeps": [
     "books-balance"
