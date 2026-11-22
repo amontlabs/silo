@@ -334,6 +334,8 @@
 /* The choice of an entry with no verdict: the case, the options as three columns in one border, and why. An option
    with no cost takes both columns; the recommended one has the mark of an open row. */
 .ws-fact-text + .ws-fact-text { margin-top: 8px; }
+/* The paragraphs that go on with the reason read as the reason does. */
+.ws-choice .ws-md { margin-top: 8px; max-width: none; font-size: inherit; }
 .ws-choice a { color: var(--accent-ink); text-decoration: underline; }
 .ws-case .ws-fact-text { color: var(--ink); }
 .ws-options { max-width: 960px; container-type: inline-size; }

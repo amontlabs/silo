@@ -114,6 +114,15 @@ Recommended: one computer. Nobody wants the second.
     await waitFor(() => expect(item).toHaveTextContent('You press Create twice.'));
   });
 
+  it('goes on with the reason under "Why this one", a paragraph each, and gives it once', async () => {
+    const more = '\nThis replaces `one-press`,\nwhich made two.\n\nA key is kept a day.\n';
+    const item = await openFrom('#part-b/create', 'Create and delete a computer', withChoice({ create: `${CHOICE}${more}` }));
+    const why = (await within(item).findByText('Why this one')).closest('.ws-fact') as HTMLElement;
+    expect([...why.querySelectorAll('p')].map((paragraph) => paragraph.textContent)).toEqual(['Nobody wants the second.', 'This replaces one-press, which made two.', 'A key is kept a day.']);
+    expect(why.querySelector('code')).toHaveTextContent('one-press');
+    expect(item).not.toHaveTextContent('Key records by id.');
+  });
+
   it('shows whole as Markdown when it has another shape, and the reason of the recommendation stays', async () => {
     const item = await openFrom('#part-b/create', 'Create and delete a computer', withChoice({ create: `${CHOICE}\nA second case: you press it three times.\n` }));
     await within(item).findByText('A second case: you press it three times.');

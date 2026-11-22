@@ -114,6 +114,8 @@ export interface ChoiceTable {
   case: string;
   options: ChoiceOption[];
   why: string;
+  /** The paragraphs after the recommendation's, which go on with the reason: Markdown, with a blank line between. */
+  whyMore?: string;
 }
 
 /** The section "The choice" of an entry's notes (choice.ts): a table, or Markdown when it has another shape. */

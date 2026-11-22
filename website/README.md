@@ -643,9 +643,12 @@ What a person sees:
     later stage."
   - On a feature whose choice has that shape, "Recommended: take" stays as a
     line and "Why this one" is its reason, so `suggest.why` is not shown.
+  - The paragraphs after the one that starts "Recommended:" go on with the
+    reason under "Why this one", a paragraph each.
+    `plan/extensions/decisions/read-grant-names-its-part.md` has one.
   - A section of another shape shows whole as Markdown in the same place. A
-    second case is one such shape, and so is a paragraph after "Recommended:".
-    `suggest.why` then stays.
+    second case is one such shape, and so is a paragraph between the options
+    and "Recommended:". `suggest.why` then stays.
   - While the choice shows in place, Notes leaves that section out, and an
     entry whose notes hold nothing else has no "Notes". Once the entry has a
     verdict, or when its details could not load, the section is read under Notes.

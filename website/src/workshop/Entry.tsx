@@ -786,7 +786,10 @@ function ChoiceView({ choice }: { choice: ChoiceTable }) {
           ))}
         </ul>
       </div>
-      <Fact label="Why this one"><ChoiceText text={choice.why} /></Fact>
+      <Fact label="Why this one">
+        <ChoiceText text={choice.why} />
+        {choice.whyMore ? <Markdown text={choice.whyMore} /> : null}
+      </Fact>
     </div>
   );
 }

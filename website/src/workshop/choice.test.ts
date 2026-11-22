@@ -138,8 +138,22 @@ Recommended: build it. Budgets need it.
     expect(table(WORD_AGENT.replace('Recommended: the everyday word, never counted.', 'Recommended: the everyday word.')).why).toMatch(/^People will keep/);
   });
 
+  it('keeps the paragraphs after the recommendation apart from the reason, each whole', () => {
+    const more = 'This replaces `spend-per-computer`, which gave\nonly a total.\n\nA price that changes does not change what was shown.';
+    for (const notes of [SPEND.replace('## Notes', `${more}\n\n## Notes`), SPEND.slice(0, SPEND.indexOf('## Notes')) + more, SPEND.replace('## Notes', `${more}\n\n## Notes`).replace(/\n/g, '\r\n')]) {
+      expect(read(notes)).toEqual({ ...table(SPEND), whyMore: more });
+    }
+  });
+
   const broken: [string, (notes: string) => string][] = [
     ['a second case', (notes) => notes.replace('## Notes', 'A second case: a model has no price.\n\n## Notes')],
+    ['a second case after a paragraph that follows the reason', (notes) => notes.replace('## Notes', 'This replaces another.\n\nA second case: a model has no price.\n\n## Notes')],
+    ['a second set of options', (notes) => notes.replace('## Notes', 'On Linux it differs.\n\nThe options:\n\n## Notes')],
+    ['a second recommendation', (notes) => notes.replace('## Notes', 'Recommended: build it. Later, too.\n\n## Notes')],
+    ['a list after the reason', (notes) => notes.replace('## Notes', '- A price per model.\n\n## Notes')],
+    ['a paragraph between the options and the recommendation', (notes) => notes.replace('Recommended: build it.', 'Both can be changed later.\n\nRecommended: build it.')],
+    ['text right after the mark', (notes) => notes.replace('(recommended).', '(recommended) for now.')],
+    ['a paragraph after a recommendation with no reason', (notes) => notes.replace(/Recommended: build it\.[^#]*/, 'Recommended: build it.\n\nBudgets need it.\n\n')],
     ['no list', (notes) => notes.replace(/\n- [\s\S]*?\n\nRecommended/, '\nBuild it or leave it out.\n\nRecommended')],
     ['no "Recommended:"', (notes) => notes.replace('Recommended: build it.', 'Build it.')],
     ['no reason', (notes) => notes.replace(/Recommended: build it\.[^#]*/, 'Recommended: build it.\n\n')],

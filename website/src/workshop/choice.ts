@@ -36,6 +36,7 @@ const PART_LINE = /^An agent's part, \d{1,2} [A-Z][a-z]+ \d{4}\.(?: |$)/;
 const OPTIONS = 'The options:';
 const RECOMMENDED = 'Recommended:';
 const MARK = ' (recommended)';
+const SECOND_CASE = /^A second case\b/;
 /** A line that Markdown reads as something else than text of a paragraph. */
 const STRUCTURE = /^\s*(?:[-*+]\s|\d{1,9}[.)]\s|#{1,6}\s|```|~~~)/;
 /** Where the sentence that starts "It costs" begins: at the start, or after the end of a sentence. */
@@ -97,18 +98,21 @@ export function parseChoice(section: string): Choice {
   const text = section.replace(/\r\n?/g, '\n').replace(/^##[^\n]*\n?/, '').trim();
   const whole = { text };
   const blocks = text.split(/\n[ \t]*\n/).map((block) => block.trimEnd());
-  const count = blocks.length;
-  // The case, "The options:", one list and "Recommended:", which is the last.
-  if (count < 4 || blocks[count - 3] !== OPTIONS || !blocks[count - 1].startsWith(RECOMMENDED)) return whole;
-  const prose = [...blocks.slice(0, count - 3), blocks[count - 1]];
+  const at = blocks.findIndex((block) => block.startsWith(RECOMMENDED));
+  // The case, "The options:", one list, "Recommended:", then any paragraphs, which go on with the reason.
+  if (at < 3 || blocks[at - 2] !== OPTIONS) return whole;
+  const prose = [...blocks.slice(0, at - 2), ...blocks.slice(at)];
   if (prose.some((block) => block.split('\n').some((line) => STRUCTURE.test(line)))) return whole;
-  const said = blocks.slice(0, count - 3).map(oneLine);
-  if (said.some((one) => one === OPTIONS || one.startsWith(RECOMMENDED))) return whole;
+  const said = blocks.slice(0, at - 2).map(oneLine);
+  if (said.includes(OPTIONS)) return whole;
+  // What follows the reason is never another choice: a second case, its options or its recommendation.
+  const after = blocks.slice(at + 1);
+  if (after.map(oneLine).some((one) => one === OPTIONS || one.startsWith(RECOMMENDED) || SECOND_CASE.test(one))) return whole;
   const opening = PART_LINE.exec(said[0]);
   if (!opening) return whole;
   said[0] = said[0].slice(opening[0].length);
   const theCase = said.filter(Boolean).join('\n\n');
-  const items = itemsOf(blocks[count - 2]);
+  const items = itemsOf(blocks[at - 1]);
   if (!theCase || !items) return whole;
   const options: ChoiceOption[] = [];
   for (const item of items) {
@@ -117,6 +121,7 @@ export function parseChoice(section: string): Choice {
     options.push(option);
   }
   if (options.filter((option) => option.recommended).length !== 1) return whole;
-  const why = whyOf(oneLine(blocks[count - 1]), options);
-  return why ? { case: theCase, options, why } : whole;
+  const why = whyOf(oneLine(blocks[at]), options);
+  if (!why) return whole;
+  return { case: theCase, options, why, ...(after.length ? { whyMore: after.join('\n\n') } : {}) };
 }
