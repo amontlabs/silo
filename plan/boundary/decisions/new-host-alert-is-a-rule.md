@@ -1,6 +1,6 @@
 # What happens when a computer reaches hundreds of hosts for the first time
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You let main run open for a while to learn which hosts it needs,
 and one package install reaches 200 hosts for the first time. You decided that each of them raises

@@ -1,6 +1,6 @@
 # Can the record be queried with ordinary tools
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You want every host main reached last week, sorted by bytes sent,
 and the app has no such view.

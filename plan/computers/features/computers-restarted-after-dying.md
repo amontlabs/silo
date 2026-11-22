@@ -1,6 +1,6 @@
 # A computer that stops by itself
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. At 3:00 main stops by itself while three agents work in it. Silo
 starts it again in seconds, and in the morning an alert says what happened and which runs ended.

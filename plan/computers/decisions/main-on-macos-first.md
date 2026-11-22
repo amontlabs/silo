@@ -1,6 +1,6 @@
 # Which system main runs first
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You install Silo on your Mac. Main is where your agents will
 live, and it is either a macOS computer or a Linux one.

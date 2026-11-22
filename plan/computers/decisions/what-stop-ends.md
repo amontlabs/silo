@@ -1,6 +1,6 @@
 # Which processes stopping a computer ends
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You stop main. A database is running in it, and an agent left a
 development server running in the background with `nohup`.

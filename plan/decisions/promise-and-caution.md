@@ -1,6 +1,6 @@
 # The rules are the promise
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You set a rule: main reaches GitHub and nothing else. You also
 add a classifier that pauses main when a command looks destructive.

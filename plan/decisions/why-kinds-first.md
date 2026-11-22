@@ -1,6 +1,6 @@
 # Why the kind comes first
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A new feature brings a fork back from the bin. Until someone says
 that this is granting, nobody knows whether a precaution may do it.

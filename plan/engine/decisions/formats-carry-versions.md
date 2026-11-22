@@ -10,7 +10,7 @@ maintainer.
   before it; a reader maps an older record onto the current shape before using it; a mark kept for
   a future format is refused today.
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Two years from now, after many updates of Silo, you open the
 record of a run from this month.

@@ -1,6 +1,6 @@
 # Who else Silo is for
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A developer keeps one agent open in a terminal and reads each
 step. A team of five keeps twenty agents going on different tasks. Both could use Silo. The question

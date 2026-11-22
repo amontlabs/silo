@@ -1,4 +1,4 @@
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You install Silo and start Claude Code in main. Its first call to
 its model provider is refused, because no rule allows that host. This entry said that Silo works

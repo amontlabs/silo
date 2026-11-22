@@ -1,6 +1,6 @@
 # Ports of a computer reached from your Mac
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in a fork starts the development server of your site on
 port 3000. You grant that port to your Mac and open localhost:3000 in your browser.

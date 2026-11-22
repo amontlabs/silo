@@ -1,6 +1,6 @@
 # Comments to the agent
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. In the receipt of codex's run you see that it changed `auth.ts`
 in a way you do not want, and you want to tell it "keep the old token check".

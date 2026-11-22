@@ -1,6 +1,6 @@
 # An extension that reads and alerts
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Disk watch wakes every minute and reads /work on main. When /work
 passes 40 GB it alerts you, and the alert opens on the file lines of the build that wrote 12 GB of

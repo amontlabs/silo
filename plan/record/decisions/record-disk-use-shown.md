@@ -1,6 +1,6 @@
 # Where is the record's own disk use shown
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Your Mac has 40 GB left. Main takes 120 GB, its checkpoints 60
 GB, and the record 12 GB, of which 9 GB are recordings.

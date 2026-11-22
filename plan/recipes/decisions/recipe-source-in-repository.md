@@ -4,9 +4,9 @@ The lesson behind `recipe-stored-by-silo` and `no-project-folder` was that an ag
 rules file that sits in a repository. This answer lets a repository name rules and keeps the rules in
 force out of it.
 
-Whether this is how the owner wants it is the question under "For the owner".
+Whether this is how the owner wants it is the question under "The choice".
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A repository holds the recipe of its test computer, and the
 recipe lists the hosts that computer needs. An agent in main adds a paste site to that list, then

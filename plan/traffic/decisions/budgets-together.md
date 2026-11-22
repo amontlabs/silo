@@ -1,6 +1,6 @@
 # When a computer and a conversation in it each have a budget, which one counts
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main has a budget of 50 dollars and one conversation in it has a
 budget of 10. That conversation reaches 10 while main is at 30.

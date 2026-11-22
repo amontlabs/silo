@@ -9,4 +9,4 @@ alerts. The audit proposes that `alert-only-on-a-change` adds "alerts of one kin
 arrive as one alert with a count". The other way is a new decision that sets the property again as a
 rule that ships with Silo, switched on, which you can switch off or narrow.
 
-The question is put to the owner in `new-host-alert-is-a-rule`, under "For the owner".
+The question is put to the owner in `new-host-alert-is-a-rule`, under "The choice".

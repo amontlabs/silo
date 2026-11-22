@@ -1,6 +1,6 @@
 # Extensions in sequence
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main's agents make 2,000 tool calls a day. A pattern in Silo
 sorts 1,900 of them as ordinary. A small model, added as an extension, looks at the other 100 and is

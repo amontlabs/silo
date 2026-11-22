@@ -1,6 +1,6 @@
 # Does every wait at the boundary end at Silo's own limit
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You installed an extension that gives its opinion on each tool
 call of main before the call goes on. Its computer hangs while a call from main waits for it, and

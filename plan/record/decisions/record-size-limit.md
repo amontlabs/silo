@@ -1,6 +1,6 @@
 # The size limit
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You set the record's limit at 20 GB. It holds 15 GB of
 recordings, 4 GB of message text and 1 GB of lines, and it is full.

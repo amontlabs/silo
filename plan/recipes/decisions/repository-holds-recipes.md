@@ -1,6 +1,6 @@
 # Recipes in a repository
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Your repository silo-site holds two recipes in a file at its
 root, one for macOS computers and one for Linux computers. An agent in main asks Silo to test its

@@ -1,6 +1,6 @@
 # When a plan's limit is reached
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. At 14:20 Claude Code in main reaches your Max plan's 5-hour
 limit, which Anthropic says resets at 17:00. Silo takes a checkpoint, alerts you, and alerts you

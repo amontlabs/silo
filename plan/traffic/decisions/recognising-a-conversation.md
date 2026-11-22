@@ -1,6 +1,6 @@
 # How a conversation is recognised in each provider's traffic
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. One Claude Code conversation in main has a budget of 5 dollars.
 It has spent 3 dollars when Claude Code compacts its long history. Later you go back two turns and

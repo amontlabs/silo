@@ -1,6 +1,6 @@
 # What the record may cost in speed
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A build takes 10 minutes in a computer with nothing recorded. In
 the trials, one way of seeing file changes as they happen made a build 1.6 to 2.1 times slower.

@@ -1,6 +1,6 @@
 # Model calls in the record
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Two days later you ask why main's agent deleted the migrations
 folder. The record shows the turn: the model that answered, its tool call `rm -rf migrations`, what

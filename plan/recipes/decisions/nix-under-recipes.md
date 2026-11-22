@@ -1,6 +1,6 @@
 # Nix under recipes
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Your recipe for a Linux computer names Node 22 and Postgres 17. A
 computer made from it in March and another made in June hold the same versions, down to the last

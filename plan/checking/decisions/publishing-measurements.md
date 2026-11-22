@@ -1,6 +1,6 @@
 # When measurements are published
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. For Silo 0.4, forking main took 180 ms at the 99th percentile and
 410 ms at worst, over 500 interleaved runs on a Mac mini M4 with macOS 26.1, on 3 December 2026. The

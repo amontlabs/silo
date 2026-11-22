@@ -1,6 +1,6 @@
 # May several computers write to one cache
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main and a fork both build a Rust project, and its downloaded
 packages take 3 GB. In the fork an agent tries a tool you do not trust yet.

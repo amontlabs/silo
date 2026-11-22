@@ -1,6 +1,6 @@
 # How the engine brings what is seen to what is wanted
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main and two forks are running when your Mac restarts for an
 update overnight. In the morning you open the app.

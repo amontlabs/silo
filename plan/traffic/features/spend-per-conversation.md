@@ -1,6 +1,6 @@
 # Spend
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Today in main one conversation cost 12.30 dollars and two others
 4.10 and 0.80, so main spent 17.20 in all.

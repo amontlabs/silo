@@ -1,6 +1,6 @@
 # Computers that outlive the engine
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent is three hours into a job in main when Silo's engine
 crashes.

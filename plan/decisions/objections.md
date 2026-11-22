@@ -1,6 +1,6 @@
 # Objections to expect
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Silo is posted on Hacker News, and the first reply is "A virtual
 machine per agent is too heavy."

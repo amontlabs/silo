@@ -1,6 +1,6 @@
 # Presenting it
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A developer lands on the home page from a link, and gives it
 thirty seconds.

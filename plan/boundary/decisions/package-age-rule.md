@@ -1,6 +1,6 @@
 # Whether there is a rule on the age of packages
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A popular npm package is replaced by a version that steals keys,
 and the registry removes it two hours later. During those two hours an agent in main runs `npm

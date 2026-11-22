@@ -1,6 +1,6 @@
 # What needs you
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. At 16:05 main asks to reach api.stripe.com and the request is
 held for 90 seconds, the fork try-bun has written 41 GB, and claude #1 has finished in client-a.

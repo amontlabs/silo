@@ -1,6 +1,6 @@
 # Is an agent program's own account of its model requests used as a check
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main finds Claude Code's sign-in in its files and
 calls the model 40 times with `curl`, outside Claude Code. Silo sees all 40 calls and counts them in

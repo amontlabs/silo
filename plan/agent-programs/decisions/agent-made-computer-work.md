@@ -1,6 +1,6 @@
 # How does an agent's work in a computer it asked for reach the user
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. The agent in main ran the tests on a clean Linux computer it
 made, and tried a migration in a fork. Now it needs the results, and you want to see what happened.

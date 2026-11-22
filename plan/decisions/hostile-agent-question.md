@@ -1,6 +1,6 @@
 # The agent is hostile
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A feature lets an agent leave a note for you in the app. A
 hostile agent could write a note that looks like a message from Silo and asks you to grant

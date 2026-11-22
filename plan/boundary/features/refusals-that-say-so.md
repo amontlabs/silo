@@ -1,6 +1,6 @@
 # Refusals
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A rule denies a connection from main to paste.rs. The agent's
 `curl` gets back an answer that says the request was denied, and the agent tells you so and goes on

@@ -1,6 +1,6 @@
 # Stopping one run
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Sixteen agents work in main. One run of Codex is stuck in a loop
 of `cargo test` with twelve child processes. You stop that run from the app, and the other fifteen

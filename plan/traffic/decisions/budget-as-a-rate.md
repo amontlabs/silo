@@ -1,6 +1,6 @@
 # Can a budget be a rate
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main has a budget of 50 dollars. At 3 in the morning an agent
 loops on a failing test and spends 5 dollars every 20 minutes.

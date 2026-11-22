@@ -1,6 +1,6 @@
 # Teams
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Three developers share one main where agents work on the team's
 migrations. Each of them sees its record and its screen, and any of them can pause it.

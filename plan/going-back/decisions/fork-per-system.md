@@ -1,6 +1,6 @@
 # How a fork is made on each system
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main runs a dev server and a test watcher. At 14:02 you fork main
 to try Bun. The fork gets main's disk as it was at 14:02, the agents' conversations included.

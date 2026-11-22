@@ -1,6 +1,6 @@
 # What is a fork given, and can it push code by itself
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent finishes a fix in a fork and runs `git push`. Either it
 goes through, or it is refused until you allow it. You decided that code leaves a fork through Git

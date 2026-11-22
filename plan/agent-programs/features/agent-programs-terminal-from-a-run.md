@@ -1,6 +1,6 @@
 # From a run to its conversation
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Silo's window shows that a run of Codex in the fork try-bun
 stopped and needs you. One click opens your terminal app in try-bun, in the run's folder, with that

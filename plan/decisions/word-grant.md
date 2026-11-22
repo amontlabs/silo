@@ -1,6 +1,6 @@
 # The word "grant"
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A fork starts with no secrets. For one task you give it your
 GitHub token. Only you, or a rule you set, may do that, so the act needs one name everywhere.

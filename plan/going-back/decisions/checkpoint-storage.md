@@ -1,6 +1,6 @@
 # Where is a checkpoint stored
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main runs `sudo rm -rf /`, by mistake or on purpose.
 It has full access inside main.

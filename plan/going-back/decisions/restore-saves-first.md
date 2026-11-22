@@ -1,6 +1,6 @@
 # What does a restore do before it goes back
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. At 16:00 you restore main to 15:38 to undo a bad migration. Then
 you remember that a second agent had finished a fix at 15:55 that you wanted.

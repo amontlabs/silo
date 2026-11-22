@@ -1,6 +1,6 @@
 # Alerts
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. At 14:31 a rule sees codex in main send 2.1 MB to paste.rs. At
 14:32 the same install reaches 11 more new hosts.

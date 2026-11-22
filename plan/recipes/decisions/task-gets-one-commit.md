@@ -1,6 +1,6 @@
 # What does a task's computer get from main
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main has changed src/login.ts and added
 tests/login.test.ts, and committed neither. It asks Silo to test the changes. Silo takes a

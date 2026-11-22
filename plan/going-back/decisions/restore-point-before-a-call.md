@@ -1,6 +1,6 @@
 # Which moment does a restore use around a tool call
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. At 15:12 an agent runs a database migration that should change 40
 tables, and it fails at the 25th. You want main as it was just before. An interval checkpoint was

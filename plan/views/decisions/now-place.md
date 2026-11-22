@@ -1,6 +1,6 @@
 # Now
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Three runs are alive in main. claude #1 has worked for 1 h 12 and
 spent $6.40, codex started 8 minutes ago, and claude #2 has made no model call for 38 minutes while

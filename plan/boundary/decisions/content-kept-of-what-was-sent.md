@@ -1,6 +1,6 @@
 # Of what goes to an allowed host, where does the record keep the content and where only the size
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent pushes a private repository to GitHub with your token,
 and you later want to know what left. Silo opens that connection to put the token in, and the

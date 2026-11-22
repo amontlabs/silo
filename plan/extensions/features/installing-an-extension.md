@@ -1,6 +1,6 @@
 # Taking an extension back
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Disk watch is installed on main and on two forks, and it alerts
 you too often. You take back its tools on the forks, then remove it from main. Its rules are

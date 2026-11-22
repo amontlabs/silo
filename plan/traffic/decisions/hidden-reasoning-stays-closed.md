@@ -1,6 +1,6 @@
 # Does Silo open the model's hidden reasoning
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Codex's model thinks for 40 seconds before it deletes a folder in
 main. OpenAI sends that thinking sealed, so that only OpenAI can read it, with a short summary in

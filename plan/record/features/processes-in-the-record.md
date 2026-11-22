@@ -1,6 +1,6 @@
 # Processes in the record
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. At 3 in the morning main's processor is at full use. You want to
 know which command it is, what started it, and how it ended.

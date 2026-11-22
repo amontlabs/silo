@@ -1,6 +1,6 @@
 # How a fork becomes main
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A fork of main has spent the morning moving your project to Node
 24, and it works. Meanwhile an agent in main committed a fix in `~/code/api` and did not push it.

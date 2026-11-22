@@ -1,6 +1,6 @@
 # What is a property's sentence for
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A promise reads: "A restore changes only what is inside the
 computer. The record, what was spent, the rules and precautions, and what was granted or taken back

@@ -1,6 +1,6 @@
 # How is spend shown
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. One of main's conversations today cost 3.20 dollars at
 Anthropic's API prices. You pay for main's model calls with your Max plan, and Anthropic says your

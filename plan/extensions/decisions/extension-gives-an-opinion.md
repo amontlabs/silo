@@ -1,6 +1,6 @@
 # How an extension's opinion is kept
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An extension called Leftovers says how /work/app/node_modules on
 main would come back: by a rebuild. You want to see that on the folder in Disk, and to let a

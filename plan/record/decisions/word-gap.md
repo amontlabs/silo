@@ -1,6 +1,6 @@
 # The word "gap"
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent starts 40,000 processes in ten seconds, and 3,000 of the
 reports about them are lost on the way to the record. Separately, Silo never writes down the files a

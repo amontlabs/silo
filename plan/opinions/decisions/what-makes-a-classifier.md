@@ -1,6 +1,6 @@
 # What makes an extension a classifier
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Silo's own small check that says which run wrote a file gives a
 value from a list, and so does an extension named Leftovers that answers "by a rebuild" about
@@ -69,4 +69,4 @@ an extension with a computer. The audit proposes that this entry alone sets the 
 gives a value from a fixed list as its opinion: a pattern or a function inside Silo, or an
 extension." A second audit asks instead: is each built-in an extension with a computer?
 
-The question is put to the owner in `built-in-classifiers-run-inside`, under "For the owner".
+The question is put to the owner in `built-in-classifiers-run-inside`, under "The choice".

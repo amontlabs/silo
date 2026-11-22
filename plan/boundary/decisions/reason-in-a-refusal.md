@@ -1,6 +1,6 @@
 # What may the reason in a refusal say
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main is refused twice in a morning. First a rule
 denies a package published yesterday. Then a classifier you installed denies a command it finds

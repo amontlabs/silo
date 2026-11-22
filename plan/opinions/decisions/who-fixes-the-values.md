@@ -1,6 +1,6 @@
 # Who fixes the values
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An extension named Leftovers wants to tell you that
 /work/app/node_modules is "safe to delete".

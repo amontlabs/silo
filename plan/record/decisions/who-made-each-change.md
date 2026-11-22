@@ -5,7 +5,7 @@ computer's rules, secrets, channels and state, and "each with who did it". It do
 change": a file change is a fact, but which process made it is a separate report, and what no run
 is shown to have written is shown as unattributed (`books-balance`, in `what-runs-wrote`).
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A background process writes 2 GB in main at a moment when Silo
 could not see which program did it. A promise in force says that such a change is shown as

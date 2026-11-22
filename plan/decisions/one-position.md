@@ -1,6 +1,6 @@
 # One position gives all of it
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A visitor asks why one product sets limits, takes checkpoints,
 counts spending and keeps a record, when each exists as a separate tool.

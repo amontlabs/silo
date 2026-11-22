@@ -1,6 +1,6 @@
 # An opinion is a value
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An extension says "not safe" about a request from main to
 paste.rs, and explains: "the body looks like the contents of .env". You have a precaution that holds

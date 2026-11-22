@@ -1,6 +1,6 @@
 # Sources
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Disk shows "target/ grew by 3 GB, written by cargo build". The
 first half was seen on the disk from outside main. The second was told by the part of Silo that runs

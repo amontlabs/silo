@@ -1,6 +1,6 @@
 # Checkpoints with memory
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main is a macOS computer where an agent drives an iPhone app
 through a long test in Xcode, with a dev server open. You restore main to the 15:38 checkpoint.

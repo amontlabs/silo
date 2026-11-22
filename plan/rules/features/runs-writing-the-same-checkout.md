@@ -1,6 +1,6 @@
 # Two runs writing in the same checkout
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Two runs in main both edit `src/app.ts` in the checkout of your
 site within the same ten minutes. Silo alerts you and offers to make a fork.

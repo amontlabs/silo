@@ -1,6 +1,6 @@
 # Where an x86 Linux computer runs
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in a Linux computer beside main needs a tool that exists
 only for Intel processors, or a container image built only for them.

@@ -1,6 +1,6 @@
 # Which properties does Silo promise in public
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. The page of promises for Silo 0.4 has 14 candidates. "A restore
 changes only what is inside the computer" passes its checks. The promise that every way out of a

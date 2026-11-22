@@ -1,6 +1,6 @@
 # How the engine is cut into parts
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A restore of main fails once in a thousand times, only when a
 checkpoint is being taken at the same moment. The question is whether a test can find that before

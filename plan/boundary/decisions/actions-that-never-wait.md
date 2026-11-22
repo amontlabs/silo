@@ -1,6 +1,6 @@
 # Does stopping a computer or taking back its access wait for an ask
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A rule you wrote stops a fork when it connects to a host that is
 not on its list. At 03:00 the fork does, while it is halfway through a long build.

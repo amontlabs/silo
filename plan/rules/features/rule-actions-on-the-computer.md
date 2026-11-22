@@ -1,6 +1,6 @@
 # Rules that act on the computer
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You put a fake token in main that no honest task uses. One night
 a request carries it towards a host. A rule denies the request, stops main and alerts you.

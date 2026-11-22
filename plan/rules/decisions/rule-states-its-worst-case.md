@@ -1,6 +1,6 @@
 # What a rule shows when it is set
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You allow api.github.com on main, which holds your repositories.
 Later you set a rule that stops main if a fake secret ever leaves it.

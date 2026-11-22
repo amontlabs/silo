@@ -1,6 +1,6 @@
 # What keeping the record costs in speed
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent runs a build with 8 jobs, then a parallel test suite, in
 a macOS computer with the record on. Seeing file changes, connections and processes each adds some

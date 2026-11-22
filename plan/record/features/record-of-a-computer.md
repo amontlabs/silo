@@ -1,6 +1,6 @@
 # The record of a computer
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent worked in main all night. In the morning you ask what it
 reached, what it spent and what it changed, and you want an answer the agent could not have

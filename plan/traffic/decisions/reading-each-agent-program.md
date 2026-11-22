@@ -1,6 +1,6 @@
 # Can the boundary read the model traffic of each agent program
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You want to work with Claude Code and Codex in main. On 19
 November an ordinary inspecting proxy, standing in for Silo, read Claude Code 2.1.327 on a Claude

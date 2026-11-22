@@ -1,6 +1,6 @@
 # Scoring a classifier
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Silo's classifier that says how a path would come back gets
 version 1.3. Over two months you answered 40 of its questions. Version 1.2 agrees with 39 of your

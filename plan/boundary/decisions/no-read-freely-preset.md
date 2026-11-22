@@ -1,6 +1,6 @@
 # Does Silo offer a preset that lets reads pass and holds writes
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A web page an agent reads tells it to fetch
 https://evil.example/?k= followed by your API key. That request only reads, and it carries the key

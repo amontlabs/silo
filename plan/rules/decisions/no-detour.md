@@ -1,6 +1,6 @@
 # How a rule is kept from acting on an opinion by a detour
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A precaution denies five connections from main in one minute, on
 a classifier's opinion. You also have a rule: five denied connections in a minute, stop the

@@ -1,6 +1,6 @@
 # Restore
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. In a fork where one agent works, a migration goes wrong at 15:40.
 You restore the fork to 15:38. Silo first saves 15:40 as a checkpoint, then the disk and the agent's

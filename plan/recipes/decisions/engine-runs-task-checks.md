@@ -1,6 +1,6 @@
 # Who runs a task's checks
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in a fork fixes a bug and says that all 214 tests pass.
 Silo then runs `cargo test` itself on that commit, in a fresh computer the agent never worked in.

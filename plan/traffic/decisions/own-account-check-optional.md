@@ -1,6 +1,6 @@
 # Is the check against an agent program's own account optional
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You have main and three forks, all running Claude Code. Comparing
 Claude Code's own account with what Silo saw costs some extra work and disk in each computer, and

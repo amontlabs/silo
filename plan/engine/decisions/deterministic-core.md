@@ -1,6 +1,6 @@
 # Is the core deterministic
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. The engine stops one night after six hours of agents working in
 main and two forks, and it never happens again.

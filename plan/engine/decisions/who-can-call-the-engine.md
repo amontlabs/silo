@@ -1,6 +1,6 @@
 # Who can call the engine
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in a fork may use Silo's tools from inside. It sends the
 engine a call that says it comes from the app, and asks for main's rules to be loosened.

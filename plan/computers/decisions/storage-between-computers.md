@@ -1,6 +1,6 @@
 # Can a computer read what another computer left on disk or in memory
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You drop a fork in which an agent had loaded a dump of a
 production database. A week later you make a fresh Linux computer, and an agent in it, with `sudo`,

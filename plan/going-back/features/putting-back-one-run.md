@@ -1,6 +1,6 @@
 # Putting back one run's work
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Three agents work in main. Agent B, sent to fix the CSS, also
 rewrote `config/database.yml` and two scripts in `scripts/`. You put back B's run. The two scripts,

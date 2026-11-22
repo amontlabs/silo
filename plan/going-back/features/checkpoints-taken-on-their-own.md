@@ -1,6 +1,6 @@
 # Checkpoints taken on their own
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Three agents work in main all afternoon. At 15:40 one of them
 deletes the database it was migrating. Silo took checkpoints on its own every few minutes and at

@@ -1,6 +1,6 @@
 # The core under a simulator
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A test program plays a made-up night of work against Silo's
 engine: three computers, forks and checkpoints, a virtual machine that dies, a disk that fills, a

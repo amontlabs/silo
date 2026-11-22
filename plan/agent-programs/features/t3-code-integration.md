@@ -1,6 +1,6 @@
 # T3 Code as a client of Silo
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You work from T3 Code on your Mac. Today it connects to one
 computer over SSH. With this, T3 Code lists every computer, shows which runs need you, and opens the

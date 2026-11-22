@@ -1,6 +1,6 @@
 # What limits the engine's tables and memory
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent's script goes wrong and asks for a new fork in a loop,
 ten thousand times.

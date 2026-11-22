@@ -1,6 +1,6 @@
 # An extension that protects
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Push check is installed on main with the right to hold its
 pushes. An agent pushes to the main branch of amontlabs/site. The push waits, Silo asks Push check,

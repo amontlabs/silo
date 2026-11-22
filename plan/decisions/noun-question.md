@@ -1,6 +1,6 @@
 # Does it need a new noun?
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Someone proposes "workspaces": a named group of computers that
 share settings.

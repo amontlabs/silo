@@ -1,6 +1,6 @@
 # Which channels does a computer have
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A program in a fork has to sign you in to a service, so it needs
 a link opened in the browser on your Mac. The list of channels has seven entries and that is not one

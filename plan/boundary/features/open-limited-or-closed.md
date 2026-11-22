@@ -1,6 +1,6 @@
 # A computer's network: open, limited or closed
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main installs a package. Its install script tries to
 send your files to paste.rs and to open 192.168.1.10, the storage box on your home network.

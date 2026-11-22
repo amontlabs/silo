@@ -1,6 +1,6 @@
 # When does a request wait for an extension's answer
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main has two extensions. Disk watch reads /work every minute and
 alerts you. Push check may hold main's pushes. When an agent pushes, the push waits for Push check's

@@ -1,6 +1,6 @@
 # Network
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. In one afternoon, main called api.anthropic.com 1,204 times for
 $18.40, pushed three times to github.com with the secret github, installed 3 packages from npm that

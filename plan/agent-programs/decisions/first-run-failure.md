@@ -1,6 +1,6 @@
 # What does first run do where it could fail
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You install Silo on a MacBook with 30 GB free, and the Wi-Fi
 drops halfway through the download of macOS.

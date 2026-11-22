@@ -1,6 +1,6 @@
 # The engine and the programs that follow it
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. The app is open. In a terminal you type the command that forks
 main.

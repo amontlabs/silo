@@ -1,6 +1,6 @@
 # When you restore a computer, what stays as it is now
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. At 15:00 you take a secret back from main and tighten its rules.
 Then you restore main to 14:00.

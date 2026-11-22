@@ -1,6 +1,6 @@
 # Who may use the Workshop
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A developer finds the Workshop from the home page, signs in with
 GitHub and writes that the bin should keep a computer for a month.

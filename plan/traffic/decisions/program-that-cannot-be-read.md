@@ -1,6 +1,6 @@
 # What does Silo know of an agent program whose traffic cannot be read
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You try a new agent program in main. It talks to a model provider
 whose format Silo cannot read yet. Main has a budget of 50 dollars.

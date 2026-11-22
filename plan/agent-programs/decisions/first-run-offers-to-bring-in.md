@@ -1,6 +1,6 @@
 # What first run does with what is already on the Mac
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. On your Mac, Claude Code has three MCP servers, one of them with
 your Linear API key in its settings. ~/code holds twenty repositories, one with a .env file that

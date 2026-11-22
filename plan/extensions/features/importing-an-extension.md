@@ -1,6 +1,6 @@
 # Importing and installing an extension
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You import Disk watch from a folder. Before anything changes,
 Silo shows that it adds no rules, makes a Linux computer from its recipe, wakes every minute, may

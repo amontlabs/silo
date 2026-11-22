@@ -1,6 +1,6 @@
 # The word "unattributed"
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main grew by 3 GB today, and two runs are shown to have written
 2.2 GB of it. Main also reached 14 hosts, and for 2 of them no run is shown to have made the

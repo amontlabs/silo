@@ -1,6 +1,6 @@
 # Matching reports to facts
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Between the checkpoints of 14:00 and 14:05, Claude Code and Codex
 in main both report writing /work/site/package-lock.json, and the file changed once in that time.

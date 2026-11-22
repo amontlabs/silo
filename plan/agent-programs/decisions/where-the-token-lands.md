@@ -1,6 +1,6 @@
 # Where the token lands when each agent app connects over SSH
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You drive main from the Claude app and from the Codex app on your
 Mac, both connected over SSH. Then you fork main to let an agent try a tool you do not trust.

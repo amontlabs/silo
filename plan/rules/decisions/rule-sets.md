@@ -1,6 +1,6 @@
 # Switching several rules on at once
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. For web work a computer needs the npm registry and github.com
 allowed, and pushes held. You make a new Linux computer and set the same three rules again.

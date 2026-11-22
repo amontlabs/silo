@@ -2,7 +2,7 @@
 - The phone app is the feature `phone-app` in `views`. Forwarding to a phone is the feature
   `forwarding-to-a-phone` in `extensions`.
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent tries to merge at night while you are away from the Mac.
 Silo holds the merge for your answer, and refuses it as not answered when the hold passes its limit.

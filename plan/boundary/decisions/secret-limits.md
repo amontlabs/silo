@@ -1,6 +1,6 @@
 # Can a secret be limited
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You give a fork a GitHub token so that it can read a private
 repository, and you do not want it to push. A Git fetch over HTTPS is sent as a POST request.

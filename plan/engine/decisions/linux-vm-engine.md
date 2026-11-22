@@ -1,6 +1,6 @@
 # Which virtual machine monitor runs Linux computers
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You want a Linux computer beside main on your Mac, and later the
 same computers on a Linux server. Something has to run the virtual machine. The facts below are of

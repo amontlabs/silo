@@ -1,6 +1,6 @@
 # No approval by hand
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You make a macOS computer from a recipe that includes computer
 use. An agent opens your Mac app and clicks through its sign-up, and no dialog ever asked you to

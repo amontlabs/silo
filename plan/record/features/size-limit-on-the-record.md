@@ -1,6 +1,6 @@
 # A size limit on the record
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Agents drive the screen of main for a few hours a day, and the
 recordings add several gigabytes a week. You set the record's limit at 20 GB.

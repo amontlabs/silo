@@ -1,6 +1,6 @@
 # Testing your changes
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You change the sync code of your Mac app in main, without
 committing, and ask Silo to test it. Silo makes a fresh macOS computer and a fresh Linux computer

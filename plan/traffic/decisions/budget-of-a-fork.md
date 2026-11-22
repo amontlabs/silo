@@ -1,6 +1,6 @@
 # When you fork a computer that has a budget, what budget does the fork get
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main has a budget of 50 dollars and an agent makes ten forks of
 it.

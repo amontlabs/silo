@@ -1,6 +1,6 @@
 # The word "revoke"
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. At 15:00 you gave a fork your GitHub token. At 16:00 the task is
 done and you remove it. The app has to name that act on its button and in the record.

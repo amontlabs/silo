@@ -1,6 +1,6 @@
 # How each agent program takes a reply that Silo changed
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A rule on main denies `git push --force`. Claude Code's model
 asks for it, and Silo changes the reply so that the push does not run and the model sees it was

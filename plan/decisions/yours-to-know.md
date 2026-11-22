@@ -1,6 +1,6 @@
 # May Silo hide something that is the user's to know?
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You install an extension that runs code. It gets a computer of
 its own, which uses memory and disk on your Mac.

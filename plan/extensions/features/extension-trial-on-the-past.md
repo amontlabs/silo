@@ -1,6 +1,6 @@
 # A trial on the past
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You import Push check, which would hold pushes it finds risky.
 Before installing it, you run it in a fresh computer on the last week of main's record. It would

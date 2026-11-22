@@ -1,6 +1,6 @@
 # Where Claude Code comes from
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Your recipe for main includes Claude Code at version 2.1.0. The
 first time Silo builds that recipe on your Mac, it downloads that version from Anthropic and checks

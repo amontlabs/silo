@@ -1,6 +1,6 @@
 # Faster to get, or faster to judge
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Two proposals wait. One lists what is only in a fork before you
 drop it. The other adds colour themes to the app.

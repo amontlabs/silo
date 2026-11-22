@@ -1,6 +1,6 @@
 # Timeline
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. At 13:42 claude #2 ran "clean the build" in main. At 14:10 you
 find that a file you needed is gone.

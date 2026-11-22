@@ -1,6 +1,6 @@
 # Receipts
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. codex worked for 1 h 12 in a fork on "fix the flaky login test",
 and says all tests pass.

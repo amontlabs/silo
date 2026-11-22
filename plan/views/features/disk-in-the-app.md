@@ -1,6 +1,6 @@
 # Disk
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Your Mac has 20 GB free. In main, six copies of target/ take 78
 GB and nine old worktrees take 31 GB, and two commits in one of them were never pushed.

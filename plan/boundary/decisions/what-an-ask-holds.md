@@ -1,6 +1,6 @@
 # What does a pending ask hold
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Three agents work in main. One of them pushes to a host that a
 rule holds, and the ask waits for you while you are at lunch.

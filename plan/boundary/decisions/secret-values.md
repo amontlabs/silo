@@ -1,6 +1,6 @@
 # Where can a secret's real value be found
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main uses your API key through Silo. The service has
 a page that shows the key it was called with, and the agent asks for that page.

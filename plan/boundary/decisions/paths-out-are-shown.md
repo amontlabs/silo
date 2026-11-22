@@ -1,6 +1,6 @@
 # Does Silo show every path by which data can leave a computer
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You open the page of a fork to see where its data can go. It
 lists github.com and your model provider. The fork can also look up any name on the internet, and a

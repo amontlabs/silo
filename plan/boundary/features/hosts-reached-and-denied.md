@@ -1,6 +1,6 @@
 # Hosts reached and denied, in the record
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. At 14:02 a program in main connects to paste.rs for the first
 time. You are alerted. No rule allows the host, so the connection is denied. The record keeps the

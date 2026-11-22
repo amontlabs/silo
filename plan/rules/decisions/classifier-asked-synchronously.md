@@ -1,6 +1,6 @@
 # A classifier asked about each tool call before it runs
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main gets a reply from its model that asks to run `rm
 -rf ~/projects/site`. You have set a precaution that asks a classifier about each tool call.

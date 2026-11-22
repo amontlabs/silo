@@ -4,7 +4,7 @@ Each line is marked Notes in the design record. One part of the chat-window line
 in `computer-reached-over-ssh`, which has no verdict yet: you work in a computer through a terminal
 over SSH, your editor, or a tool that connects in, such as T3 Code.
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. The agent in main writes a handoff note and sends it to the agent
 in a fork with Silo's tool for files. You also type a comment on a change, and the agent receives

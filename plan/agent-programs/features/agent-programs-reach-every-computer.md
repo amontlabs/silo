@@ -1,6 +1,6 @@
 # Every computer reached by name
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent makes a fork named try-bun. A moment later you type
 `ssh try-bun` in your terminal, and your editor lists try-bun among its remote machines.

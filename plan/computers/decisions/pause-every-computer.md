@@ -1,6 +1,6 @@
 # Can you pause every running computer at once
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. At 23:00 you see agents in main and two forks pushing to the
 wrong branch, and you want everything frozen now. An hour earlier a precaution had paused a third

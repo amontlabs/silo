@@ -1,6 +1,6 @@
 # How does a computer use a secret it cannot read
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main uses your OpenAI key, which is sent as it is in
 each request. It also uses your AWS keys, which are never sent: the program signs each request with

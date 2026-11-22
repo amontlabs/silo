@@ -1,6 +1,6 @@
 # Old checkpoints thinned
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main has run for three weeks with checkpoints at each turn.
 Without thinning, every one of them is still there, each holding what changed after it.

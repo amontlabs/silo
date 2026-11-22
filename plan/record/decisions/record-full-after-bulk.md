@@ -1,6 +1,6 @@
 # What does Silo do when the record's size limit is still reached once bulky content has gone
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You set the record's limit at 20 GB. No recording and no message
 text is left to remove, the lines alone take 20 GB, and three agents are working in main.

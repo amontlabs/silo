@@ -1,6 +1,6 @@
 # Forks
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You want an agent to try moving your project to Node 24 without
 touching main. You fork main. The fork starts with main's disk, its own name and its own screen, and

@@ -1,6 +1,6 @@
 # How does the user get from a run in Silo's window to its conversation
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Silo's window shows that a run of Claude Code in the fork try-bun
 stopped and needs you.

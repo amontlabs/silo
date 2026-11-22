@@ -1,6 +1,6 @@
 # How Silo makes the error for a denied tool call exist
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A rule on main denies `git push --force`. Claude Code, on your
 Max plan, gets a reply in which the model asks for `git push --force origin main`.

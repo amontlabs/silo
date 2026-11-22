@@ -1,6 +1,6 @@
 # As sure as its least sure ingredient
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main has a budget of 50 dollars. Silo adds up the spend from the
 model calls it saw itself. It also shows that a build wrote 3 GB, added up from what a program

@@ -1,6 +1,6 @@
 # Bad paths written first
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A request is held for your answer and you are asleep. If nobody
 wrote what happens then, it waits for ever or passes by accident.

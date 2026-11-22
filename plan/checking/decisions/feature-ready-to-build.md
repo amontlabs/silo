@@ -1,6 +1,6 @@
 # When a feature is ready to build
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. The feature "How each run is going" is taken, and everything it
 needs is done. It adds no promise and keeps none.

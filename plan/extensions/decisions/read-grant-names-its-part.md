@@ -1,6 +1,6 @@
 # A grant to read names its part
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You install Disk watch on main. To do its job it needs the file
 lines of main's record. Main's record also holds every model call: the tool calls your agents'

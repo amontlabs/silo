@@ -1,6 +1,6 @@
 # An alert on a run stuck too long
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A run in main has been stuck for 20 minutes, asking the same
 failing command again and again. You had set 15 minutes, so Silo alerts you.

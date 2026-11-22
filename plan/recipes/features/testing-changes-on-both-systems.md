@@ -1,6 +1,6 @@
 # Testing your changes on macOS and Linux
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main changes how your site builds its pages. Before
 it pushes, Silo tests the change in a fresh macOS computer and a fresh Linux computer, and shows the

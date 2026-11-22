@@ -1,6 +1,6 @@
 # Never fills a hole
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Silo could not watch main for two minutes during a build. The
 timeline can show those two minutes as quiet, or as not seen.

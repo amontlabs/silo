@@ -1,6 +1,6 @@
 # A minimum age for packages
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A rule on main denies packages younger than 7 days. An agent runs
 `npm install`, which picks a release published two hours ago. The download is denied, and so is the

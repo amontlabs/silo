@@ -1,6 +1,6 @@
 # The approvals of computer use
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent needs to drive the screen of a macOS computer. macOS
 allows that only after two approvals in System Settings: Accessibility and Screen Recording. The old

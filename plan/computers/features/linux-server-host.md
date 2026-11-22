@@ -1,6 +1,6 @@
 # A Linux server as host
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You run Silo on a Linux server with 128 GB of memory. Twenty
 forks of a Linux main try twenty fixes at once, on Intel processors, and you follow them from your

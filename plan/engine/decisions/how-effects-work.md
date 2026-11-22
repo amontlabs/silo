@@ -1,6 +1,6 @@
 # How the core asks a driver to act
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. The engine asks for a checkpoint of main. The part that takes it
 hangs and answers a minute late, or the engine crashes and asks again after its restart.

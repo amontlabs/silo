@@ -1,6 +1,6 @@
 # Accounts per computer
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You have a work Claude account and a personal one. You want main
 to use the work account, and a fork for a side project to use the personal one.

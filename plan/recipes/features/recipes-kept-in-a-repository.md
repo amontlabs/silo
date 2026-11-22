@@ -1,6 +1,6 @@
 # Recipes kept in a repository
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Your repository silo-site holds a recipe for macOS computers and
 one for Linux computers, and the Linux one names registry.npmjs.org. An agent in main adds paste.rs

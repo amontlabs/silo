@@ -1,6 +1,6 @@
 # Which network settings does a computer have
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You make a fork to try a tool you do not trust yet, and you want
 to say what it can reach. Later an agent in it starts sending files to a host you do not know, and

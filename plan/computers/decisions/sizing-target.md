@@ -1,6 +1,6 @@
 # What load is one device sized for
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. On a MacBook Pro with 32 GB, 16 agents work in main across two
 repositories. On a MacBook Air with 16 GB, three agents work in main and one fork tries a migration.

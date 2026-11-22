@@ -1,6 +1,6 @@
 # What part Silo plays in the logins of agent programs
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You use Claude Code with your Claude subscription, and Codex with
 an OpenAI API key. You make a fresh computer to run a task.

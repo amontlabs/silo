@@ -1,6 +1,6 @@
 # The record under a flood
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent creates 2 million files in a loop in main. Before that,
 it had reached a host you did not expect.

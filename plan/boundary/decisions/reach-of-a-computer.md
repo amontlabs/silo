@@ -1,6 +1,6 @@
 # Can a computer reach more than what was granted
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You make a new computer and start an agent in it. Before you
 allowed anything, it needs its model provider and the npm registry.

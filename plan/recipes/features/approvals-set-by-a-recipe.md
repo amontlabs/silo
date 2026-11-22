@@ -1,6 +1,6 @@
 # Computer use with no approval by hand
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Silo makes a fresh macOS computer for a task that tests your
 app's sign-up. An agent opens the app and clicks through it, and nobody had to allow screen

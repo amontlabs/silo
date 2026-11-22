@@ -1,6 +1,6 @@
 # Kinds of facts and reports
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An extension that follows your deployments wants to write
 "deployed to production" into the record of main, as a kind of line of its own.

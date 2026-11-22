@@ -1,6 +1,6 @@
 # The word "budget"
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main has a budget of 50 dollars. An agent in it calls a paid
 image service with a key you gave it, and spends 30 dollars there.

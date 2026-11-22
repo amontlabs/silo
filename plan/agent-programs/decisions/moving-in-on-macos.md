@@ -1,6 +1,6 @@
 # What does moving in keep when main is on macOS
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. On your Mac your user is ana. A setting of Claude Code starts an
 MCP server at /Users/ana/.local/bin/linear-mcp, and a skill calls /opt/homebrew/bin/node.

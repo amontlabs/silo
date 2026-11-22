@@ -1,6 +1,6 @@
 # Files sent between computers
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in a Linux computer builds a 200 MB test database. The
 agent that needs it works in main. A rule you set allows files from that Linux computer to main, one

@@ -1,6 +1,6 @@
 # How the engine is built
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Agents write the first ten files of the engine. Every later file,
 hundreds of them, copies how those ten are written.

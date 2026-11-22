@@ -1,6 +1,6 @@
 # The record's size on disk
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main runs agents all day: builds, tests, three long
 conversations, and one agent that drives the screen for an hour. Rough estimates say the lines of

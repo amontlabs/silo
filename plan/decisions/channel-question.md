@@ -1,6 +1,6 @@
 # Is it a channel?
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A new feature lets an agent paste from your Mac's clipboard into
 its computer.

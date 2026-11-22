@@ -1,6 +1,6 @@
 # The engine after a crash
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. The engine crashes halfway through a restore of a fork you asked
 for.

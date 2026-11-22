@@ -1,6 +1,6 @@
 # No more than it has
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A new feature lets an agent in a fork ask Silo to copy files into
 main.

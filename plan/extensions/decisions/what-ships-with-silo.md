@@ -1,6 +1,6 @@
 # What ships with Silo
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You set Silo up. Beside the extensions you import, it offers a
 few of its own, such as Disk watch, each with the same list of what it reads, shows and may protect.

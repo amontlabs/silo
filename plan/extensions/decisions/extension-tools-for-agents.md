@@ -1,6 +1,6 @@
 # Tools for agents
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Someone writes Docs search, an extension that keeps an index of
 your team's documents and would give the agents in main a tool, search_docs. To keep its index

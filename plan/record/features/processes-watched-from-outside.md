@@ -1,6 +1,6 @@
 # Processes watched from outside
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Today the list of commands that ran in main is told by a part of
 Silo inside main, and an agent with full access can interfere with it. Watching from outside would

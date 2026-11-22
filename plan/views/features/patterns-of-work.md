@@ -1,6 +1,6 @@
 # Patterns of work
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Over a week, `npm install` ran 41 times in 12 runs in main, for 3
 h 10 and 9 GB. In one run, the same 4,000-line file was given to the model 20 times.

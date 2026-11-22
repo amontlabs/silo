@@ -1,6 +1,6 @@
 # The format of a recipe
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Your recipe for main is five short lines: the system, three
 pieces, two packages, the hosts it reaches and the secret GITHUB_TOKEN. Silo started it from your

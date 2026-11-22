@@ -1,6 +1,6 @@
 # The meanings of the words for what Silo knows
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. On Tuesday an agent in main installs a package. On Friday a
 classifier you added says the package was not needed. The install is in main's record. The

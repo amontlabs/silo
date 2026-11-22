@@ -1,6 +1,6 @@
 # What does a fork store of its parent's disk
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main's disk holds 60 GB, of which 25 GB is build output. You fork
 main to try a dependency upgrade.

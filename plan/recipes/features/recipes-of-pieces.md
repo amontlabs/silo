@@ -1,6 +1,6 @@
 # Recipes made of pieces
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Your recipe for main names macOS, Node 22 and three pieces:
 Claude Code, Codex and your team's review skill. The skill is written once, and Silo puts it where

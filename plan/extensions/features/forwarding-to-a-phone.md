@@ -1,6 +1,6 @@
 # Forwarding to a phone
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You are out. A rule holds a push from main for your yes. Your
 phone buzzes: "main: push of 3 commits to amontlabs/site waits for you". You get back to your Mac

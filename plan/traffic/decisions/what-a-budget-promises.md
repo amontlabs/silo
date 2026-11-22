@@ -6,7 +6,7 @@ Proposed, as a property checked by a hostile test.
 - Whether a budget denies or holds at each threshold: `budget-denies-or-holds`, open.
 - Whether a program can get around a budget on a conversation by starting a new one: `recognising-a-conversation`.
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main has a budget of 50 dollars. The spend reaches 50 while three
 long answers are still coming back from the model.

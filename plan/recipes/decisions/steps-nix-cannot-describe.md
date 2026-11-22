@@ -1,6 +1,6 @@
 # What Nix cannot describe
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Your recipe for a macOS computer includes Microsoft Excel, which
 Nix does not package, and computer use. Silo puts the system in place, installs Excel at the version

@@ -1,6 +1,6 @@
 # Does a budget deny or hold at each threshold
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main has a budget of 50 dollars. You are out for the afternoon,
 and an agent in main spends steadily.

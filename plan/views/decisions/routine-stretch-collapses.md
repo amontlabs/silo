@@ -1,6 +1,6 @@
 # A routine stretch
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Between 13:00 and 13:40, claude #2 ran 212 commands in main. Most
 were builds and tests, and three times it ran the same failing install.

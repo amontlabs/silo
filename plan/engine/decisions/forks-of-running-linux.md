@@ -1,6 +1,6 @@
 # How forks of a running Linux computer arrive
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A Linux computer has three agents at work, and you fork it so
 that the fork starts with the same programs running, where they were.

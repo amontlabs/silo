@@ -1,6 +1,6 @@
 # A blank computer
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You make a Linux computer and pick no recipe. It holds Ubuntu and
 nothing more: no agent program, no Node, none of your tools.

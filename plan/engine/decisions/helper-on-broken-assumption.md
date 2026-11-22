@@ -1,6 +1,6 @@
 # When the part of Silo that runs one computer finds a bug in itself, what does it do
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent is in the middle of a task in a fork. The part of Silo
 that runs that fork, its helper, finds its own state impossible, which means a bug in Silo.

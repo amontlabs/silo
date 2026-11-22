@@ -1,6 +1,6 @@
 # Is what Silo sees of a computer the same on macOS and Linux
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main is a Linux computer, and a macOS computer beside it builds
 your iPhone app. Both records show every connection, model call, spend and checkpoint in the same

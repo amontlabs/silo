@@ -1,6 +1,6 @@
 # Phone app
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You are away from your Mac at 18:40. An agent in main asks to
 push to the default branch of your repository, and the ask ends in 90 seconds.

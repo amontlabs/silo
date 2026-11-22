@@ -1,6 +1,6 @@
 # Whether anything done inside a computer can change its rules
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main is limited to github.com. An agent in main, with `sudo`,
 tries to reach paste.rs: it edits the network settings, changes `/etc/hosts`, ends processes and

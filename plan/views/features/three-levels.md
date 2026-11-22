@@ -1,6 +1,6 @@
 # Three levels
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main asks to reach api.stripe.com. The first screen
 says main needs you, its line lets you allow or deny, and opening it shows the Timeline at that

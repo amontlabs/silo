@@ -1,6 +1,6 @@
 # Budgets on rates and on usage outside a plan
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You set main to at most 5 dollars in any hour. You also allow at
 most 20 dollars a month of usage billed beyond your Max plan.

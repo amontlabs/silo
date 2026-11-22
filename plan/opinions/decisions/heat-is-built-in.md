@@ -1,6 +1,6 @@
 # Heat
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Claude Code, Codex and a second Claude Code all wrote
 /work/site/package-lock.json in main today, and the map of hot files shows it as written by three

@@ -1,6 +1,6 @@
 # What Silo changes in model traffic
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A rule on main denies `git push --force`, and Silo holds main's
 Anthropic API key as a secret.

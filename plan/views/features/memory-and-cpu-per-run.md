@@ -1,6 +1,6 @@
 # Memory and CPU of each run
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Your Mac has 16 GB. Main runs low on memory, Silo pauses it and
 alerts you. Three runs were alive in main.

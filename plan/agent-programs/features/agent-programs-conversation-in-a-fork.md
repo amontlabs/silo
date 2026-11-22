@@ -1,6 +1,6 @@
 # The conversation carried into a fork
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main has spent the morning on a migration. You fork
 main to let it try a risky approach. In the fork you sign in again and run `claude --continue`, and

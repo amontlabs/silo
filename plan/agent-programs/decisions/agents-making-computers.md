@@ -1,6 +1,6 @@
 # May an agent ask for a fork or a fresh computer
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main has changed your app. It wants to run the tests
 on a clean Linux computer, and to try a risky migration in a fork of main, without waiting for you.

@@ -1,6 +1,6 @@
 # Reports matched to facts
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A program inside main says it wrote 2 MB to `out.log`. The disk,
 seen from outside, shows that `out.log` did not change.

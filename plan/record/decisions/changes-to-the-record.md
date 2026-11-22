@@ -1,6 +1,6 @@
 # Can anything change what the record already holds
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You dropped ten forks last spring and emptied the bin. Their
 record is still on your Mac, with the conversations you had in them.

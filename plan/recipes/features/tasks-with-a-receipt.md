@@ -1,6 +1,6 @@
 # Tasks
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main starts a task: run the database migration in a
 fork of this morning's checkpoint. It ends four minutes later, and you get its receipt, with the

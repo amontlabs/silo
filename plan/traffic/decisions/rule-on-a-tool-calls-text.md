@@ -1,6 +1,6 @@
 # Can a rule deny a tool call by its text
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You set a rule on main that denies `git push --force`. Claude
 Code's model asks for `git push --force origin main`.

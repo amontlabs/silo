@@ -1,6 +1,6 @@
 # Which agent programs run in a computer
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A new agent program comes out, and Silo does not offer it yet.
 You install it in main with its vendor's installer.

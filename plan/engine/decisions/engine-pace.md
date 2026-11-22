@@ -1,6 +1,6 @@
 # How fast the engine is built
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. The engine could be written in one go from the plan as it stands,
 and main could run on your Mac sooner.

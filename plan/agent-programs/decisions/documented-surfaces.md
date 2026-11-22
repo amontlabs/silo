@@ -1,6 +1,6 @@
 # How does Silo integrate with an agent program
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Claude Code keeps each conversation in a file on the disk, in a
 format Anthropic does not promise to keep. Reading those files would let Silo show the conversation,

@@ -1,6 +1,6 @@
 # How much memory an idle computer gives back
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A build in main takes 6 GB of memory, then main sits idle all
 night. A macOS computer beside it does the same after an Xcode build. How much of that memory each

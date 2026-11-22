@@ -1,6 +1,6 @@
 # Does the engine hold one use of a mechanism?
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You want a classifier that judges tool calls. Silo could have
 "judge tool calls" built in. Or it could run any classifier you define, on any input, and ship the

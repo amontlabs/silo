@@ -1,6 +1,6 @@
 # Observing and waiting
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A build in main writes 50,000 files faster than Silo can write
 them down.

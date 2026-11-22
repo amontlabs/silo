@@ -1,6 +1,6 @@
 # Registering an extension
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You installed an extension that sums up main's day each
 evening and gives its opinion when a request waits for it. Its author changes one of its files, and

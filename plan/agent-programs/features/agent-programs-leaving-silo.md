@@ -1,6 +1,6 @@
 # Leaving Silo
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You stop using Silo. You export main as a disk image that another
 virtual machine app starts, and your recipes and rules as text files.

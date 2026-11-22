@@ -1,6 +1,6 @@
 # Hand over a computer
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent got a computer into a state where a bug shows, after an
 hour of installs and changes. You hand that computer to a colleague, who gets an exact copy on their

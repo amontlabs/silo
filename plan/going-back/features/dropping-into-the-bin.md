@@ -1,6 +1,6 @@
 # Drop and the bin
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. On Monday you drop the fork where an agent tried Node 24. On
 Thursday you remember a script it wrote there. The fork is still in the bin, and you bring it back.

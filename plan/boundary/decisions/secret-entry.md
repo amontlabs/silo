@@ -1,6 +1,6 @@
 # Where does the user enter a secret
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main needs your Stripe key. Today you would paste it
 into the chat, where it goes to the model provider and stays in the conversation.

@@ -1,6 +1,6 @@
 # The ways out of a computer
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Before you give main a token, you open main's page. It lists the
 network, limited to github.com and crates.io, port 3000 open to your Mac, no files, the clipboard

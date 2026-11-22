@@ -1,6 +1,6 @@
 # Whether Silo offers a rule that names the paths to leave out of long history
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main rebuilds a Rust project several times a day, and
 a full build rewrites its 4 GB `target` folder. Each checkpoint keeps the version of that folder it

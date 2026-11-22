@@ -1,6 +1,6 @@
 # How Anthropic reads "intermediate"
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You use Claude Code on your Max plan in main. Your sign-in passes
 through Silo with each request, and Silo keeps it nowhere. Anthropic's terms forbid a developer to

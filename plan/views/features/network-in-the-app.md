@@ -1,6 +1,6 @@
 # Network
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Over a day, main reached 40 hosts. One of them, paste.rs, was
 new, and codex sent it 2.1 MB.

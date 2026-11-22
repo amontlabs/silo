@@ -4,7 +4,7 @@ The record names no check for this sentence: `simulator` is put forward here. Th
 `no-silent-change-to-traffic`, in the part `traffic`: Silo makes a change to traffic only when it
 can record it.
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. The part of Silo that writes the record is down during a heavy
 build, and a rule refuses a tool call. Three promises in force say that each such decision, refusal

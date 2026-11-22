@@ -1,6 +1,6 @@
 # Only agents work there
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Your laptop records every file you touch for a day: thousands of
 lines, nearly all of them you. Main records the same day: thousands of lines, nearly all of them

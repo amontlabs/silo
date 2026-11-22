@@ -1,6 +1,6 @@
 # Whether setting a rule or a precaution requires writing code
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You want main to deny packages younger than 7 days.
 

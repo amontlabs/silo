@@ -1,6 +1,6 @@
 # What each run wrote
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Two runs of Claude Code and one of Codex work in main, and main
 grows by 3 GB.

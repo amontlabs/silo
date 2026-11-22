@@ -1,6 +1,6 @@
 # The order of work
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Two things could be built next: the record of what happened in
 main, or forks you can show in a demo next week.

@@ -1,6 +1,6 @@
 # What happens when a caller repeats a call
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You type the command that forks main. The engine makes the fork,
 the answer is lost on its way back, and the command line sends the call again.

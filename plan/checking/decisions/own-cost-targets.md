@@ -1,6 +1,6 @@
 # Which costs of Silo's own processes have a target
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Claude Code in main makes 200 model calls in an hour, and each
 one passes through Silo, which reads it. Silo's own programs on your Mac use memory and processor

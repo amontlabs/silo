@@ -1,6 +1,6 @@
 # File changes, seen from outside
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent runs a build with 8 jobs in a computer, then unpacks
 50,000 small files. Two trials on 21 November measured both ways of seeing those changes from

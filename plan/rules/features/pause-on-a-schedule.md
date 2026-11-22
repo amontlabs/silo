@@ -1,6 +1,6 @@
 # Computers paused on a schedule
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You choose main and its forks, from 23:00 to 07:00. At 23:00 Silo
 pauses them, your Mac goes quiet and nothing is spent overnight. At 07:00 they resume where they

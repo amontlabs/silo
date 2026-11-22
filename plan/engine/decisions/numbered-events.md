@@ -1,6 +1,6 @@
 # How does a client follow the engine
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. The app is open while three forks start, and your Mac sleeps for
 a minute in the middle. The app missed part of what happened.

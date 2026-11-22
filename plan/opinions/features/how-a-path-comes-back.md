@@ -1,6 +1,6 @@
 # How each path would come back
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Before you drop the fork try-bun, Silo sorts what is on its disk.
 /work/app/node_modules, 1.4 GB, comes back by a rebuild from package-lock.json. /work/app/src comes

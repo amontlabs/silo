@@ -1,6 +1,6 @@
 # Panels from an extension
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An extension called Spend by repository shows a panel in the app
 with this week's spend per repository: amontlabs/site 14 dollars, silo 31 dollars. A click on a row

@@ -1,6 +1,6 @@
 # Logins kept out of copies
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Claude Code is signed in on main with your subscription. You fork
 main to let an agent try a tool you do not trust yet. The fork starts without the login, and you

@@ -1,6 +1,6 @@
 # Limits at the boundary
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A feature proposes a spending limit kept by a small program
 inside the computer. An agent with `sudo` can end that program.

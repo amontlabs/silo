@@ -1,6 +1,6 @@
 # The agent's summary
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. codex ends a run in a fork with "Fixed the login bug, all 212
 tests pass." The receipt of the same run shows that `npm test` ended with 3 failures.

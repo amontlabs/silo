@@ -1,6 +1,6 @@
 # The meanings of the words for the boundary
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. The word list gives "channel" a meaning that holds the list of
 the seven channels, and "deny" a meaning that holds the rule that everything is denied unless

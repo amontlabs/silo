@@ -1,6 +1,6 @@
 # Where is what Silo guarantees done
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A rule says main never reaches paste.rs. An agent in main uses
 sudo to stop the part of Silo that runs inside main, changes Claude Code's own settings, and tries

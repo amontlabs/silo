@@ -1,6 +1,6 @@
 # Gaps in the record
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. During one run, 3,000 of 40,000 reports about processes are lost.
 You open the receipt of that run.

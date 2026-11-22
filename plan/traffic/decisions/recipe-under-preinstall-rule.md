@@ -1,6 +1,6 @@
 # Does a recipe fall under Anthropic's rule for a product that preinstalls or runs Claude Code
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Silo's recipe for main fetches Claude Code from Anthropic when
 main is made, and you sign in with your Max plan. Anthropic's rule says that preinstalling or

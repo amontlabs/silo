@@ -5,7 +5,7 @@ led to it needs that turn's text. The question is the owner's.
 
 A long conversation takes a few megabytes, as a rough estimate (`record-disk-size`).
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You open an alert and want to read the turn that led to it, or a
 receipt that shows what you asked word for word. Both need the text of your conversations with

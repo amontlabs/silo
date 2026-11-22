@@ -1,6 +1,6 @@
 # Purge
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main's disk holds 60 GB. Silo offers, biggest first:
 `~/code/app/target`, 14 GB; `node_modules` in three repositories, 5 GB; `~/.cargo/registry`, 3 GB. A

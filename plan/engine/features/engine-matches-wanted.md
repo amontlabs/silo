@@ -1,6 +1,6 @@
 # Computers brought to what you asked
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main and two forks are running when your Mac restarts overnight.
 One of the forks had also died by itself an hour before.

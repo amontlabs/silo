@@ -1,6 +1,6 @@
 # What Silo does when disk runs low
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Your Mac has 18 GB free. Main takes 120 GB, its checkpoints 60
 GB, and two forks in the bin 30 GB. An agent starts a build that writes 20 GB.

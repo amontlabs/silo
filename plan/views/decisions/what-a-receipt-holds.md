@@ -1,6 +1,6 @@
 # What a receipt holds
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A task ran for 1 h 12 in a fork: "fix the flaky login test". You
 open its receipt.

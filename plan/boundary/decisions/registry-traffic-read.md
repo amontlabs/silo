@@ -1,6 +1,6 @@
 # Reading the traffic to package registries
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A rule on main denies npm packages younger than 7 days. An agent
 runs `npm install` for a package published yesterday.

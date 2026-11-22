@@ -1,6 +1,6 @@
 # What Silo does when memory runs low
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Your Mac has 32 GB. Main holds 14 GB, a fork running a large
 build 10 GB, and a Linux computer 4 GB. You open Xcode and a few browser tabs, and macOS reports its

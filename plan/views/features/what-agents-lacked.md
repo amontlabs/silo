@@ -1,6 +1,6 @@
 # What agents lacked
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Over a week, agents in main write "docker is not installed",
 "could not reach the staging database" and "the tests take 9 minutes, I ran only some".

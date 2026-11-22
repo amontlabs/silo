@@ -1,6 +1,6 @@
 # File changes in the record
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. After a night of work, main is 9 GB larger. You want to know
 which files appeared, changed and went, without relying on what the agents say.

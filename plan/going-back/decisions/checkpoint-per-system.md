@@ -1,6 +1,6 @@
 # What a checkpoint is made of on each system
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. At 14:00 Silo takes a checkpoint of main while a dev server runs
 on port 3000 and Claude Code is in the middle of a reply. At 15:00 you restore main to 14:00.

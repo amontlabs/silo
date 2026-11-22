@@ -1,6 +1,6 @@
 # The audit of recipes
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A new release of Claude Code comes out on a Monday. Silo's
 recipes take it on Thursday, after Silo has read what it changes in the computers they make.

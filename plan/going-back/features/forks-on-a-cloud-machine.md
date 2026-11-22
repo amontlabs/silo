@@ -1,6 +1,6 @@
 # Forks on a cloud machine
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main is a macOS computer on your Mac. You want five agents to try
 five fixes at once, each in a fork of its own. Apple allows two macOS computers on a Mac, so only

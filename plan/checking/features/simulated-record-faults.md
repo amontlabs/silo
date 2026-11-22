@@ -1,6 +1,6 @@
 # The record's faults in the simulator
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. In the same made-up nights, what Silo sees from outside sometimes
 arrives late, twice or not at all, a program inside lies about which process wrote a file, and a

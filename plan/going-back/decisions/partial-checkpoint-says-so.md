@@ -1,6 +1,6 @@
 # A checkpoint that leaves paths out
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A rule leaves `node_modules` and `target` out of main's
 checkpoints to save disk. You restore main to yesterday's checkpoint, which holds the code but not

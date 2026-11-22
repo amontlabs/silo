@@ -1,6 +1,6 @@
 # The kind of the other actions the design names
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A classifier is sure a fork's work is good, and main's disk is
 nearly full. The question is whether a precaution could copy the fork's files into main, or empty

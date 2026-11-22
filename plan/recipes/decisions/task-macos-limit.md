@@ -1,6 +1,6 @@
 # Two macOS computers
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main and a macOS fork where an agent tries a new tool are both
 running. You ask Silo to test your changes on both systems. Apple allows two macOS computers running

@@ -1,6 +1,6 @@
 # What is only here
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main holds 60 GB. Silo lists what is only here: an untracked
 `.env` in `~/code/site`, a commit in `~/code/api` that was never pushed, a Postgres database, an

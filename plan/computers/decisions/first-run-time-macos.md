@@ -1,6 +1,6 @@
 # How long the first run takes with a macOS main
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You install Silo on a home connection of 100 Mbit/s. Before your
 first agent can work in main, Silo downloads macOS from Apple, over 10 GB, and installs it.

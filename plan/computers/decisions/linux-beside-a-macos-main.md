@@ -1,6 +1,6 @@
 # How the code reaches a Linux computer beside a macOS main
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main has changed 12 files of `~/work/app` without
 committing them, and wants to run the tests on Linux.

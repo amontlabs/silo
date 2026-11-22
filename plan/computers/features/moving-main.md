@@ -1,6 +1,6 @@
 # Moving main
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You get a new Mac. Main, with its repositories, its tools, its
 checkpoints and its record, moves to it, and its agents' conversations go on there.

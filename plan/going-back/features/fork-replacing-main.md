@@ -1,6 +1,6 @@
 # A fork becomes main
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A fork has spent the morning moving your project to Node 24, with
 new packages installed and a database migrated. It works, and you make it main. An agent in main had

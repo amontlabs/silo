@@ -1,6 +1,6 @@
 # A macOS screen reached from a Linux computer
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Your site's code and its agent are in a Linux computer. A layout
 bug shows only in Safari on iOS. You grant the Linux computer the iOS simulator of a macOS computer,

@@ -1,6 +1,6 @@
 # What a rule allows, shown when it is set
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You allow api.github.com on main, and Silo says: anything main
 can read can be sent there. Then you switch on the set "web work", and Silo shows that it would also

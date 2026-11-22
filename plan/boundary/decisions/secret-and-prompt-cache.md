@@ -1,6 +1,6 @@
 # Does swapping in a secret change a request to a model provider
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main sends its model provider a conversation of 100
 000 tokens on every turn, and Silo puts the real API key in on the way. The provider charges far

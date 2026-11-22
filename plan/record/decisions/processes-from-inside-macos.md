@@ -1,6 +1,6 @@
 # Processes from inside, on macOS
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. In a macOS computer, an agent runs a test suite that starts 300
 short processes in ten seconds, and one of them writes `config.json`. What the record can say

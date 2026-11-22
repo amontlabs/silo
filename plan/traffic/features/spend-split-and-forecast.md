@@ -1,6 +1,6 @@
 # Spend split, and a forecast of a plan's limits
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. This week main spent 140 dollars. Silo shows that 60 of them went
 to reading cached context, and 90 to one model at its highest effort. At this pace, it says, your

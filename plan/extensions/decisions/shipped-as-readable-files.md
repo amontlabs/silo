@@ -1,6 +1,6 @@
 # How the extensions that ship with Silo are shipped
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Silo ships Push check, which holds pushes it finds risky. Before
 installing it you open it in Silo. Its list of what it reads and may hold, its rules, how its

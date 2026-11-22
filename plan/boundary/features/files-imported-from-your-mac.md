@@ -1,6 +1,6 @@
 # Files imported from your Mac
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You have a folder of mockups on your desktop and an agent in main
 that should build from them. You bring the folder into main. It is copied once.

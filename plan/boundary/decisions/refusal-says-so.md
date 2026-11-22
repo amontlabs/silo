@@ -1,6 +1,6 @@
 # What comes back to a computer when Silo refuses a request
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A program in main connects to a host that no rule allows, and
 Silo refuses the connection. You agreed on 20 November that what comes back says so. What is left

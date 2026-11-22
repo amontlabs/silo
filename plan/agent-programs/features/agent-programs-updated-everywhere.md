@@ -1,6 +1,6 @@
 # Agent programs updated in every computer
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Claude Code releases a new version. You have main, two forks and
 a Linux computer. One action would update Claude Code in all four, after a checkpoint of each.

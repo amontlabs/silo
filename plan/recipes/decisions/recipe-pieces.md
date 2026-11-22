@@ -1,6 +1,6 @@
 # Recipes made of pieces
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You want a computer with Claude Code, Node 22 and computer use.
 Its recipe names macOS and three pieces: claude-code, node-22 and computer-use. None of the three

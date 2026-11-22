@@ -1,6 +1,6 @@
 # When an extension's computer runs
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You install two extensions. Disk watch wakes every minute to read
 /work on main. Request check is asked about each request of main that waits at the boundary.

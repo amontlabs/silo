@@ -1,6 +1,6 @@
 # Promises with passing checks
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. The site has a page of what Silo promises. Each line gives one
 promise, how it was checked and what was not, the version of Silo and the date. Each release runs

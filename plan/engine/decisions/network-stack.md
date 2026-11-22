@@ -1,6 +1,6 @@
 # What carries a computer's network at the boundary
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in a macOS computer runs `npm install`, and the
 computer's rules allow only registry.npmjs.org and github.com. Apple's virtualization comes with a

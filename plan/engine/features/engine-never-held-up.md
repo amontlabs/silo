@@ -1,6 +1,6 @@
 # An engine the record and classifiers never hold up
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent runs a build in main that changes 40,000 files. At the
 same moment you ask for a fork, and in another fork a classifier takes thirty seconds over one tool

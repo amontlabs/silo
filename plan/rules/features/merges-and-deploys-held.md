@@ -1,6 +1,6 @@
 # Merges and deploys held for your yes
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You switch the set on for main and leave. An agent runs `gh pr
 merge 42`. The merge waits, and your phone shows an ask: merge pull request 42 into the main branch

@@ -1,6 +1,6 @@
 # When memory or disk runs low
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Your Mac runs short of memory while a fork builds, and later
 short of disk while main writes a large file.

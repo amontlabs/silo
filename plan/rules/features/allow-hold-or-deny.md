@@ -1,6 +1,6 @@
 # Rules that allow, hold or deny a request
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main has three rules: allow github.com, allow crates.io, hold
 every push. A program in main connects to paste.rs. No rule allows it, so it is denied, and the

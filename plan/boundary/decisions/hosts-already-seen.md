@@ -1,6 +1,6 @@
 # After a fork or a restore, which hosts count as already seen
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main has reached 300 hosts and you fork it, or you restore main
 to yesterday. Silo alerts you when a computer reaches a host for the first time, so it has to know

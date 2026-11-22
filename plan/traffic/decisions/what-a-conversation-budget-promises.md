@@ -1,6 +1,6 @@
 # What a budget on a conversation promises
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You give one conversation in main a budget of 5 dollars. It
 reaches the limit, and the agent program starts a new conversation, which can spend 5 dollars

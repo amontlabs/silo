@@ -1,6 +1,6 @@
 # Where a computer's system image comes from
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You make your first Linux computer beside main to run your tests
 on Linux. Its system has to come from somewhere. For main's macOS there is no choice: Apple forbids

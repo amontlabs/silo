@@ -1,6 +1,6 @@
 # One Nix store for macOS computers
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You have two recipes, one for main and one for your docs site,
 and both include Node.js and Python. Three computers are made from main's recipe.

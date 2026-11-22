@@ -1,6 +1,6 @@
 # Can main be a Linux computer
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A developer who builds a Linux server app installs Silo on a Mac
 and wants main to be Linux: lighter, giving idle memory back, and with more than one fork running

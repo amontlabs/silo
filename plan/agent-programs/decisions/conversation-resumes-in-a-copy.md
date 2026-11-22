@@ -1,6 +1,6 @@
 # Does each agent program take a conversation up again in a copied computer
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You fork main at 14:02 while Claude Code is 40 turns into work on
 the login page. In the fork you run `claude --resume`, pick that conversation and go on from turn

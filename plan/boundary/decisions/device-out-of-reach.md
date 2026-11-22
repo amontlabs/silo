@@ -1,6 +1,6 @@
 # Can a computer reach your device
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You run a model server on your Mac, on port 11434, and you want
 an agent in main to use it. Another day an agent in main scans 192.168.1.x and finds the admin page

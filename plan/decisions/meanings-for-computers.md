@@ -1,6 +1,6 @@
 # The meanings of the words for a computer
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main runs three agents. You pause it for lunch and resume it: the
 three are where they were. Later one agent loops, and you stop that one. At night you stop main: all

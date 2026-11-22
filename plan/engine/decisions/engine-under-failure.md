@@ -1,6 +1,6 @@
 # What the engine gives up when a failure forces a choice
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You ask to restore a fork. The engine accepts, and crashes a
 moment later.

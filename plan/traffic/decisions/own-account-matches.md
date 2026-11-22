@@ -1,6 +1,6 @@
 # Does each agent program's own account match the boundary
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You turn on the check against Claude Code's own account for main.
 On 19 November, behind an ordinary inspecting proxy standing in for Silo, Claude Code 2.1.327

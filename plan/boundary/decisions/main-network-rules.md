@@ -1,6 +1,6 @@
 # Does main reach every host its projects need
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main holds your three projects. The first deploys to Vercel, the
 second talks to Stripe, and the third only needs GitHub.

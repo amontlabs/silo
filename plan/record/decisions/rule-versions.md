@@ -1,6 +1,6 @@
 # Rule versions
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. At 15:00 you tighten a rule on main so that it reaches github.com
 only. At 15:00:01 a connection to npmjs.org still goes through.

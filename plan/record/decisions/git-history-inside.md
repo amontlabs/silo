@@ -1,6 +1,6 @@
 # Can Git history inside a computer serve as the record
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main deletes three failing tests, commits the
 deletion as "fix flaky tests", then rewrites the last five commits with `git rebase`.

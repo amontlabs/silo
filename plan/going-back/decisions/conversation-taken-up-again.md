@@ -1,6 +1,6 @@
 # Whether a conversation is taken up again after a restore or a fork
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You restore main to 15:38. Claude Code was halfway through a
 refactor then, and its conversation is a file on main's disk, as it was at 15:38.

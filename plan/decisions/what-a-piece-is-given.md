@@ -1,6 +1,6 @@
 # Nothing without a reason
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You install an extension that sums up each evening what main did.
 It needs to read main's record. It does not need the network, your secrets or your other computers.

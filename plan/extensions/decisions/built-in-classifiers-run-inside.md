@@ -1,6 +1,6 @@
 # Do the small classifiers that ship with Silo run inside it, or each in a computer of its own
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Silo ships a handful of small checks, such as the one that says
 which run wrote a file. The plan calls them built-in classifiers. A Mac holds only a few running

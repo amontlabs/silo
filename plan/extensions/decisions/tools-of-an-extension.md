@@ -1,6 +1,6 @@
 # Which tools an extension may use
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An extension called Leftovers reads the file lines of main and
 says how /work/app/node_modules would come back: by a rebuild. Disk shows that opinion on the folder,

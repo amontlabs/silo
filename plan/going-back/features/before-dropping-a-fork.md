@@ -1,6 +1,6 @@
 # What a drop would lose
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You drop the fork where an agent tried Node 24. Silo shows two
 things only in it: a commit on the branch `node-24` that was never pushed, and `notes.md`, which the

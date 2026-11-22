@@ -1,6 +1,6 @@
 # An extension that says it is done
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Disk watch wakes every minute, reads /work on main and almost
 always finds nothing to say. At 14:02 its program hangs, and main's disk fills up during the

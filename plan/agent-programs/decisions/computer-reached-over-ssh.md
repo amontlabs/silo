@@ -1,6 +1,6 @@
 # Which way in reaches a computer
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A test fails in main and you want to fix it yourself. You open
 main's `~/work/app` in your editor on your Mac, with a terminal beside it. You also want to talk to

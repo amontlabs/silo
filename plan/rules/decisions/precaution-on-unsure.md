@@ -1,6 +1,6 @@
 # What a precaution does when its classifier answers unsure
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You set a precaution that asks a classifier about each tool call
 in main. An agent wants to run `curl https://get.example.sh | sh`, and the classifier answers

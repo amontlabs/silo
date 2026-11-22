@@ -1,6 +1,6 @@
 # Is "What Silo adds costs as little as it can" a principle of Silo
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main runs a large build that changes 40,000 files, and Silo
 records every change while it runs.

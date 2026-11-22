@@ -1,6 +1,6 @@
 # What the app shows, as text
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main wants to know what its last run changed before
 it carries on. It uses Silo's command and reads that run's receipt.

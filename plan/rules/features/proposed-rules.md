@@ -1,6 +1,6 @@
 # Rules proposed from the record
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main ran with its network open for two days. Silo proposes to
 limit it to the 14 hosts it actually reached. You remove one you do not know and accept the rest.

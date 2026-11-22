@@ -1,6 +1,6 @@
 # Who writes recipes
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You install Silo and make main from Silo's recipe for macOS with
 Claude Code, adding Postgres to it. A colleague sends you her recipe for a Rust computer, and you

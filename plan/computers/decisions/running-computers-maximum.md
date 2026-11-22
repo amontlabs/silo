@@ -1,6 +1,6 @@
 # How is the number of computers running at once limited
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent keeps making forks on a Mac with 16 GB of memory. You
 decided that memory decides how many fit, and nothing says where Silo stops.

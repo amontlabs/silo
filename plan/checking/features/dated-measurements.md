@@ -1,6 +1,6 @@
 # Published measurements
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. The site shows: "Fork of main: 180 ms at the 99th percentile, 410
 ms at worst, over 500 interleaved runs. Mac mini M4, macOS 26.1. Silo 0.4, 3 December 2026." Beside

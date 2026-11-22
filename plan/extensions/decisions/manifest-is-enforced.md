@@ -1,6 +1,6 @@
 # The manifest is enforced
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You install Disk watch 1.2 on main. It may read /work on main and
 alert you, and it wakes once a minute. Its program then tries to read what main's agents sent to

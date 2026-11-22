@@ -1,6 +1,6 @@
 # How old automatic checkpoints are thinned
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main has run for three weeks with a checkpoint at each turn of
 three agents, tens of thousands of checkpoints in all.

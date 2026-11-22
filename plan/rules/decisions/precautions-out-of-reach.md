@@ -1,6 +1,6 @@
 # Whether anything done inside a computer can change its precautions
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A precaution pauses main when a classifier says "not safe". An
 agent in main, with `sudo`, tries to switch that precaution off: it edits files, ends processes and

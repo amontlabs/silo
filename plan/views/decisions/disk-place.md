@@ -1,6 +1,6 @@
 # Disk
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Your Mac is down to 20 GB free. In main, six copies of target/
 take 78 GB, written by claude #2 and codex. Nine worktrees take 31 GB, and the runs that made them

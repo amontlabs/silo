@@ -1,6 +1,6 @@
 # Speed measured against budgets
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Before the code that forks a computer is written, the fork gets a
 target, such as 300 ms at the 99th percentile and 1 s at worst. Then forks of main are timed

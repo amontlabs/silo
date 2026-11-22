@@ -1,6 +1,6 @@
 # What the boundary forwards between an agent program and its provider
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Claude Code in main sends Anthropic a conversation of 100 000
 tokens on every turn, with your Max plan's sign-in in each request.

@@ -1,6 +1,6 @@
 # One kind of thing
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Checkpoints are built for Linux computers first. Someone proposes
 to ship them, and to give macOS computers something different later.

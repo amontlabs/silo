@@ -1,6 +1,6 @@
 # The meanings of the words for Silo's pieces
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. The home page says "Silo records what they do there". What
 records is neither the app nor the `silo` command: it is a part that runs beside each computer.

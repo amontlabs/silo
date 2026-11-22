@@ -1,6 +1,6 @@
 # The first run
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You install Silo on your Mac. With no account and no key, the
 first run checks your disk and network, starts the download of macOS, and asks its questions while

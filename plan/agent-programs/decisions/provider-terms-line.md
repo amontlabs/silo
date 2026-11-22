@@ -1,6 +1,6 @@
 # Does Silo refuse to build what helps get around a provider's terms
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Your Claude subscription reaches its usage limit at 15:00. You
 have a second subscription, and a tool could switch your agents to it each time the first one runs

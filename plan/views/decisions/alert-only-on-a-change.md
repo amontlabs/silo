@@ -1,6 +1,6 @@
 # When Silo alerts you
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. At 14:02 main's disk passes 90% and stays there all afternoon. In
 the same minute an install in main reaches 12 hosts that main never reached before.

@@ -1,6 +1,6 @@
 # Can a window an agent opens appear on your device
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You type in a document on your Mac while an agent in main tests
 the Mac app it builds. The app opens three windows and a dialog.

@@ -1,6 +1,6 @@
 # Where an alert leads
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. At 14:31 a rule alerts you that codex in main sent 2.1 MB to
 paste.rs.

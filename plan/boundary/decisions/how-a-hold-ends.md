@@ -1,6 +1,6 @@
 # How is a held request refused on each kind of connection
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A rule holds every request from main to api.stripe.com, and you
 do not answer before the hold's limit. Another rule holds an `ssh` connection from main to your

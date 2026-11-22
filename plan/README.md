@@ -55,6 +55,11 @@ prose: where the entry comes from, the options, what was found, and the owner's 
 part of the notes says whether it is the owner's or an agent's. A part that does not say is an
 agent's.
 
+The notes of an entry the owner has yet to decide start with a section `## The choice`. It gives
+one real case, the options with what each costs, and the option recommended. The recommended
+option is the entry's `answer`, or its `suggest` for a feature. An entry that agents decide has no
+such section.
+
 ## How a statement gets into a list
 
 Nobody adds a statement by editing a list. An entry shows the statement under `sets`, and the tool

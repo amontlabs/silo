@@ -1,6 +1,6 @@
 # An agent program's own account, checked
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main calls the model 40 times with Claude Code's
 sign-in, outside Claude Code. Silo sees the 40 calls, Claude Code's own account holds none of them,

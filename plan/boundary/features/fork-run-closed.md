@@ -1,6 +1,6 @@
 # A fork run with its network closed
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You fork main to run the benchmark of a library, with the fork's
 network closed. The run ends, and the fork's record shows that no connection left it from start to

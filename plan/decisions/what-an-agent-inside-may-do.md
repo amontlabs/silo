@@ -15,4 +15,4 @@ agent in main runs `silo` and reads the precaution that pauses main. The audit p
 `where-precautions-live` wins and that both entries say "except see the opinions and precautions
 about it". Both lose their verdict with the edit and are taken again.
 
-The question is put to the owner in `computer-reads-its-record`, under "For the owner".
+The question is put to the owner in `computer-reads-its-record`, under "The choice".

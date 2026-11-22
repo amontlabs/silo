@@ -1,6 +1,6 @@
 # What checks the real drivers and the real boundary
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. This entry is about how Silo is checked, so agents may take it,
 as `owners-part-on-engine` allows. You need not read it.

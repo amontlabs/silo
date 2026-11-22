@@ -1,6 +1,6 @@
 # Recordings of computer use
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent drives the screen of main for 20 minutes to fill in a
 form in a browser. No command and no file says what it clicked.

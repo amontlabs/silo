@@ -1,6 +1,6 @@
 # Secrets the computer cannot read
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main needs your GitHub token. You type it in Silo's
 own prompt. Main holds only a placeholder. An agent that prints its environment or posts it to

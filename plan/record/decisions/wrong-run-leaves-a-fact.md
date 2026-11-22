@@ -1,6 +1,6 @@
 # Attributing work to the wrong run
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Claude Code and Codex work in main, each in a run of its own.
 Codex deletes `src/auth.rs`, but first uses sudo to move itself out of its run, so the deletion

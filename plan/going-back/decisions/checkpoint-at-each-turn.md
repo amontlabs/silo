@@ -1,6 +1,6 @@
 # Is a turn a moment for a checkpoint
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. At 15:12 an agent runs a migration that drops a table in main's
 database. The last checkpoint taken at an interval is from 15:05. With a checkpoint at each turn,

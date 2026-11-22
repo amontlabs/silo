@@ -1,6 +1,6 @@
 # What may come back to an agent?
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main runs `git push`, and a rule denies it.
 

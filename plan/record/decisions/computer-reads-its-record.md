@@ -3,7 +3,7 @@
 The second half of the question, what a computer may see of the opinions and precautions about
 it, is settled in the part `rules`.
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main uses Silo's command to list everything the app
 shows for main. The list holds the check that pauses main when its work looks unsafe, and what that

@@ -1,6 +1,6 @@
 # A new classifier checked against your answers
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Silo 0.9 brings version 1.3 of the classifier that says how a
 path would come back. Before it takes over, it runs on main's record. It agrees with 37 of your 40

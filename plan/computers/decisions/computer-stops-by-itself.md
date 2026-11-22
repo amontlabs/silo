@@ -1,6 +1,6 @@
 # What Silo does when a computer stops by itself
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. At 3:00 main stops by itself while three agents work in it. The
 part of Silo that runs main hit a bug, or an agent ran `sudo reboot`.

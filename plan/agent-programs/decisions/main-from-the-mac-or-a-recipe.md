@@ -1,6 +1,6 @@
 # Does main copy from the Mac, or start from a guided recipe
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Your Mac has Claude Code, Codex, forty tools installed with
 Homebrew and an app you installed by hand. You make main.

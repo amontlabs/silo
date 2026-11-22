@@ -1,6 +1,6 @@
 # One piece for every agent program
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Your recipe includes two pieces, one for Rust and one for code
 review, and main runs Claude Code and Codex. Each piece's instructions are written once.

@@ -1,6 +1,6 @@
 # A desktop in Linux computers
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent tests your web app in Firefox on Linux, clicking through
 it as a person would, in a fork of a Linux computer, and you follow it in a window. Three such forks

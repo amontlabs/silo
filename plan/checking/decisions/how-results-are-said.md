@@ -1,6 +1,6 @@
 # How the result of a check is stated
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Under the promise "A restore changes only what is inside the
 computer", the site says: "Held in 1 million made-up histories of up to 200 steps, and in tests that

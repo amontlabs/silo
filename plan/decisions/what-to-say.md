@@ -1,6 +1,6 @@
 # What to say
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Someone at a meetup asks what Silo is, and you have five
 sentences.

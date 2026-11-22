@@ -1,6 +1,6 @@
 # Which processes make up Silo
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main and two forks are running. The part of Silo that runs one of
 the forks hits a bug and crashes.

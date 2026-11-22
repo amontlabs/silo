@@ -1,6 +1,6 @@
 # Agents on the screen of a macOS computer
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main tests the Mac app it builds by clicking through
 it on main's screen. You work in Xcode on your Mac and nothing pops up. When you want to see it, you

@@ -1,6 +1,6 @@
 # Does a provider treat a subscription's traffic differently when Silo's network stack makes the connection
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You use Claude Code on your Max plan in main all day. Anthropic
 sees each connection made by Silo and not by Claude Code itself, as it would behind a company's

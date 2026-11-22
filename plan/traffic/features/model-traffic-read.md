@@ -1,6 +1,6 @@
 # Model traffic read at the boundary
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You use Claude Code on your Max plan in main. Silo reads what
 passes between Claude Code and Anthropic: each turn, each tool call, and what it cost.

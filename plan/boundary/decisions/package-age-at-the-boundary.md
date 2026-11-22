@@ -1,6 +1,6 @@
 # Where a rule on the age of packages is enforced
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You set a rule that no package younger than seven days is
 installed. An agent fetches the package by hand with curl, to get past the setting of the package

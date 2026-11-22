@@ -1,6 +1,6 @@
 # The meanings of the words for what Silo does
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. The rule that alerts you when main reaches a new host ships with
 Silo, switched on. You never set it. The meaning put forward for "rule" begins "Data you set".

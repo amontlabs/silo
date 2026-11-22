@@ -1,6 +1,6 @@
 # No bad state
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A precaution must never grant. Either the app has no way to write
 one that grants, or something has to catch it afterwards.

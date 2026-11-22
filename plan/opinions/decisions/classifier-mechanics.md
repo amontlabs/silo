@@ -1,6 +1,6 @@
 # A classifier's mechanics
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Silo's classifier that sorts main's requests into model, package
 registry, Git and the rest reads only the record. After a crash, Silo throws away its opinions about

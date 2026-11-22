@@ -1,6 +1,6 @@
 # A budget on a run
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. In main, Claude Code runs a refactor while Codex fixes tests. You
 want the refactor to spend no more than 10 dollars.

@@ -1,6 +1,6 @@
 # How long may a hold last
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. At 10:00 a command of an agent in main pushes to a host that a
 rule holds. You are in a meeting until 10:30. The agent program ends any command that runs for more

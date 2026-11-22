@@ -1,6 +1,6 @@
 # What ships on macOS if reports from inside are not ready there
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. The first version runs main as a macOS computer on your Mac, and
 an agent runs `npm install` there. Whether Silo can see from inside macOS which program did what is

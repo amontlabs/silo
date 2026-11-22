@@ -1,6 +1,6 @@
 # Access checked on every short history
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. The part of Silo that decides who may get what is the first code
 written: which computer holds which secret and may reach which host. A test runs it on every

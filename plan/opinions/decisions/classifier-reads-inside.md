@@ -1,6 +1,6 @@
 # A classifier that reads inside
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. In the fork try-bun, an agent made three commits in /work/app and
 never pushed them, yet the Git state in the fork says they were pushed to GitHub. You are about to

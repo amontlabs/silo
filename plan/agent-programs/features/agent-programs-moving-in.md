@@ -1,6 +1,6 @@
 # Moving in from your Mac
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. On your Mac, Claude Code has three MCP servers and twelve skills,
 and your repositories are in ~/code. The first run lists them, you tick what to bring, and main

@@ -1,6 +1,6 @@
 # What happens to a request when a rule only alerts
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main has two rules: allow crates.io, and alert on any new host. A
 program in main connects to paste.rs.

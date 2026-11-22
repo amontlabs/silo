@@ -1,6 +1,6 @@
 # How each run is going
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You come back to main after lunch. Claude Code is working on your
 site. Codex has been stuck for 25 minutes: `git rebase` opened an editor and waits for input. A

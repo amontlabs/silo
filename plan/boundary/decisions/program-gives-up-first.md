@@ -1,6 +1,6 @@
 # What does Silo see when an agent program gives up on a hold
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A rule holds a push from main to github.com, and an ask waits in
 your Silo app. Thirty seconds in, the agent program gives up on the command and closes its

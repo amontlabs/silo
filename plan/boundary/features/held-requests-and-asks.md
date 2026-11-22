@@ -1,6 +1,6 @@
 # Held requests and asks
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A rule on main holds every push to github.com. An agent pushes
 three commits to the main branch of your site. Only the push waits, the agent's other work goes on,

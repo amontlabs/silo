@@ -1,6 +1,6 @@
 # Does any vendor's term bear on changing a reply
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. To deny `git push --force` in Claude Code on your Max plan, Silo
 changes a reply Claude Code receives and the later requests of that conversation. The reading of

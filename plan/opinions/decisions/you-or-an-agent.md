@@ -1,6 +1,6 @@
 # How does Silo know whether you or an agent did something in a computer
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. In main you open a terminal over SSH and run `npm install`. Then
 you start Claude Code in that terminal, and it installs pnpm. At 14:05 a scheduled job inside main

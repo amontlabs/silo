@@ -1,6 +1,6 @@
 # May a promise rest on the agent not knowing it?
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main reads your rules on screen and Silo's source,
 which is public. It now knows that every push to GitHub is held for your answer.

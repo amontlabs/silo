@@ -1,6 +1,6 @@
 # What does Silo show before a set of rules is switched on
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You switch the set "web work" on for main. Main already reaches
 github.com. The set also allows registry.npmjs.org.

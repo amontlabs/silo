@@ -1,6 +1,6 @@
 # Standard names
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A security engineer reads "A computer cannot get more than it
 has" in the Workshop. With "no privilege escalation" beside it, they know at once which idea it is

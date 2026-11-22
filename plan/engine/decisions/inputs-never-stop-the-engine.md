@@ -1,6 +1,6 @@
 # Can an input make the engine stop
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in a fork sends Silo a malformed message, by accident or
 on purpose, and it reaches a line of the engine that nobody expected it to reach.

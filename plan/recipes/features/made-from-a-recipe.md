@@ -1,6 +1,6 @@
 # A computer made from a recipe
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You make main from a recipe that names macOS, Claude Code, Node
 22 and computer use, and main comes up with all of it. A Linux computer for a test is made from its

@@ -1,6 +1,6 @@
 # Can a restarted engine take back its helpers
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Silo's engine crashes while main and two forks are running, then
 starts again. The three computers kept running while it was away.

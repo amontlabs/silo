@@ -1,6 +1,6 @@
 # A precaution on a tool call that waits
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You install an extension that looks at each tool call in main.
 The model asks to run `rm -rf ~/projects/site`. The extension answers "deny", and the model sees its

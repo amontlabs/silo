@@ -1,6 +1,6 @@
 # Main on your Mac
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You install Silo on your Mac. Main is a macOS computer where
 three agents work at once in `~/work/app` and `~/work/site`. Your Mac's files, keychain and SSH keys

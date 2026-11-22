@@ -1,6 +1,6 @@
 # Questions to you
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main holds /work/site/.next, 2.1 GB. Silo cannot tell whether a
 rebuild would bring it back, so it counts it as only here. The app asks you: "Is /work/site/.next a

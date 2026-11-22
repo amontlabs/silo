@@ -1,6 +1,6 @@
 # Can a macOS computer run containers
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main needs a Postgres database in Docker to run the
 tests of `~/work/app`.

@@ -1,6 +1,6 @@
 # What the record keeps of a denied attempt
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A rule says main never reaches paste.rs. An agent in main uses
 `sudo` to stop the probe, the small part of Silo that runs inside main. Then it tries paste.rs. The

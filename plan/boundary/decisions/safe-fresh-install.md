@@ -1,6 +1,6 @@
 # What does a fresh install allow
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You install Silo, make main and start an agent in it, having set
 nothing.

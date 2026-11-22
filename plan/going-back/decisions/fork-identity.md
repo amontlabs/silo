@@ -1,6 +1,6 @@
 # How a fork is kept from acting as its parent
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main runs a job every night at 02:00 that emails your team a
 report, and a Tailscale node that puts main on your private network. At 18:00 you fork main to let

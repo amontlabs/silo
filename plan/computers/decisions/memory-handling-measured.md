@@ -1,6 +1,6 @@
 # Is memory handling a point where Silo is better than the alternatives
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You want memory to be one reason people choose Silo. Main and a
 Linux computer have been idle for an hour after a build, and someone asks how much memory they still

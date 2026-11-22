@@ -1,6 +1,6 @@
 # A sign-in started in a computer
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. In main, Claude Code connects to Linear's MCP server, which asks
 you to sign in. With your yes, the page opens in the browser on your Mac, where you are already

@@ -1,6 +1,6 @@
 # What a receipt is
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. claude #1 worked for 1 h 12 in a fork and ends with "Refactored
 the parser, all tests pass". You want to know in a minute whether to trust it.

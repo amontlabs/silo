@@ -1,6 +1,6 @@
 # The shape of a recipe
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in a Linux computer downloads a tool from its release
 page on GitHub and runs it.

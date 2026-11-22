@@ -8,7 +8,7 @@ runs macOS or Linux. Nothing of yours is inside unless you put it there."
 And gives the reason it can be said: only agents work there, so a complete account is possible
 (`only-agents-work-there`).
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent broke something at 14:07. The saved moments are 14:00
 and 14:10, and the home page had said "any moment". The sentence also says that Silo records

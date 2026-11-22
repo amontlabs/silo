@@ -1,6 +1,6 @@
 # What does an ask show you
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An ask says that main wants to send 2 MB to api.example.com with
 your deploy key. The agent adds a line: "I need this to publish the fix you asked for."

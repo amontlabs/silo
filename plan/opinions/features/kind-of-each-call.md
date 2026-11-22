@@ -1,6 +1,6 @@
 # The kind of each call
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. In one hour main sent 1,240 requests: 900 to api.anthropic.com, a
 model; 300 to registry.npmjs.org, a package registry; 30 to github.com, Git; and 10 POST requests to

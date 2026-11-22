@@ -10,7 +10,7 @@ problem.
 The question has three parts: `reaching-a-computer`, `following-the-work` (with
 `conversation-taken-up-again`, in `going-back`) and `agents-making-computers`.
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A fork was made a moment ago and you gave no yes for it. Your
 editor already moves files in and out of it, and it already reads your repositories. The plan

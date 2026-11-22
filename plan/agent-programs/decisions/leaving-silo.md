@@ -1,6 +1,6 @@
 # What does a user who leaves Silo take
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. After a year you stop using Silo. Main holds your setup and your
 repositories, you wrote six recipes and forty rules, and the record holds a year of what your agents

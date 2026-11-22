@@ -1,6 +1,6 @@
 # What one fact or one report in the record is called
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You open main's record at 14:02: a file changed, a connection
 opened, and an agent said it ran the tests. Each of the three is one line.

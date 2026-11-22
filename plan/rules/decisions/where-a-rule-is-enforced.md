@@ -1,6 +1,6 @@
 # Where a rule is enforced
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main has no rule that allows paste.rs, and an agent in main tries
 to reach it. The connection is refused outside main.

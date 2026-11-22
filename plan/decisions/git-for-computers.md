@@ -1,6 +1,6 @@
 # Git for computers
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. The headline of the home page. "Git for computers" is three words
 a developer gets at once: a checkpoint is a commit, a fork is a branch. They then look for merge,

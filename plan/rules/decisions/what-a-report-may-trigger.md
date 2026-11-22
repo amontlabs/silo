@@ -6,7 +6,7 @@ lists "reversible": an action can be undone and still grant something. This entr
 thing with the word in force, and sets the four properties of `law-of-triggers` again, unchanged.
 Found by two audits of the plan (A27 and B7).
 
-## For the owner
+## The choice
 
 Yes changes one word of a decision you took and nothing else. No keeps "undone", which reads as
 "reversible", the word `protective` asks not to use.

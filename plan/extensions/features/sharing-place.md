@@ -1,6 +1,6 @@
 # A place to share
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You wrote rules that let a computer reach the npm registry and
 its mirrors, and an extension that watches for runaway builds. Another Silo user wants both. Today

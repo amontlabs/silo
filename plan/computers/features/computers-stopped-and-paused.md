@@ -1,6 +1,6 @@
 # Stopping and pausing computers
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in a fork pushes to a test server every second. You
 pause the fork, look, and then stop it, and a server it had started in the background with `nohup`

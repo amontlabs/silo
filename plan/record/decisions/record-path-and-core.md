@@ -1,6 +1,6 @@
 # The record path and the core
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. A build changes 50,000 files in a minute in main. During that
 minute you take a secret back from main in the app.

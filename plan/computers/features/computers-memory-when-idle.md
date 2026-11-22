@@ -1,6 +1,6 @@
 # Memory given back when idle
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. On a Mac with 32 GB, main and two forks each grew to 10 GB during
 a build. At night the forks' agents finish and the forks sit idle.

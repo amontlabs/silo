@@ -1,6 +1,6 @@
 # The word "agent"
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You start Claude Code in main and it starts four subagents. You
 close it and open it again an hour later. How many agents was that: one, two, five?

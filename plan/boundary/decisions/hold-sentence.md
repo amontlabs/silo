@@ -1,6 +1,6 @@
 # What does an agent get back when a hold ends without your answer
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. At 23:00 an agent in main pushes to a host that one of your rules
 holds. You are asleep, and the hold reaches its limit.

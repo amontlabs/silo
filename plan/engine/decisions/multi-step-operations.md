@@ -1,6 +1,6 @@
 # How an operation of several steps survives a crash
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Forking main takes several steps: copy the disk, make the
 computer, give it its rules, start it. The engine crashes after the second.

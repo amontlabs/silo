@@ -1,6 +1,6 @@
 # What the user's app shows when work moves to a fork
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You talk to Claude Code in main from the Claude desktop app. An
 agent's work moves to a fork, try-bun, and the desktop app stays connected to main.

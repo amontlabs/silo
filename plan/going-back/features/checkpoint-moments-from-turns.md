@@ -1,6 +1,6 @@
 # Checkpoints at each turn
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. At 15:12 an agent runs a migration that drops a table. The last
 interval checkpoint is from 15:05, and another agent has done seven minutes of work since. With a

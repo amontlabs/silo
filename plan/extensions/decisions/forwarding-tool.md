@@ -1,6 +1,6 @@
 # Forwarding
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You are away from your Mac. An agent in main pushes to
 amontlabs/site, and a rule holds the push for you. Your phone shows: "main: push of 3 commits to

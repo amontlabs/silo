@@ -1,6 +1,6 @@
 # Questions to you
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. The app asks "Is /work/site/.next a build?" and shows that your
 answer will cover every .next folder under /work. You answer yes. Disk then shows those folders as

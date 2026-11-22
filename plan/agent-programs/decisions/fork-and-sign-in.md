@@ -1,6 +1,6 @@
 # Does a fork carry the sign-in of an agent program
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Claude Code is signed in on main with your subscription, and you
 fork main to let an agent try something risky. A fork copies the whole disk and the sign-in is a

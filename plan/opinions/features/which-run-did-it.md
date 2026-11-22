@@ -1,6 +1,6 @@
 # Which run did it
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main holds two runs of Claude Code and one of Codex.
 /work/site/src/app.ts was last written by the Codex run, which ended at 11:40.

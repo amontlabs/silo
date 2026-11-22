@@ -1,6 +1,6 @@
 # Opinions beside the record
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Disk in main shows /work/app/node_modules, 1.2 GB, as coming back
 by a rebuild, marked as the opinion of Silo's classifier, version 1.2. Network shows "not safe" on a

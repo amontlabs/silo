@@ -1,6 +1,6 @@
 # A flood
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent creates 2 million files in a loop in main. A large build
 can do the same.

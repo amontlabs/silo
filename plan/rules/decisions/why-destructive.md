@@ -1,6 +1,6 @@
 # Why stop, restore and drop are destructive
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You stop a fork in which an agent has a dev server running and a
 build halfway through.

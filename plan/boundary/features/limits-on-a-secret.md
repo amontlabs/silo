@@ -1,6 +1,6 @@
 # Limits on a secret
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You give main a GitHub token limited to reading, until 18:00. The
 agent clones and reads issues. A push with that token is refused, and after 18:00 the token is no

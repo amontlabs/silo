@@ -1,6 +1,6 @@
 # A grant shows its paths
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You are about to install Disk watch on main. Its computer may
 reach hooks.slack.com. Before you confirm, the app shows one new path: main, then Disk watch's

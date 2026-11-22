@@ -1,6 +1,6 @@
 # What agents on your Mac can reach today
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Before installing Silo, you run a command on your Mac. It lists
 what an agent started in your terminal can read today: 14 SSH keys, the tokens in your shell's

@@ -1,6 +1,6 @@
 # What part may a classifier play in an ask
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An ask says that main wants to push to github.com/you/app. Under
 it, a line says that the classifier you installed finds the push low risk.

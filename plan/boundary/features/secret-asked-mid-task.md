@@ -1,6 +1,6 @@
 # A secret an agent asks for
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent deploying your site finds it has no Cloudflare token. It
 runs the `silo` command to ask for one by name. You get an ask that shows the name and the hosts the

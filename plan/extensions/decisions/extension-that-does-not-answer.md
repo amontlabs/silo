@@ -1,6 +1,6 @@
 # What wakes an extension, and who chooses what happens when it does not answer in time
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An extension you installed to deny unsafe requests is slow or
 stuck, and a request from main waits for its answer. Today the decision you took gives the choice to

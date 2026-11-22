@@ -1,6 +1,6 @@
 # Your agent programs in a computer
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You use Claude Code and Codex. Next month you try a new agent
 program Silo does not offer: you install it in main with its vendor's installer, and it runs.

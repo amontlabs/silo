@@ -1,6 +1,6 @@
 # How files go in or out of a computer
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You want to open the images an agent made in main in a Mac app,
 and to give the agent a 2 GB data file from your Downloads folder.

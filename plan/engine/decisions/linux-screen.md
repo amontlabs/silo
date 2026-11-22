@@ -1,6 +1,6 @@
 # How a Linux computer's screen is shown
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent drives a browser on the desktop of a Linux fork, and you
 want to watch it in a window on your Mac, as you would a macOS computer.

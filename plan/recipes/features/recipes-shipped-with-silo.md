@@ -1,6 +1,6 @@
 # Recipes that ship with Silo
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You install Silo and make main from its recipe for macOS with
 Claude Code. A new Claude Code comes out on a Monday, and Silo's recipe takes it on Thursday, after

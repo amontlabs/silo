@@ -1,6 +1,6 @@
 # Hostile tests on the real thing
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent with root in a real Linux computer tries to reach your
 Mac, to read the cloud metadata address 169.254.169.254, to get past a rule that denies paste.rs,

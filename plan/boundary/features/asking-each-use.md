@@ -1,6 +1,6 @@
 # Asking each time a secret or host is used
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You set a rule on main: ask each time the secret `npm-publish` is
 used. An agent runs `npm publish`. The request waits, and you get an ask that shows the package and

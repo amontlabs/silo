@@ -1,6 +1,6 @@
 # Budgets on a computer or a conversation
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Main has a budget of 50 dollars. At 3 in the morning an agent
 loops on a failing test and keeps calling the model. At 50 dollars its next model call is refused,

@@ -1,6 +1,6 @@
 # The meanings of the words for an agent's work
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Claude Code is signed in with your subscription in main, and one
 of its replies asks to run `npm install`. Three words name that scene: the agent program, the tool

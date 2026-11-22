@@ -1,6 +1,6 @@
 # How does the boundary read encrypted model traffic
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. Claude Code in main talks to api.anthropic.com. An install script
 fetches from registry.npmjs.org, which your rule on package age names. An agent clones a repository

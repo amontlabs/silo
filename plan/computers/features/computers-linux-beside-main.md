@@ -1,6 +1,6 @@
 # A Linux computer beside main
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. An agent in main wants to run the tests of `~/work/app` on Linux,
 with a Postgres in Docker. Silo makes a Linux computer from the repository's recipe and hands it a

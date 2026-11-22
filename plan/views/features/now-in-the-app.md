@@ -1,6 +1,6 @@
 # Now
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You come back after lunch. In main, claude #1 has worked for 1 h
 12 and spent $6.40, codex waits on a command, and claude #2 has been stuck on `sleep 600` for 38

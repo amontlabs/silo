@@ -1,6 +1,6 @@
 # Precautions on reports and opinions
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. At 01:00 a classifier says of a run in main: "not safe". Your
 precaution takes a checkpoint, pauses main and alerts you. In the morning you look, find nothing

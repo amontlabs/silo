@@ -1,6 +1,6 @@
 # May something a promise rests on be best effort?
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You are promised that a held request never waits past its limit.
 The limit is kept by a timer. If the timer is "usually on time", so is the promise.

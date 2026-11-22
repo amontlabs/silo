@@ -1,6 +1,6 @@
 # What the first run on macOS shows while it waits
 
-## For the owner
+## The choice
 
 An agent's part, 22 November 2026. You install Silo. Before main exists, macOS has to download more
 than 10 GB and then install.
