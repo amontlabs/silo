@@ -4,5 +4,7 @@
   "suggest": {
     "verdict": "take",
     "why": "STATE lists the agent program's own hook among what was dropped."
-  }
+  },
+  "verdict": "take",
+  "by": "agents"
 }
