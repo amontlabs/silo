@@ -9,7 +9,7 @@ import { isHidden } from '../../tools/plan/read/index.js';
 import { GitHubError } from './github.mjs';
 
 export const BRANCH = 'main';
-/** How many times the write is done again when main moved between the read and the ref update. */
+/** How many times the write is done again when main moved between the read and the write. */
 export const ATTEMPTS = 3;
 /** How deep plan/ may go: `plan/<part>/decisions/<id>.json` is three folders down from plan/'s own files. */
 const LEVELS = 3;
@@ -39,6 +39,7 @@ export class VerdictRefusal extends Error {
 
 export const CHANGED = 'This entry changed since the page was built: reload the page.';
 export const BUSY = 'Main kept changing while the verdict was written. Try again.';
+export const PARTIAL = 'GitHub answered in part, so nothing was written. Try again.';
 export const DENIED = 'GitHub refused the change to main. The Workshop needs the permission Contents: Read and write, and your account write access to the repository.';
 
 /**
@@ -59,23 +60,30 @@ function decode(bytes, path) {
   }
 }
 
+/** GitHub's answer lacks part of what was asked: nothing is written on it. */
+const partial = () => new VerdictRefusal(502, 'partial', PARTIAL);
+
 /**
  * The files of plan/ from the GraphQL answer, by path relative to plan/, and the mode of each. A link or a submodule
  * refuses, whatever its name, as the plan's reader does; a file whose name or folder starts with a dot is skipped.
- * Files GitHub gave no text for (cut, or not text) are listed in `fetch`.
+ * Files GitHub gave no text for (cut, or not text) are listed in `fetch`. A folder without its entries, or an entry
+ * without its object, is an answer in part: the read fails whole, so a part of plan/ is never taken for all of it.
  */
 function readTree(tree, prefix, depth, out) {
-  for (const entry of tree?.entries ?? []) {
+  if (!Array.isArray(tree?.entries)) throw partial();
+  for (const entry of tree.entries) {
+    if (typeof entry?.name !== 'string') throw partial();
     const path = prefix ? `${prefix}/${entry.name}` : entry.name;
     if (entry.mode === SYMLINK || entry.type === 'commit') throw new VerdictRefusal(409, 'refused', `plan/${path} is a symbolic link or a submodule on main`);
     if (isHidden(path)) continue;
     if (entry.type === 'tree') {
       // The files of a folder at depth 1 are the last ones the query gives with their text.
-      if (depth <= 1 || !entry.object) throw new VerdictRefusal(409, 'refused', `plan/${path} is deeper than the Workshop reads`);
+      if (depth <= 1) throw new VerdictRefusal(409, 'refused', `plan/${path} is deeper than the Workshop reads`);
       readTree(entry.object, path, depth - 1, out);
     } else if (entry.type === 'blob') {
+      const blob = entry.object;
+      if (typeof blob?.oid !== 'string' || typeof entry.mode !== 'number') throw partial();
       out.modes.set(path, entry.mode.toString(8).padStart(6, '0'));
-      const blob = entry.object ?? {};
       if (typeof blob.text === 'string' && !blob.isTruncated) out.files.set(path, blob.text);
       else out.fetch.push({ path, oid: blob.oid });
     }
@@ -103,17 +111,25 @@ export async function writeVerdict({ call, repo, entry, verdict, built, attempts
     if (typeof head !== 'string') throw new GitHubError(502, { as: 'user' });
 
     const { data: answer } = await call('POST', '/graphql', { body: { query: PLAN_QUERY, variables: { owner, name, commit: head, plan: `${head}:plan`, seen: `${built}:plan/${path}` } } });
+    // Any error, even beside data, means the answer may lack part of plan/.
+    const errors = Array.isArray(answer?.errors) ? answer.errors : [];
+    if (errors.some((error) => error?.type === 'RATE_LIMITED')) throw new GitHubError(429, { as: 'user', rateLimited: true, retryAfter: 60 });
     const repository = answer?.data?.repository;
-    if (!repository) {
-      const limited = Array.isArray(answer?.errors) && answer.errors.some((error) => error?.type === 'RATE_LIMITED');
-      throw new GitHubError(limited ? 429 : 502, { as: 'user', rateLimited: limited, retryAfter: limited ? 60 : 0 });
-    }
+    if (errors.length || !repository) throw partial();
     if (!repository.plan) throw new VerdictRefusal(409, 'refused', 'main has no plan/');
     const read = { files: new Map(), modes: new Map(), fetch: [] };
     readTree(repository.plan, '', LEVELS, read);
     const blobText = async (oid, where) => {
-      const { data } = await call('GET', `/repos/${repo}/git/blobs/${oid}`);
-      return decode(Buffer.from(String(data?.content ?? ''), 'base64'), where);
+      let data;
+      try {
+        ({ data } = await call('GET', `/repos/${repo}/git/blobs/${oid}`));
+      } catch (error) {
+        // A blob the tree just named and GitHub does not give: the read is in part, not a matter of permission.
+        if (error instanceof GitHubError && !error.rateLimited && !error.network) throw partial();
+        throw error;
+      }
+      if (typeof data?.content !== 'string' || data.encoding !== 'base64') throw partial();
+      return decode(Buffer.from(data.content, 'base64'), where);
     };
     for (const file of read.fetch) read.files.set(file.path, await blobText(file.oid, file.path));
 
@@ -149,9 +165,9 @@ export async function writeVerdict({ call, repo, entry, verdict, built, attempts
     }
     const oid = answered?.data?.createCommitOnBranch?.commit?.oid;
     if (typeof oid === 'string' && !answered.errors?.length) return { status: 'done', commit: oid, message: outcome.message };
-    const errors = Array.isArray(answered?.errors) ? answered.errors : [];
-    if (errors.some((error) => error?.type === 'RATE_LIMITED')) throw new GitHubError(429, { as: 'user', rateLimited: true, retryAfter: 60 });
-    if (errors.some((error) => DENIED_TYPES.has(error?.type))) throw new VerdictRefusal(403, 'forbidden', DENIED);
+    const failures = Array.isArray(answered?.errors) ? answered.errors : [];
+    if (failures.some((error) => error?.type === 'RATE_LIMITED')) throw new GitHubError(429, { as: 'user', rateLimited: true, retryAfter: 60 });
+    if (failures.some((error) => DENIED_TYPES.has(error?.type))) throw new VerdictRefusal(403, 'forbidden', DENIED);
     // The head was not the one expected (main moved, forward or back), or the answer says nothing sure: read main again.
     if (await moved(call, repo, head)) continue;
     throw new GitHubError(502, { as: 'user' });

@@ -16,7 +16,7 @@ import { clean, commentIssue, countOf, kindOf, LABELS, labelNames } from './issu
 import { entryMarker, LABELS as LABEL_DEFINITIONS, readEntryMarker } from '../../tools/workshop/model/index.js';
 import { clearCookie, cookieNames, HINT_COOKIE, parseCookies, seal, serializeCookie, SESSION_MAX_AGE, STATE_MAX_AGE, unseal } from './session.mjs';
 import { createSnapshot, SNAPSHOT } from './snapshot.mjs';
-import { DENIED, VerdictRefusal, writeVerdict } from './verdicts.mjs';
+import { VerdictRefusal, writeVerdict } from './verdicts.mjs';
 
 export { LABELS };
 
@@ -1075,11 +1075,8 @@ export function createWorkshop({
       try {
         result = await writeVerdict({ call, repo, entry, verdict: input.verdict, built: input.built });
       } catch (error) {
+        // verdicts.mjs says when GitHub refused the write itself (DENIED); any other failure is answered as for every route.
         if (error instanceof VerdictRefusal) refuse(error.status, error.code, error.message);
-        if (error instanceof GitHubError && (error.status === 403 || error.status === 404) && !error.rateLimited) {
-          ctx.githubStatus = error.status;
-          refuse(403, 'forbidden', DENIED);
-        }
         throw error;
       }
       return json(200, { ok: true, entry: entry.id, verdict: input.verdict, commit: result.commit, ...(result.status === 'already' ? { already: true } : {}), message: result.message });

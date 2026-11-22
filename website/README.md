@@ -1087,7 +1087,11 @@ What the server does, with the owner's own token and nothing else:
 2. In one GraphQL call it reads that commit's tree, the text of every file of
    `plan/` at it, and the entry's file at `built`. A file GitHub gives cut short
    is read whole from its blob. A link or a submodule under `plan/`, or a
-   folder deeper than `plan/<part>/<kind>/`, refuses the verdict.
+   folder deeper than `plan/<part>/<kind>/`, refuses the verdict. An answer
+   with any error, even beside data, or a folder or a file it gives without
+   its contents, or a blob GitHub does not give, answers 502 `partial`:
+   "GitHub answered in part, so nothing was written. Try again." A part of
+   `plan/` is never taken for all of it.
 3. When the entry's file on `main` differs from its file at `built`, it refuses
    with 409 `changed`: "This entry changed since the page was built: reload the
    page." A verdict is for the text the owner saw. A change to any other file

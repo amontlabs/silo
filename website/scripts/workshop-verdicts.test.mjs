@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { drop, take } from '../../tools/plan/write/index.js';
 import { loadDir } from '../../tools/plan/read/index.js';
-import { ATTEMPTS, BUSY, CHANGED, DENIED } from '../server/verdicts.mjs';
+import { ATTEMPTS, BUSY, CHANGED, DENIED, PARTIAL } from '../server/verdicts.mjs';
 import { BUDGET } from '../server/workshop.mjs';
 import { planEntries } from './plan-entries.mjs';
 import { ORIGIN, setup, withBudget } from './workshop-test-support.mjs';
@@ -456,4 +456,33 @@ test('model: main moves only by fast-forwards, and each verdict is one commit eq
     // Every case was reached, so no rule was checked on nothing.
     for (const [name, times] of Object.entries(reached)) assert.ok(times > 0, `${name} was never reached: ${JSON.stringify(reached)}`);
   } finally { t.fake.state.hook = null; await t.close(); }
+});
+
+test('an answer GitHub gives in part fails the whole read, nothing written, and says so: errors beside data, a folder without its entries, a file without its object', async () => {
+  /** The folder `engine/decisions` of plan/ in a PlanAt answer. */
+  const decisions = (answer) => answer.data.repository.plan.entries.find((e) => e.name === 'engine').object.entries.find((e) => e.name === 'decisions');
+  const cases = [
+    ['errors beside data', (answer) => {
+      decisions(answer).object = null;
+      return { ...answer, errors: [{ type: 'SERVICE_UNAVAILABLE', path: ['repository', 'plan'], message: 'Something went wrong while executing your query.' }] };
+    }],
+    ['a folder whose entries are missing', (answer) => {
+      delete decisions(answer).object.entries;
+      return answer;
+    }],
+    ['a file whose object is null', (answer) => {
+      decisions(answer).object.entries.find((e) => e.name === 'model-tool.json').object = null;
+      return answer;
+    }],
+  ];
+  for (const [name, change] of cases) {
+    const t = await started();
+    try {
+      t.fake.state.planAnswer = change;
+      const response = await t.verdict('linux-vm-engine', 'take');
+      assert.deepEqual([response.status, response.json.error, response.json.message], [502, 'partial', PARTIAL], name);
+      assert.equal(t.main(), t.seed, name);
+      assert.equal(t.gitWrites().length, 0, name);
+    } finally { await t.close(); }
+  }
 });

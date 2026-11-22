@@ -47,6 +47,8 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     contentsDenied: 'FORBIDDEN',
     // GraphQL cuts a blob's text past this many bytes (isTruncated), as GitHub does for large files.
     truncateOver: Infinity,
+    // A test's change to the answer of the plan's read (GraphQL PlanAt), as GitHub may give it in part: (answer) => answer.
+    planAnswer: null,
     // Each createCommitOnBranch asked for: its input, as sent.
     commitInputs: [],
   };
@@ -383,7 +385,8 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
         if (`${owner}/${name}` !== repo) return json(res, 200, { data: { repository: null }, errors: [{ type: 'NOT_FOUND', message: 'Could not resolve to a Repository.' }] });
         const git = state.git;
         const options = { truncateOver: state.truncateOver };
-        return json(res, 200, { data: { repository: { commit: git.graph(git.resolve(commit), 0, options), plan: git.graph(git.resolve(plan), 3, options), seen: git.graph(git.resolve(seen), 0, options) } } });
+        const answer = { data: { repository: { commit: git.graph(git.resolve(commit), 0, options), plan: git.graph(git.resolve(plan), 3, options), seen: git.graph(git.resolve(seen), 0, options) } } };
+        return json(res, 200, state.planAnswer ? state.planAnswer(answer) : answer);
       }
       if (who.kind !== 'user') return json(res, 403, { message: 'Forbidden' });
       const { owner, name, number } = body.variables || {};
