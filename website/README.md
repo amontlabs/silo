@@ -1132,7 +1132,10 @@ sends the verdict. A key held down never confirms: Chromium clicks on each
 repeat of Enter, so the repeats of a key are ignored until it is let go, and
 a press less than 0.4 seconds after the first is ignored too. An armed button
 goes back after four seconds, or when the focus leaves the pair. While the server works, the pressed button says "Taking…" or
-"Dropping…" and both are disabled. On success the entry shows its verdict at
+"Dropping…" and both are disabled. The words of the state take the focus at
+the confirm and keep it when the buttons go or the server refuses, so a
+keyboard user stays on the row. They are focusable for this only, and show
+the ring for the keyboard's confirm, not a pointer's. On success the entry shows its verdict at
 once, as the owner's: "Decided." or "Dropped.", and "by agents" goes. The page
 keeps the verdict in its own memory of its writes (`writes.ts`) and shows it
 over whatever build it is, across reloads, until a build's plan shows that

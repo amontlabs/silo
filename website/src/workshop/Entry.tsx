@@ -341,7 +341,7 @@ const ARMED = 'Confirm';
  * draws the same buttons as placeholders, inert, while `me` has not answered for the owner remembered, or the entry's
  * details have not shown yet.
  */
-function VerdictButtons({ row, ctx, held = false, onSend }: { row: Row; ctx: EntryContext; held?: boolean; onSend: () => void }) {
+function VerdictButtons({ row, ctx, held = false, onSend }: { row: Row; ctx: EntryContext; held?: boolean; onSend: (byKey: boolean) => void }) {
   const { w } = ctx;
   const id = planId(row) as string;
   const pending = w.verdictPending[id];
@@ -354,7 +354,7 @@ function VerdictButtons({ row, ctx, held = false, onSend }: { row: Row; ctx: Ent
     const timer = setTimeout(() => setArmed(null), ARM_MS);
     return () => clearTimeout(timer);
   }, [armed]);
-  const press = (verdict: Verdict) => {
+  const press = (verdict: Verdict, byKey: boolean) => {
     if (pending || repeating.current) return;
     if (armed !== verdict) {
       setArmed(verdict);
@@ -363,7 +363,7 @@ function VerdictButtons({ row, ctx, held = false, onSend }: { row: Row; ctx: Ent
     }
     if (Date.now() - armedAt.current < CONFIRM_AFTER_MS) return;
     setArmed(null);
-    onSend();
+    onSend(byKey);
     void w.sendVerdict(row, verdict);
   };
   if (held) {
@@ -387,7 +387,7 @@ function VerdictButtons({ row, ctx, held = false, onSend }: { row: Row; ctx: Ent
           <button
             key={verdict} type="button" className={`ws-vbtn ${verdict}${armed === verdict ? ' armed' : ''}`}
             aria-label={armed === verdict ? `${ARMED} ${verdict}` : undefined}
-            aria-busy={pending === verdict || undefined} disabled={Boolean(pending)} onClick={() => press(verdict)}
+            aria-busy={pending === verdict || undefined} disabled={Boolean(pending)} onClick={(event) => press(verdict, event.detail === 0)}
             onKeyDown={(event) => {
               repeating.current = event.repeat;
               if (event.repeat) event.preventDefault();
@@ -411,7 +411,9 @@ function VerdictButtons({ row, ctx, held = false, onSend }: { row: Row; ctx: Ent
  * then their room is held.
  *
  * The line whose button sent a verdict stays where it is on screen when the new state shows: the choice over it goes
- * then, several screens tall at times, and the result would leave the screen with it.
+ * then, several screens tall at times, and the result would leave the screen with it. Its words take the focus at the
+ * confirm, since the buttons are disabled and then go, and would leave it to the page. They can take it only for this:
+ * they stop being focusable when they lose it. A pointer's confirm draws no ring.
  */
 function StateLine({ row, ctx, facts, children }: { row: Row; ctx: EntryContext; facts: Workshop['facts']; children?: ReactNode }) {
   const text = stateText(row);
@@ -421,6 +423,7 @@ function StateLine({ row, ctx, facts, children }: { row: Row; ctx: EntryContext;
   const offered = offersVerdict(row);
   const detailsShown = !row.more || typeof facts === 'object';
   const line = useRef<HTMLDivElement>(null);
+  const words = useRef<HTMLSpanElement>(null);
   const sentFrom = useRef<Row['status'] | null>(null);
   // Read while rendering: the page still shows the state before this one.
   const wasAt = sentFrom.current !== null && sentFrom.current !== row.status ? line.current?.getBoundingClientRect().top : undefined;
@@ -430,11 +433,17 @@ function StateLine({ row, ctx, facts, children }: { row: Row; ctx: EntryContext;
     const moved = line.current.getBoundingClientRect().top - wasAt;
     if (moved) scrollBy({ top: moved, behavior: 'instant' });
   }, [wasAt]);
+  const sent = (byKey: boolean) => {
+    sentFrom.current = row.status;
+    if (!words.current) return;
+    words.current.tabIndex = -1;
+    words.current.focus({ preventScroll: true, focusVisible: byKey } as FocusOptions);
+  };
   return (
     <>
       <div className="ws-state" ref={line}>
-        <span className={`ws-state-text ${tone}`}>{text}</span>
-        {offered && (ctx.w.mayDecide || ctx.w.verdictHeld) ? <VerdictButtons row={row} ctx={ctx} held={!ctx.w.mayDecide || !detailsShown} onSend={() => { sentFrom.current = row.status; }} /> : null}
+        <span className={`ws-state-text ${tone}`} ref={words} onBlur={(event) => event.currentTarget.removeAttribute('tabindex')}>{text}</span>
+        {offered && (ctx.w.mayDecide || ctx.w.verdictHeld) ? <VerdictButtons row={row} ctx={ctx} held={!ctx.w.mayDecide || !detailsShown} onSend={sent} /> : null}
         {id || children ? <span className="ws-state-more">{id ? <CopyId id={id} /> : null}{children}</span> : null}
       </div>
       {refusal ? <p className="ws-refused" role="alert">{refusal}</p> : null}
