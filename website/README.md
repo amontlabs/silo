@@ -185,8 +185,10 @@ needs Playwright's own Chromium, as the load check does). It builds the plan
 in `plan/` twice into a directory of its own: build A names its chunks apart,
 as a deployment whose chunks changed does, and build B replaces it. It serves
 A with the API against the fake GitHub and opens it as `owner-fake`, at a part
-that has a feature with facts, notes and history (F) and a feature with none
-of the facts (X). It types a comment on X and does not send it. Then B
+that has a feature with facts, notes and history (F) and an entry with
+nothing to show from the facts chunk (X), so that opening X loads none of it.
+A taken decision that adds nothing is such an entry. The check types a comment
+on X and does not send it. Then B
 replaces A, and F's facts, Notes and History must each say "The Workshop has
 changed since this page opened." with Reload. The first press must not
 reload, and must say "Text you typed is not sent yet." with "Reload anyway".
