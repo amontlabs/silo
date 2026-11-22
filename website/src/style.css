@@ -69,17 +69,11 @@
 .pitch span {
   display: block;
 }
-/* While a picture is put at a moment in one go, nothing in it animates. */
-.jump,
-.jump * {
-  transition: none !important;
-  animation: none !important;
-}
-/* Until their script has drawn them, the pictures and the film's controls stay hidden, with their room kept. */
-.pictures-pending :is(.film, .mini) {
+/* Until its script has drawn it, the film and its controls stay hidden, with their room kept. */
+.pictures-pending .film {
   visibility: hidden;
 }
-/* The notice: where Silo stands, under the same three columns as the points */
+/* The notice: where Silo stands, under the same three columns as the cards */
 .notice {
   display: grid;
   grid-template-columns: 1fr 2fr;

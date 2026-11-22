@@ -138,10 +138,12 @@ export const PHONE_DOCK: Dock = { y: 15, step: 12, first: 16, right: 464, words:
 function wordsRest(record: readonly Recorded[], i: number) {
   const { t } = record[i];
   const said = t + 120;
+  const words = record[i].words.split(/\s+/).length;
   const shot = TIMED.find((s) => t >= s.start && t < s.start + s.dur)!;
   // Its words leave with its shot, or after the cut when they need that to be read, and before the next mark lands.
+  // To be read they need 250 ms and 200 ms a word, and 900 ms at least.
   const next = record[i + 1] ? record[i + 1].t - FADE : END;
-  return { said, until: Math.min(next, Math.max(out(shot.key), said + FADE + 900)) };
+  return { said, until: Math.min(next, Math.max(out(shot.key), said + FADE + Math.max(900, 250 + 200 * words))) };
 }
 
 export function buildRecord(parent: SVGGElement, reel: Reel, dock: Dock) {

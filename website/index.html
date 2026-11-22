@@ -19,9 +19,9 @@
       })();
     </script>
     <script>
-      // The pictures are drawn by their script. Until it has drawn them they stay hidden, with their room
-      // kept, so a half-drawn picture never shows first. If the script has not started after 3 s, the stills
-      // the page holds without script show and stay.
+      // The film is drawn by its script. Until it has drawn it the film stays hidden, with its room kept, so
+      // a half-drawn picture never shows first. If the script has not started after 3 s, the still the page
+      // holds without script shows and stays. The cards need no wait: their markup is each picture's end.
       document.documentElement.classList.add('pictures-pending');
       window.siloPicturesFallback = setTimeout(() => document.documentElement.classList.remove('pictures-pending'), 3000);
     </script>
@@ -93,9 +93,6 @@
         </symbol>
         <symbol id="out" viewBox="0 0 9 9"><path d="M2 7 7.5 1.5M3.2 1.5h4.3v4.3" /></symbol>
         <symbol id="go" viewBox="0 0 13 13"><path d="M2 6.5h9M7.5 3 11 6.5 7.5 10" /></symbol>
-        <symbol id="computer" viewBox="0 0 14 14"><rect x="1.5" y="2.5" width="11" height="7.5" /><path d="M4.5 12.5h5M7 10v2.5" /></symbol>
-        <symbol id="ok" viewBox="0 0 12 12"><path d="M2.5 6.3 5 8.7l4.6-5.4" /></symbol>
-        <symbol id="pointer" viewBox="0 0 20 20"><path class="cur-edge" d="M3 2l12.5 6.6-5.4 1.5L8.2 15.6z" fill="currentColor" stroke-width="1.4" stroke-linejoin="round" /></symbol>
       </defs>
     </svg>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -145,139 +142,271 @@
             </div>
           </div>
         </section>
-        <section class="for joint" aria-labelledby="for-title">
+        <section class="for joint" id="cards" aria-labelledby="for-title">
           <h2 class="title" id="for-title">What Silo does</h2>
-          <ul class="points" id="cards" role="list">
-            <li class="card" data-mini="full">
-              <span class="prog"><b></b></span>
-              <svg class="mini" viewBox="0 0 320 140" aria-hidden="true" focusable="false">
-                <rect class="bx" x="10.5" y="12.5" width="299" height="115" />
-                <use href="#computer" class="gl" x="19" y="20" width="13" height="13" /><text class="i" x="38" y="30.5">main</text>
-                <path class="rl" d="M10.5 40.5H309.5" />
-                <text class="i ty l1" style="--n: 32; --t: 700ms" x="22" y="64"><tspan class="pr">$ </tspan>sudo apt install postgresql-17</text>
-                <use href="#ok" class="ok f k1" x="286" y="54" width="11" height="11" />
-                <text class="i ty l2" style="--n: 35; --t: 750ms" x="22" y="90"><tspan class="pr">$ </tspan>sudo systemctl restart postgresql</text>
-                <use href="#ok" class="ok f k2" x="286" y="80" width="11" height="11" />
-                <text class="i ty l3" style="--n: 13; --t: 350ms" x="22" y="116"><tspan class="pr">$ </tspan>npm install</text>
-                <use href="#ok" class="ok f k3" x="286" y="106" width="11" height="11" />
-              </svg>
-              <div class="txt">
-                <p class="term">full access</p>
-                <h3>Agents have sudo, and nothing asks them for approval</h3>
-                <p>Inside the computer, an agent installs a package or changes a system setting without a prompt. What it can reach outside is decided at the boundary.</p>
+          <ul class="fc-grid" role="list">
+            <li class="fc-item" data-picture="rules" tabindex="0">
+              <span class="fc-fill" aria-hidden="true"></span>
+              <div class="fc-pic">
+                <svg viewBox="0 0 376 188" aria-hidden="true" focusable="false">
+                  <rect class="fc-comp" x="10" y="14" width="94" height="160" rx="4"/>
+                  <text x="22" y="38" class="fc-title">main</text>
+                  <text x="22" y="100"><tspan class="fc-quiet">$ </tspan>sudo …</text>
+                  <rect class="fc-cover" data-part="typed" x="38" y="85" width="53" height="20" style="transform-origin:91px 95px"/>
+                  <path class="fc-edge" d="M171 10V180"/>
+                  <path class="fc-rest" d="M92 64H358M92 130H358"/>
+                  <path class="fc-trail" data-part="trail-a" d="M92 64H358" style="transform-origin:92px 64px"/>
+                  <path class="fc-trail fc-hot" data-part="trail-b" d="M92 130H121" style="transform-origin:92px 130px"/>
+                  <circle class="fc-source" cx="92" cy="64" r="3.5"/><circle class="fc-source" cx="92" cy="130" r="3.5"/>
+                  <circle class="fc-open" cx="358" cy="64" r="5"/><circle class="fc-open" cx="358" cy="130" r="5"/>
+                  <circle class="fc-solid" data-part="reached" cx="358" cy="64" r="5.5"/>
+                  <circle class="fc-solid fc-moving" data-part="request-a" cx="92" cy="64" r="5"/>
+                  <circle class="fc-orange" data-part="request-b" cx="117" cy="130" r="5"/>
+                  <g data-part="denied"><rect class="fc-ground" x="141" y="138" width="60" height="44"/><text x="171" y="167" class="fc-hot" text-anchor="middle">denied</text></g>
+                  <rect class="fc-rule" x="121" y="49" width="100" height="30" rx="3"/>
+                  <text x="171" y="69" text-anchor="middle">registries</text>
+                  <rect class="fc-rule fc-none" x="121" y="115" width="100" height="30" rx="3"/>
+                  <text x="171" y="135" class="fc-quiet" text-anchor="middle">no rule</text>
+                  <text x="365" y="42" text-anchor="end">registry.npmjs.org</text>
+                  <text x="365" y="108" text-anchor="end">paste.rs</text>
+                </svg>
+              </div>
+              <div class="fc-text">
+                <p class="fc-term">rules</p>
+                <h3>Agents have full access, and your rules decide at the boundary</h3>
+                <p class="fc-body">Nothing inside the computer asks for approval. At the boundary, your rules allow, hold or deny each request. The default is deny.</p>
               </div>
             </li>
-            <li class="card" data-mini="screen">
-              <span class="prog"><b></b></span>
-              <svg class="mini" viewBox="0 0 320 140" aria-hidden="true" focusable="false">
-                <rect class="bx" x="10.5" y="20.5" width="140" height="104" />
-                <text class="s9" x="17" y="31">macOS</text>
-                <path class="rl" d="M10.5 36.5H150.5" />
-                <rect class="fld" x="24.5" y="44.5" width="112" height="64" />
-                <circle class="gl" cx="30" cy="50.5" r="1.5" /><circle class="gl" cx="35.5" cy="50.5" r="1.5" /><circle class="gl" cx="41" cy="50.5" r="1.5" />
-                <rect class="rlf" x="32" y="58" width="48" height="3" /><rect class="rlf" x="32" y="65" width="32" height="3" />
-                <rect class="btnr b1" x="58.5" y="76.5" width="44" height="16" rx="3" /><rect class="rlf" x="71.5" y="82.5" width="18" height="4" />
-                <use href="#ok" class="ok f k1" x="108" y="79" width="11" height="11" />
-                <rect class="trk" x="44.5" y="112.5" width="72" height="8" rx="4" />
-                <g transform="translate(159 0)">
-                  <rect class="bx" x="10.5" y="20.5" width="140" height="104" />
-                  <text class="s9" x="17" y="31">Linux</text>
-                  <path class="rl" d="M10.5 36.5H150.5" />
-                  <rect class="fld" x="24.5" y="44.5" width="112" height="64" />
-                  <circle class="gl" cx="30" cy="50.5" r="1.5" /><circle class="gl" cx="35.5" cy="50.5" r="1.5" /><circle class="gl" cx="41" cy="50.5" r="1.5" />
-                  <rect class="rlf" x="32" y="58" width="48" height="3" /><rect class="rlf" x="32" y="65" width="32" height="3" />
-                  <rect class="btnr b2" x="58.5" y="76.5" width="44" height="16" rx="3" /><rect class="rlf" x="71.5" y="82.5" width="18" height="4" />
-                  <use href="#ok" class="ok f k2" x="108" y="79" width="11" height="11" />
-                  <rect class="rlf" x="14" y="113" width="132" height="7" />
-                </g>
-                <g class="mv f ac"><use href="#pointer" class="cur agentc" width="16" height="16" /><text class="a s9" x="17" y="21">agent</text></g>
-              </svg>
-              <div class="txt">
-                <p class="term">macOS or Linux</p>
-                <h3>macOS or Linux, with a screen agents can drive</h3>
-                <p>A computer is a virtual machine that runs macOS or Linux. An agent can open an app there and click through it.</p>
+            <li class="fc-item" data-picture="secrets" tabindex="0">
+              <span class="fc-fill" aria-hidden="true"></span>
+              <div class="fc-pic">
+                <svg viewBox="0 0 376 188" aria-hidden="true" focusable="false">
+                  <defs><clipPath id="fc-inside"><rect x="0" y="40" width="196" height="120"/></clipPath><clipPath id="fc-outside"><rect x="196" y="40" width="180" height="120"/></clipPath></defs>
+                  <rect class="fc-comp" x="10" y="14" width="134" height="160" rx="4"/>
+                  <text x="22" y="38" class="fc-title">main</text>
+                  <path class="fc-edge" d="M196 10V180"/>
+                  <path class="fc-rest" d="M80 80V124H305V81"/>
+                  <path class="fc-trail" data-part="from-held" d="M80 80V124"/>
+                  <path class="fc-trail" data-part="trail" d="M80 124H244" style="transform-origin:80px 124px"/>
+                  <path class="fc-trail" data-part="to-host" d="M305 110V81"/>
+                  <rect class="fc-chip fc-held" x="28" y="52" width="104" height="28" rx="3"/><text x="80" y="71" class="fc-quiet" text-anchor="middle">STRIPE_KEY</text>
+                  <g clip-path="url(#fc-inside)"><g class="fc-moving" data-part="as-held"><rect class="fc-chip fc-held" x="28" y="52" width="104" height="28" rx="3"/><text x="80" y="71" class="fc-quiet" text-anchor="middle">STRIPE_KEY</text></g></g>
+                  <g clip-path="url(#fc-outside)"><g data-part="as-real"><rect class="fc-chip fc-hot" x="244" y="110" width="122" height="28" rx="3"/><text x="305" y="129" text-anchor="middle">sk_live_••••</text></g></g>
+                  <rect class="fc-rule" x="158" y="107" width="76" height="34" rx="3"/>
+                  <text x="196" y="129" text-anchor="middle">stripe</text>
+                  <circle class="fc-open" cx="305" cy="75" r="5"/><circle class="fc-solid" data-part="reached" cx="305" cy="75" r="5.5"/>
+                  <text x="305" y="56" text-anchor="middle">api.stripe.com</text>
+                </svg>
+              </div>
+              <div class="fc-text">
+                <p class="fc-term">secrets</p>
+                <h3>Agents use your keys without being able to read them</h3>
+                <p class="fc-body">The computer holds a placeholder. Silo swaps in the real key on the way to a host you allowed. The key never enters the computer or the record.</p>
               </div>
             </li>
-            <li class="card" data-mini="edge">
-              <span class="prog"><b></b></span>
-              <svg class="mini" viewBox="0 0 320 140" aria-hidden="true" focusable="false">
-                <rect class="bx" x="10.5" y="50.5" width="96" height="40" />
-                <use href="#computer" class="gl" x="19" y="64" width="13" height="13" /><text class="i" x="38" y="74">main</text>
-                <path class="edge" d="M150.5 12V128" />
-                <path class="wn" d="M106.5 70.5H140.5" />
-                <path class="wn" d="M160.5 70.5H172V40.5H190" />
-                <path class="wn" d="M172 70.5V100.5H190" />
-                <g class="gate" transform="translate(150.5 70.5)"><rect x="-10" y="-10" width="20" height="20" rx="5" /><path d="M-4 5V-5M-4 -2H5" /></g>
-                <circle class="mk m1" cx="195.5" cy="40.5" r="3.5" /><text class="i" x="206" y="44">crates.io</text>
-                <circle class="mk" cx="195.5" cy="100.5" r="3.5" /><text class="i" x="206" y="104">paste.rs</text>
-                <text class="a sn f dn" x="262" y="104">denied</text>
-                <path class="xx f xm" d="M168.5 82l7 7M175.5 82l-7 7" />
-                <circle class="pk p1" r="3.5" /><circle class="pk p2" r="3.5" />
-              </svg>
-              <div class="txt">
-                <p class="term">the boundary</p>
-                <h3>Your rules, enforced outside the computer</h3>
-                <p>A connection that no rule allows is denied, and the attempt is recorded. Silo can propose rules from the hosts a computer actually used.</p>
+            <li class="fc-item" data-picture="record" tabindex="0">
+              <span class="fc-fill" aria-hidden="true"></span>
+              <div class="fc-pic">
+                <svg viewBox="0 0 376 188" aria-hidden="true" focusable="false">
+                  <rect class="fc-comp" x="10" y="14" width="124" height="160" rx="4"/>
+                  <text x="22" y="38" class="fc-title">main</text>
+                  <path class="fc-edge" d="M166 10V180"/>
+                  <path class="fc-open" d="M46 50H65L74 59V88H46Z"/>
+                  <path class="fc-edge" d="M65 50V59H74"/>
+                  <rect class="fc-bar" x="52" y="63" width="16" height="4" rx="2"/>
+                  <rect class="fc-solid" data-part="change" x="52" y="71" width="16" height="4" rx="2" style="transform-origin:52px 73px"/>
+                  <rect class="fc-bar" x="52" y="79" width="10" height="4" rx="2"/>
+                  <g clip-path="url(#fc-sight)"><path class="fc-sight" d="M78 73H158"/></g>
+                  <defs><clipPath id="fc-sight"><rect data-part="seen" x="76" y="63" width="84" height="20" style="transform-origin:160px 73px"/></clipPath></defs>
+                  <rect class="fc-chip" x="28" y="116" width="64" height="28" rx="3"/>
+                  <text x="38" y="135" class="fc-quiet">$</text>
+                  <rect class="fc-bar" x="54" y="128" width="28" height="4" rx="2"/>
+                  <path class="fc-trail" data-part="said" d="M92 130H159" style="transform-origin:92px 130px"/>
+                  <g data-part="fact"><path class="fc-orange" d="M166 66L173 73L166 80L159 73Z"/></g>
+                  <g data-part="report"><path class="fc-open" d="M166 123L173 130L166 137L159 130Z"/></g>
+                  <text x="184" y="78" data-part="fact-said"><tspan class="fc-hot">fact</tspan><tspan class="fc-quiet"> · </tspan>file changed</text>
+                  <text x="184" y="135" data-part="report-said"><tspan class="fc-quiet">report · </tspan>cargo build</text>
+                </svg>
+              </div>
+              <div class="fc-text">
+                <p class="fc-term">record</p>
+                <h3>What agents did, seen from outside their computer</h3>
+                <p class="fc-body">File changes, connections and model calls are facts Silo saw itself. What a program inside says is kept apart, since an agent can change it.</p>
               </div>
             </li>
-            <li class="card" data-mini="record">
-              <span class="prog"><b></b></span>
-              <svg class="mini" viewBox="0 0 320 140" aria-hidden="true" focusable="false">
-                <rect class="bx" x="10.5" y="6.5" width="299" height="127" />
-                <g class="f l1"><g transform="translate(24 22.5) rotate(45)"><rect class="dm fact" x="-3.5" y="-3.5" width="7" height="7" /></g><text class="sn" x="36" y="26">tool call</text><text class="i" x="104" y="26">cargo build</text></g>
-                <g class="f l2"><g transform="translate(24 41.5) rotate(45)"><rect class="dm" x="-3.5" y="-3.5" width="7" height="7" /></g><text class="sn" x="36" y="45">process</text><text class="i" x="104" y="45">cargo build</text></g>
-                <g class="f l3"><g transform="translate(24 60.5) rotate(45)"><rect class="dm fact" x="-3.5" y="-3.5" width="7" height="7" /></g><text class="sn" x="36" y="64">files</text><text class="i" x="104" y="64">214 changed</text></g>
-                <g class="f l4"><g transform="translate(24 79.5) rotate(45)"><rect class="dm fact" x="-3.5" y="-3.5" width="7" height="7" /></g><text class="sn" x="36" y="83">network</text><text class="i" x="104" y="83">crates.io</text></g>
-                <g class="f l5"><g transform="translate(24 98.5) rotate(45)"><rect class="dm fact" x="-3.5" y="-3.5" width="7" height="7" /></g><text class="sn" x="36" y="102">model</text><text class="i" x="104" y="102">18 calls · $0.42</text></g>
-                <g class="f lg">
-                  <path class="rl" d="M10.5 112.5H309.5" />
-                  <g transform="translate(24 123.5) rotate(45)"><rect class="dm fact" x="-3.5" y="-3.5" width="7" height="7" /></g><text class="sn" x="36" y="127">fact</text>
-                  <g transform="translate(86 123.5) rotate(45)"><rect class="dm" x="-3.5" y="-3.5" width="7" height="7" /></g><text class="sn" x="98" y="127">report</text>
-                </g>
-              </svg>
-              <div class="txt">
-                <p class="term">the record</p>
-                <h3>A record of everything agents did</h3>
-                <p>It says what ran, which files changed, where the computer connected and what the model calls cost. What Silo saw itself is marked apart from what a program inside reported.</p>
+            <li class="fc-item" data-picture="screen" tabindex="0">
+              <span class="fc-fill" aria-hidden="true"></span>
+              <div class="fc-pic">
+                <svg viewBox="0 0 376 188" aria-hidden="true" focusable="false">
+                  <rect class="fc-comp fc-away" x="8" y="12" width="172" height="144" rx="4"/>
+                  <text x="20" y="36" class="fc-title fc-quiet">your Mac</text>
+                  <rect class="fc-comp" x="196" y="12" width="172" height="144" rx="4"/>
+                  <text x="208" y="36" class="fc-title">main</text>
+                  <path class="fc-hair" d="M9 46H179M197 46H367"/>
+                  <path class="fc-rest" d="M94 156V170M72 170H116"/><path class="fc-edge" d="M282 156V170M260 170H304"/>
+                  <rect class="fc-open" x="24" y="60" width="140" height="78" rx="3"/>
+                  <path class="fc-hair" d="M25 74H163"/>
+                  <circle class="fc-source" cx="33" cy="67" r="2"/>
+                  <circle class="fc-source" cx="41" cy="67" r="2"/>
+                  <circle class="fc-source" cx="49" cy="67" r="2"/>
+                  <rect class="fc-bar" x="36" y="86" width="92" height="5" rx="2.5"/>
+                  <rect class="fc-bar" x="36" y="100" width="108" height="5" rx="2.5"/>
+                  <rect class="fc-bar" x="36" y="114" width="54" height="5" rx="2.5"/>
+                  <path class="fc-trail" d="M95 109V124"/>
+                  <rect class="fc-press" x="257" y="132" width="14" height="14" rx="3"/>
+                  <rect class="fc-press" x="275" y="132" width="14" height="14" rx="3"/>
+                  <rect class="fc-press" x="293" y="132" width="14" height="14" rx="3"/>
+                  <rect class="fc-source" data-part="launched" x="275" y="132" width="14" height="14" rx="3"/>
+                  <g data-part="opened" style="transform-origin:282px 132px"><rect class="fc-open" x="212" y="54" width="140" height="72" rx="3"/><path class="fc-hair" d="M213 68H351"/><circle class="fc-source" cx="221" cy="61" r="2"/><circle class="fc-source" cx="229" cy="61" r="2"/><circle class="fc-source" cx="237" cy="61" r="2"/><rect class="fc-bar" x="224" y="80" width="84" height="5" rx="2.5"/><rect class="fc-bar" x="224" y="94" width="40" height="5" rx="2.5"/><rect class="fc-press" x="284" y="96" width="56" height="22" rx="3"/><g data-part="pressed"><rect class="fc-pressed" x="284" y="96" width="56" height="22" rx="3"/><path class="fc-tick" d="M300 107L304 111L311 103"/></g></g>
+                  <path class="fc-agent" data-part="agent" d="M326 111V129L330.8 124.6L334 132L337.2 130.6L334.1 123.4H340.4Z"/>
+                </svg>
+              </div>
+              <div class="fc-text">
+                <p class="fc-term">screen</p>
+                <h3>Agents click through Mac apps on a screen that is not yours</h3>
+                <p class="fc-body">Main is a macOS virtual machine with its own screen. Windows an agent opens there never take your focus or your screen.</p>
               </div>
             </li>
-            <li class="card" data-mini="needs">
-              <span class="prog"><b></b></span>
-              <svg class="mini" viewBox="0 0 320 140" aria-hidden="true" focusable="false">
-                <rect class="chip r1" x="10.5" y="10.5" width="299" height="20" rx="3" /><text x="20" y="24">1</text><text class="sn i" x="34" y="24">paste.rs denied</text>
-                <g class="g g2"><rect class="chip" x="10.5" y="35.5" width="299" height="20" rx="3" /><text x="20" y="49">2</text><text class="sn i" x="34" y="49">Codex asks for a host</text></g>
-                <g class="g g3"><rect class="chip" x="10.5" y="60.5" width="299" height="20" rx="3" /><text x="20" y="74">3</text><text class="sn i" x="34" y="74">a run looks stuck</text><g transform="translate(298 70.5)"><g transform="rotate(45)"><rect class="dm op" x="-3.5" y="-3.5" width="7" height="7" /></g><path class="hf" d="M0 -4.95L-4.95 0L0 4.95Z" /></g></g>
-                <path class="wr ws" pathLength="1" d="M24.5 30.5V43.5" />
-                <path class="wr w1" pathLength="1" d="M24.5 43.5H34" />
-                <path class="wd f" d="M24.5 43.5V64.5H34" />
-                <g class="f c1"><rect class="bx" x="34.5" y="34.5" width="275" height="18" /><g transform="translate(46 43.5) rotate(45)"><rect class="dm fact" x="-3.5" y="-3.5" width="7" height="7" /></g><text class="sn" x="58" y="47">connection</text><text class="i" x="130" y="47">paste.rs</text></g>
-                <g class="f c2"><rect class="bx" x="34.5" y="55.5" width="275" height="18" /><g transform="translate(46 64.5)"><g transform="rotate(45)"><rect class="dm op" x="-3.5" y="-3.5" width="7" height="7" /></g><path class="hf" d="M0 -4.95L-4.95 0L0 4.95Z" /></g><text class="sn" x="58" y="68">turn 14</text><text class="i" x="130" y="68">Codex</text></g>
-                <use href="#pointer" class="cur mv f yc" width="16" height="16" />
-              </svg>
-              <div class="txt">
-                <p class="term">what needs you</p>
-                <h3>A short list of what needs you</h3>
-                <p>The first screen ranks what needs you. An alert opens on what triggered it, and on the turn that led to it.</p>
+            <li class="fc-item" data-picture="recipes" tabindex="0">
+              <span class="fc-fill" aria-hidden="true"></span>
+              <div class="fc-pic">
+                <svg viewBox="0 0 376 188" aria-hidden="true" focusable="false">
+                  <defs><clipPath id="fc-branches"><rect data-part="branches" x="174" y="20" width="62" height="148" style="transform-origin:174px 94px"/></clipPath></defs>
+                  <path class="fc-chip fc-hot" d="M8 34H156L174 52V154H8Z"/>
+                  <path class="fc-trail fc-hot fc-fold" d="M156 34V52H174"/>
+                  <text x="22" y="72"><tspan class="fc-quiet">base · </tspan>pinned</text>
+                  <text x="22" y="100"><tspan class="fc-quiet">nix · </tspan>postgresql</text>
+                  <text x="22" y="128"><tspan class="fc-quiet">pieces · </tspan>skills</text>
+                  <rect class="fc-cover" data-part="write-base" x="20" y="57" width="121" height="20" style="transform-origin:141px 67px"/>
+                  <rect class="fc-cover" data-part="write-nix" x="20" y="85" width="150" height="20" style="transform-origin:170px 95px"/>
+                  <rect class="fc-cover" data-part="write-pieces" x="20" y="113" width="141" height="20" style="transform-origin:161px 123px"/>
+                  <path class="fc-edge" clip-path="url(#fc-branches)" d="M174 94C212 94 198 49 236 49M174 94C212 94 198 139 236 139"/>
+                  <g data-part="mac">
+                  <rect class="fc-comp" x="236" y="14" width="132" height="70" rx="4"/><text x="248" y="38" class="fc-title">macOS</text>
+                  <rect class="fc-bar" x="248" y="60" width="76" height="5" rx="2.5"/>
+                  <rect class="fc-source" data-part="mac-tests" x="248" y="60" width="76" height="5" rx="2.5" style="transform-origin:248px 62px"/>
+                  </g>
+                  <g data-part="linux">
+                  <rect class="fc-comp" x="236" y="104" width="132" height="70" rx="4"/><text x="248" y="128" class="fc-title">Linux</text>
+                  <rect class="fc-bar" x="248" y="150" width="76" height="5" rx="2.5"/>
+                  <rect class="fc-source" data-part="linux-tests" x="248" y="150" width="76" height="5" rx="2.5" style="transform-origin:248px 152px"/>
+                  </g>
+                  <path class="fc-trail" data-part="mac-passed" d="M337 62L343 68L354 55"/>
+                  <path class="fc-trail" data-part="linux-passed" d="M337 152L343 158L354 145"/>
+                </svg>
+              </div>
+              <div class="fc-text">
+                <p class="fc-term">recipes</p>
+                <h3>Every computer comes from a recipe you can share</h3>
+                <p class="fc-body">A recipe is text: a pinned base and a layer built by Nix. Silo makes a macOS and a Linux computer from it and runs your tests on each.</p>
               </div>
             </li>
-            <li class="card" data-mini="back">
-              <span class="prog"><b></b></span>
-              <svg class="mini" viewBox="0 0 320 140" aria-hidden="true" focusable="false">
-                <use href="#computer" class="gl" x="16" y="17" width="13" height="13" /><text class="i" x="35" y="27.5">main</text>
-                <path class="gl" d="M26 60.5H296" />
-                <g transform="translate(64.5 60.5) rotate(45)"><rect class="dm p s1" x="-3.5" y="-3.5" width="7" height="7" /></g>
-                <g transform="translate(116.5 60.5) rotate(45)"><rect class="dm p s2" x="-3.5" y="-3.5" width="7" height="7" /></g>
-                <g transform="translate(168.5 60.5) rotate(45)"><rect class="dm p s3" x="-3.5" y="-3.5" width="7" height="7" /></g>
-                <g transform="translate(220.5 60.5) rotate(45)"><rect class="dm p s4" x="-3.5" y="-3.5" width="7" height="7" /></g>
-                <g transform="translate(272.5 60.5) rotate(45)"><rect class="dm p s5" x="-3.5" y="-3.5" width="7" height="7" /></g>
-                <path class="wr acc wb" pathLength="1" d="M116.5 67V112.5H140" />
-                <g class="p left fk"><rect class="bx" x="140.5" y="98.5" width="112" height="28" /><use href="#computer" class="gl" x="147" y="106" width="13" height="13" /><text class="i" x="165" y="116.5">fork</text></g>
-                <use href="#pointer" class="cur mv f yc" width="16" height="16" />
-              </svg>
-              <div class="txt">
-                <p class="term">going back</p>
-                <h3>Silo takes you back to any moment</h3>
-                <p>Checkpoints are taken on their own while agents work. You restore one, or you continue from it in a fork while main keeps running.</p>
+            <li class="fc-item" data-picture="extensions" tabindex="0">
+              <span class="fc-fill" aria-hidden="true"></span>
+              <div class="fc-pic">
+                <svg viewBox="0 0 376 188" aria-hidden="true" focusable="false">
+                  <defs><clipPath id="fc-read"><rect data-part="reads" x="170" y="30" width="74" height="115" style="transform-origin:170px 87px"/></clipPath></defs>
+                  <rect class="fc-comp" x="10" y="14" width="118" height="160" rx="4"/>
+                  <text x="22" y="38" class="fc-title">main</text>
+                  <rect class="fc-bar" x="22" y="60" width="72" height="5" rx="2.5"/>
+                  <rect class="fc-bar" x="22" y="74" width="48" height="5" rx="2.5"/>
+                  <path class="fc-edge" d="M164 10V154"/>
+                  <path class="fc-thin" clip-path="url(#fc-read)" d="M170 44C212 44 200 94 242 94M170 73C212 73 200 94 242 94M170 102C212 102 200 94 242 94M170 131C212 131 200 94 242 94"/>
+                  <g data-part="mark-a"><path class="fc-solid" d="M164 38L170 44L164 50L158 44Z"/></g>
+                  <g data-part="mark-b"><path class="fc-open" d="M164 67L170 73L164 79L158 73Z"/></g>
+                  <g data-part="mark-c"><path class="fc-solid" d="M164 96L170 102L164 108L158 102Z"/></g>
+                  <g data-part="mark-d"><path class="fc-solid" d="M164 125L170 131L164 137L158 131Z"/></g>
+                  <text x="164" y="173" class="fc-quiet" text-anchor="middle">record</text>
+                  <rect class="fc-comp" x="242" y="58" width="122" height="72" rx="4"/>
+                  <text x="254" y="82" class="fc-title">extension</text>
+                  <rect class="fc-bar" x="254" y="100" width="88" height="5" rx="2.5"/>
+                  <rect class="fc-bar" x="254" y="112" width="56" height="5" rx="2.5"/>
+                  <rect class="fc-source" data-part="read-a" x="254" y="100" width="88" height="5" rx="2.5" style="transform-origin:254px 102px"/>
+                  <rect class="fc-source" data-part="read-b" x="254" y="112" width="56" height="5" rx="2.5" style="transform-origin:254px 114px"/>
+                  <circle class="fc-solid fc-moving" data-part="read" cx="242" cy="94" r="4.5"/>
+                  <g data-part="alert"><circle class="fc-orange" cx="364" cy="58" r="10"/><path class="fc-bang" d="M364 52.5V59.5M364 63.2V63.4"/></g>
+                  <text x="348" y="40" class="fc-hot" data-part="alert-said" text-anchor="end">alert</text>
+                </svg>
+              </div>
+              <div class="fc-text">
+                <p class="fc-term">extensions</p>
+                <h3>Extensions read the record, alert you and deny requests</h3>
+                <p class="fc-body">One that runs code gets a computer of its own, with only the tools its manifest names. It can never allow what your rules deny.</p>
+              </div>
+            </li>
+          </ul>
+          <div class="fc-tree" aria-hidden="true"></div>
+          <ul class="fc-examples" role="list" aria-label="Examples of extensions">
+            <li class="fc-item" data-picture="disk" tabindex="0">
+              <span class="fc-fill" aria-hidden="true"></span>
+              <div class="fc-pic">
+                <svg viewBox="0 0 240 94" aria-hidden="true" focusable="false">
+                  <rect class="fc-comp" x="4" y="8" width="86" height="80" rx="4"/>
+                  <text x="14" y="29" class="fc-title">main</text>
+                  <rect class="fc-chip" x="14" y="44" width="64" height="28" rx="3"/>
+                  <text x="46" y="63" text-anchor="middle">/work</text>
+                  <path class="fc-rest" d="M78 58H112"/>
+                  <path class="fc-trail" data-part="asked" d="M78 58H112" style="transform-origin:112px 58px"/>
+                  <rect class="fc-comp" x="112" y="34" width="46" height="48" rx="4"/>
+                  <circle class="fc-open" cx="135" cy="58" r="14"/>
+                  <path class="fc-edge" d="M135 58H142"/>
+                  <path class="fc-edge" data-part="tick" d="M135 58V48" style="transform-origin:135px 58px"/>
+                  <path class="fc-trail" data-part="shown" d="M158 58H176" style="transform-origin:158px 58px"/>
+                  <g data-part="panel">
+                  <rect class="fc-open" x="176" y="22" width="58" height="62" rx="3"/><path class="fc-hair" d="M177 36H233"/>
+                  <rect class="fc-bar" x="184" y="46" width="40" height="5" rx="2.5"/><rect class="fc-bar" x="184" y="57" width="26" height="5" rx="2.5"/><rect class="fc-source" x="184" y="68" width="34" height="5" rx="2.5"/>
+                  </g>
+                  <circle class="fc-orange" data-part="warned" cx="233" cy="23" r="6"/>
+                  <circle class="fc-solid fc-moving" data-part="read" cx="78" cy="58" r="4"/>
+                </svg>
+              </div>
+              <div class="fc-text">
+                <p class="fc-term">disk watch</p>
+                <p class="fc-body">Every minute it reads <span class="fc-keep">/work</span> on main, draws a panel and alerts you.</p>
+              </div>
+            </li>
+            <li class="fc-item" data-picture="call" tabindex="0">
+              <span class="fc-fill" aria-hidden="true"></span>
+              <div class="fc-pic">
+                <svg viewBox="0 0 240 94" aria-hidden="true" focusable="false">
+                  <defs><clipPath id="fc-back"><rect data-part="back" x="42" y="0" width="194" height="32" style="transform-origin:42px 16px"/></clipPath></defs>
+                  <path class="fc-edge" d="M46 4V62"/>
+                  <path class="fc-rest" d="M196 36H220"/>
+                  <path class="fc-trail" data-part="asked" d="M116 50V77H88"/>
+                  <rect class="fc-comp" x="4" y="62" width="84" height="30" rx="4"/>
+                  <text x="46" y="82" class="fc-title" text-anchor="middle">check</text>
+                  <g data-part="call"><rect class="fc-chip" x="58" y="22" width="150" height="28" rx="3"/><text x="133" y="41" text-anchor="middle">git push --force</text></g>
+                  <circle class="fc-open" cx="226" cy="36" r="5"/>
+                  <text x="236" y="64" class="fc-quiet" text-anchor="end">model</text>
+                  <circle class="fc-solid fc-moving" data-part="ask" cx="116" cy="50" r="4"/>
+                  <g data-part="deny"><path class="fc-ground" d="M110 71H122V83H110Z"/><path class="fc-open fc-hot" d="M116 70L123 77L116 84L109 77Z"/><path class="fc-orange" d="M116 70V84L109 77Z"/><text x="129" y="82" class="fc-hot">deny</text></g>
+                  <path class="fc-trail" clip-path="url(#fc-back)" d="M46 22C46 3 226 1 226 27"/>
+                  <path class="fc-trail" data-part="head" d="M221 22L226 29L231 22"/>
+                </svg>
+              </div>
+              <div class="fc-text">
+                <p class="fc-term">tool call check</p>
+                <p class="fc-body">It is asked about each tool call before the agent runs it. A denied call goes back to the model with an error.</p>
+              </div>
+            </li>
+            <li class="fc-item" data-picture="registry" tabindex="0">
+              <span class="fc-fill" aria-hidden="true"></span>
+              <div class="fc-pic">
+                <svg viewBox="0 0 240 94" aria-hidden="true" focusable="false">
+                  <rect class="fc-comp" x="4" y="8" width="70" height="80" rx="4"/>
+                  <text x="14" y="29" class="fc-title">main</text>
+                  <path class="fc-edge" d="M140 4V92"/>
+                  <path class="fc-rest" d="M62 34H226"/>
+                  <path class="fc-trail" data-part="opened-lane" d="M62 34H226" style="transform-origin:62px 34px"/>
+                  <circle class="fc-source" cx="62" cy="34" r="3.5"/>
+                  <circle class="fc-open" cx="226" cy="34" r="5"/><circle class="fc-solid" data-part="reached" cx="226" cy="34" r="5.5"/>
+                  <g data-part="host"><rect class="fc-rule" x="92" y="20" width="96" height="28" rx="3"/><text x="140" y="39" text-anchor="middle">crates.io</text></g>
+                  <g data-part="allow"><rect class="fc-rule fc-hot" x="92" y="56" width="96" height="28" rx="3"/><text x="140" y="75" class="fc-hot" text-anchor="middle">allow</text></g>
+                </svg>
+              </div>
+              <div class="fc-text">
+                <p class="fc-term">registry rules</p>
+                <p class="fc-body">It has no computer, only rules that allow crates.io. You see them before you install it.</p>
               </div>
             </li>
           </ul>

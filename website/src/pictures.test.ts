@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { recordAnimations } from './cards-test-support';
+import { LINGER, PICTURES } from './cards';
 import { LENGTH, STILL, TIMED, endOf } from './film/story';
 import { homePage, measurableSvg } from './film/test-support';
 import { mountPictures } from './pictures';
@@ -9,12 +11,14 @@ const page = new DOMParser().parseFromString(homePage(), 'text/html').body.inner
 type Seen = (entries: { target: Element; intersectionRatio: number }[]) => void;
 let watchers: { seen: Seen; targets: Element[] }[] = [];
 let reduced = false;
+let motionChanged: (() => void)[] = [];
+let animations: ReturnType<typeof recordAnimations>;
 let visibility = 'visible';
 
 /** Puts `target` in view by `ratio`, as its observer would report it. */
 const see = (target: Element, ratio: number) =>
   watchers.filter((watcher) => watcher.targets.includes(target)).forEach((watcher) => watcher.seen([{ target, intersectionRatio: ratio }]));
-const NAMES = ['full', 'screen', 'edge', 'record', 'needs', 'back'];
+const NAMES = Object.keys(PICTURES);
 const $ = (selector: string) => document.querySelector<HTMLElement>(selector)!;
 const root = () => $('.film');
 const figure = () => $('.film figure');
@@ -28,8 +32,13 @@ const moment = () =>
 const shot = () => TIMED.filter(({ start, dur }) => moment() >= start + dur - 1).length;
 /** Moving, held by the page, or paused by the visitor. */
 const filmIs = () => ($('.film-pause').textContent === 'Play' ? 'paused' : root().film!.running ? 'moving' : 'held');
-const card = (name: string) => $(`.card[data-mini="${name}"]`);
-const playing = () => [...document.querySelectorAll<HTMLElement>('.card.playing')].map((el) => el.dataset.mini);
+const card = (name: string) => $(`.fc-item[data-picture="${name}"]`);
+const playing = () => animations.playing();
+const lasts = (name: string) => PICTURES[name][0] + LINGER;
+const setMotion = (on: boolean) => {
+  reduced = on;
+  motionChanged.forEach((run) => run());
+};
 const pointer = (target: Element, type: string, kind: string) => {
   const event = new MouseEvent(type);
   Object.defineProperty(event, 'pointerType', { value: kind });
@@ -79,8 +88,14 @@ beforeEach(() => {
       }
     },
   );
-  vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('reduced-motion') && reduced }));
-  Element.prototype.animate = (() => ({})) as unknown as Element['animate'];
+  motionChanged = [];
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    get matches() {
+      return query.includes('reduced-motion') && reduced;
+    },
+    addEventListener: (_type: string, run: () => void) => motionChanged.push(run),
+  }));
+  animations = recordAnimations();
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility });
   document.documentElement.className = 'pictures-pending';
   document.body.innerHTML = page;
@@ -98,13 +113,10 @@ describe('the two pictures', () => {
     mountPictures();
     expect(document.documentElement.classList.contains('pictures-pending')).toBe(false);
     expect(root().classList.contains('live')).toBe(true);
-    expect($('#cards').classList.contains('live')).toBe(true);
     expect(moment()).toBeCloseTo(STILL, -1);
-    // The first card's last moment: the three commands are typed and checked.
-    expect(card('full').querySelectorAll('.ty.on')).toHaveLength(3);
-    expect(card('full').querySelectorAll('.ok.on')).toHaveLength(3);
-    // No pointer is part of a still.
-    expect(document.querySelectorAll('.mv.on')).toHaveLength(0);
+    // A card is drawn at its end: nothing is over the drawing.
+    expect(animations.live()).toEqual([]);
+    expect(document.querySelectorAll('svg.fc-ghost')).toHaveLength(0);
   });
 
   it('show the still until the film first moves, then play it from its start', () => {
@@ -136,10 +148,10 @@ describe('the two pictures', () => {
 
   it('move one at a time: the film while 30% of it is in view, the cards only while the film is not playing', () => {
     mountPictures();
-    see(card('full'), 1);
-    see(card('screen'), 1);
+    see(card('rules'), 1);
+    see(card('secrets'), 1);
     expect(filmIs()).toBe('held');
-    expect(playing()).toEqual(['full']);
+    expect(playing()).toEqual(['rules']);
 
     see(figure(), 0.29);
     expect(filmIs()).toBe('held');
@@ -152,15 +164,15 @@ describe('the two pictures', () => {
 
     see(figure(), 0);
     expect(filmIs()).toBe('held');
-    expect(playing()).toEqual(['screen']);
+    expect(playing()).toEqual(['secrets']);
   });
 
   it('give the turn to the next card in view, and to none that is out of view', () => {
     mountPictures();
-    see(card('full'), 1);
-    see(card('edge'), 0.6);
-    see(card('needs'), 0.2);
-    expect(turnsOver(16000)).toEqual(['full', 'edge', 'full', 'edge']);
+    see(card('rules'), 1);
+    see(card('recipes'), 0.6);
+    see(card('extensions'), 0.2);
+    expect(turnsOver(16000)).toEqual(['rules', 'recipes', 'rules', 'recipes']);
   });
 
   it('hold the film at its moment when it leaves the view, and carry on from there', () => {
@@ -190,31 +202,31 @@ describe('the two pictures', () => {
 
   it('play the card the visitor points at, and carry on from it once it ends', () => {
     mountPictures();
-    see(card('full'), 1);
-    see(card('screen'), 1);
-    pointer(card('edge'), 'pointerenter', 'mouse');
-    expect(playing()).toEqual(['edge']);
+    see(card('rules'), 1);
+    see(card('secrets'), 1);
+    pointer(card('recipes'), 'pointerenter', 'mouse');
+    expect(playing()).toEqual(['recipes']);
     // The card ends, the pointer stays: no other card starts.
     vi.advanceTimersByTime(10000);
     expect(playing()).toEqual([]);
-    pointer(card('edge'), 'pointerleave', 'mouse');
+    pointer(card('recipes'), 'pointerleave', 'mouse');
     vi.advanceTimersByTime(900);
-    expect(turnsOver(10000)).toEqual(['full', 'screen', 'full']);
+    expect(turnsOver(10000)).toEqual(['rules', 'secrets', 'rules']);
   });
 
   it('play the card the visitor points at and hold the film until they leave it', () => {
     mountPictures();
     see(figure(), 1);
     vi.advanceTimersByTime(4000);
-    pointer(card('edge'), 'pointerenter', 'mouse');
-    expect(playing()).toEqual(['edge']);
+    pointer(card('recipes'), 'pointerenter', 'mouse');
+    expect(playing()).toEqual(['recipes']);
     expect(filmIs()).toBe('held');
     // The card ends, the pointer stays: the film still waits.
     vi.advanceTimersByTime(10000);
     expect(playing()).toEqual([]);
     expect(filmIs()).toBe('held');
     expect(shot()).toBe(0);
-    pointer(card('edge'), 'pointerleave', 'mouse');
+    pointer(card('recipes'), 'pointerleave', 'mouse');
     expect(filmIs()).toBe('moving');
     vi.advanceTimersByTime(5000);
     expect(playing()).toEqual([]);
@@ -227,8 +239,8 @@ describe('the two pictures', () => {
     $('.film-pause').click();
     expect(filmIs()).toBe('paused');
     expect($('.film-pause').textContent).toBe('Play');
-    pointer(card('edge'), 'pointerenter', 'mouse');
-    pointer(card('edge'), 'pointerleave', 'mouse');
+    pointer(card('recipes'), 'pointerenter', 'mouse');
+    pointer(card('recipes'), 'pointerleave', 'mouse');
     vi.advanceTimersByTime(30000);
     expect(filmIs()).toBe('paused');
     expect(shot()).toBe(0);
@@ -243,105 +255,93 @@ describe('the two pictures', () => {
     card('record').click();
     expect(playing()).toEqual(['record']);
     expect(filmIs()).toBe('held');
-    vi.advanceTimersByTime(3700 + 600);
+    vi.advanceTimersByTime(lasts('record'));
     expect(playing()).toEqual([]);
     expect(filmIs()).toBe('moving');
   });
 
   it('keep taking turns after the pointer leaves a card, once the pause after it is over', () => {
     mountPictures();
-    see(card('full'), 1);
-    see(card('screen'), 1);
-    see(card('edge'), 1);
-    pointer(card('full'), 'pointerenter', 'mouse');
+    see(card('rules'), 1);
+    see(card('secrets'), 1);
+    see(card('recipes'), 1);
+    pointer(card('rules'), 'pointerenter', 'mouse');
     vi.advanceTimersByTime(1000);
-    pointer(card('full'), 'pointerleave', 'mouse');
+    pointer(card('rules'), 'pointerleave', 'mouse');
     expect(playing()).toEqual([]);
     vi.advanceTimersByTime(899);
     expect(playing()).toEqual([]);
     vi.advanceTimersByTime(1);
-    expect(turnsOver(15000)).toEqual(['screen', 'edge', 'full', 'screen']);
+    expect(turnsOver(15000)).toEqual(['secrets', 'recipes', 'rules', 'secrets']);
   });
 
   it('keep taking turns after a pressed card ends, once the pause between two turns is over', () => {
     mountPictures();
-    see(card('full'), 1);
+    see(card('rules'), 1);
     see(card('record'), 1);
     card('record').click();
     expect(playing()).toEqual(['record']);
-    vi.advanceTimersByTime(3700 + 600);
+    vi.advanceTimersByTime(lasts('record'));
     expect(playing()).toEqual([]);
     vi.advanceTimersByTime(399);
     expect(playing()).toEqual([]);
     vi.advanceTimersByTime(1);
-    expect(turnsOver(10000)).toEqual(['full', 'record', 'full']);
+    expect(turnsOver(10000)).toEqual(['rules', 'record', 'rules']);
   });
 
-  it('never leave a card playing for longer than its picture lasts', () => {
+  it('never move the film and a card at once, and always come back to taking turns', () => {
     mountPictures();
-    // How long each card plays, on the fake clock, taken at the moments it starts and stops (the page adds and removes
-    // `playing`) and never by looking now and then. `--dur` is what its picture and its linger last; a stay may not pass it.
-    let overstay = -Infinity;
-    const startedAt = new Map<string, { at: number; dur: number }>();
-    for (const name of NAMES) {
-      const list = card(name).classList;
-      const add = list.add.bind(list);
-      const remove = list.remove.bind(list);
-      const toggle = list.toggle.bind(list);
-      list.add = (...tokens: string[]) => {
-        if (tokens.includes('playing') && !list.contains('playing')) startedAt.set(name, { at: Date.now(), dur: parseFloat(card(name).style.getPropertyValue('--dur')) });
-        add(...tokens);
-      };
-      list.remove = (...tokens: string[]) => {
-        const start = startedAt.get(name);
-        if (tokens.includes('playing') && start && list.contains('playing')) {
-          overstay = Math.max(overstay, Date.now() - start.at - start.dur);
-          startedAt.delete(name);
-        }
-        remove(...tokens);
-      };
-      // The page adds and removes the class today. Should it toggle it one day, the same two paths measure it.
-      list.toggle = (token: string, force?: boolean) => {
-        const on = force ?? !list.contains(token);
-        if (token !== 'playing') return toggle(token, force);
-        if (on) list.add(token); else list.remove(token);
-        return on;
-      };
-    }
     for (const name of NAMES) see(card(name), 1);
     // A visitor's hand in every order, between turns: whatever happened, a minute later the cards still take turns.
     const hands = [
-      () => pointer(card('edge'), 'pointerenter', 'mouse'),
-      () => pointer(card('edge'), 'pointerleave', 'mouse'),
-      () => card('needs').click(),
+      () => pointer(card('recipes'), 'pointerenter', 'mouse'),
+      () => pointer(card('recipes'), 'pointerleave', 'mouse'),
+      () => card('extensions').click(),
+      () => card('disk').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true })),
+      () => card('disk').dispatchEvent(new FocusEvent('blur')),
       () => see(figure(), 1),
       () => see(figure(), 0),
       () => show('hidden'),
       () => show('visible'),
+      () => setMotion(!reduced),
       () => $('.film-pause').click(),
     ];
     // A seeded generator (Park-Miller), the same hands on every run; the choices come from its whole value, as
-    // its low bits repeat every few calls and would leave most hands unused. Each hand that starts a card draws
-    // it in jsdom, which costs about 20 ms, so a hundred rounds keep the test well under its limit on a busy machine.
+    // its low bits repeat every few calls and would leave most hands unused.
     let seed = 7;
     const pick = (below: number) => Math.floor(((seed = (seed * 48271) % 2147483647) / 2147483647) * below);
+    let moved = 0;
     for (let round = 0; round < 100; round++) {
       hands[pick(hands.length)]();
       vi.advanceTimersByTime(pick(2500));
-      expect(playing().length).toBeLessThanOrEqual(1);
+      const cards = playing();
+      expect(cards.length).toBeLessThanOrEqual(1);
+      expect(animations.moving()).toEqual(cards);
+      if (filmIs() === 'moving' || reduced || visibility === 'hidden') expect(cards, `round ${round}`).toEqual([]);
+      moved += cards.length;
     }
-    // Back to rest: pointer away, tab shown, film out of view.
-    pointer(card('edge'), 'pointerleave', 'mouse');
+    expect(moved).toBeGreaterThan(0);
+    // Back to rest: pointer away, tab shown, film out of view, motion allowed.
+    pointer(card('recipes'), 'pointerleave', 'mouse');
     show('visible');
+    setMotion(false);
     see(figure(), 0);
     vi.advanceTimersByTime(10000);
     // A minute of turns: every card takes one.
     expect(new Set(turnsOver(60000)).size).toBe(NAMES.length);
-    // No stay passed its card's time, by not even a millisecond; one still going is measured up to now.
-    for (const [, start] of startedAt) overstay = Math.max(overstay, Date.now() - start.at - start.dur);
-    expect(overstay).toBeLessThanOrEqual(0);
-    // The test saw stays end, so the check above was made on something.
-    expect(overstay).toBeGreaterThan(-Infinity);
+  });
+
+  it('hold the film for a card that has the focus, until it ends', () => {
+    mountPictures();
+    see(figure(), 1);
+    const record = card('record');
+    vi.spyOn(record, 'matches').mockReturnValue(true);
+    record.dispatchEvent(new FocusEvent('focus'));
+    expect(playing()).toEqual(['record']);
+    expect(filmIs()).toBe('held');
+    vi.advanceTimersByTime(lasts('record'));
+    expect(playing()).toEqual([]);
+    expect(filmIs()).toBe('moving');
   });
 
   it('pause where the film is, and go on from there', () => {
@@ -386,8 +386,8 @@ describe('the two pictures', () => {
     expect(filmIs()).toBe('moving');
 
     see(figure(), 0);
-    see(card('full'), 1);
-    expect(playing()).toEqual(['full']);
+    see(card('rules'), 1);
+    expect(playing()).toEqual(['rules']);
     show('hidden');
     expect(playing()).toEqual([]);
     vi.advanceTimersByTime(60000);
@@ -405,25 +405,21 @@ describe('the two pictures', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('move nothing on their own with reduced motion, until the visitor presses Play or a card', () => {
+  it('move nothing with reduced motion until the visitor presses Play, and never a card', () => {
     reduced = true;
     mountPictures();
     see(figure(), 1);
-    see(card('full'), 1);
+    see(card('rules'), 1);
     expect(filmIs()).toBe('paused');
     expect($('.film-pause').textContent).toBe('Play');
     expect(moment()).toBeCloseTo(STILL, -1);
     vi.advanceTimersByTime(60000);
     expect(filmIs()).toBe('paused');
     expect(moment()).toBeCloseTo(STILL, -1);
-    expect(playing()).toEqual([]);
 
-    pointer(card('full'), 'pointerenter', 'mouse');
-    expect(playing()).toEqual([]);
-    card('full').click();
-    expect(playing()).toEqual(['full']);
-    vi.advanceTimersByTime(10000);
-    expect(playing()).toEqual([]);
+    pointer(card('rules'), 'pointerenter', 'mouse');
+    card('rules').click();
+    expect(animations.live()).toEqual([]);
 
     // Play goes on from the still.
     $('.film-pause').click();
@@ -433,5 +429,17 @@ describe('the two pictures', () => {
     see(figure(), 0);
     vi.advanceTimersByTime(60000);
     expect(playing()).toEqual([]);
+  });
+
+  it('stop the card that plays when the visitor asks for less motion, and take turns again after', () => {
+    mountPictures();
+    see(card('rules'), 1);
+    expect(playing()).toEqual(['rules']);
+    setMotion(true);
+    expect(playing()).toEqual([]);
+    vi.advanceTimersByTime(10000);
+    expect(playing()).toEqual([]);
+    setMotion(false);
+    expect(playing()).toEqual(['rules']);
   });
 });

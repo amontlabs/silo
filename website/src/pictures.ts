@@ -1,9 +1,9 @@
 // The home page has two pictures: the film and the cards. This starts both and says which may move.
 //
 // Only one thing moves on its own at a time. The film plays while at least 30% of it is in view, and the cards
-// take turns only while the film is not playing. A card the visitor points at or presses holds the film until
-// they leave it or it ends. A hidden tab holds everything. With reduced motion nothing moves until the visitor
-// presses Play or a card.
+// take turns only while the film is not playing. A card the visitor points at, focuses or presses holds
+// the film until they leave it or it ends. A hidden tab holds everything. With reduced motion the cards stay at
+// their end, and the film moves only once the visitor presses Play.
 
 import { mountCards, type Cards } from './cards';
 import { mountFilm, type Film } from './film/film';
@@ -25,7 +25,7 @@ function inViewNow(el: Element) {
 }
 
 export function mountPictures({ hold = null }: { hold?: number | null } = {}): { film: Film; cards: Cards } {
-  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const motion = matchMedia('(prefers-reduced-motion: reduce)');
   const root = document.querySelector<HTMLElement>('.film')!;
   const figure = root.querySelector('figure')!;
   let filmInView = inViewNow(figure);
@@ -37,8 +37,9 @@ export function mountPictures({ hold = null }: { hold?: number | null } = {}): {
     film.allow(filmInView && visible && !cards.busy);
     cards.turns(visible && !film.running);
   };
-  film = mountFilm(root, { reduced, inView: filmInView, hold, onChange: settle });
-  cards = mountCards(document.getElementById('cards')!, { still: reduced, onChange: settle });
+  film = mountFilm(root, { reduced: motion.matches, inView: filmInView, hold, onChange: settle });
+  cards = mountCards(document.getElementById('cards')!, { still: motion.matches, onChange: settle });
+  motion.addEventListener('change', () => cards!.still(motion.matches));
 
   new IntersectionObserver(
     (entries) => {
@@ -51,7 +52,7 @@ export function mountPictures({ hold = null }: { hold?: number | null } = {}): {
     if (document.visibilityState === 'hidden') cards.rest();
     settle();
   });
-  // Both pictures are drawn: they can show.
+  // The film is drawn: it can show. The cards show from their markup.
   window.clearTimeout(window.siloPicturesFallback);
   document.documentElement.classList.remove('pictures-pending');
   settle();

@@ -6,13 +6,26 @@ Vite. It has two pages:
 - **Home** (`index.html`, `src/style.css`, `src/film/film.css`,
   `src/cards.css`): the way into the Workshop with one line on where Silo
   stands, the headline and the pitch with the film under them, six cards on
-  what Silo does, and the "in heavy development" notice. Its texts are interim,
-  until the owner settles the new design, and nothing on it is read from the
-  plan. Each card has a small picture of its feature, a label, a title and a
-  paragraph. The page has a script, `src/home.ts`. It plays the pictures
-  (`src/pictures.ts`), one thing at a time: the film while at least 30% of it
-  is in view, the cards in view taking turns while it does not play, a card you
-  point at or press at once (`src/cards.ts`, `src/scene.ts`).
+  what Silo does with three smaller examples of extensions under them, and the
+  "in heavy development" notice. Its texts are interim, until the owner settles
+  the new design, and nothing on it is read from the plan. The page has a
+  script, `src/home.ts`. It plays the pictures (`src/pictures.ts`), one thing at
+  a time: the film while at least 30% of it is in view, the cards in view taking
+  turns while it does not play, and at once a card you point at, focus or press.
+
+  The cards are rules, secrets, record, screen, recipes and extensions. The
+  examples are disk watch, tool call check and registry rules.
+  - A card has a picture, a label, a title and a short text. An example
+    has no title.
+  - A picture is drawn at its end in `index.html`. `src/cards.ts` has, for each,
+    the moments of the parts it names by `data-part`, and plays them as
+    animations over that drawing. Stopping a picture is cancelling them, so the
+    last moment of a part is always the part as it is drawn.
+  - Across a row the pictures, labels, titles and texts start at the same
+    height, and take the same number of lines. Some sizes and measures in
+    `src/cards.css` are fitted to these exact sentences at some widths. After a
+    change to a sentence, measure the rows again in Firefox from 641 to 1440
+    wide.
 
   The film (`src/film/`) is one session in Silo's window, in eleven shots and a
   loop of 73.7 s. The window has a sidebar, a canvas and the record as a dock.
@@ -30,7 +43,7 @@ Vite. It has two pages:
     1000 px there is no window: the film shows the name of the place, the
     canvas through a camera that pans, and the record under it.
   - With reduced motion the film opens on the end of Network with Play, and
-    nothing on the page moves until you press Play or a card.
+    moves only once you press Play. Every card stays at its end.
   - Without script the film shows that same still, at the size it keeps while
     it plays, and each card shows as a still at its end. The film's still is
     `src/film/still.html`, which the build puts into the page.

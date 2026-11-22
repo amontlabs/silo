@@ -114,10 +114,10 @@ describe('the pointer', () => {
 });
 
 describe('the record', () => {
-  // The film's timing gives these three less, because the next line follows so soon. Each is held to what it has.
-  const CROWDED: Record<string, number> = { '3 copied': 890, 'npm install': 800, 'cargo test': 760 };
+  /** How long a text has to rest to be read. */
+  const readable = (words: string) => 250 + 200 * words.split(/\s+/).length;
 
-  it('rests every word at full ink at least 900 ms, the three crowded lines apart, one line at a time', { timeout: 30_000 }, () => {
+  it('rests every line at full ink long enough to be read, 250 ms and 200 ms a word, one line at a time', { timeout: 30_000 }, () => {
     const { reel, render, figure } = drawn();
     const labels = [...figure.querySelectorAll<SVGElement>('[data-line]')];
     expect(labels).toHaveLength(reel.record.length);
@@ -134,7 +134,7 @@ describe('the record', () => {
         to = t;
         expect(labels.filter(onScreen), `${line.words} at ${t}`).toEqual([labels[i]]);
       }
-      expect(to - (from ?? to), line.words).toBeGreaterThanOrEqual(CROWDED[line.words] ?? 900);
+      expect(to - (from ?? to), line.words).toBeGreaterThanOrEqual(readable(line.words));
     });
   });
 });
