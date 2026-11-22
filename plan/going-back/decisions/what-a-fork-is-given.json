@@ -1,6 +1,9 @@
 {
-  "asks": "What is a fork given?",
-  "answer": "No secrets, and read-only repository access, unless you, or a rule you set, give it more. Never more than its parent has.",
+  "asks": "What is a fork given, and can it push code by itself?",
+  "answer": "No secrets, and no access to a repository of its own, unless you, or a rule you set, give it more. It reads a private repository only with a secret that only reads, given by a rule you set. It cannot push until you, or a rule you set, allow it. Code leaves a fork through Git, with a push you allowed or when you bring its commits to the computer it was forked from. A fork never has more than its parent.",
+  "replaces": [
+    "code-leaves-through-git"
+  ],
   "sets": [
     {
       "in": "going-back/properties",

@@ -1,4 +1,4 @@
 {
-  "asks": "How does any program on the Mac reach any computer, including one made a moment ago, with nothing added by hand?",
-  "answer": "Silo keeps one file of SSH entries: one named entry per computer, with its key. The Mac's SSH settings include that file once, with the user's yes. Every tool then reaches every computer by name, with no prompt."
+  "asks": "How does any program on the Mac reach any computer, including one made a moment ago, and is anything else open in a new computer?",
+  "answer": "Silo keeps one file of SSH entries: one named entry per computer, with its key. The Mac's SSH settings include that file once, with your yes. That yes grants your Mac the way in to every computer, present and future, and Silo shows it among each computer's channels. Every tool then reaches every computer by name, with no prompt. Nothing else is open in a new computer until you, or a rule you set, open it. A repository host is a host like any other."
 }

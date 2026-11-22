@@ -179,7 +179,7 @@ export const SILO_MAP: MapLayout = {
     { title: 'The internet', line: 'every other host', full: [990, 200, 122, 40], fold: [878, 71, 144, 20] },
     // The same name as the app's part, in the phone's zone: what you see is shown in both. It leaves the folded map.
     { title: 'What you see', line: 'alerts and asks', full: [998, 322, 104, 40], rests: ['phone-app', 'forwarding-to-a-phone'] },
-    { title: 'The boundary\'s channels', line: 'the network, ports, files, secrets, the screen, the clipboard, repository access', full: [728, 240, 212, 96], rests: ['channel-list'] },
+    { title: 'The boundary\'s channels', line: 'the network, ports, files, secrets, the screen, the clipboard, your way in', full: [728, 240, 212, 96], rests: ['channel-list'] },
   ],
   // Main is one computer among several: forks and fresh computers.
   ghosts: [

@@ -30,3 +30,5 @@ recipe of its test computer and names `registry.npmjs.org`; an agent in main add
 `tasks-test-your-changes` switches the rule on. The audit proposes that the source may name rules
 and secrets as proposals, which Silo switches on only with your yes, and that the rules in force are
 kept by the engine and never read from the repository.
+
+The question is put to the owner in `recipe-source-in-repository`, under "For the owner".

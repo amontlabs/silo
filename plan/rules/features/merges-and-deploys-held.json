@@ -1,6 +1,6 @@
 {
   "name": "Merges and deploys held for your yes",
-  "what": "A set of rules you can switch on holds each merge into a default branch and each deploy until you answer the ask. You can answer from your phone.",
+  "what": "A set of rules you can switch on holds each merge into a default branch and each deploy for your answer. If the hold's limit passes first, it is refused as held and not answered. You can answer in Silo's phone app.",
   "needs": [
     "worst-case-and-rule-sets",
     "held-requests-and-asks",

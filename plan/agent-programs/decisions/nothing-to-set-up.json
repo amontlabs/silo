@@ -1,4 +1,4 @@
 {
   "asks": "What must you set up before Silo works?",
-  "answer": "Silo needs no account, no sign-up and no key. It works with no setting touched."
+  "answer": "Silo needs no account, no sign-up and no key. On a fresh install nothing is allowed out. The first run proposes the rules your agent programs need, such as the one to reach their model provider, and switches them on with your yes."
 }

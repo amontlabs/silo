@@ -16,7 +16,7 @@
     {
       "in": "words",
       "word": "channel",
-      "means": "One way through the boundary. The channels are the network, ports, files, secrets, the screen, the clipboard, repository access. None exists by default.",
+      "means": "One way through the boundary. The channels are the network, ports, files, secrets, the screen, the clipboard, and the way in from your Mac. None exists by default.",
       "not": [
         "door"
       ]

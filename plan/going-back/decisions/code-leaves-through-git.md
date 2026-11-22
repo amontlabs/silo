@@ -6,3 +6,5 @@ finishes a fix in a fork and runs `git push`: by that default the push is denied
 after a grant. The audit proposes to keep the safer default and to add to `what-a-fork-is-given`:
 "Its commits leave when you grant the push or bring them to the parent (`keeping-from-a-fork`)."
 This decision then reads: Git is the way out, open at any moment of the fork's life.
+
+The question is put to the owner in `what-a-fork-is-given`, under "For the owner".

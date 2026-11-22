@@ -10,6 +10,34 @@ problem.
 The question has three parts: `reaching-a-computer`, `following-the-work` (with
 `fork-carries-the-conversation`) and `agents-making-computers`.
 
+## For the owner
+
+An agent's part, 22 November 2026. A fork was made a moment ago and you gave no yes for it. Your
+editor already moves files in and out of it, and it already reads your repositories. The plan
+proposes that nothing is open in a new computer until you allow it, and these two are exceptions.
+
+The options:
+
+- Only your own way in (recommended). One yes lets your Mac into every computer, present and future,
+  and Silo shows it on each one. Repositories get no special treatment. It costs a standing grant
+  that covers computers not made yet. A fork also reads a private repository only once a rule of
+  yours gives it a secret that only reads.
+- No exception at all. Each new computer needs your yes before your terminal or your editor reaches
+  it. It costs a prompt on every fork.
+- Both stay as defaults. Your way in and read-only access to repositories exist on every new
+  computer. It costs the principle, which is reworded to name both exceptions, and your decision
+  that no destination is special, since Silo then treats repository hosts apart.
+
+Recommended: only your own way in. Reaching your own computers is what Silo is for. Treating
+repositories apart goes against your decision that no destination is special.
+
+With this answer, "repository access" leaves the list of channels (`channel-list`) and your way in
+joins it. What a fork is given changes the same way (`what-a-fork-is-given`).
+
+One thing must change to build it. `secret-limits` proposes that a secret that only reads is sent
+only with GET requests, and `git fetch` over HTTPS also sends a POST. That limit needs another
+definition, or a token that the host itself limits to reading.
+
 ## What is known
 
 - Over SSH, the app on the Mac is only the window. The agent program runs inside the computer, so

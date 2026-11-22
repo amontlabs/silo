@@ -2,6 +2,24 @@
 - The phone app is the feature `phone-app` in `views`. Forwarding to a phone is the feature
   `forwarding-to-a-phone` in `extensions`.
 
+## For the owner
+
+An agent's part, 22 November 2026. An agent tries to merge at night while you are away from the Mac.
+Silo holds the merge for your answer, and refuses it as not answered when the hold passes its limit.
+
+The options:
+
+- Silo's own apps only (recommended). You answer in Silo on the Mac or in Silo's phone app. A chat
+  app or a forwarded message shows the question and leads back to Silo. It costs answering only on
+  the Mac until the phone app is built, which is planned for later.
+- Chat apps answer too. A reply in a chat app or to a forwarded message counts as your answer. It is
+  quicker, and it puts your yes in the hands of a service Silo does not control.
+- On the Mac only. No phone answers. It costs the work held while you are away, which is refused
+  when the limit passes.
+
+Recommended: silo's own apps only. A yes can give a computer more than it has, so it comes only
+through something Silo controls. The phone app keeps you reachable.
+
 ## Raised on 21 November 2026, by an agent
 
 The owner's roadmap has a set of rules whose asks are "answered from the phone":

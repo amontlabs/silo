@@ -1,0 +1,7 @@
+{
+  "asks": "Does a fork carry the sign-in of an agent program?",
+  "answer": "No. A fork is made without the sign-ins that agent programs keep on the disk, as it is made without secrets, unless you, or a rule you set, let it carry one. In a fork without one, you sign in again.",
+  "needs": [
+    "login-handling"
+  ]
+}

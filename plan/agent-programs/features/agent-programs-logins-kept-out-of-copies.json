@@ -1,6 +1,6 @@
 {
   "name": "Logins kept out of copies",
-  "what": "A login to an agent program does not end up in a fork or a shared computer by accident. A subscription login is supported as fully as an API key.",
+  "what": "A login to an agent program does not end up in a fork or a shared computer by accident. A subscription login works through the vendor's own sign-in inside each computer.",
   "needs": [
     "agent-programs-run-unmodified",
     "login-handling",
@@ -9,6 +9,7 @@
     "subscription-substitution",
     "where-the-token-lands",
     "disguising",
-    "forking-a-computer"
+    "forking-a-computer",
+    "fork-and-sign-in"
   ]
 }
