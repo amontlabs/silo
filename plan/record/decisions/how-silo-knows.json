@@ -1,5 +1,5 @@
 {
   "asks": "How does Silo know a thing it writes down?",
   "answer": "Three words. They say how Silo knows a thing, not where it happened: a file change happens inside a computer and is seen from outside, so it is a fact.",
-  "verdict": "take"
+  "verdict": "drop"
 }
