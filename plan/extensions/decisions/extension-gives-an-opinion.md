@@ -81,6 +81,9 @@ only a precaution may act on it, and no answer ever allows anything.
 | Only the tool that protects gives an opinion; other extensions alert or draw a panel | What an extension finds could not be shown in Silo's own places, checked against the user's answers (`scoring-a-classifier`) or read by a precaution. Silo's own classifiers could not be extensions (`shipped-extensions-use-the-manifest`). |
 | A fourth kind of tool beside reads, shows and protects | The kinds say what a tool costs the user. An answer costs attention, as what is shown does, or time when a precaution acts on it, as what protects does. |
 
+The decision `tools-of-an-extension` proposes that fourth kind all the same: the kinds taken leave
+no tool through which an extension gives an opinion. The two are put to the owner together.
+
 A pattern that an extension adds and Silo applies by itself, as a rule is data, would cover what a
 pattern can say without running any code. It could come beside this. It does not cover a model or
 an agent, so it does not answer the question alone.
