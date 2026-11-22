@@ -313,10 +313,6 @@
 .ws-what { color: var(--muted); max-width: 60ch; }
 .ws-what p + p { margin-top: 8px; }
 .ws code { font: 12.5px var(--mono); padding: 0 3px; border-radius: 3px; background: var(--media); }
-/* The state's words on a row of their own, the owner's Take and Drop in a column at its end, the id, its copy button
-   and the votes on the row under it. The buttons come after `me` answers: the row's height is the state's whether or
-   not they are there, and an entry they are offered on keeps its short state on one line beside them, so nothing
-   moves at any width. */
 /* The state's words, then the owner's Take and Drop at the end of their line when both fit on it, or at the end of a line
    of their own under them when not: the words are never cut. The id, Copy id and the votes always take the next line. */
 .ws-state { margin-top: 12px; min-height: 34px; font-size: 14px; color: var(--muted); display: flex; flex-wrap: wrap; column-gap: 8px; row-gap: 6px; align-items: center; }

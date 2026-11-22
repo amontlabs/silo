@@ -528,9 +528,10 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
       try {
         await api.verdict(id, verdict, built);
       } catch (error) {
-        // An answer lost on the way (no connection, or none in time) may hide a verdict written on main: asked once
-        // more, the server answers "already" when it is there.
-        if (!(error instanceof ApiError && error.status === 0)) throw error;
+        // An answer lost on the way (no connection, or none in time), or GitHub not answering the server in time, may
+        // hide a verdict written on main: asked once more, the server answers "already" when it is there.
+        const lost = error instanceof ApiError && (error.status === 0 || (error.status === 502 && error.code === 'github_failed'));
+        if (!lost) throw error;
         await api.verdict(id, verdict, built);
       }
       keepVerdict({ entry: id, verdict }, Date.now());

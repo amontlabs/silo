@@ -237,8 +237,13 @@ describe('the owner\'s verdict', () => {
     await waitFor(() => expect(within(item()).getByRole('alert')).toHaveTextContent(message));
   });
 
-  it('asks once more when the answer is lost (no connection, none in time, or the connection cut while the answer is read): the verdict may be on main, and the server then says so', async () => {
-    const lost = [() => Promise.reject(new TypeError('Failed to fetch')), () => new Promise<never>(() => {}), () => ({ ...ok({ ok: true, commit: 'e'.repeat(40) }), cut: true })] as const;
+  it('asks once more when the answer is lost (no connection, none in time, the connection cut while the answer is read, or GitHub not answering the server in time): the verdict may be on main, and the server then says so', async () => {
+    const lost = [
+      () => Promise.reject(new TypeError('Failed to fetch')),
+      () => new Promise<never>(() => {}),
+      () => ({ ...ok({ ok: true, commit: 'e'.repeat(40) }), cut: true }),
+      () => ({ status: 502, body: { error: 'github_failed', message: 'GitHub did not answer. Try again later.' } }),
+    ] as const;
     for (const first of lost) {
       const saved = apiConfig.writeTimeoutMs;
       apiConfig.writeTimeoutMs = 50;
