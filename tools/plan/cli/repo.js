@@ -101,23 +101,27 @@ export function unwatched(root) {
 
 /**
  * Whether the entry's file holds what the owner ruled on. Among the commits since the base, on any
- * branch that was merged, the latest whose subject is exactly the owner's verdict on the entry
- * (`Owner: take <id>` or `Owner: drop <id>`; with a `verdict`, only that kind) is found; no commit
+ * branch that was merged, the latest whose subject is exactly a verdict on the entry, the owner's
+ * (`Owner: take <id>` or `Owner: drop <id>`) or the agents' (`Agents: take <id>` or `Agents: drop <id>`;
+ * with a `verdict`, only that kind) is found; no commit
  * comes before a descendant of it. In it the entry's file is found by its id, among the files the
  * commit wrote (not those it deleted), wherever it was then. The answer is yes when that version and
  * the working file, committed or not, agree on the verdict and on the text keys (asks, answer,
  * name, what, replaces, sets, removes): so a merge, a move or an edit of other keys, such as the
  * `adds` a take of another entry rewrites, changes nothing, and neither does an edit that was put
- * back. No such commit, or a difference: no. Rule 11 does not apply to an entry for which it is yes.
+ * back. The commit's own file says who wrote the verdict (`by`) as the subject does: `Agents:` with
+ * `"by": "agents"`, `Owner:` with no `by`. No such commit, or a difference: no. Rule 11 does not apply to an entry for which it is yes.
  * @param {string} root @param {string} ref the base @returns {(id: string, file: string, verdict?: string) => boolean} file: `plan/…`
  */
 export const ruledByOwner = (root, ref) => (id, file, verdict) => {
-  const subjects = verdict ? [`Owner: ${verdict} ${id}`] : [`Owner: take ${id}`, `Owner: drop ${id}`];
+  const kinds = verdict ? [verdict] : ['take', 'drop'];
+  const subjects = ['Owner', 'Agents'].flatMap((who) => kinds.map((kind) => `${who}: ${kind} ${id}`));
   const log = git(root, ['log', '-z', '--date-order', '--format=%H %s', `${ref}..HEAD`]);
   if (log === null) return false;
   const found = log.split('\0').filter(Boolean).find((record) => subjects.includes(record.slice(record.indexOf(' ') + 1)));
   if (found === undefined) return false;
   const commit = found.slice(0, found.indexOf(' '));
+  const byAgents = found.slice(found.indexOf(' ') + 1).startsWith('Agents: ');
   const changed = git(root, ['diff-tree', '-r', '--root', '--no-renames', '--diff-filter=d', '--name-only', '-z', '--no-commit-id', commit]);
   // plan/decisions/<id>.json, plan/<part>/decisions/<id>.json or plan/<part>/features/<id>.json
   const isEntryFile = (name) => {
@@ -132,7 +136,14 @@ export const ruledByOwner = (root, ref) => (id, file, verdict) => {
   } catch {
     disk = null;
   }
-  return !ruledKeysDiffer(git(root, ['cat-file', 'blob', `${commit}:${path}`]), disk);
+  const blob = git(root, ['cat-file', 'blob', `${commit}:${path}`]);
+  let by;
+  try {
+    by = JSON.parse(blob ?? '').by;
+  } catch {
+    by = undefined;
+  }
+  return (by === 'agents') === byAgents && !ruledKeysDiffer(blob, disk);
 };
 
 /**

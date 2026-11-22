@@ -14,7 +14,7 @@ import { parsePlan } from '../read/index.js';
  * relative to `plan/`; it is empty unless `status` is `done`. A verdict deletes no file.
  * @typedef {{ status: 'done' | 'already' | 'refused', changed: Map<string, string>, message: string, errors?: Problem[] }} Outcome
  */
-/** @typedef {{ exists?: (path: string) => boolean }} Options */
+/** @typedef {{ exists?: (path: string) => boolean, by?: 'agents' }} Options `by`: the agents write the verdict, not the owner */
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const refused = (message, errors) => ({ status: 'refused', changed: new Map(), message, ...(errors ? { errors } : {}) });
@@ -75,7 +75,8 @@ const entryText = (kind, value) => canonicalText(kind === 'decision' ? canonical
  * notes, and gets `replaced_by` with this entry's id: it is replaced, and no longer in force. The
  * take is refused when a decision it names is not taken or already replaced, when one would keep
  * an `adds`, and when a taken decision it does not name would be left with neither an `answer` nor
- * an `adds`.
+ * an `adds`. With `by: 'agents'` the verdict is written with `"by": "agents"`, and a drop the owner
+ * wrote is not turned into a take.
  * @param {Map<string, string>} files @param {string} id @param {Options} [options] @returns {Outcome}
  */
 export function take(files, id, options = {}) {
@@ -83,6 +84,7 @@ export function take(files, id, options = {}) {
   if (loaded.refusal) return loaded.refusal;
   const { plan, json, entry, file } = loaded;
   if (entry.built) return refused(`${id} is built`);
+  if (options.by === 'agents' && entry.verdict === 'drop' && entry.by === undefined) return refused(`${id} is dropped by the owner: only the owner can take it again`);
   if (entry.verdict === 'take') {
     const by = replacedBy(entry);
     return { status: 'already', changed: new Map(), message: by ? `${id} is already taken, and replaced by ${by}` : `${id} is already taken` };
@@ -184,6 +186,8 @@ export function take(files, id, options = {}) {
   if (setIds.length) data.adds = setIds;
   else delete data.adds;
   data.verdict = 'take';
+  if (options.by) data.by = options.by;
+  else delete data.by;
   changed.set(file, entryText(entry.kind, data));
   return finish(files, changed, options, `took ${id}`);
 }
@@ -193,13 +197,16 @@ export function take(files, id, options = {}) {
  * feature holds `started`, so a feature being built loses it in the same write, and the message
  * says so. Refused on a
  * replaced decision, on a taken entry that has `adds` (its statements are in force), and on a taken
- * decision that has `replaces` (the decisions it replaced would be in force again).
+ * decision that has `replaces` (the decisions it replaced would be in force again). With
+ * `by: 'agents'` the verdict is written with `"by": "agents"`, and a verdict the owner wrote (no
+ * `by`) is refused: only the owner overrules the owner. Without it, `by` is removed.
  * @param {Map<string, string>} files @param {string} id @param {Options} [options] @returns {Outcome}
  */
 export function drop(files, id, options = {}) {
   const loaded = load(files, id, options);
   if (loaded.refusal) return loaded.refusal;
   const { plan, json, entry, file } = loaded;
+  if (options.by === 'agents' && entry.verdict !== undefined && entry.by === undefined) return refused(`${id} is ${entry.verdict === 'take' ? 'taken' : 'dropped'} by the owner: only the owner can change that`);
   if (entry.verdict === 'drop') return { status: 'already', changed: new Map(), message: `${id} is already dropped` };
   if (entry.built) return refused(`${id} is built`);
   const by = replacedBy(entry);
@@ -216,6 +223,8 @@ export function drop(files, id, options = {}) {
   }
   const data = structuredClone(json.get(file));
   data.verdict = 'drop';
+  if (options.by) data.by = options.by;
+  else delete data.by;
   const building = data.started !== undefined;
   delete data.started;
   return finish(files, new Map([[file, entryText(entry.kind, data)]]), options, building ? `dropped ${id}, which was being built: its started date is removed` : `dropped ${id}`);

@@ -425,3 +425,16 @@ test('a symbolic link is no file of the plan', () => {
   assert.equal(steps.length, 1);
   assert.deepEqual([...history.keys()], ['x']);
 });
+
+test('a take or a drop the agents wrote says so with `agents`; one by the owner does not, and a later owner verdict drops it', () => {
+  const history = entryHistory([
+    step(1, add(P, D)),
+    step(2, edit(P, D, { ...D, verdict: 'take', by: 'agents' })),
+    step(3, edit(P, { ...D, verdict: 'take', by: 'agents' }, { ...D, verdict: 'drop', by: 'agents' })),
+    step(4, edit(P, { ...D, verdict: 'drop', by: 'agents' }, { ...D, verdict: 'take' })),
+  ]);
+  const [owner, dropped, taken] = history.get('x');
+  assert.deepEqual(taken, { commit: 'c2', date: '2026-11-02T00:00:00Z', what: ['taken'], agents: true });
+  assert.deepEqual(dropped, { commit: 'c3', date: '2026-11-03T00:00:00Z', what: ['dropped'], agents: true });
+  assert.deepEqual(owner, { commit: 'c4', date: '2026-11-04T00:00:00Z', what: ['taken'] });
+});

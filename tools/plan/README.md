@@ -13,8 +13,8 @@ Node 26, no dependency, no network call. `npm test` runs the tests, which use th
 |---|---|
 | `plan` | Shows the first entry in the order with no verdict (its kind, its question or its name, and `suggest`; for a decision its `answer`, or when it has none the statements it sets, and each decision it names in `replaces` with its `answer`, or the ids it adds when it has none), the features being built, the features ready to build, and the features that wait and for what. |
 | `plan show <id>` | For an entry: first its state, then the entry whole (its keys, its `sets` in full, its stage and position, each need with its status, what needs it, its notes), then what binds it, compact: every principle and the properties of the root, of its part and in `keeps` (id and `says`); the taken decisions in force of its part and in `needs` (id and `answer`, or the ids it adds when it has none); the other taken decisions in force of the root as ids only, which `--all` prints in full. A decision in force is taken and not replaced. A replaced decision, one that has `replaced_by`, prints `Replaced by: <id>` first. A need that is replaced prints `replaced by <id>`. Each decision named in `replaces` prints with its `answer`, or the ids it adds. For a part: its title and line (and the word of the same id with its meaning, when there is one), its taken entries in force (and its replaced and dropped ones) as a count and their ids, then each entry with no verdict in the order of `order.json` (id, kind, status, and its `asks` or `name`), the first marked `next`, then its properties (id and `says`). For a statement: the statement, the entry whose `adds` brought it, the features that keep it, and the entries that would replace or remove it. `--json` gives everything, whatever `--all`. |
-| `plan take <id>` | The owner's yes. It writes what is listed under the table, in one commit named `Owner: take <id>`. |
-| `plan drop <id>` | The owner's no. Writes `"verdict": "drop"`, keeps `sets`, `removes` and `replaces`, and commits `Owner: drop <id>`. On a feature being built it removes `started` in the same write, since only a taken feature holds `started`, and its message says so. |
+| `plan take <id> [--by agents]` | The owner's yes. It writes what is listed under the table, in one commit named `Owner: take <id>`. With `--by agents` it is the agents' yes: the same write plus `"by": "agents"`, in a commit named `Agents: take <id>`. |
+| `plan drop <id> [--by agents]` | The owner's no. Writes `"verdict": "drop"`, keeps `sets`, `removes` and `replaces`, and commits `Owner: drop <id>`. With `--by agents` it is the agents' no: it also writes `"by": "agents"` and commits `Agents: drop <id>`; it is refused on an entry whose verdict the owner wrote. On a feature being built it removes `started` in the same write, since only a taken feature holds `started`, and its message says so. |
 | `plan check` | Checks the plan. The merge gate and the site's build run it. |
 
 What `plan take <id>` writes:
@@ -23,12 +23,12 @@ What `plan take <id>` writes:
 2. Each statement the entry removes leaves its list.
 3. Those ids leave the `adds` of the entries that had them.
 4. In the entry, `adds` (the ids it set) takes the place of `sets` and `removes`, and
-   `"verdict": "take"` is written. `replaces` stays.
+   `"verdict": "take"` is written, then `"by": "agents"` with `--by agents`. `replaces` stays.
 5. Each decision the entry names in `replaces` gets `"replaced_by": "<id>"`.
 
 It commits only the files it changed, and deletes none.
 
-`plan --help` lists them. `plan`, `plan show` and `plan check` take `--json`; `plan show` on an entry takes `--all`. Exit codes: 0 done,
+`--by` takes `agents` and nothing else; without it the verdict is the owner's, and a `by` the entry had (from an earlier agents' verdict) is removed. `plan take --by agents` of an entry the owner dropped is refused too: the agents never overrule the owner. `plan --help` lists them. `plan`, `plan show` and `plan check` take `--json`; `plan show` on an entry takes `--all`. Exit codes: 0 done,
 1 refused or errors found, 2 wrong use.
 
 `plan take` refuses when the plan fails the check, when `plan/` has uncommitted changes, when the
@@ -109,15 +109,17 @@ Each problem names the file, the field, what is wrong and the fix.
     (the remote's old plan, until the first push).
 
   Neither applies to an entry whose file holds what the owner ruled on. The evidence is the latest
-  commit since the base, on any merged branch, named `Owner: take <id>` or `Owner: drop <id>` (for
-  a verdict typed in, the one of its kind). Of two such commits, one made on top of the other is
+  commit since the base, on any merged branch, named `Owner: take <id>` or `Owner: drop <id>`, or
+  `Agents: take <id>` or `Agents: drop <id>` (for a verdict typed in, the one of its kind). The
+  commit's file and its subject agree on who wrote the verdict: `Agents:` with `"by": "agents"`,
+  `Owner:` with no `by`. A `by` added or removed by hand while the verdict stayed is refused too. Of two such commits, one made on top of the other is
   the later, whatever their dates. That commit must have written the entry's file, found in it by its id
   wherever the file was then. The entry's file now, committed or not, must agree with that version
   on the verdict and on the keys above. A merge, a move, a change of other keys (`adds`,
   `replaced_by`, `suggest`, as a take of another entry or a suggestion does) or a change that was
   put back come between without effect; a later ruling replaces an earlier one. The check does not
-  catch `plan take` run without the owner's word, a commit named `Owner: take <id>` written by
-  hand, or an owner's commit amended or squashed with another change.
+  catch `plan take` run without the owner's word, a commit named `Owner: take <id>` or
+  `Agents: take <id>` written by hand, or an owner's commit amended or squashed with another change.
 
 A malformed value is a problem like any other: the check never throws on one.
 

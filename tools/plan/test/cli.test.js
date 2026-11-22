@@ -31,9 +31,9 @@ async function withRepo(body, files = basePlan()) {
 test('plan --help lists the five commands; --json too', async () => {
   const { code, out } = await run(temp(), ['--help']);
   assert.equal(code, 0);
-  for (const usage of ['plan ', 'plan show <id>', 'plan take <id>', 'plan drop <id>', 'plan check']) assert.ok(out.includes(`  ${usage}`), usage);
+  for (const usage of ['plan ', 'plan show <id>', 'plan take <id> [--by agents]', 'plan drop <id> [--by agents]', 'plan check']) assert.ok(out.includes(`  ${usage}`), usage);
   const json = JSON.parse((await run(temp(), ['--help', '--json'])).out);
-  assert.deepEqual(json.commands.map((item) => item.usage), ['plan', 'plan show <id>', 'plan take <id>', 'plan drop <id>', 'plan check']);
+  assert.deepEqual(json.commands.map((item) => item.usage), ['plan', 'plan show <id>', 'plan take <id> [--by agents]', 'plan drop <id> [--by agents]', 'plan check']);
 });
 
 test('wrong use exits 2', async () => {
@@ -974,5 +974,84 @@ test('evidence: an id with a character of a regular expression gives the file\'s
     const listed = JSON.parse(checked.out);
     assert.equal(listed.ok, false);
     assert.ok(listed.errors.some((e) => e.file === 'plan/engine/decisions/odd(.json'), checked.out);
+  });
+});
+
+test('take --by agents writes the key after the verdict and commits "Agents: take <id>"; drop --by agents "Agents: drop <id>"; the check passes after', async () => {
+  await withRepo(async (root) => {
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    const taken = await run(root, ['take', 'losses-show', '--by', 'agents']);
+    assert.equal(taken.code, 0, taken.out + taken.err);
+    assert.equal(git(root, 'log', '-1', '--format=%s').trim(), 'Agents: take losses-show');
+    assert.match(taken.out, /^Agents: take losses-show/);
+    assert.deepEqual(git(root, 'show', '--name-only', '--format=', 'HEAD').trim().split('\n').sort(), ['plan/record/decisions/losses-show.json', 'plan/record/properties.json']);
+    const file = readJson(root, 'record/decisions/losses-show.json');
+    const keys = Object.keys(file);
+    assert.equal(file.verdict, 'take');
+    assert.equal(keys[keys.indexOf('verdict') + 1], 'by');
+    assert.equal(file.by, 'agents');
+    assert.equal(readFileSync(join(root, 'plan/record/decisions/losses-show.json'), 'utf8'), canonicalText(canonicalFile('record/decisions/losses-show.json')(file)));
+    assert.equal((await run(root, ['check'])).code, 0);
+
+    const dropped = await run(root, ['drop', 'no-detour', '--by=agents']);
+    assert.equal(dropped.code, 0, dropped.out + dropped.err);
+    assert.equal(git(root, 'log', '-1', '--format=%s').trim(), 'Agents: drop no-detour');
+    assert.equal(readJson(root, 'record/decisions/no-detour.json').by, 'agents');
+    assert.equal((await run(root, ['check'])).code, 0);
+    // Without --by, both are the owner's as ever.
+    assert.equal((await run(root, ['take', 'linux-vm-engine'])).code, 0);
+    assert.equal(git(root, 'log', '-1', '--format=%s').trim(), 'Owner: take linux-vm-engine');
+    assert.equal(Object.hasOwn(readJson(root, 'engine/decisions/linux-vm-engine.json'), 'by'), false);
+  });
+});
+
+test('drop --by agents on an entry the owner took is refused and writes nothing; a --by other than agents is wrong use', async () => {
+  await withRepo(async (root) => {
+    const before = head(root);
+    const refused = await run(root, ['drop', 'engine-language', '--by', 'agents']);
+    assert.equal(refused.code, 1);
+    assert.match(refused.err, /taken by the owner/);
+    assert.equal(head(root), before);
+    assert.ok(clean(root));
+    for (const argv of [['take', 'linux-vm-engine', '--by', 'owner'], ['drop', 'linux-vm-engine', '--by', ''], ['take', 'linux-vm-engine', '--by'], ['take', 'linux-vm-engine', '--by', 'agents', '--by', 'agents']]) {
+      assert.equal((await run(root, argv)).code, 2, argv.join(' '));
+    }
+    assert.equal(head(root), before);
+    assert.equal((await run(root, ['take', '--by', 'agents', 'linux-vm-engine'])).code, 0);
+  });
+});
+
+test('the check reads "Agents: take" as the evidence of a verdict with by agents, and nothing else: a by typed in, or a subject that does not match, fails', async () => {
+  await withRepo(async (root) => {
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    assert.equal((await run(root, ['take', 'linux-vm-engine', '--by', 'agents'])).code, 0);
+    assert.equal((await run(root, ['check'])).code, 0);
+    const name = 'engine/decisions/linux-vm-engine.json';
+    const file = readJson(root, name);
+    // The same file under the owner's subject: who wrote it is not the owner.
+    git(root, 'commit', '-q', '--amend', '-m', 'Owner: take linux-vm-engine');
+    assert.equal((await run(root, ['check'])).code, 1);
+    git(root, 'commit', '-q', '--amend', '-m', 'Agents: take linux-vm-engine');
+    assert.equal((await run(root, ['check'])).code, 0);
+    // A file without by under the agents' subject.
+    const { by: _by, ...owner } = file;
+    writeJson(root, name, owner);
+    git(root, 'commit', '-q', '-am', 'Agents: take linux-vm-engine');
+    assert.equal((await run(root, ['check'])).code, 1);
+  });
+  await withRepo(async (root) => {
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    // by typed into a verdict the owner wrote, with no command.
+    assert.equal((await run(root, ['take', 'linux-vm-engine'])).code, 0);
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    const name = 'engine/decisions/linux-vm-engine.json';
+    writeJson(root, name, { ...readJson(root, name), by: 'agents' });
+    const typed = JSON.parse((await run(root, ['check', '--json'])).out);
+    assert.deepEqual(typed.errors.map((e) => `${e.file} ${e.field}`), [`plan/${name} by`]);
+    // by with no verdict, and a by that is not agents.
+    writeJson(root, name, { ...readJson(root, name), verdict: undefined, by: 'agents' });
+    assert.match((await run(root, ['check'])).out, /by without a verdict/);
+    writeJson(root, name, { ...readJson(root, name), verdict: 'take', by: 'owner' });
+    assert.match((await run(root, ['check'])).out, /"owner" is not a value of by/);
   });
 });

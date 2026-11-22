@@ -5,6 +5,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { checkChange, checkFiles, formatProblem } from '../check/index.js';
 import { entryStatus, hasSets, replacedBy, waitingFor } from '../model/status.js';
+import { BYS } from '../model/names.js';
 import { PlanError, parsePlan } from '../read/index.js';
 import { drop, take } from '../write/index.js';
 import { Refused, UsageError, parseArgs } from './args.js';
@@ -13,8 +14,8 @@ import { baseFiles, existsIn, findRoot, git, planFiles, ruledByOwner, uncommitte
 export const COMMANDS = [
   { name: '', usage: 'plan', what: 'What is next: the first entry with no verdict, the features being built, those ready to build, the features that wait and for what.' },
   { name: 'show', usage: 'plan show <id>', what: 'One entry, part or statement. An entry with what it links to and what binds it (--all: the whole product\'s decisions in full); a part with what is next in it.' },
-  { name: 'take', usage: 'plan take <id>', what: "The owner's yes: writes what the entry sets into the lists and commits \"Owner: take <id>\"." },
-  { name: 'drop', usage: 'plan drop <id>', what: "The owner's no: commits \"Owner: drop <id>\"." },
+  { name: 'take', usage: 'plan take <id> [--by agents]', what: "The owner's yes: writes what the entry sets into the lists and commits \"Owner: take <id>\". --by agents: the agents' yes, for an entry about how Silo is built; commits \"Agents: take <id>\"." },
+  { name: 'drop', usage: 'plan drop <id> [--by agents]', what: "The owner's no: commits \"Owner: drop <id>\". --by agents: the agents' no, never on what the owner decided; commits \"Agents: drop <id>\"." },
   { name: 'check', usage: 'plan check', what: 'The plan holds together. The merge gate and the site\'s build run it.' },
 ];
 
@@ -80,7 +81,7 @@ function help(ctx, argv) {
     ctx.out(JSON.stringify({ commands: COMMANDS }, null, 2));
     return 0;
   }
-  const line = (item) => `  ${item.usage.padEnd(16)}  ${item.what}`;
+  const line = (item) => `  ${item.usage.padEnd(30)}  ${item.what}`;
   ctx.out([
     'plan: the plan of Silo, in plan/. The model is plan/README.md.',
     '',
@@ -376,13 +377,16 @@ function check(ctx, argv) {
 
 /**
  * `plan take <id>` and `plan drop <id>`: the pure function on the files, then the changed files
- * written and committed alone, subject `Owner: <verdict> <id>`.
+ * written and committed alone, subject `Owner: <verdict> <id>`, or `Agents: <verdict> <id>` with
+ * `--by agents`.
  * @param {Context} ctx @param {string[]} argv @param {'take' | 'drop'} kind
  */
 function verdict(ctx, argv, kind) {
-  const { positional, flags } = parseArgs(argv, {});
+  const { positional, values, flags } = parseArgs(argv, { by: 'value' });
   if (flags.has('json')) throw new UsageError(`plan ${kind} takes no --json`);
-  if (positional.length !== 1) throw new UsageError(`usage: plan ${kind} <id>`);
+  if (positional.length !== 1) throw new UsageError(`usage: plan ${kind} <id> [--by agents]`);
+  if (Object.hasOwn(values, 'by') && !BYS.includes(values.by)) throw new UsageError(`--by takes ${BYS.join(' or ')}, not "${values.by}"; leave it out for the owner's verdict`);
+  const by = /** @type {'agents' | undefined} */ (values.by);
   const [id] = positional;
   const root = findRoot(ctx.cwd);
   if (git(root, ['rev-parse', '--show-toplevel']) === null) throw new Refused(`${root} is not a git checkout: a verdict is a commit`);
@@ -392,7 +396,7 @@ function verdict(ctx, argv, kind) {
   if (hidden.length) throw new Refused(`git is told not to look at ${hidden.join(', ')}, so it cannot say whether plan/ has uncommitted changes: clear the flag with git update-index --no-assume-unchanged or --no-skip-worktree first`);
 
   const files = planFiles(root);
-  const outcome = (kind === 'take' ? take : drop)(files, id, { exists: existsIn(root) });
+  const outcome = (kind === 'take' ? take : drop)(files, id, { exists: existsIn(root), ...(by ? { by } : {}) });
   if (outcome.status === 'refused') throw refusal(outcome.message, outcome.errors);
   if (outcome.status === 'already') {
     ctx.out(`plan ${kind}: ${outcome.message}`);
@@ -440,7 +444,7 @@ function verdict(ctx, argv, kind) {
     const left = restore(written);
     throw new Refused(`could not write plan/${written.at(-1)} (${/** @type {Error} */ (error).message}); ${left ? `the files written were put back${left}` : 'nothing changed'}`);
   }
-  const subject = `Owner: ${kind} ${id}`;
+  const subject = `${by ? 'Agents' : 'Owner'}: ${kind} ${id}`;
   const committed = git(root, ['add', '--', ...paths]) !== null && git(root, ['commit', '-q', '-m', subject, '--', ...paths]) !== null;
   if (!committed) {
     git(root, ['reset', '-q', '--', ...paths]);

@@ -41,7 +41,7 @@ const verdictOf = (value) => (value.verdict === 'take' || value.verdict === 'dro
 
 /**
  * The names a step gives to an entry that was there before it.
- * @param {Snapshot} before @param {Snapshot} after @returns {{ what: string[], text?: object, by?: unknown }}
+ * @param {Snapshot} before @param {Snapshot} after @returns {{ what: string[], text?: object, by?: unknown, agents?: true }}
  */
 function compare(before, after) {
   const was = before.value;
@@ -69,6 +69,8 @@ function compare(before, after) {
     extra.text = { before: side(was), after: side(now) };
   }
   if (names.has('replaced')) extra.by = now.replaced_by;
+  // A verdict the agents wrote, not the owner: `by` in the file says so.
+  if ((names.has('taken') || names.has('dropped')) && now.by === 'agents') extra.agents = true;
   return { what, ...extra };
 }
 
@@ -83,7 +85,7 @@ function compare(before, after) {
  * the file coming back is `added` again. A step that changes none of the names of `WHAT` gives no change.
  *
  * @param {{ commit: string, date: string, files: Record<string, { before: string | null, after: string | null }> }[]} steps
- * @returns {Map<string, { commit: string, date: string, what: string[], text?: object, by?: unknown }[]>}
+ * @returns {Map<string, { commit: string, date: string, what: string[], text?: object, by?: unknown, agents?: true }[]>}
  */
 export function entryHistory(steps) {
   /** @type {Map<string, string | null>} the text of each entry file and notes file, by path, as of the steps seen */

@@ -410,7 +410,7 @@ test('model: after any sequence of takes and drops the plan passes the check, no
     // The reference: each statement this test made, by id, with its list, its text and the entry that brought it.
     /** @type {Map<string, { list: string, value: any, by: string }>} */
     const model = new Map();
-    /** @type {Map<string, { verdict: 'take' | 'drop', answered: boolean, replaces: string[], needs: string[] }>} the decisions this test made */
+    /** @type {Map<string, { verdict: 'take' | 'drop', by?: 'agents', answered: boolean, replaces: string[], needs: string[] }>} the decisions this test made, and who ruled on each */
     const decisions = new Map();
     /** @type {Map<string, string>} each replaced decision, and the decision that replaced it */
     const replaced = new Map();
@@ -490,7 +490,8 @@ test('model: after any sequence of takes and drops the plan passes the check, no
         const already = replaces.filter((target) => replaced.has(target));
         const kept = replaces.filter((target) => statementsOf(target).some((sid) => !gone.has(sid)));
         const emptied = taken().filter((owner) => !replaced.has(owner) && !decisions.get(owner).answered && !replaces.includes(owner) && statementsOf(owner).every((sid) => gone.has(sid)));
-        const outcome = take(files, id);
+        const by = rng.int(3) === 0 ? 'agents' : undefined;
+        const outcome = take(files, id, by ? { by } : {});
         const expected = already.length ? /already replaced/ : kept.length ? /would still add/ : emptied.length ? /would be left with nothing in force/ : null;
         if (expected) {
           assert.equal(outcome.status, 'refused', `${label}: expected ${expected}`);
@@ -509,27 +510,30 @@ test('model: after any sequence of takes and drops the plan passes the check, no
           for (const { in: list, ...value } of sets) model.set(list === 'words' ? wordId(value.word) : value.id, { list, value, by: id });
           for (const sid of removes) model.delete(sid);
           for (const target of replaces) replaced.set(target, id);
-          decisions.set(id, { verdict: 'take', answered, replaces, needs });
+          decisions.set(id, { verdict: 'take', by, answered, replaces, needs });
         }
       } else if (op < 8) {
         // A new decision, and the owner's no: it keeps its sets and replaces.
         const { decision, replaces, needs } = generate(id, step, { removing: false });
         files.set(`decisions/${id}.json`, canonicalText(canonicalDecision({ ...decision, answer: 'Yes.' })));
         place(files, id);
-        const outcome = drop(files, id);
+        const by = rng.int(3) === 0 ? 'agents' : undefined;
+        const outcome = drop(files, id, by ? { by } : {});
         assert.equal(outcome.status, 'done', `${label}: ${outcome.message} ${JSON.stringify(outcome.errors ?? [])}`);
         counts.done += 1;
         commit(outcome, label);
         assert.deepEqual(parse(files, `decisions/${id}.json`).replaces, replaces.length ? replaces : undefined, label);
-        decisions.set(id, { verdict: 'drop', answered: true, replaces, needs });
+        decisions.set(id, { verdict: 'drop', by, answered: true, replaces, needs });
       } else if (decisions.size) {
         // The owner's no on a decision this test made.
         const target = rng.pick([...decisions.keys()]);
         const d = decisions.get(target);
         const named = [...decisions].some(([other, od]) => other !== target && od.replaces.includes(target));
         const needed = [...decisions].some(([, od]) => od.verdict !== 'drop' && od.needs.includes(target));
-        const outcome = drop(files, target);
-        const expected = d.verdict === 'drop' ? 'already'
+        // The agents never overrule the owner: their drop of an entry the owner ruled on is refused, whatever else holds.
+        const by = rng.int(3) === 0 ? 'agents' : undefined;
+        const outcome = drop(files, target, by ? { by } : {});
+        const expected = by && d.by === undefined ? /by the owner/ : d.verdict === 'drop' ? 'already'
           : replaced.has(target) ? /is replaced by/
             : statementsOf(target).length ? /is taken and brought/
               : d.replaces.length ? /a decision that replaces .* comes first/
@@ -542,7 +546,7 @@ test('model: after any sequence of takes and drops the plan passes the check, no
         }
         counts[outcome.status] += 1;
         commit(outcome, label);
-        if (outcome.status === 'done') d.verdict = 'drop';
+        if (outcome.status === 'done') Object.assign(d, { verdict: 'drop', by });
       }
 
       // The lists hold exactly the reference's statements, with the sample's own around them.
@@ -565,8 +569,74 @@ test('model: after any sequence of takes and drops the plan passes the check, no
         assert.deepEqual(owners, [statement.by], `${label}: ${sid}`);
         assert.equal(entryStatus(plan.entries[statement.by], plan.entries), 'taken', `${label}: ${statement.by} is in force`);
       }
+      // Each file says who ruled, as the test did, and `by` follows the verdict.
+      for (const [made, d] of decisions) {
+        const file = parse(files, `decisions/${made}.json`);
+        assert.equal(file.verdict, d.verdict, `${label}: ${made} verdict`);
+        assert.equal(file.by, d.by, `${label}: ${made} by`);
+        if (d.by) assert.equal(Object.keys(file).at(Object.keys(file).indexOf('verdict') + 1), 'by', `${label}: ${made} key order`);
+      }
       assert.deepEqual(checkFiles(files).errors, [], `${label}: check`);
     }
     assert.ok(counts.done > 0, `seed ${seed}: something was done`);
   }
+});
+
+test('take with by agents writes "by": "agents" right after the verdict, in the canonical form, and the result passes the check', () => {
+  const files = sample();
+  const outcome = take(files, 'losses-show', { by: 'agents' });
+  assert.equal(outcome.status, 'done');
+  const name = 'record/decisions/losses-show.json';
+  const written = parse(apply(files, outcome), name);
+  assert.equal(written.verdict, 'take');
+  assert.equal(written.by, 'agents');
+  const keys = Object.keys(written);
+  assert.equal(keys[keys.indexOf('verdict') + 1], 'by');
+  assert.equal(outcome.changed.get(name), canonicalText(canonicalDecision(written)));
+  assert.deepEqual(checkFiles(apply(files, outcome)).errors, []);
+  // Without by, the file has none.
+  assert.equal(Object.hasOwn(parse(apply(files, take(files, 'losses-show')), name), 'by'), false);
+});
+
+/** The sample with an answer on `no-detour`, which nothing needs: an entry either command may rule on. */
+const answered = () => sample({ 'record/decisions/no-detour.json': { ...basePlan()['record/decisions/no-detour.json'], answer: 'It is not.' } });
+
+test('drop with by agents writes the verdict and "by": "agents"; it is refused on a verdict the owner wrote, allowed on none or on the agents\' own', () => {
+  const files = answered();
+  const name = 'record/decisions/no-detour.json';
+  const dropped = drop(files, 'no-detour', { by: 'agents' });
+  assert.equal(dropped.status, 'done');
+  const written = parse(apply(files, dropped), name);
+  assert.deepEqual(Object.keys(written).slice(-2), ['verdict', 'by']);
+  assert.deepEqual([written.verdict, written.by], ['drop', 'agents']);
+  assert.deepEqual(checkFiles(apply(files, dropped)).errors, []);
+  // Dropping again: already.
+  assert.equal(drop(apply(files, dropped), 'no-detour', { by: 'agents' }).status, 'already');
+
+  // An entry the owner took: refused, and nothing is written.
+  const refused = drop(files, 'engine-language', { by: 'agents' });
+  assert.equal(refused.status, 'refused');
+  assert.match(refused.message, /taken by the owner/);
+  assert.equal(refused.changed.size, 0);
+
+  // An entry the agents took: the agents may drop it, and the owner's drop removes by.
+  const taken = apply(files, take(files, 'no-detour', { by: 'agents' }));
+  const again = drop(taken, 'no-detour', { by: 'agents' });
+  assert.equal(again.status, 'done');
+  assert.equal(parse(apply(taken, again), name).by, 'agents');
+  const owner = drop(taken, 'no-detour');
+  assert.equal(owner.status, 'done');
+  assert.equal(Object.hasOwn(parse(apply(taken, owner), name), 'by'), false);
+});
+
+test('take with by agents does not turn the owner\'s drop into a yes; an owner take over an agents drop removes by', () => {
+  const files = answered();
+  const ownerDropped = apply(files, drop(files, 'no-detour'));
+  const refused = take(ownerDropped, 'no-detour', { by: 'agents' });
+  assert.equal(refused.status, 'refused');
+  assert.match(refused.message, /dropped by the owner/);
+  const agentsDropped = apply(files, drop(files, 'no-detour', { by: 'agents' }));
+  assert.equal(take(agentsDropped, 'no-detour', { by: 'agents' }).status, 'done');
+  const owner = take(agentsDropped, 'no-detour');
+  assert.equal(Object.hasOwn(parse(apply(agentsDropped, owner), 'record/decisions/no-detour.json'), 'by'), false);
 });

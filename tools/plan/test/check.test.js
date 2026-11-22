@@ -565,3 +565,29 @@ test('rule 11, the verdict of every combination of the base, the file and the ev
     }
   }
 });
+
+test('by: only "agents", only beside a verdict', () => {
+  const file = 'plan/engine/decisions/linux-vm-engine.json';
+  assert.deepEqual(errorsOf(variant((f) => { f['engine/decisions/linux-vm-engine.json'].by = 'agents'; })), [`${file} by: by without a verdict`]);
+  assert.deepEqual(errorsOf(variant((f) => { Object.assign(f['engine/decisions/linux-vm-engine.json'], { verdict: 'take', by: 'owner' }); })), [`${file} by: "owner" is not a value of by`]);
+  assert.deepEqual(errorsOf(variant((f) => { Object.assign(f['engine/decisions/linux-vm-engine.json'], { verdict: 'take', by: 'agents' }); })), []);
+  assert.deepEqual(errorsOf(variant((f) => { Object.assign(f['record/decisions/no-detour.json'], { verdict: 'drop', by: 'agents' }); })), []);
+  // A feature too.
+  assert.deepEqual(errorsOf(variant((f) => { f['engine/features/start-computer.json'].by = 'agents'; })), []);
+  assert.deepEqual(errorsOf(variant((f) => { delete f['engine/features/start-computer.json'].verdict; f['engine/features/start-computer.json'].by = 'agents'; })), ['plan/engine/features/start-computer.json by: by without a verdict']);
+});
+
+test('rule 11: who wrote a verdict is part of it', () => {
+  const base = filesOf(basePlan());
+  const changeOf = (edit, options) => checkChange(filesOf(variant(edit)), base, options).errors.map((e) => `${e.file} ${e.field}: ${e.message}`);
+  // A by added by hand to the owner's take.
+  assert.deepEqual(changeOf((f) => { f['engine/decisions/engine-language.json'].by = 'agents'; }), ['plan/engine/decisions/engine-language.json by: "engine-language" changed its by while its verdict stayed take']);
+  // A new verdict written by agents needs the agents' commit, as the owner's needs the owner's.
+  const typed = (f) => { Object.assign(f['engine/decisions/linux-vm-engine.json'], { verdict: 'take', by: 'agents' }); };
+  const [error] = checkChange(filesOf(variant(typed)), base, { ruledByOwner: () => false }).errors;
+  assert.match(error.message, /the agents' command did not write/);
+  assert.match(error.fix, /plan take linux-vm-engine --by agents/);
+  assert.deepEqual(changeOf(typed, { ruledByOwner: () => true }), []);
+  // ruledKeysDiffer sees `by`.
+  assert.equal(ruledKeysDiffer('{"verdict":"take"}', '{"verdict":"take","by":"agents"}'), true);
+});
