@@ -1056,7 +1056,7 @@ owner is the GitHub account whose id is in `WORKSHOP_OWNER_ID`; `GET me` answers
 not, sees no button and is refused.
 
 On the page: an open entry with no verdict, or whose verdict the agents wrote
-(`"by": "agents"`), shows Take and Drop at the end of its state line. The first
+(`"by": "agents"`), shows Take and Drop at the end of the row of its state. The first
 press arms the button, which then says "Confirm"; a second, separate press
 sends the verdict. A key held down never confirms: Chromium clicks on each
 repeat of Enter, so the repeats of a key are ignored until it is let go, and
@@ -1077,8 +1077,15 @@ done on the page, and neither is a verdict on a part, a word, a principle or a
 property.
 
 The page learns that the person is the owner only when `me` answers, so the
-buttons come after it. When the person signed in last was the owner, the
-buttons' room is held by placeholders until then, so nothing moves.
+buttons come after it. The state's words have a row of their own, with the
+buttons' column at its end, and the id, Copy id and the votes are on the row
+under it: the row's height is the state's whether or not the buttons are
+there, so their arrival moves nothing at any width, on a first visit too
+(`scripts/verdict-layout.test.mjs` measures it in a real browser). When the
+person signed in last was the owner, the buttons' room shows placeholders
+until then. The buttons are live only once the entry's details show (what a
+yes would change, from the facts chunk): the owner decides on them too, so
+until they show, the buttons' room holds placeholders.
 
 What the page sends: `{ "entry": "fork-computers", "verdict": "take", "built":
 "<commit>" }`, and nothing else. `built` is the commit the site was built from

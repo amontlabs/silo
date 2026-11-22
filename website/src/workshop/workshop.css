@@ -313,7 +313,15 @@
 .ws-what { color: var(--muted); max-width: 60ch; }
 .ws-what p + p { margin-top: 8px; }
 .ws code { font: 12.5px var(--mono); padding: 0 3px; border-radius: 3px; background: var(--media); }
-.ws-state { margin-top: 12px; min-height: 34px; font-size: 14px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* The state's words on a row of their own, the owner's Take and Drop in a column at its end, the id, its copy button
+   and the votes on the row under it. The buttons come after `me` answers: the row's height is the state's whether or
+   not they are there, and an entry they are offered on keeps its short state on one line beside them, so nothing
+   moves at any width. */
+.ws-state { margin-top: 12px; min-height: 34px; font-size: 14px; color: var(--muted); display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; row-gap: 6px; align-items: center; }
+.ws-state-text { grid-row: 1; grid-column: 1; line-height: 24px; }
+.ws-offered > .ws-state-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-state > .ws-verdict { grid-row: 1; grid-column: 2; }
+.ws-state-more { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 /* What an open entry says of the plan's lists: a small quiet label and its lines under it, at the size of the answer. */
 .ws-fact { margin-top: 14px; max-width: 70ch; }
 .ws-fact-label { display: block; margin-bottom: 4px; font: 12px/16px var(--mono); color: var(--faint); }
@@ -367,10 +375,10 @@
 .ws .ws-btn.go:hover:not(:disabled) { background: var(--accent-hover); border-color: #d68200; }
 .ws .ws-btn:focus-visible { outline-offset: 2px; }
 .ws .ws-btn:disabled { opacity: .5; }
-/* The owner's Take and Drop, at the end of an entry's state line, in the family of Copy id. Each button keeps the width
+/* The owner's Take and Drop, at the end of the row of an entry's state, in the family of Copy id. Each button keeps the width
    of its longest word (Drop, Confirm, Dropping…), so nothing moves when it is armed or sent; an armed one is outlined
    in the ink. While `me` has not answered for the owner remembered, the same boxes hold their room as placeholders. */
-.ws-verdict { display: inline-flex; gap: 6px; margin-left: auto; }
+.ws-verdict { display: inline-flex; gap: 6px; }
 .ws .ws-vbtn { display: inline-grid; justify-items: center; padding: 2px 8px; border: 1px solid var(--line); border-radius: 3px; font: 12px/16px var(--mono); color: var(--muted); }
 .ws .ws-vbtn.take { color: var(--accent-ink); }
 .ws .ws-vbtn:hover:not(:disabled) { color: var(--ink); border-color: var(--faint); }

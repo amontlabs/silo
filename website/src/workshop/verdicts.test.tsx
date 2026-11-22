@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { apiConfig } from './api';
 import type { Me } from './api';
 import { ARM_MS, CONFIRM_AFTER_MS } from './Entry';
-import { buildData, DECISIONS } from './fixtures';
+import { buildData, DECISIONS, fixtureFacts } from './fixtures';
 import { KEEP_FIELDS_MS } from './writes';
 import type { BuildData } from './plan';
 import { clock, mockApi, ok, owner, posts, refused, renderApp, rowButton, visitor, withheldTimers } from './test-support';
@@ -73,6 +73,26 @@ describe('the owner\'s verdict', () => {
       cleanup();
       localStorage.clear();
     }
+  });
+
+  it('offers no live Take or Drop before the entry\'s details show: what a yes would change is part of what the owner decides on', async () => {
+    const plain = buildData();
+    const data = { ...plain, builtFrom: BUILT };
+    let giveFacts: () => void = () => {};
+    const facts = new Promise<ReturnType<typeof fixtureFacts>>((resolve) => { giveFacts = () => resolve(fixtureFacts(plain)); });
+    mockApi({ me: theOwner });
+    history.replaceState(null, '', '/workshop#part-b/create');
+    await renderApp(data, undefined, () => facts);
+    await waitFor(() => expect(rowButton(NAME)).toHaveAttribute('aria-expanded', 'true'));
+    // me has answered for the owner; the details are still loading: the buttons' room is held, inert.
+    await waitFor(() => expect(item().querySelector('.ws-verdict')).not.toBeNull());
+    expect(item().querySelector('.ws-ph-notes')).not.toBeNull();
+    expect(button(/^Take$/)).toBeNull();
+    expect(item().querySelector('.ws-verdict')).toHaveAttribute('aria-hidden', 'true');
+    await act(async () => giveFacts());
+    await waitFor(() => expect(button(/^Take$/)).not.toBeNull());
+    expect(item().querySelector('.ws-ph-notes')).toBeNull();
+    expect(within(item()).getByText('Recommended: take')).toBeInTheDocument();
   });
 
   it('arms on the first press and sends on the second: the id, the verdict and the build, nothing else', async () => {

@@ -318,7 +318,8 @@ const ARMED = 'Confirm';
  * and Chromium clicks on each repeat of Enter, so a repeated key does nothing until it is let go, and a press sooner
  * than CONFIRM_AFTER_MS after arming is ignored. While the server writes the verdict, the pressed one says so
  * and both are disabled. Each button keeps the width of its longest word, so nothing moves as it changes. `held`
- * draws the same buttons as placeholders, inert, while `me` has not answered for the owner remembered.
+ * draws the same buttons as placeholders, inert, while `me` has not answered for the owner remembered, or the entry's
+ * details have not shown yet.
  */
 function VerdictButtons({ row, ctx, held = false }: { row: Row; ctx: EntryContext; held?: boolean }) {
   const { w } = ctx;
@@ -381,16 +382,25 @@ function VerdictButtons({ row, ctx, held = false }: { row: Row; ctx: EntryContex
   );
 }
 
+/**
+ * The state of a row: its words on a row of their own, with the owner's Take and Drop at its end, and under it the id,
+ * the button that copies it and the votes. The buttons come after `me` answers, in a column of the state's row whose
+ * height is the state's, so they move nothing at any width. They are live only once the entry's details (what a yes
+ * would change) show, since the owner decides on them too; until then their room is held.
+ */
 function StateLine({ row, ctx, children }: { row: Row; ctx: EntryContext; children?: ReactNode }) {
   const text = stateText(row);
   const tone = isDecided(row) && row.status !== 'dropped' ? 'ws-yes' : 'ws-muted';
   const id = planId(row);
   const refusal = id ? ctx.w.verdictRefusals[id] : undefined;
+  const offered = offersVerdict(row);
+  const detailsShown = !row.more || typeof ctx.w.facts === 'object';
   return (
     <>
-      <div className="ws-state">
-        <span className={tone}>{text}</span>{id ? <CopyId id={id} /> : null}{children}
-        {offersVerdict(row) && (ctx.w.mayDecide || ctx.w.verdictHeld) ? <VerdictButtons row={row} ctx={ctx} held={!ctx.w.mayDecide} /> : null}
+      <div className={`ws-state${offered ? ' ws-offered' : ''}`}>
+        <span className={`ws-state-text ${tone}`}>{text}</span>
+        {offered && (ctx.w.mayDecide || ctx.w.verdictHeld) ? <VerdictButtons row={row} ctx={ctx} held={!ctx.w.mayDecide || !detailsShown} /> : null}
+        {id || children ? <span className="ws-state-more">{id ? <CopyId id={id} /> : null}{children}</span> : null}
       </div>
       {refusal ? <p className="ws-refused" role="alert">{refusal}</p> : null}
     </>
