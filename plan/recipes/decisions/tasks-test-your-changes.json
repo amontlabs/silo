@@ -1,6 +1,6 @@
 {
   "asks": "What does Silo do when you want to test your changes?",
-  "answer": "While working, you want to test your changes. Silo makes a Linux computer and a macOS computer from the repository's recipes, with the current changes, and runs the tests in each.",
+  "answer": "When you or an agent in main asks for a test, Silo makes a fresh Linux computer and a fresh macOS computer from the repository's recipes, gives each your current changes, and runs the repository's tests in each. The result of each comes back in its receipt.",
   "needs": [
     "repository-holds-recipes"
   ]

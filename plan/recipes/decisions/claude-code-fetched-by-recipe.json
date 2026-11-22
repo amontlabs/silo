@@ -1,4 +1,4 @@
 {
   "asks": "Where does the copy of Claude Code in a computer come from?",
-  "answer": "A recipe fetches Claude Code from Anthropic on the user's Mac, and Silo ships no copy of it."
+  "answer": "Silo ships no copy of Claude Code, since its licence reserves all rights. A recipe that includes Claude Code names its version, and when a computer is made, that version is downloaded from Anthropic and checked against the recipe. If the download fails, the computer is not made, and Silo says which download failed."
 }

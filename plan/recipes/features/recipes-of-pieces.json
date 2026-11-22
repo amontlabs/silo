@@ -9,5 +9,9 @@
     "piece-for-every-agent-program",
     "agent-program-data-file",
     "agent-programs-run-unmodified"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A recipe then stays a short list, and a skill or a tool is written once for every computer and every agent program."
+  }
 }

@@ -1,4 +1,7 @@
 {
   "asks": "Does a computer made from a recipe ask for approvals by hand?",
-  "answer": "A computer made from a recipe asks for no approval by hand for what the recipe installs, such as the permissions computer use needs."
+  "answer": "A computer made from a recipe asks for no approval by hand for what the recipe installs, such as the approvals computer use needs on macOS. Silo sets them while it makes the computer, and its forks and checkpoints keep them. If Silo cannot set one, as can happen after a macOS update, the computer is still made, Silo names the approval that is missing, and you give it once in that computer. How Silo sets them on the current macOS is to find out.",
+  "needs": [
+    "computer-use-approvals"
+  ]
 }

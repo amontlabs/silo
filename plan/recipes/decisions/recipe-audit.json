@@ -1,4 +1,7 @@
 {
   "asks": "Who audits the recipes that ship with Silo?",
-  "answer": "Silo audits its built-in recipes and updates them often. The audit is work Silo does: a pinned list, a wait before taking new versions, and a reading of what changed between two versions of a machine."
+  "answer": "Silo audits the recipes and pieces it ships, and updates them as new versions pass the audit. Every version in them is pinned. A new version is taken only once it has been public for three days, so that a poisoned release is usually found and pulled first. A fix for a known security hole may skip the wait, and the update says so. Before an update ships, Silo reads what changes in the computer the recipe makes: the packages added, removed or changed, and what each runs when it is installed. A recipe you write is yours to audit.",
+  "needs": [
+    "silo-ships-recipes"
+  ]
 }

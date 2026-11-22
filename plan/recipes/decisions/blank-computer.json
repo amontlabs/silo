@@ -1,4 +1,4 @@
 {
   "asks": "What is in a computer that no recipe set up?",
-  "answer": "A computer is blank by default: a bare macOS or Linux machine. A recipe says what goes in it."
+  "answer": "A computer that no recipe set up holds only its system: a fresh macOS, or Ubuntu on Linux, with nothing added but what Silo itself needs inside it. It has no agent program, language or tool. A recipe says what goes in it."
 }

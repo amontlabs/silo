@@ -14,5 +14,9 @@
     "meanings-for-recipes",
     "computer-image",
     "computers-main-on-a-mac"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Tasks that start ready, Linux computers beside main and the list of what is only on a computer all need computers made from a text you can read."
+  }
 }

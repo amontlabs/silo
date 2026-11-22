@@ -1,6 +1,6 @@
 {
   "asks": "What does a task's computer get from main?",
-  "answer": "Main hands each computer one commit that includes the uncommitted work. The recipe brings the rest.",
+  "answer": "When a task on a repository in main starts, Silo reads that repository and makes one commit of its working tree: the last commit plus every change not yet committed, with new files and without the files the repository ignores. That commit is on no branch and changes nothing in main. Each computer of the task gets that same commit, and its recipe brings everything else. If the repository in main cannot be read, the task does not start, and Silo says why.",
   "needs": [
     "tasks-test-your-changes"
   ]

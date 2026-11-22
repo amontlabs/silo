@@ -1,3 +1,4 @@
 {
-  "asks": "Can macOS computers share one Nix store, read-only?"
+  "asks": "Can macOS computers share one Nix store, read-only?",
+  "answer": "No. Nothing from your device is shared into a computer, so no Nix store is shared into one, on macOS or on Linux. Each computer keeps its Nix store on its own disk. Silo keeps the disk it built from a recipe, and each computer made from that recipe starts as a copy-on-write clone of it, so the Mac stores what they hold in common once, as it does for a fork. To find out: what the first build of a recipe costs in time and disk, and how much each computer adds after it."
 }

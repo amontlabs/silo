@@ -7,5 +7,9 @@
     "recipe-source-in-repository",
     "recipe-stored-by-silo",
     "no-project-folder"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A repository's computers then change in the same commit as the code that needs them, and testing your changes makes its computers from these recipes."
+  }
 }

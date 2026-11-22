@@ -30,7 +30,7 @@
     {
       "in": "words",
       "word": "engine",
-      "means": "The central piece of Silo. The app, the command line and every tool only talk to it."
+      "means": "The program at the centre of Silo. The app, the command line and every tool only talk to it."
     }
   ]
 }

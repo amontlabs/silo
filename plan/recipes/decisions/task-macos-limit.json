@@ -1,7 +1,8 @@
 {
   "asks": "Does the limit of two macOS computers bind tasks?",
-  "answer": "The limit of two macOS computers applies.",
+  "answer": "Yes. Apple allows two macOS computers running at once on one Mac, main included, and a task's macOS computer counts as one. When both places are taken, the macOS part of a task waits until a macOS computer stops, and Silo shows which computers hold the places. The Linux part does not wait. Silo never stops a computer to make room: you stop one, or cancel the task. The receipt shows how long the task waited.",
   "needs": [
-    "tasks-test-your-changes"
+    "tasks-test-your-changes",
+    "main-on-macos-first"
   ]
 }

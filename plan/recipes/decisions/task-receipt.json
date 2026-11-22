@@ -1,7 +1,0 @@
-{
-  "asks": "Does a task end with a receipt?",
-  "answer": "A task is a command run in a fork or in a fresh computer, with an end and a receipt.",
-  "needs": [
-    "what-a-receipt-is"
-  ]
-}

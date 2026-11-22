@@ -8,5 +8,9 @@
     "claude-code-fetched-by-recipe",
     "recipe-under-preinstall-rule",
     "agent-programs-run-unmodified"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Making a computer must be convenient, and a recipe that works on the first day is most of that."
+  }
 }

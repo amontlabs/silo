@@ -1,6 +1,6 @@
 {
   "asks": "Who runs the checks of a task?",
-  "answer": "The engine runs the checks, on a machine the agent never touched. The agent cannot fake that result.",
+  "answer": "Silo runs a task's checks itself, in a fresh computer made from the task's recipe and commit, where no agent ever worked. The command of each check is set outside every computer, and nothing done inside a computer can change it. Silo keeps the exit code and the output in the record, so an agent can neither alter a result nor claim one that did not happen. The result is told by a program inside that computer, so it is unverified: the code under test runs there, and code written to fake a pass can do it. The receipt names the commit, so a change to the tests shows in it. A check that cannot start, or that runs past its time limit, never counts as passed: the receipt says it did not run, or that it was stopped.",
   "needs": [
     "tasks-test-your-changes"
   ]

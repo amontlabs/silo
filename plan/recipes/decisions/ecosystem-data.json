@@ -1,4 +1,4 @@
 {
   "asks": "What does Silo know about an ecosystem?",
-  "answer": "A third kind of data covers ecosystems: which folders a rebuild brings back, which hosts are package registries."
+  "answer": "Silo keeps what it knows of each package ecosystem in a data file that ships with it, as it keeps what it knows of each agent program. For each ecosystem, such as npm, Cargo or pip, the file names the folders a rebuild brings back, such as node_modules or target, the files a rebuild starts from, such as package-lock.json or Cargo.lock, and the hosts of its package registries. No ecosystem is named in Silo's code. An ecosystem the file does not know is unknown, so its folders count as only here."
 }

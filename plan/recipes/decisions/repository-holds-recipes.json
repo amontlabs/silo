@@ -1,4 +1,4 @@
 {
   "asks": "May a repository hold recipes?",
-  "answer": "A repository can hold recipes, in the repository itself or in the app: one for macOS computers, one for Linux computers. Tasks use them."
+  "answer": "A repository can have its own recipes: one for macOS computers and one for Linux computers. Their source is a file in the repository, or it is kept in Silo for that repository. A task on that repository, such as a test of your changes, makes its computers from them. When a repository has no recipe for one system, a task that needs that system does not run there, and Silo says which recipe is missing."
 }

@@ -1,11 +1,11 @@
 {
   "asks": "Is a recipe made of pieces?",
-  "answer": "A recipe is made of pieces that combine. A piece is a small recipe, and a recipe can include other recipes.",
+  "answer": "A recipe is made of pieces that combine. A piece adds one thing to a computer, such as an agent program, a language with its tools, or computer use, and it makes no computer by itself. A recipe names a system and the pieces it includes, and a piece can include other pieces. When two pieces set the same thing differently, the recipe is refused, and Silo names both pieces.",
   "sets": [
     {
       "in": "words",
       "word": "piece",
-      "means": "A small recipe that a recipe can include."
+      "means": "A text that adds one thing to a computer, such as an agent program or a tool. A recipe includes pieces, and a piece makes no computer by itself."
     }
   ]
 }

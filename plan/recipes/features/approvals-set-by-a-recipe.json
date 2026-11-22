@@ -8,5 +8,9 @@
     "computer-use-approvals",
     "steps-nix-cannot-describe",
     "computers-macos-screen"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A fresh macOS computer made for a task has nobody to click through the approvals, so computer use there needs them set in advance."
+  }
 }

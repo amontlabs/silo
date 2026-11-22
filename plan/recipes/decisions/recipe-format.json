@@ -1,4 +1,7 @@
 {
   "asks": "In which format is a recipe written?",
-  "answer": "A recipe is written in an existing format that people know and models write correctly. Making one can start from a project's Dockerfile or devcontainer."
+  "answer": "A recipe is a short file in TOML. It names the system, the pieces it includes and the packages it adds by name and version, and it may name the rules and secrets its computer needs. The format is Silo's own, in the shape devbox and Flox use for the same job, so that a person reads a recipe in a minute and a model writes one correctly. Silo checks a recipe before it makes anything, and names the line it cannot use. Making one can start from a project's devcontainer.json, Dockerfile or Brewfile: Silo proposes the pieces and packages that match, and lists what it could not match.",
+  "needs": [
+    "recipe-pieces"
+  ]
 }

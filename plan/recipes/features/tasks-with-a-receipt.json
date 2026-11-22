@@ -4,11 +4,14 @@
   "needs": [
     "made-from-a-recipe",
     "tasks-start-ready",
-    "task-receipt",
-    "meanings-for-recipes",
     "what-a-receipt-is",
+    "meanings-for-recipes",
     "forking-a-computer",
     "checkpoints-taken-on-their-own",
     "receipts-of-work"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "In Silo's shape, forks and fresh computers serve tasks, and a receipt is how a person judges a task in a minute."
+  }
 }

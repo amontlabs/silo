@@ -1,7 +1,8 @@
 {
   "asks": "How is a piece written once for every agent program?",
-  "answer": "Most pieces are the same for every agent program. Some have a part that differs, because each program keeps its instructions and skills in a different place. The data file of an agent program also says where the program keeps its instructions and skills, so that a piece is written once for every program.",
+  "answer": "A piece holds its instructions as Markdown and its skills as SKILL.md folders, once. The data file of each agent program says where that program reads instructions and skills, such as ~/.claude/CLAUDE.md and ~/.claude/skills for Claude Code, or ~/.codex/AGENTS.md and ~/.codex/skills for Codex. When Silo makes a computer, it puts the piece's files at the places each agent program in it reads. A program whose data file names no such place gets nothing from that part of the piece, and Silo says so when it makes the computer.",
   "needs": [
-    "recipe-pieces"
+    "recipe-pieces",
+    "agent-program-data-file"
   ]
 }

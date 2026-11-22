@@ -7,9 +7,13 @@
     "tasks-test-your-changes",
     "task-gets-one-commit",
     "engine-runs-task-checks",
-    "task-results-side-by-side",
+    "what-a-receipt-is",
     "task-macos-limit",
     "main-on-macos-first",
     "computers-linux-beside-main"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It catches a change that breaks one system before you push, from a run no agent touched."
+  }
 }
