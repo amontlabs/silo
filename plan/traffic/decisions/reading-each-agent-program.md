@@ -1,5 +1,30 @@
 # Can the boundary read the model traffic of each agent program
 
+## For the owner
+
+An agent's part, 22 November 2026. You want to work with Claude Code and Codex in main. On 19
+November an ordinary inspecting proxy, standing in for Silo, read Claude Code 2.1.327 on a Claude
+subscription and Codex 0.170.0 on a ChatGPT sign-in. Silo itself has not been tried yet, nor signing
+in from scratch through it.
+
+The options:
+
+- Shown as read only after its check (recommended). For each program, and each new version a recipe
+  gives it, a test through Silo shows four things: the program accepts Silo's certificate, each way
+  it talks to its model is read, signing in and renewing a sign-in work, and its requests leave
+  unchanged. A program whose model Silo cannot read still runs, and the app says that its
+  conversations, spend and budgets are not covered. A program that refuses Silo's certificate cannot
+  reach its model through Silo, so Silo does not offer it and says why. It costs a wait before a new
+  program or version is read.
+- Read on trust. The first test and the vendors' support for company proxies are taken as enough for
+  every program and version. It costs silent gaps: a version that moves to a new host or a new way
+  of talking to its model stops being read, while the app still shows its spend as complete.
+
+Recommended: shown as read only after its check. Spend, budgets and denied tool calls are worth only
+what Silo really reads, so what the app calls read has to have been seen read.
+
+## Notes
+
 To find out. A first test on 19 November 2026 says yes for Claude Code and Codex.
 
 What has to be checked is narrow: that each agent program accepts a certificate from Silo. Companies inspect traffic this way, and agent programs offer a setting for a company certificate, so this is expected to work. It is a test to run once per program.

@@ -1,5 +1,27 @@
 # Which costs of Silo's own processes have a target
 
+## For the owner
+
+An agent's part, 22 November 2026. Claude Code in main makes 200 model calls in an hour, and each
+one passes through Silo, which reads it. Silo's own programs on your Mac use memory and processor
+all the while, even when every computer is idle.
+
+The options:
+
+- Targets that hold (recommended). Each program Silo adds gets a target for its memory, processor,
+  disk writes and the wait it adds, written before it is built and measured on a named machine. A
+  change that misses a target does not go in. When a target cannot be met without you seeing less or
+  waiting longer, you choose. It costs slower work on Silo, and features that wait until they meet
+  their target or are redesigned.
+- Targets as a guide. The same targets are measured and shown, and a change that misses one goes in
+  with a note, to be tuned later. It costs weight that grows a few milliseconds at a time: each
+  model call and each idle hour cost a little more, and nobody chose it.
+
+Recommended: targets that hold. You asked on 21 November that anything of Silo's be as light as
+possible, and a target holds the weight down only if missing it stops the change.
+
+## Notes
+
 Agent, 22 November 2026, from Guillotine and guillotine-mini (evmts), two Zig codebases by one
 maintainer.
 
