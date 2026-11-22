@@ -3,27 +3,81 @@
 The public site at [silo.amontlabs.com](https://silo.amontlabs.com), built with
 Vite. It has two pages:
 
-- **Home** (`index.html`, `src/style.css`, `src/flow.css`, `src/cards.css`):
-  the way into the Workshop with one line on where Silo stands, the headline
-  and the pitch with the flow under them, six cards on what Silo does, and the
+- **Home** (`index.html`, `src/style.css`, `src/film/film.css`,
+  `src/cards.css`): the way into the Workshop with one line on where Silo
+  stands, the headline and the pitch with the film under them, six cards on
+  what Silo does with three smaller examples of extensions under them, and the
   "in heavy development" notice. Its texts are interim, until the owner settles
-  the new design, and nothing on it is read from the plan. The flow is a film
-  of eight steps, from main and its three agents to a fork dropped after one
-  file is brought back, played in a loop, with the step names and Pause under
-  it; a hidden caption tells it in words. Each card has a small picture of its
-  feature, a label, a title and a paragraph. The page has a script,
-  `src/home.ts`, that plays the pictures (`src/pictures.ts`, `src/flow.ts`,
-  `src/cards.ts`, `src/scene.ts`), one thing at a time: the flow while at
-  least 30% of it is in view, the cards in view taking turns while it does not
-  play, a card you point at or press at once. The film is drawn from the moment
-  alone, so a step name or Pause shows exactly what playing shows; nothing runs
-  while it is held. With reduced motion nothing moves until you press Play or a
-  card. Without script the flow shows the last moment of Boundary from its
-  markup and `src/flow.css` alone, at the size it keeps through every step, and
-  each card shows as a still at its end. The page shows once its fonts are
-  in (at most 1.2 s), so nothing changes width: it preloads every face it waits
-  for, and the deployed site lets a browser keep the font files, so a later
-  visit does not wait.
+  the new design, and nothing on it is read from the plan. The page has a
+  script, `src/home.ts`. It plays the pictures (`src/pictures.ts`), one thing at
+  a time: the film while at least 30% of it is in view, the cards in view taking
+  turns while nothing in it moves, and at once a card you point at or press,
+  which holds the film. When the film starts or jumps, the cards stop at once,
+  with no dissolve and no fading line. Play and a jump take the film back from
+  a card.
+
+  The cards are rules, secrets, record, screen, recipes and extensions. The
+  examples are disk watch, tool call check and registry rules.
+  - A card has a picture, a label, a title and a short text. An example
+    has no title.
+  - A card is not a control: the keyboard does not stop on it or play it. Its
+    picture is hidden from a screen reader, which reads its text.
+  - A picture is drawn at its end in `index.html`. `src/cards.ts` has, for each,
+    the moments of the parts it names by `data-part`, and plays them as
+    animations over that drawing. Stopping a picture is cancelling them, so the
+    last moment of a part is always the part as it is drawn.
+  - Across a row the pictures, labels, titles and texts start at the same
+    height, and take the same number of lines. Some sizes and measures in
+    `src/cards.css` are fitted to these exact sentences at some widths. After a
+    change to a sentence, measure the rows again in Firefox from 641 to 1440
+    wide. The film-check measures them at 1440, 1024 and 900 only.
+
+  The film (`src/film/`) is one session in Silo's window, in eleven shots and a
+  loop of 73.7 s. The window has a sidebar, a canvas and the record as a dock.
+  A row of the sidebar or a segment of the progress line jumps to its shot. A
+  jump plays the shot from its start, or holds its end when the film is paused.
+  Each frame is drawn from the moment alone, so `/?hold=31000` shows the film
+  at 31 s and `/?shot=4` the end of its fourth shot. Nothing changes layout
+  while it plays: only what is painted changes.
+  - `story.ts` has the shots as data: how long each lasts, the entries of the
+    plan it shows and where a phone's camera looks. A test fails when one of
+    those ids is not an entry of the plan.
+  - `shots.ts` and `network.ts` draw the shots, and `chrome.ts` what is around
+    the canvas.
+  - From 1065 px wide the window scales with the page. From 1000 to 1064 px its
+    smallest words are a unit larger, so they still show at 11 px. Under
+    1000 px there is no window: the film shows the name of the place, the
+    canvas through a camera that pans, and the record under it.
+  - The film's words are 11 px or more from 390 px wide up. Narrower they
+    shrink with the screen, to 9 px at 320.
+  - With reduced motion the film opens on the end of Network with Play, and
+    moves only once you press Play. A jump is instant, with no crossfade, and
+    the sidebar's mark never slides. Every card stays at its end.
+  - When reduced motion turns on, the film pauses on the end of the shot it is
+    in and the cards stop at once. When it turns off, nothing starts by itself:
+    the film waits for Play, and the cards take turns again once you point at
+    or press one.
+  - Without script the film shows that same still, at the size it keeps while
+    it plays and framed as it is then at each width, and each card shows as a
+    still at its end. The film's still is `src/film/still.html`, which the
+    build puts into the page. Its phone part brings the few styles that frame
+    it, written with it by the film-check and gone when the film is drawn.
+  - After a change to the film, with the dev server running, write its still
+    again with `npm --prefix website run film-check -- --write-still`, then
+    run `npm --prefix website run film-check`. It reads the film's frames in
+    Playwright's Firefox for words that overlap, are cut or are under 11 px
+    from 390 wide up (it says the smallest size at 320 and does not fail on
+    it), for a layout that changes while the film plays, for a page that
+    scrolls sideways, for a still framed unlike the film and for rows of cards
+    that do not line up (`--shots <dir>` saves captures).
+    It takes the server's URL after `--`. `npm test` does not run it.
+
+  The page shows once its fonts are in, or after 1.2 s without them. The film
+  mounts once the faces it measures its words in are in, however long that
+  takes, and from 1.2 s it shows its still until then. Every face either waits
+  for is preloaded (IBM Plex Sans is one file for all its weights, so its 500
+  needs no file of its own), and the deployed site lets a browser keep the font
+  files, so a later visit does not wait.
   A link to the site shows `public/og.png` when shared: a 1200 × 630 capture
   of `scripts/share-image.html`, opened from the dev server at
   `/scripts/share-image.html`.

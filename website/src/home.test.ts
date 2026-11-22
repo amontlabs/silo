@@ -1,11 +1,14 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { homePage } from './film/test-support';
 
-const html = readFileSync(join(process.cwd(), 'index.html'), 'utf8');
+const html = homePage();
 const read = (file: string) => readFileSync(join(process.cwd(), file), 'utf8');
-const css = ['src/style.css', 'src/flow.css', 'src/cards.css'].map(read).join('\n');
-const scripts = ['src/home.ts', 'src/pictures.ts', 'src/flow.ts', 'src/cards.ts', 'src/scene.ts'].map(read).join('\n');
+const css = ['src/style.css', 'src/film/film.css', 'src/cards.css'].map(read).join('\n');
+const filmFiles = readdirSync(join(process.cwd(), 'src/film')).filter((file) => file.endsWith('.ts') && !file.includes('test'));
+const filmScripts = filmFiles.map((file) => read(`src/film/${file}`)).join('\n');
+const scripts = [...['src/home.ts', 'src/pictures.ts', 'src/cards.ts'].map(read), filmScripts].join('\n');
 const theme = readFileSync(join(process.cwd(), 'public/theme.js'), 'utf8');
 const workshop = readFileSync(join(process.cwd(), 'workshop/index.html'), 'utf8');
 const HEADLINE = 'Your agents work in a computer of their own.';
@@ -31,113 +34,98 @@ describe('the home page', () => {
 
   it('holds the way to the Workshop, then the hero, then the cards, then the notice', () => {
     expect([...doc.querySelectorAll('main > *')].map((node) => node.tagName + (node.className ? `.${node.className.split(' ')[0]}` : ''))).toEqual(['A.strip', 'SECTION.hero', 'SECTION.for', 'DIV.notice']);
-    // The hero is the headline, the pitch and the flow, and no link of its own, so the flow starts high on the page.
-    expect([...doc.querySelectorAll('.hero > *')].map((node) => node.tagName + (node.id ? `#${node.id}` : ''))).toEqual(['H1#hero-title', 'P', 'DIV#flow']);
+    // The hero is the headline, the pitch and the film, and no link of its own, so the film starts high on the page.
+    expect([...doc.querySelectorAll('.hero > *')].map((node) => node.tagName + (node.id ? `#${node.id}` : `.${node.className}`))).toEqual(['H1#hero-title', 'P.pitch', 'DIV.film']);
     expect(doc.querySelectorAll('.hero a')).toHaveLength(0);
     expect(doc.querySelector('main > a.strip')?.getAttribute('href')).toBe('/workshop');
     expect([...doc.querySelectorAll('script[type="module"]')].map((script) => script.getAttribute('src'))).toEqual(['/src/home.ts']);
   });
 
-  it('tells the flow in words for a screen reader, and has no title of its own', () => {
-    // The headline above the flow names it.
-    expect(doc.querySelectorAll('.flow :is(h2, h3, .title)')).toHaveLength(0);
-    expect(doc.querySelector('.flow figure')?.getAttribute('aria-labelledby')).toBe('hero-title');
-    // The picture is drawn for the eye; a screen reader gets the caption instead.
-    expect(doc.querySelector('.stage')?.getAttribute('aria-hidden')).toBe('true');
-    expect(doc.querySelector('.flow figure')?.getAttribute('aria-describedby')).toBe('flow-caption');
-    expect(text('#flow-caption')).toEqual([
-      'Three agents work in main, a virtual machine on your Mac, in two repositories. Each runs its commands with sudo, and nothing asks for approval. Silo writes down what happens. What it saw itself, such as a tool call, a file change, a connection or a model call, is a fact. What a program inside told it is a report, and it is marked apart. A request to a host that a rule allows passes. A request to a host that no rule allows is denied at the edge of main, and the attempt is recorded. A short list shows what needs you, and the denied connection opens on the process, the tool call and the turn that led to it. Another list ranks repeated work by what it cost. Checkpoints are taken on their own. You go back to the one before that turn and continue from it in a fork, while main keeps running. Before you drop the fork, Silo lists what is only there. You bring one file back to main, and the fork goes to the bin.',
+  it('tells the film in words for a screen reader, and has no title of its own', () => {
+    // The headline above the film names it.
+    expect(doc.querySelectorAll('.film :is(h2, h3, .title)')).toHaveLength(0);
+    expect(doc.querySelector('.film figure')?.getAttribute('aria-labelledby')).toBe('hero-title');
+    expect(doc.querySelector('.film figure')?.getAttribute('aria-describedby')).toBe('film-caption');
+    // The stills are drawn for the eye; a screen reader gets the caption instead.
+    for (const still of doc.querySelectorAll('.film figure > :not(figcaption)')) expect(still.getAttribute('aria-hidden')).toBe('true');
+    expect(text('#film-caption')).toEqual([
+      "The film follows one session in Silo. On the first run you copy your agent programs and your repositories into main, a virtual machine on your Mac. Agents work there, and Now shows what each one runs and what it spent. You limit main's network to the hosts it used. A secret is only a placeholder inside main, and its real value is put in at the boundary. A package that is too young is denied, and so is a request to paste.rs, which no rule allows. That denial waits in Needs you, and it opens in the Timeline on the process and the turn that led to it. A rule denies a forced Git push, and the model gets an error. In Disk you purge what a rebuild would bring back. You go back to a checkpoint in a fork, bring one file back to main, and drop the fork into the bin. Your changes are tested on a macOS computer and a Linux computer. An extension you install denies a request that waits at the boundary. An agent reads the record as text with the silo command.",
     ]);
   });
 
-  it('gives the flow controls a screen reader can name', () => {
-    expect(text('.flow .ctl')).toEqual(['Pause']);
-    const steps = [...doc.querySelectorAll('.steps li > button[type="button"]')];
-    expect(steps.map((button) => button.getAttribute('aria-label'))).toEqual(['Main', 'Full access', 'Record', 'Boundary', 'Needs you', 'Cost', 'Go back', 'Drop']);
-    expect(text('.steps .lb')).toEqual(steps.map((button) => button.getAttribute('aria-label')));
-    // What is drawn inside the picture is not a control: nothing in it takes the keyboard.
-    expect(doc.querySelectorAll('.stage :is(button, a, input, [tabindex])')).toHaveLength(0);
+  it('gives the film a control a screen reader can name, and nothing to press in its still', () => {
+    expect(text('.film-pause')).toEqual(['Pause']);
+    expect(doc.querySelector('.film-progress')?.getAttribute('aria-label')).toBe('Shots of the film');
+    expect(doc.querySelectorAll('.film figure :is(button, a, input, [tabindex], [role="button"])')).toHaveLength(0);
   });
 
-  it('draws in the flow what the plan says, with the kind of each line of the record', () => {
-    const lines = (selector: string) =>
-      [...doc.querySelectorAll(`.stage ${selector}`)].map((line) => {
-        const mark = line.querySelector('.mk');
-        const kind = !mark?.matches('svg') ? '' : mark.classList.contains('fact') ? 'fact' : mark.classList.contains('opinion') ? 'opinion' : 'report';
-        return `${kind} ${line.textContent?.replace(/\s+/g, ' ').trim()}`.trim();
-      });
-    expect(text('.stage .main .who')).toEqual(['Claude Code~/api', 'Codex~/web', 'Claude Code~/api']);
-    expect(text('.stage .main .cmd')).toEqual(['$ sudo apt install postgresql-17', '$ npm install', '$ curl paste.rs', '$ cargo build']);
-    // Process names are reports and run names are opinions.
-    expect(lines('.rr')).toEqual([
-      'fact tool callcargo build',
-      'report processcargo build',
-      'fact files214 changed',
-      'fact model18 calls · $0.42',
-      'opinion by Claude Code, run 2',
-      'fact networkcrates.io',
-      'fact networkpaste.rsdenied',
-    ]);
-    expect(lines('.legend span')).toEqual(['fact fact', 'report report', 'opinion opinion']);
-    expect(lines('.cc')).toEqual(['fact connectionpaste.rs', 'report processcurl', 'fact tool callcurl paste.rs', 'opinion turn 14Codex']);
-    expect(lines('.nr')).toEqual(['1paste.rs denied', '2Codex asks for a host', 'opinion 3a run looks stuck']);
-    expect(text('.stage .cr')).toEqual(['npm install41 times in 12 runs38 min2.1 GB', 'cargo build9 times12 min1.1 GB', 'apt update7 times3 min0.2 GB']);
-    expect(text('.stage .host')).toEqual(['paste.rs', 'crates.io']);
-    expect(text('.stage .fn')).toEqual(['notes.mdnot committedBring back', 'CLAUDE.mdeditedBring back']);
-    expect(text('.stage :is(.mac-name, .cp-name, .hd b, .denied, .bin, .file, .pb.drop)')).toEqual([
-      'your Mac', 'before turn 14', 'main', 'record', 'paste.rs denied', 'needs you', 'cost', 'denied', 'bin', 'fork', 'Drop', 'only here', 'notes.md',
-    ]);
-    expect(doc.querySelector('.stage')?.textContent).not.toMatch(/sandbox|safe|secure|proven|dashboard|monitor|observab|merge|diff/i);
+  it('shows without script one still, for the window and for a phone: the end of Network', () => {
+    expect(doc.querySelectorAll('.film figure > .film-window')).toHaveLength(1);
+    expect(doc.querySelectorAll('.film figure > .film-phone')).toHaveLength(1);
+    for (const still of ['.film-window', '.film-phone']) {
+      const words = text(`${still} :is(text, span)`);
+      for (const word of ['Network', 'STRIPE_KEY', 'stripe v2', 'allowed', 'registries v3', 'denied', 'paste.rs denied']) expect(words, still).toContain(word);
+    }
   });
 
-  it('says what Silo does in six cards: a picture, a label, a title, one paragraph', () => {
+  it('says what Silo does in six cards, and three examples of the last under them', () => {
     expect(text('.for .title')).toEqual(['What Silo does']);
     expect(doc.querySelector('.for .title')?.tagName).toBe('H2');
     expect(doc.querySelector('.for')?.getAttribute('aria-labelledby')).toBe(doc.querySelector('.for .title')?.id);
-    expect(text('.points .term')).toEqual(['full access', 'macOS or Linux', 'the boundary', 'the record', 'what needs you', 'going back']);
-    expect(text('.points h3')).toEqual([
-      'Agents have sudo, and nothing asks them for approval',
-      'macOS or Linux, with a screen agents can drive',
-      'Your rules, enforced outside the computer',
-      'A record of everything agents did',
-      'A short list of what needs you',
-      'Silo takes you back to any moment',
+    expect(text('.fc-grid .fc-term')).toEqual(['rules', 'secrets', 'record', 'screen', 'recipes', 'extensions']);
+    expect(text('.fc-grid h3')).toEqual([
+      'Agents have full access, and your rules decide at the boundary',
+      'Agents use your keys without being able to read them',
+      'What agents did, seen from outside their computer',
+      'Agents click through Mac apps on a screen that is not yours',
+      'Every computer comes from a recipe you can share',
+      'Extensions read the record, alert you and deny requests',
     ]);
-    expect(text('.points h3 + p')).toEqual([
-      'Inside the computer, an agent installs a package or changes a system setting without a prompt. What it can reach outside is decided at the boundary.',
-      'A computer is a virtual machine that runs macOS or Linux. An agent can open an app there and click through it.',
-      'A connection that no rule allows is denied, and the attempt is recorded. Silo can propose rules from the hosts a computer actually used.',
-      'It says what ran, which files changed, where the computer connected and what the model calls cost. What Silo saw itself is marked apart from what a program inside reported.',
-      'The first screen ranks what needs you. An alert opens on what triggered it, and on the turn that led to it.',
-      'Checkpoints are taken on their own while agents work. You restore one, or you continue from it in a fork while main keeps running.',
+    expect(text('.fc-grid .fc-body')).toEqual([
+      'Nothing inside the computer asks for approval. At the boundary, your rules allow, hold or deny each request. The default is deny.',
+      'The computer holds a placeholder. Silo swaps in the real key on the way to a host you allowed. The key never enters the computer or the record.',
+      'File changes, connections and model calls are facts Silo saw itself. What a program inside says is kept apart, since an agent can change it.',
+      'Main is a macOS virtual machine with its own screen. Windows an agent opens there never take your focus or your screen.',
+      'A recipe is text: a pinned base and a layer built by Nix. Silo makes a macOS and a Linux computer from it and runs your tests on each.',
+      'One that runs code gets a computer of its own, with only the tools its manifest names. It can never allow what your rules deny.',
     ]);
-    expect(doc.querySelectorAll('.points > li.card > .txt > .term + h3 + p:last-child')).toHaveLength(6);
-    expect(doc.querySelectorAll('.points > li.card > svg.mini[aria-hidden="true"][viewBox="0 0 320 140"]')).toHaveLength(6);
-    expect([...doc.querySelectorAll('.card')].map((card) => card.getAttribute('data-mini'))).toEqual(['full', 'screen', 'edge', 'record', 'needs', 'back']);
+    expect(text('.fc-examples .fc-term')).toEqual(['disk watch', 'tool call check', 'registry rules']);
+    expect(text('.fc-examples .fc-body')).toEqual([
+      'Every minute it reads /work on main, draws a panel and alerts you.',
+      'It is asked about each tool call before the agent runs it. A denied call goes back to the model with an error.',
+      'It has no computer, only rules that allow crates.io. You see them before you install it.',
+    ]);
+    expect(doc.querySelector('.fc-examples')?.getAttribute('aria-label')).toBe('Examples of extensions');
+    expect(doc.querySelectorAll('.fc-examples h3')).toHaveLength(0);
+    // Each is the rows the grid lines up: a picture, a label, then a title and a text, or a text alone.
+    expect(doc.querySelectorAll('.fc-grid > li.fc-item > .fc-text > .fc-term + h3 + p.fc-body:last-child')).toHaveLength(6);
+    expect(doc.querySelectorAll('.fc-examples > li.fc-item > .fc-text > .fc-term + p.fc-body:last-child')).toHaveLength(3);
+    expect(doc.querySelectorAll('.fc-grid .fc-pic > svg[aria-hidden="true"][viewBox="0 0 376 188"]')).toHaveLength(6);
+    expect(doc.querySelectorAll('.fc-examples .fc-pic > svg[aria-hidden="true"][viewBox="0 0 240 94"]')).toHaveLength(3);
+    expect(doc.querySelectorAll('.fc-item > .fc-fill[aria-hidden="true"]:first-child')).toHaveLength(9);
+    // They are not controls: nothing in them is a stop of the keyboard, and what they say is their text.
+    expect(doc.querySelectorAll('.fc-grid :is([tabindex], [role], a, button), .fc-examples :is([tabindex], [role], a, button)')).toHaveLength(0);
   });
 
-  it('draws what the pictures say, and nothing the plan has not decided', () => {
-    const picture = (name: string) => text(`.card[data-mini="${name}"] svg text`);
-    // Three commands, each followed by its check, and no prompt, button or question.
-    expect(picture('full')).toEqual(['main', '$ sudo apt install postgresql-17', '$ sudo systemctl restart postgresql', '$ npm install']);
-    expect(doc.querySelectorAll('.card[data-mini="full"] svg .ok')).toHaveLength(3);
-    expect(doc.querySelectorAll('.card[data-mini="full"] svg :is(button, a, input, .btnr)')).toHaveLength(0);
-    expect(picture('screen')).toEqual(['macOS', 'Linux', 'agent']);
-    expect(picture('edge')).toEqual(['main', 'crates.io', 'paste.rs', 'denied']);
-    // A fact is a filled diamond and a report a hollow one: only the process is a report.
-    expect(picture('record')).toEqual([
-      'tool call', 'cargo build', 'process', 'cargo build', 'files', '214 changed', 'network', 'crates.io', 'model', '18 calls · $0.42', 'fact', 'report',
-    ]);
-    const kinds = (name: string) =>
-      [...doc.querySelectorAll(`.card[data-mini="${name}"] svg .dm`)].map((mark) => (mark.classList.contains('fact') ? 'fact' : mark.classList.contains('op') ? 'opinion' : 'report'));
-    expect(kinds('record')).toEqual(['fact', 'report', 'fact', 'fact', 'fact', 'fact', 'report']);
-    expect(picture('needs')).toEqual(['1', 'paste.rs denied', '2', 'Codex asks for a host', '3', 'a run looks stuck', 'connection', 'paste.rs', 'turn 14', 'Codex']);
-    expect(kinds('needs')).toEqual(['opinion', 'fact', 'opinion']);
-    // The row of turn 14 and the line `a run looks stuck` carry the opinion mark, and the line leading to the row is dashed.
-    expect(doc.querySelectorAll('.card[data-mini="needs"] svg .c2 .op, .card[data-mini="needs"] svg .g3 .op')).toHaveLength(2);
-    expect(doc.querySelectorAll('.card[data-mini="needs"] svg .wd')).toHaveLength(1);
-    expect(picture('back')).toEqual(['main', 'fork']);
-    expect(doc.querySelectorAll('.card[data-mini="back"] svg .dm')).toHaveLength(5);
+  it('draws what the pictures say', () => {
+    const picture = (name: string) => text(`.fc-item[data-picture="${name}"] svg text`);
+    expect(picture('rules')).toEqual(['main', '$ sudo …', 'denied', 'registries', 'no rule', 'registry.npmjs.org', 'paste.rs']);
+    expect(picture('secrets')).toEqual(['main', 'STRIPE_KEY', 'STRIPE_KEY', 'sk_live_••••', 'stripe', 'api.stripe.com']);
+    expect(picture('record')).toEqual(['main', '$', 'fact · file changed', 'report · cargo build']);
+    expect(picture('screen')).toEqual(['your Mac', 'main']);
+    expect(picture('recipes')).toEqual(['base · pinned', 'nix · postgresql', 'pieces · skills', 'macOS', 'Linux']);
+    expect(picture('extensions')).toEqual(['main', 'record', 'extension', 'alert']);
+    expect(picture('disk')).toEqual(['main', '/work']);
+    expect(picture('call')).toEqual(['check', 'git push --force', 'model', 'deny']);
+    expect(picture('registry')).toEqual(['main', 'crates.io', 'allow']);
+  });
+
+  it('is at each picture\'s end without a script: only what travels and what covers is out of sight', () => {
+    const cards = read('src/cards.css').replace(/\/\*[\s\S]*?\*\//g, '');
+    const gone = [...cards.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, , body]) => /opacity: *0|visibility|display: *none|scaleX\(0\)/.test(body)).map(([, selector]) => selector.trim());
+    expect(gone.sort()).toEqual(['.for .fc-cover', '.for .fc-fill', '.for .fc-moving', '.for .fc-tree::after'].sort());
+    // With reduced motion and without script there is nothing to switch off: the styles move nothing.
+    expect(cards).not.toMatch(/animation|transition|@keyframes/);
   });
 
   it('has the navigation, with GitHub kept on phones', () => {
@@ -161,7 +149,7 @@ describe('the home page', () => {
     const body = html.slice(html.indexOf('<main'));
     expect(body).not.toMatch(/(?:fill|stroke|style)="[^"]*#[0-9a-f]{3,8}/i);
     expect(scripts).not.toMatch(/#[0-9a-f]{3,8}\b/i);
-    expect(['src/flow.css', 'src/cards.css'].map(read).join('\n').replace(/\/\*[\s\S]*?\*\//g, '')).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
+    expect(['src/film/film.css', 'src/cards.css'].map(read).join('\n').replace(/\/\*[\s\S]*?\*\//g, '')).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
   });
 
   it('says what the Workshop is and where Silo stands, with nothing read from the plan', () => {
@@ -194,11 +182,35 @@ describe('the home page', () => {
     for (const href of preloaded) expect(existsSync(join(process.cwd(), 'public', href))).toBe(true);
   });
 
+  it('preloads every face the film waits for', () => {
+    const faces = [...read('public/fonts/fonts.css').matchAll(/@font-face \{([^}]*)\}/g)].map(([, body]) => {
+      const [low, high = low] = /font-weight: ([\d ]+);/.exec(body)![1].split(' ').map(Number);
+      return { family: /font-family: '([^']+)'/.exec(body)![1], italic: body.includes('style: italic'), low, high, file: /url\(\.\/([^)]+)\)/.exec(body)![1] };
+    });
+    const preloaded = [...doc.querySelectorAll('link[rel="preload"][as="font"]')].map((link) => link.getAttribute('href'));
+    const waited = [...(/const FACES = \[(.*)\];/.exec(read('src/home.ts'))?.[1].matchAll(/"(?:(\d+) )?\d+px '([^']+)'"/g) ?? [])];
+    expect(waited).toHaveLength(3);
+    for (const [face, weight = '400', family] of waited) {
+      // Plex Sans is one file for every weight from 400 to 600, so 500 asks for no file of its own.
+      const from = faces.find((one) => !one.italic && one.family === family && one.low <= Number(weight) && Number(weight) <= one.high);
+      expect(preloaded, face).toContain(`/fonts/${from?.file}`);
+    }
+  });
+
+  it('shows the still of a film that is not drawn by the time the page shows regardless', () => {
+    const page = /setTimeout\(show, (\d+)\)/.exec(html)?.[1];
+    const still = /classList\.remove\('pictures-pending'\), (\d+)\)/.exec(html)?.[1];
+    expect(page).toBe('1200');
+    expect(still).toBe(page);
+  });
+
   it('keeps no style for a class or id the page and its scripts do not use', () => {
     const used = new Set([
       ...[...html.matchAll(/class="([^"]*)"/g)].flatMap((match) => match[1].split(/\s+/)),
       ...[...scripts.matchAll(/['"`.]([a-z][\w-]*)/g)].map((match) => match[1]),
       ...[...scripts.matchAll(/class="([^"$]*)/g)].flatMap((match) => match[1].split(/\s+/)),
+      // The film names the classes of what it draws several to a string.
+      ...(filmScripts.match(/\bf-[a-z][a-z0-9-]*/g) ?? []),
     ]);
     const ids = new Set([...html.matchAll(/id="([^"]*)"/g)].map((match) => match[1]));
     const selectors = css.replace(/\/\*[\s\S]*?\*\//g, '').match(/[^{}]+(?=\{)/g) ?? [];
@@ -223,17 +235,40 @@ describe('the home page', () => {
       ...names(read('src/style.css')),
       ...names(html.slice(html.indexOf('<style>'), html.indexOf('</style>'))),
     ]);
-    // What style.css styles on purpose: the pictures' own frames, hidden until they are drawn, and a scene being put at a moment.
-    for (const own of ['stage', 'steps', 'ctl', 'mini', 'jump']) page.delete(own);
-    const inMarkup = [...doc.querySelectorAll('.stage, .stage *, .steps, .steps *, .mini, .mini *')].flatMap((part) => [...part.classList]);
-    // In the scripts: the class names in a selector, those a cue adds or removes, and those of the wires it draws.
-    const code = read('src/flow.ts') + read('src/cards.ts') + read('src/scene.ts');
-    const inScripts = [
-      ...[...code.matchAll(/'[^'\n]*'|`[^`\n]*`/g)].flatMap(([literal]) => [...literal.matchAll(/\.([a-z][\w-]*)/g)].map((match) => match[1])),
-      ...[...code.matchAll(/(?:add|rem|once|toggle|remove)\((?:'[^'\n]*', )?'([a-z][\w-]*)'/g)].map((match) => match[1]),
-      ...[...code.matchAll(/class="([^"$]*)/g)].flatMap((match) => match[1].split(/\s+/)),
-    ];
+    // What style.css styles on purpose: the film's root, hidden until it is drawn.
+    page.delete('film');
+    const inMarkup = [...doc.querySelectorAll('.film figure > :not(figcaption), .film figure > :not(figcaption) *, .fc-grid, .fc-grid *, .fc-examples, .fc-examples *, .fc-tree')].flatMap((part) => [...part.classList]);
+    // The scripts of the cards name their classes in selectors, and add one.
+    const inScripts = read('src/cards.ts').match(/\bfc-[a-z-]+/g) ?? [];
     expect([...new Set([...inMarkup, ...inScripts])].filter((name) => page.has(name))).toEqual([]);
+  });
+
+  it("keeps the film's styles under its root, and its names out of the rest of the page", () => {
+    const selectorsOf = (file: string) =>
+      (read(file).replace(/\/\*[\s\S]*?\*\//g, '').match(/[^{}]+(?=\{)/g) ?? [])
+        .filter((selector) => !selector.trim().startsWith('@'))
+        .flatMap((selector) => selector.split(',').map((one) => one.trim()));
+    for (const selector of selectorsOf('src/film/film.css')) expect(selector).toMatch(/^(:root\[data-theme="dark"\] )?\.film(?![\w-])/);
+    const classes = (file: string) => selectorsOf(file).flatMap((selector) => [...selector.matchAll(/\.([A-Za-z][\w-]*)/g)].map((match) => match[1]));
+    expect(classes('src/film/film.css').filter((name) => !/^(film|f-|live$)/.test(name))).toEqual([]);
+    // Outside its own stylesheet only its root is named, to hide it until it is drawn.
+    expect(['src/site.css', 'src/style.css', 'src/cards.css'].flatMap(classes).filter((name) => /^(film-|f-)/.test(name))).toEqual([]);
+  });
+
+  it("keeps the cards' styles in their section, and their names out of the film and the rest of the page", () => {
+    const selectorsOf = (file: string) =>
+      (read(file).replace(/\/\*[\s\S]*?\*\//g, '').match(/[^{}]+(?=\{)/g) ?? [])
+        .filter((selector) => !selector.trim().startsWith('@'))
+        .flatMap((selector) => selector.split(',').map((one) => one.trim()));
+    const classes = (selector: string) => [...selector.matchAll(/\.([A-Za-z][\w-]*)/g)].map((match) => match[1]);
+    for (const selector of selectorsOf('src/cards.css')) {
+      expect(selector).toMatch(/^(:root\[data-theme="dark"\] )?\.for /);
+      expect(classes(selector).filter((name) => !/^(for|fc-|title$)/.test(name)), selector).toEqual([]);
+    }
+    const section = doc.querySelector('.for')!;
+    expect([...section.querySelectorAll('*')].flatMap((el) => [...el.classList]).filter((name) => !/^(fc-|title$)/.test(name))).toEqual([]);
+    expect([...section.querySelectorAll('[id]')].map((el) => el.id).filter((id) => !/^(fc-|for-title$)/.test(id))).toEqual([]);
+    expect(['src/site.css', 'src/style.css', 'src/film/film.css'].flatMap(selectorsOf).flatMap(classes).filter((name) => name.startsWith('fc-'))).toEqual([]);
   });
 
   it('has a theme script with only what the two pages use', () => {

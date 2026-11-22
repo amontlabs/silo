@@ -1,12 +1,14 @@
-// The home page has two pictures: the flow and the cards. This starts both and says which may move.
+// The home page has two pictures: the film and the cards. This starts both and says which may move.
 //
-// Only one thing moves on its own at a time. The flow plays while at least 30% of it is in view, and the cards
-// take turns only while the flow is not playing. A card the visitor points at or presses holds the flow until
-// they leave it or it ends. A hidden tab holds everything. With reduced motion nothing moves until the visitor
-// presses Play or a card.
+// One thing moves at a time. The film plays while at least 30% of it is in view, and the cards take turns only
+// while nothing in the film moves: as it starts or jumps, the cards stop at once. A card the visitor points at or
+// presses holds the film until they leave it, it ends or they take the film with Play or a jump. A hidden tab
+// holds everything. With reduced motion the cards stay at their end, the film moves only once the visitor presses
+// Play, and a jump is instant. When reduced motion turns on everything stops, and when it turns off nothing
+// starts by itself.
 
 import { mountCards, type Cards } from './cards';
-import { mountFlow, type Flow } from './flow';
+import { mountFilm, type Film } from './film/film';
 
 declare global {
   interface Window {
@@ -15,38 +17,56 @@ declare global {
   }
 }
 
-/** How much of the flow has to be in view for it to play. */
-const FLOW_IN_VIEW = 0.3;
+/** How much of the film has to be in view for it to play. */
+const FILM_IN_VIEW = 0.3;
 
-export function mountPictures(): { flow: Flow; cards: Cards } {
-  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const flowRoot = document.getElementById('flow')!;
-  let flowInView = false;
-  let flow: Flow | undefined;
+/** Whether enough of `el` is in view now, for the first frame: the observer only answers after it. */
+function inViewNow(el: Element) {
+  const { top, bottom, height } = el.getBoundingClientRect();
+  return height > 0 && (Math.min(bottom, innerHeight) - Math.max(top, 0)) / height >= FILM_IN_VIEW;
+}
+
+export function mountPictures({ hold = null }: { hold?: number | null } = {}): { film: Film; cards: Cards } {
+  const motion = matchMedia('(prefers-reduced-motion: reduce)');
+  const root = document.querySelector<HTMLElement>('.film')!;
+  const figure = root.querySelector('figure')!;
+  let filmInView = inViewNow(figure);
+  let film: Film | undefined;
   let cards: Cards | undefined;
   const settle = () => {
-    if (!flow || !cards) return;
+    if (!film || !cards) return;
     const visible = document.visibilityState !== 'hidden';
-    flow.allow(flowInView && visible && !cards.busy);
-    cards.turns(visible && !flow.running);
+    film.allow(filmInView && visible && !cards.busy);
+    if (cards.busy) film.land();
+    cards.turns(visible && !film.moving);
   };
-  flow = mountFlow(flowRoot, { still, onChange: settle });
-  cards = mountCards(document.getElementById('cards')!, { still, onChange: settle });
+  const take = () => {
+    cards?.giveWay();
+    settle();
+  };
+  film = mountFilm(root, { reduced: motion.matches, inView: filmInView, hold, onTake: take, onChange: settle });
+  cards = mountCards(document.getElementById('cards')!, { still: motion.matches, onChange: settle });
+  motion.addEventListener('change', () => {
+    // The film first: told of the cards alone, it would play on as they let go of it.
+    film.reduce(motion.matches);
+    cards.still(motion.matches);
+    settle();
+  });
 
   new IntersectionObserver(
     (entries) => {
-      flowInView = entries[entries.length - 1].intersectionRatio >= FLOW_IN_VIEW;
+      filmInView = entries[entries.length - 1].intersectionRatio >= FILM_IN_VIEW;
       settle();
     },
-    { threshold: FLOW_IN_VIEW },
-  ).observe(flowRoot.querySelector('.stage')!);
+    { threshold: FILM_IN_VIEW },
+  ).observe(figure);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') cards.rest();
     settle();
   });
-  // Both pictures are drawn: they can show.
+  // The film is drawn: it can show. The cards show from their markup.
   window.clearTimeout(window.siloPicturesFallback);
   document.documentElement.classList.remove('pictures-pending');
   settle();
-  return { flow, cards };
+  return { film, cards };
 }

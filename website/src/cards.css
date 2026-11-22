@@ -1,103 +1,198 @@
-/* The cards: six features, each a small picture, a label, a title and one sentence. The gaps of the grid are
-   its lines. cards.ts plays one picture at a time by adding a class to a part when its moment comes. */
+/* The cards under the film: six features, each a picture, a label, a title and a sentence, and under them three
+   examples of the last. The column gaps and the top borders of a list are its lines. A picture is drawn 376 wide, the
+   width of a card at desktop, an example's 240, so that both keep the film's strokes.
+   What this file draws is a picture at its end: that is the still seen without the script and with reduced motion. */
 .for .title { padding: 24px var(--gutter) 22px; }
-.points { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); background: var(--line); }
-.card { position: relative; background: var(--paper); cursor: pointer; }
-/* The line over a card fills while its picture plays. */
-.card .prog { position: absolute; left: 0; right: 0; top: -1px; height: 2px; overflow: hidden; z-index: 1; }
-.card .prog b { position: absolute; inset: 0; background: var(--accent); transform: scaleX(0); transform-origin: left; }
-.card.playing .prog b { animation: card-fill var(--dur) linear forwards; }
-@keyframes card-fill { to { transform: none; } }
-/* A card that stops or ends: its line fades out from the width it had. */
-.card .prog b.ebb { opacity: 0; transition: opacity var(--fade) linear; }
-/* The line between a picture and its text is lighter than the lines of the grid. */
-.card .txt { padding: 12px var(--gutter) 22px; border-top: 1px solid color-mix(in srgb, var(--line) 50%, var(--paper)); }
-.card .term { font: 12px/1.5 var(--mono); color: var(--accent-ink); }
-.card h3 { margin-top: 7px; font: 20px/1.3 var(--serif); letter-spacing: -0.2px; text-wrap: balance; }
-.card h3 + p { margin-top: 7px; font-size: 14px; line-height: 1.6; color: var(--muted); text-wrap: pretty; }
+.for .fc-grid, .for .fc-examples {
+  container-type: inline-size;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 1px; margin: 0; padding: 0;
+  list-style: none; background: var(--line);
+}
 
-/* The small pictures. Everything is drawn in a 320 by 140 box. What a computer prints is set in mono, the rest in sans. */
-.mini { width: 100%; max-width: 460px; height: auto; margin: 0 auto; }
-/* A copy of a picture as it was, dissolving over the picture now (cards.ts). It lies on the picture's own box. */
-.card .mini.ghost { position: absolute; max-width: none; margin: 0; background: var(--paper); pointer-events: none; }
-.mini text { font: 10px var(--mono); fill: var(--muted); }
-.mini .sn { font-family: var(--sans); }
-.mini .i { fill: var(--ink); }
-.mini .a { fill: var(--accent-ink); }
-.mini .s9 { font-size: 9px; }
-.mini .pr { fill: var(--muted); }
-.mini .bx { fill: var(--surface); stroke: var(--wire); stroke-width: 1; }
-.mini .rl { fill: none; stroke: var(--line); stroke-width: 1; }
-.mini .gl { fill: none; stroke: var(--muted); stroke-width: 1; }
-.mini .edge { fill: none; stroke: var(--wire); stroke-width: 1; stroke-dasharray: 2 4; opacity: 0.75; }
-/* A part that appears: it fades in, or pops out of its left edge or its centre. */
-.mini .f { opacity: 0; transition: opacity 0.3s; }
-.mini .f.on { opacity: 1; }
-.mini .p { opacity: 0; transform: scale(0.8); transform-box: fill-box; transform-origin: center; transition: opacity 0.25s, transform 0.45s cubic-bezier(0.2, 0.9, 0.25, 1); }
-.mini .p.left { transform-origin: 0% 50%; }
-.mini .p.on { opacity: 1; transform: none; }
-/* A part that gives way is there until it fades out. */
-.mini .g { transition: transform 0.4s ease; }
-.mini .g.low { transform: translateY(44px); }
-.mini .wr { fill: none; stroke: var(--wire); stroke-width: 1; stroke-dasharray: 1; stroke-dashoffset: 1; }
-.mini .wr.on { stroke-dashoffset: 0; transition: stroke-dashoffset 0.4s ease; }
-.mini .wr.acc { stroke: var(--accent); stroke-width: 1.6; }
-/* The site's diamond. A checkpoint is hollow and turns orange when you go back to it. In the record a filled one is a
-   fact and a hollow one a report. */
-.mini .dm { fill: var(--paper); stroke: var(--wire); stroke-width: 1; transition: fill 0.2s, stroke 0.2s; }
-.mini .dm.hot { fill: var(--accent); stroke: var(--accent); }
-.mini .dm.fact { fill: var(--ink); stroke: var(--ink); }
-/* An opinion is a hollow diamond with its left half filled. */
-.mini .hf { fill: var(--ink); stroke: none; }
-/* The part of a joining line that leads to an opinion is dashed. */
-.mini .wd { fill: none; stroke: var(--wire); stroke-width: 1; stroke-dasharray: 2 2; }
-.mini .ok { fill: none; stroke: var(--accent-ink); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.mini .xx { fill: none; stroke: var(--accent-ink); stroke-width: 1.3; stroke-linecap: round; }
-/* A pointer glides to its place. Yours takes the text colour, an agent's the accent. Its outline is the page's colour. */
-.mini .mv { transition: transform 0.6s cubic-bezier(0.3, 0.6, 0.2, 1), opacity 0.2s; }
-.mini .cur { color: var(--ink); }
-.mini .cur.agentc { color: var(--accent); }
-.cur-edge { stroke: var(--paper); }
-.mini .chip { fill: var(--surface); stroke: var(--line); stroke-width: 1; transition: fill 0.2s, stroke 0.2s; }
-.mini .chip.lit { fill: var(--accent-wash); stroke: var(--accent); }
-.mini .trk { fill: var(--paper); stroke: var(--wire); stroke-width: 1; }
-/* A command is typed one character at a time: the clip opens along the characters the line has. */
-.mini .ty { clip-path: inset(0 100% 0 0); transition: clip-path var(--t) steps(var(--n), end); }
-.mini .ty.on { clip-path: inset(0); }
-/* The boundary: a request is a dot that travels, and the gate is lit when it stops one. */
-.mini .wn { fill: none; stroke: var(--wire); stroke-width: 1; stroke-dasharray: 2 3; }
-.mini .gate rect { fill: var(--paper); stroke: var(--wire); stroke-width: 1; transition: fill 0.2s, stroke 0.2s; }
-.mini .gate path { fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-linecap: round; transition: stroke 0.2s; }
-.mini .gate.lit rect { fill: var(--accent-wash); stroke: var(--accent); }
-.mini .gate.lit path { stroke: var(--accent-ink); }
-.mini .mk { fill: none; stroke: var(--wire); stroke-width: 1.3; transition: fill 0.2s, stroke 0.2s; }
-.mini .mk.got { fill: var(--ink); stroke: var(--ink); }
-.mini .pk { fill: var(--ink); stroke: var(--paper); stroke-width: 1; opacity: 0; }
-.mini .pk.on { opacity: 1; }
-/* Linux and macOS screens. */
-.mini .rlf { fill: var(--line); }
-.mini .fld { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
-.mini .btnr { fill: var(--surface); stroke: var(--wire); stroke-width: 1; transition: fill 0.2s, stroke 0.2s; }
-.mini .btnr.on { fill: var(--accent-wash); stroke: var(--accent); }
+/* A card is four of the grid's rows: picture, label, title, body. An example has no title. */
+.for .fc-item {
+  position: relative; min-width: 0; display: grid; grid-template-rows: subgrid; grid-row: span 4;
+  row-gap: 0; border-top: 1px solid var(--line); background: var(--paper); cursor: pointer;
+}
 
-/* Without its script a picture cannot play. It shows as a still at its end: every part that appears is there, the
-   typed lines are whole, the parts that give way are gone, and what a gesture changed has changed. A pointer is not
-   part of a still. */
-.points:not(.live) .mini :is(.f, .p):not(.mv) { opacity: 1; transform: none; }
-.points:not(.live) .mini .wr { stroke-dashoffset: 0; }
-.points:not(.live) .mini .ty { clip-path: none; }
-.points:not(.live) .mini .g { transform: translateY(44px); }
-.points:not(.live) .card[data-mini="edge"] .m1 { fill: var(--ink); stroke: var(--ink); }
-.points:not(.live) .card[data-mini="edge"] .gate rect { fill: var(--accent-wash); stroke: var(--accent); }
-.points:not(.live) .card[data-mini="edge"] .gate path { stroke: var(--accent-ink); }
-.points:not(.live) .card[data-mini="screen"] .btnr { fill: var(--accent-wash); stroke: var(--accent); }
-.points:not(.live) .card[data-mini="needs"] .r1 { fill: var(--accent-wash); stroke: var(--accent); }
-.points:not(.live) .card[data-mini="back"] .s2 { fill: var(--accent); stroke: var(--accent); }
+/* The line over a card fills while its picture plays, as a segment of the film's progress does. */
+.for .fc-fill {
+  position: absolute; left: 0; right: 0; top: -1px; height: 2px; z-index: 1;
+  background: var(--ink); transform: scaleX(0); transform-origin: left;
+}
 
+/* Type and padding follow the width of a card (100cqi is the list's), so that a title keeps two lines and a body
+   three. A body is 22.1 of its own size wide at three lines, a title 15.4 at two. Balanced lines leave no word alone.
+   The measure keeps the shortest body from taking one line fewer than the others. */
+.for .fc-grid .fc-text {
+  --card: calc((100cqi - 2px) / 3);
+  --pad: clamp(13px, (var(--card) - 309px) / 2, var(--gutter));
+  --room: calc(var(--card) - 2 * var(--pad));
+  --lines: 3;
+  --measure: 22.9em;
+}
+.for .fc-text {
+  display: grid; grid-template-rows: subgrid; grid-row: span 3; row-gap: 0; align-content: start;
+  padding: 14px var(--pad) 24px; border-top: 1px solid color-mix(in srgb, var(--line) 50%, var(--paper));
+}
+.for .fc-text .fc-term { font: 12px/1.5 var(--mono); color: var(--accent-ink); }
+
+.for .fc-grid h3 {
+  margin: 7px 0 0; min-height: 2.6em; font: min(20px, var(--room) / 15.4)/1.3 var(--serif);
+  letter-spacing: -0.2px; text-wrap: balance;
+}
+.for .fc-grid .fc-body {
+  margin-top: 7px; min-height: calc(var(--lines) * 1.6em); max-width: var(--measure);
+  font: clamp(13px, var(--room) / 22.1, 14px)/1.6 var(--sans); color: var(--muted); text-wrap: balance;
+}
+
+/* Never under 296 wide: its words stay 11 px in the narrowest column. */
+.for .fc-pic { position: relative; width: clamp(296px, 100% - 18px, 440px); max-width: 100%; margin: 0 auto; padding: 10px 0; }
+.for .fc-pic svg { display: block; width: 100%; height: auto; }
+/* A copy of a picture as it was, dissolving over the picture as it is now. */
+.for .fc-pic svg.fc-ghost { position: absolute; left: 0; top: 10px; background: var(--paper); pointer-events: none; }
+
+/* The examples hang from the extensions card, set in from the grid's edges: a line leaves the card and branches
+   to each. An example draws its own branch, so that each meets its middle to the pixel. */
+.for .fc-tree, .for .fc-examples { --inset: var(--gutter); }
+.for .fc-tree { position: relative; height: 26px; border-top: 1px solid var(--line); background: var(--paper); }
+.for .fc-tree::after {
+  content: ""; position: absolute; top: 12px; border-top: 1px solid var(--wire);
+  left: calc(var(--inset) + (100% - 2 * var(--inset)) / 6); right: calc(var(--inset) + (100% - 2 * var(--inset)) / 6);
+}
+.for .fc-examples { margin: 0 var(--inset) var(--inset); border: 1px solid var(--line); border-top: 0; }
+.for .fc-examples .fc-item { grid-row: span 3; }
+.for .fc-examples .fc-item::before, .for .fc-examples .fc-item:last-child::after {
+  content: ""; position: absolute; left: 50%; top: -14px; height: 13px; border-left: 1px solid var(--wire);
+}
+.for .fc-examples .fc-item:last-child::after { top: -27px; }
+.for .fc-examples .fc-pic { width: min(240px, 100%); padding: 10px 0 0; }
+.for .fc-examples .fc-text {
+  --pad: clamp(8px, (100cqi / 3 - 220px) / 2, 20px);
+  grid-row: span 2; border-top: 0; padding: 10px var(--pad) 16px;
+}
+.for .fc-examples .fc-body { margin-top: 4px; min-height: 3.1em; font: 13px/1.55 var(--sans); color: var(--muted); text-wrap: balance; }
+
+/* A path is one word: a line never breaks at its slash. */
+.for .fc-keep { white-space: nowrap; }
+
+/* The drawing. What a computer prints is mono, the rest sans. */
+.for .fc-pic text { font: 14px var(--mono); fill: var(--ink); white-space: pre; }
+.for .fc-pic .fc-title { font: 500 14px var(--sans); }
+.for .fc-pic .fc-quiet { fill: var(--muted); }
+.for .fc-pic .fc-hot { fill: var(--accent-ink); }
+
+.for .fc-comp { fill: var(--surface); stroke: var(--ink); stroke-width: 1.5; }
+.for .fc-comp.fc-away { fill: none; stroke: var(--wire); stroke-dasharray: 6 5; }
+.for .fc-rule { fill: var(--surface); stroke: var(--ink); stroke-width: 1.5; }
+.for .fc-rule.fc-hot { fill: var(--surface); stroke: var(--accent); }
+.for .fc-rule.fc-none { stroke: var(--wire); stroke-dasharray: 4 4; }
+.for .fc-edge { fill: none; stroke: var(--ink); stroke-width: 1.5; }
+.for .fc-rest { fill: none; stroke: color-mix(in srgb, var(--wire) 50%, var(--paper)); stroke-width: 1.5; }
+.for .fc-hair { fill: none; stroke: var(--line); stroke-width: 1; }
+.for .fc-trail { fill: none; stroke: var(--ink); stroke-width: 2; }
+.for .fc-trail.fc-hot { fill: none; stroke: var(--accent); }
+.for .fc-chip { fill: var(--surface); stroke: var(--wire); stroke-width: 1.25; }
+.for .fc-chip.fc-held { stroke-dasharray: 4 4; }
+.for .fc-chip.fc-hot { fill: var(--surface); stroke: var(--accent); stroke-width: 1.5; }
+.for .fc-thin { fill: none; stroke: var(--wire); stroke-width: 1; }
+.for .fc-sight { fill: none; stroke: var(--wire); stroke-width: 1.5; stroke-dasharray: 1 6; stroke-linecap: round; }
+.for .fc-open { fill: var(--surface); stroke: var(--ink); stroke-width: 1.5; }
+.for .fc-open.fc-hot { fill: var(--surface); stroke: var(--accent); }
+.for .fc-trail.fc-fold { stroke-width: 1.5; }
+.for .fc-bang { fill: none; stroke: var(--on-accent); stroke-width: 2.2; stroke-linecap: round; }
+.for .fc-solid { fill: var(--ink); }
+.for .fc-orange { fill: var(--accent); }
+.for .fc-source { fill: var(--wire); }
+.for .fc-ground { fill: var(--paper); }
+.for .fc-cover { fill: var(--surface); }
+.for .fc-bar { fill: color-mix(in srgb, var(--wire) 40%, var(--paper)); }
+.for .fc-press { fill: var(--surface); stroke: var(--wire); stroke-width: 1.25; }
+.for .fc-pressed { fill: var(--ink); }
+.for .fc-tick { fill: none; stroke: var(--surface); stroke-width: 1.5; }
+.for .fc-agent { fill: var(--accent); stroke: var(--surface); stroke-width: 1.2; stroke-linejoin: round; }
+
+/* On the dark paper the resting lanes, bars and hairlines need more of the wire. */
+:root[data-theme="dark"] .for .fc-rest { stroke: var(--wire); }
+:root[data-theme="dark"] .for .fc-bar { fill: color-mix(in srgb, var(--wire) 75%, var(--paper)); }
+:root[data-theme="dark"] .for .fc-hair { stroke: color-mix(in srgb, var(--wire) 60%, var(--paper)); }
+
+/* Parts that exist only while a picture plays: what travels, and what hides a line until it is written. */
+.for .fc-moving { opacity: 0; }
+.for .fc-cover { transform: scaleX(0); }
+
+/* Where a row cannot hold three lines at 13, all its bodies take four: the measure narrows to what three would
+   not fit in. The examples do the same, from the one whose text is longest. The widths asked are the list's own, so
+   that a scroll bar changes nothing. In the narrowest columns a picture is under 296 wide: its words grow. */
+@media (min-width: 901px) {
+  @container (max-width: 937px) {
+    .for .fc-grid .fc-item:nth-child(-n + 3) .fc-text { --measure: 228px; }
+  }
+  @container (max-width: 876px) {
+    .for .fc-grid .fc-item:nth-child(n + 4) .fc-text { --measure: 228px; }
+  }
+  @container (max-width: 894px) {
+    .for .fc-grid .fc-pic text { font-size: 15.3px; }
+  }
+  @container (max-width: 818px) {
+    .for .fc-grid .fc-pic text { font-size: 15.6px; }
+  }
+}
 @media (max-width: 900px) {
-  .points { grid-template-columns: repeat(2, 1fr); }
+  .for .fc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .for .fc-grid .fc-text { --card: calc((100cqi - 1px) / 2); }
+  .for .fc-tree::before { content: ""; position: absolute; top: 0; left: 75%; height: 13px; border-left: 1px solid var(--wire); }
+  .for .fc-examples .fc-item:last-child::after { content: none; }
+  @container (max-width: 626px) {
+    .for .fc-grid .fc-item:nth-child(-n + 2) .fc-text { --measure: 228px; }
+    .for .fc-grid .fc-pic text { font-size: 14.2px; }
+  }
+  @container (max-width: 607px) {
+    .for .fc-grid .fc-item:nth-child(3) .fc-text, .for .fc-grid .fc-item:nth-child(4) .fc-text { --measure: 228px; }
+  }
+  @container (max-width: 585px) {
+    .for .fc-grid .fc-item:nth-child(n + 5) .fc-text { --measure: 228px; }
+    .for .fc-grid .fc-pic text { font-size: 14.6px; }
+  }
+}
+@media (min-width: 641px) {
+  @container (max-width: 1048px) {
+    .for .fc-examples [data-picture="call"] .fc-body { max-width: 300px; }
+    .for .fc-examples [data-picture="disk"] .fc-body { max-width: 176px; }
+    .for .fc-examples [data-picture="registry"] .fc-body { max-width: 228px; }
+  }
+  @container (max-width: 706px) {
+    .for .fc-examples [data-picture="call"] .fc-body { max-width: 210px; }
+    .for .fc-examples [data-picture="disk"] .fc-body { max-width: 126px; }
+    .for .fc-examples [data-picture="registry"] .fc-body { max-width: 160px; }
+  }
+}
+@media (min-width: 641px) and (max-width: 760px) {
+  .for .fc-tree, .for .fc-examples { --inset: 12px; }
+  .for .fc-examples .fc-pic text { font-size: 14.6px; }
 }
 @media (max-width: 640px) {
-  .points { grid-template-columns: 1fr; }
-  .card .txt { padding-bottom: 20px; }
+  .for .fc-grid, .for .fc-examples { grid-template-columns: minmax(0, 1fr); }
+  .for .fc-item, .for .fc-examples .fc-item, .for .fc-text, .for .fc-examples .fc-text { display: block; grid-row: auto; }
+  .for .fc-grid .fc-text { --pad: var(--gutter); }
+  .for .fc-grid h3 { min-height: 0; font-size: 20px; }
+  .for .fc-grid .fc-body { min-height: 0; max-width: none; font-size: 14px; }
+
+  /* One column: the branch runs down the left and turns in at each example. */
+  .for .fc-tree { height: 18px; }
+  .for .fc-tree::before { left: 13px; height: 100%; }
+  .for .fc-tree::after { display: none; }
+  .for .fc-examples { margin: 0 16px 16px 25px; background: var(--paper); }
+  .for .fc-examples .fc-item::before { left: -13px; top: -1px; height: auto; bottom: 0; }
+  .for .fc-examples .fc-item:last-child::before { bottom: auto; height: 58px; }
+  .for .fc-examples .fc-item::after, .for .fc-examples .fc-item:last-child::after {
+    content: ""; position: absolute; left: -13px; top: 56px; width: 12px; height: 0;
+    border: 0; border-top: 1px solid var(--wire);
+  }
+  .for .fc-examples .fc-text { --pad: 16px; }
+  .for .fc-examples .fc-body { min-height: 0; }
+}
+/* On the narrowest phone a picture is under 296 wide: its words grow to stay 11 px. */
+@media (max-width: 329px) {
+  .for .fc-grid .fc-pic text { font-size: 14.5px; }
 }

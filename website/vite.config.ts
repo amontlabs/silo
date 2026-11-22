@@ -2,7 +2,7 @@ import { fileURLToPath, URL } from 'node:url';
 import react from '@vitejs/plugin-react';
 import type { Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
-import { createReadStream } from 'node:fs';
+import { createReadStream, readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { extname, resolve, sep } from 'node:path';
 import { planDir, readBuildData, readFacts, readHistories, readNotes } from './src/workshop/data.ts';
@@ -107,6 +107,24 @@ function planWatch(): Plugin {
   };
 }
 
+/**
+ * The home page's film as it shows without its script: one still, for the window and for a phone. It is a file of
+ * its own (src/film/still.html), written by `npm run film-check -- --write-still`.
+ */
+function filmStill(): Plugin {
+  return {
+    name: 'film-still',
+    transformIndexHtml: {
+      order: 'pre',
+      handler(html) {
+        if (!html.includes(FILM_STILL)) return html;
+        return html.replace(FILM_STILL, () => readFileSync(fileURLToPath(new URL('./src/film/still.html', import.meta.url)), 'utf8').trim());
+      },
+    },
+  };
+}
+const FILM_STILL = '<!-- film still -->';
+
 const FILM_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.mp3': 'audio/mpeg', '.otf': 'font/otf', '.ttf': 'font/ttf', '.txt': 'text/plain; charset=utf-8',
@@ -155,7 +173,7 @@ function films(): Plugin {
 export default defineConfig({
   // website/, wherever Vite is started from: films/ is found beside it.
   root: fileURLToPath(new URL('.', import.meta.url)),
-  plugins: [react(), workshopBuild(), workshopData(), workshopNotes(), workshopFacts(), workshopHistory(), planWatch(), films()],
+  plugins: [react(), workshopBuild(), workshopData(), workshopNotes(), workshopFacts(), workshopHistory(), planWatch(), filmStill(), films()],
   // The page imports the plan's model from tools/plan/model, outside website/.
   server: { fs: { allow: [repository] } },
   build: {

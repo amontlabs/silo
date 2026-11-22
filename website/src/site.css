@@ -12,6 +12,8 @@
   --accent: #ff9f0a;
   --accent-ink: #995700;
   --accent-hover: #f09300;
+  /* What is drawn on the accent, the same in both themes. */
+  --on-accent: #282016;
   --accent-wash: #fff2dc;
   --serif: "IBM Plex Serif", Georgia, serif;
   --sans: "IBM Plex Sans", Arial, sans-serif;
@@ -350,7 +352,7 @@ svg.go {
 .button.primary {
   background: var(--accent);
   border-color: #d68200;
-  color: #282016;
+  color: var(--on-accent);
   box-shadow:
     inset 0 0 0 2px #ffffff10,
     0 2px 3px #70421116;
