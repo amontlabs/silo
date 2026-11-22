@@ -1,6 +1,6 @@
 {
   "asks": "Is \"a computer cannot get more than it has\" a principle for every addition?",
-  "answer": "Yes, with the question in what it sets.",
+  "answer": "Yes. A computer cannot get more than it has. Every addition is asked whether it gives a computer more than it has, and who grants it then.",
   "needs": [
     "what-an-agent-inside-may-do"
   ],

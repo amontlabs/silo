@@ -47,7 +47,7 @@
     {
       "in": "words",
       "word": "stop",
-      "means": "End the programs running in a computer. Its disk stays."
+      "means": "End running programs: one run, or every program in a computer. The disk stays."
     },
     {
       "in": "words",

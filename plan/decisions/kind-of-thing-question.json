@@ -1,6 +1,6 @@
 {
   "asks": "Is \"a computer is a computer\" a principle for every addition?",
-  "answer": "Yes, with the question in what it sets.",
+  "answer": "Yes. A computer is a computer, whatever its system and whichever device runs it. Every addition is asked whether it is the same on every system and device, and which platform forces the difference if not.",
   "needs": [
     "one-kind-of-computer"
   ],

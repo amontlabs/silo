@@ -1,5 +1,6 @@
 {
   "asks": "Is \"Bad paths are written first\" a principle of Silo?",
+  "answer": "Yes. Bad paths are written first. Before the good path of an addition is designed, the addition says what happens when it is slow, when it fails halfway, when its input is missing and when it is wrong.",
   "sets": [
     {
       "in": "principles",

@@ -7,7 +7,7 @@
     {
       "in": "words",
       "word": "agent program",
-      "means": "Claude Code, Codex and the like.",
+      "means": "A program that runs a model and carries out what it asks for: Claude Code, Codex and the like.",
       "not": [
         "harness"
       ]

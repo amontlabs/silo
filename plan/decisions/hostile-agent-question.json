@@ -1,6 +1,6 @@
 {
   "asks": "Is \"the agent is considered hostile\" a principle for every addition?",
-  "answer": "Yes, with the question in what it sets.",
+  "answer": "Yes. The agent is considered hostile. Every addition is asked what a hostile agent can do with it.",
   "needs": [
     "security-framing"
   ],

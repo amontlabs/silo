@@ -1,6 +1,6 @@
 {
   "asks": "Is \"a bad state cannot be written down\" a principle for every addition?",
-  "answer": "Yes, with the question in what it sets.",
+  "answer": "Yes. A bad state cannot be written down. Every addition is asked which state must never exist, and what keeps it from being written.",
   "needs": [
     "bad-state"
   ],

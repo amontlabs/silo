@@ -6,7 +6,8 @@
       "in": "principles",
       "id": "holds-when-known",
       "says": "A promise never rests on the agent not knowing it.",
-      "asks": "Does it still hold when the agent knows exactly how it works?"
+      "asks": "Does it still hold when the agent knows exactly how it works?",
+      "known_as": "no security through obscurity"
     }
   ]
 }

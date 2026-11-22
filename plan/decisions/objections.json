@@ -1,4 +1,4 @@
 {
   "asks": "How do we answer the objections people raise?",
-  "answer": "With the answer beside each objection in the notes."
+  "answer": "\"I run agents with every check off and take backups.\" A backup returns files. It does not show what was sent out, what was spent, or what was done elsewhere. \"A virtual machine per agent is too heavy.\" One main holds all your agents, and a fork is for the exception. \"I can build this myself.\" Some do. What they do not build is the record, and going back for the whole machine. \"Session timelines already exist.\" Those are an agent program's view of itself. Silo's is the computer's view, under any agent program. \"Watching agents is easy to do yourself.\" For logs, yes. Not for the disk, the network and the past of a whole machine. \"The built-in sandbox of my agent program is enough.\" Its rules live next to the agent, on your own machine, and it gives no account of what happened and no way back. \"Sandbox products already exist.\" They give a boundary. They do not say what happened inside or take you back."
 }

@@ -1,3 +1,11 @@
 {
-  "asks": "What does the word \"agent\" mean in Silo?"
+  "asks": "What does the word \"agent\" mean in Silo?",
+  "answer": "An agent is an agent program at work in a computer, with its model. It is the everyday word and not a unit: the record never counts agents or says which agent did something. It names runs and conversations.",
+  "sets": [
+    {
+      "in": "words",
+      "word": "agent",
+      "means": "An agent program at work in a computer, with its model. It is not a unit: the record names runs and conversations."
+    }
+  ]
 }

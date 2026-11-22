@@ -1,6 +1,6 @@
 {
   "asks": "What may anything in Silo be given?",
-  "answer": "Nothing without a reason: no access, no visibility, no resource.",
+  "answer": "Nothing without a reason: no access, no visibility, no resource. This is about what Silo gives: to a computer through its boundary, to an extension, and to each of its own parts. What an agent does inside its computer is not given by Silo, and stays full access.",
   "sets": [
     {
       "in": "principles",

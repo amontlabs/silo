@@ -1,6 +1,6 @@
 {
   "asks": "What may come back to an agent?",
-  "answer": "What comes back to an agent is true and readable.",
+  "answer": "What comes back to an agent is true and readable. When Silo refuses a request or cannot answer it, what comes back says so: never a made-up success, and never silence. It need not be everything: an agent is not told what watches it.",
   "sets": [
     {
       "in": "principles",

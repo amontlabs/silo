@@ -1,6 +1,6 @@
 {
   "asks": "Is \"limits are set at the boundary\" a principle for every addition?",
-  "answer": "Yes, with the question in what it sets.",
+  "answer": "Yes. Limits are set at the boundary, never inside. Every addition is asked whether any limit it sets rests on something inside the computer.",
   "needs": [
     "where-limits-are-set"
   ],

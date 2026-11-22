@@ -1,5 +1,22 @@
 # Objections to expect
 
+## For the owner
+
+An agent's part, 22 November 2026. Silo is posted on Hacker News, and the first reply is "A virtual
+machine per agent is too heavy."
+
+The options:
+
+- Seven prepared answers (recommended). Each objection gets one or two factual sentences, the same
+  on the site, from you and from agents. Here: one main holds all your agents, and a fork is for the
+  exception. It costs upkeep: each answer is a claim about Silo or about others, and has to be
+  checked again when either changes.
+- No prepared answers. Each objection is answered as it comes. It costs answers that differ from one
+  place to the next, and the weak ones are found in public.
+
+Recommended: the seven answers. The objections are known from the research, and a short true answer
+is better found now than under a post.
+
 Proposed in the design record:
 
 | Objection | Answer |

@@ -1,4 +1,4 @@
 {
   "asks": "In what order is Silo built?",
-  "answer": "In the order that `order.json` holds, built from the lines in these notes."
+  "answer": "The record comes first: it is the core, and merging is not. Main on macOS comes before the rest, then forks, on macOS or Linux. Recipes and tasks come early, because beside a macOS main a Linux computer can only be made from a recipe. Giving memory back when idle, and forks that share their parent's disk, come early too. The hot-file map comes once the record exists. Extensions follow the record. Recording the screen and the phone app come later. Speed is part of the work from the start. `order.json` holds the exact order, and nothing in it has a date."
 }

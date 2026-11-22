@@ -1,6 +1,6 @@
 {
   "asks": "May Silo hide something that is the user's to know?",
-  "answer": "No. Nothing that is the user's to know is hidden.",
+  "answer": "No. Nothing that is the user's to know is hidden. Shown means that it can be found in the app or the command line, not that it is put in front of the user.",
   "sets": [
     {
       "in": "principles",
