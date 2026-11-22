@@ -20,5 +20,9 @@
   "keeps": [
     "precaution-grants-nothing",
     "allow-hold-deny-only-synchronous"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It gives any agent program the mode in which each action is looked at before it runs, which today only some programs have."
+  }
 }

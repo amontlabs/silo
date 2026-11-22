@@ -1,5 +1,23 @@
 # A secret an agent asks for
 
+## For the owner
+
+An agent's part, 22 November 2026. An agent deploying your site finds it has no Cloudflare token. It
+runs the `silo` command to ask for one by name. You get an ask that shows the name and the hosts the
+secret would be sent to. You type the value in Silo, and the agent gets a placeholder.
+
+The options:
+
+- Build it (recommended). The work goes on, and the value never appears in a chat or in the
+  computer. It costs a new thing agents can ask you: one can ask again and again, and one can
+  propose hosts of its own choosing, so the ask has to show the hosts plainly and you have to read
+  them.
+- Leave it out. You notice the agent is stuck, open Silo and add the secret yourself. It costs
+  waiting, and the risk that you paste the value into the chat because that is quicker.
+
+Recommended: build it. You suggested it, it is a small step once secrets are held outside and asks
+exist, and it removes the main reason a secret ends up in a conversation.
+
 ## The owner's words (21 November 2026)
 
 > Stuff such as asking a secret for instance could just be a silo tool shouldn't be?

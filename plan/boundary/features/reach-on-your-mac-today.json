@@ -1,4 +1,8 @@
 {
   "name": "What agents on your Mac can reach today",
-  "what": "An account, before installing, of what agents on your Mac can reach today."
+  "what": "An account, before installing, of what agents on your Mac can reach today.",
+  "suggest": {
+    "verdict": "drop",
+    "why": "It persuades by fear, which Silo's own writing rules exclude, and it is a scan of your Mac that has nothing to do with running computers."
+  }
 }

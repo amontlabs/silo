@@ -6,5 +6,9 @@
     "ask-each-time",
     "no-prompt-per-command",
     "allow-hold-or-deny"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A few things, such as publishing a package, deserve a look every time, and it is one rule on top of held requests."
+  }
 }

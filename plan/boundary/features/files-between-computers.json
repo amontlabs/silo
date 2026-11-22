@@ -6,5 +6,9 @@
     "channel-list",
     "allow-hold-or-deny",
     "computers-linux-beside-main"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Agents on several computers need to pass a build or a data file, and a rule you set is the only way that fits a computer never getting more than it has."
+  }
 }

@@ -19,5 +19,9 @@
     "computers-main-on-a-mac",
     "allow-hold-or-deny",
     "rules-out-of-reach"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Every other limit at the edge of a computer (secrets, the hosts in the record, the age of packages) stands on this one."
+  }
 }

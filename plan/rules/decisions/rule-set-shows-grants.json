@@ -1,6 +1,6 @@
 {
   "asks": "What does Silo show before a set of rules is switched on?",
-  "answer": "Before a set is switched on, Silo shows what it grants.",
+  "answer": "Before a set is switched on or off, Silo shows what the computer could then do that it cannot do now. Switching a set off can grant too, when it takes away a deny or a hold. When the switch grants nothing new, it takes one step and shows nothing.",
   "needs": [
     "rule-sets"
   ]

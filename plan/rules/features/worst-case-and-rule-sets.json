@@ -9,5 +9,9 @@
     "no-read-freely-preset",
     "word-grant",
     "security-framing"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A rule you understand at the moment you set it is worth more than any report afterwards, and sets are what make limits quick to apply."
+  }
 }

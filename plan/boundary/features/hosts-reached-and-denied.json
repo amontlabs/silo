@@ -19,5 +19,9 @@
     "new-host-raises-an-alert",
     "denied-attempts-are-recorded",
     "record-shows-what-was-sent"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The record of what left a computer and where it went is what lets you allow hosts with your eyes open."
+  }
 }

@@ -7,5 +7,9 @@
     "forking-a-computer",
     "alerts-on-a-change",
     "precautions-you-set"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Two agents overwriting each other is the most common accident with several agents, and the alert points at the fork, which is Silo's answer to it."
+  }
 }

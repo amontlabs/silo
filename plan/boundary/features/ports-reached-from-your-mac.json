@@ -6,5 +6,9 @@
     "open-limited-or-closed",
     "computers-main-on-a-mac",
     "network-stack"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Web work needs it every day, and signing in from a computer needs it too."
+  }
 }

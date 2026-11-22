@@ -18,5 +18,9 @@
     "word-request",
     "answered-asks-are-control-facts",
     "allow-hold-or-deny"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Without a hold a rule can only allow or deny, so everything you want to look at first has to be denied and retried by hand."
+  }
 }

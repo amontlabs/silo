@@ -10,7 +10,7 @@ wrong grant anything or destroy anything.
 ## Why it is so
 
 - **Two ways to act, told apart by their trigger** (`rule`, `precaution`, `less-sure-less-power`,
-  `law-of-triggers`, `grant-needs-a-fact-or-you`).
+  `what-a-report-may-trigger`, `grant-needs-a-fact-or-you`).
 - **Kinds of action** (`kind-before-design`, `kinds-of-action`). Still to decide: `why-kinds-first`,
   `word-grant`, `word-revoke`.
 - **A precaution is the only way an opinion acts** (`opinion-acts-through-a-precaution`,

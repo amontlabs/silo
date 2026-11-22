@@ -8,5 +8,9 @@
     "what-comes-back-to-an-agent",
     "where-precautions-live",
     "allow-hold-or-deny"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "An agent that is told \"denied\" stops and reports, where one that sees a broken network retries and looks for another way."
+  }
 }

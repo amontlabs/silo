@@ -4,5 +4,9 @@
   "needs": [
     "computers-stopped-and-paused",
     "rule-actions-on-the-computer"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The time is a fact, so it is one small rule once rules act on the computer."
+  }
 }

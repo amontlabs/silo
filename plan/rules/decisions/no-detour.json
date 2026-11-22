@@ -1,3 +1,21 @@
 {
-  "asks": "How is a rule kept from acting on an opinion by a detour?"
+  "asks": "How is a rule kept from acting on an opinion by a detour?",
+  "answer": "A rule is never triggered by something a precaution or a classifier did. Each decision at the boundary and each change to a computer's rules, secrets, channels and state says who made it: you, a rule, a precaution, an extension or Silo. A rule does not read the ones a precaution or an extension made, and a count in a rule leaves them out. So \"five denied connections in a minute: stop the computer\" counts only the denials rules made. What a precaution's action causes later carries the same author: a connection denied because a precaution closed the network is the precaution's. To act on what a precaution did, you set a precaution, which takes only protective actions. That the author is carried through every state a precaution set is to find out; until it is shown, a rule that reads a computer's state or counts facts takes only protective actions.",
+  "needs": [
+    "who-made-each-change",
+    "where-rules-run"
+  ],
+  "sets": [
+    {
+      "in": "rules/properties",
+      "id": "rule-never-reads-what-a-precaution-did",
+      "says": "A rule is never triggered by what a precaution or a classifier did, nor by a count that includes it.",
+      "kind": "safety",
+      "from": "less-sure-less-power",
+      "check": [
+        "bounded exhaustive test",
+        "simulator"
+      ]
+    }
+  ]
 }

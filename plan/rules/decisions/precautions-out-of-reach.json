@@ -1,6 +1,6 @@
 {
   "asks": "Can anything done inside a computer change its precautions?",
-  "answer": "A precaution is kept outside in the same way, and nothing done inside can change it.",
+  "answer": "No. A precaution is kept outside the computer, and nothing done inside a computer can change its precautions. Only you change one, from outside.",
   "needs": [
     "where-precautions-live"
   ],

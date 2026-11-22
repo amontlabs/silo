@@ -3,7 +3,7 @@
   "what": "You set a precaution on a report or on a classifier's opinion. It can alert you, take a checkpoint, pause the computer, take back a secret, close a network or another channel, and deny or hold a request still waiting; it never allows, resumes or stops a computer. It says what it rests on, the app shows it as not exact, and by default the computer sees nothing of it.",
   "needs": [
     "allow-hold-or-deny",
-    "law-of-triggers",
+    "what-a-report-may-trigger",
     "opinion-acts-through-a-precaution",
     "what-a-precaution-may-do",
     "what-a-precaution-says",
@@ -23,5 +23,9 @@
     "grant-needs-a-fact-or-you",
     "report-never-stored-as-fact",
     "every-action-has-a-kind"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It is the only way an opinion can act, and people want something to be able to pause a computer while they are away."
+  }
 }

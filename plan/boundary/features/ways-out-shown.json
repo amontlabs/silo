@@ -10,5 +10,9 @@
     "channel-question",
     "grant-shows-its-paths",
     "files-through-a-channel"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "You can decide what to give a computer only when one place shows every way out of it."
+  }
 }

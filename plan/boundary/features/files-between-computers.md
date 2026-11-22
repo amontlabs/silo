@@ -1,5 +1,24 @@
 # Files sent between computers
 
+## For the owner
+
+An agent's part, 22 November 2026. An agent in a Linux computer builds a 200 MB test database. The
+agent that needs it works in main. A rule you set allows files from that Linux computer to main, one
+way, and the agent sends the file with a tool of Silo.
+
+The options:
+
+- Build it (recommended). The file crosses where your rule allows, and the crossing is in the record
+  of both computers. It costs a new way out of a computer: a file can carry anything, a message from
+  one agent to another included. A rule that names a group of computers also needs a word for a
+  group, which the plan does not have.
+- Leave it out. Code crosses as a commit, and chosen files go from a fork to its parent before a
+  drop. It costs the general case: for anything else you download the file to your Mac and import it
+  into the other computer.
+
+Recommended: build it, after the features of the app's stage that every user meets. The two common
+cases already have their own way, so this one can wait for the stage "later".
+
 ## The owner's words (21 November 2026)
 
 > A file channel between computers and from the user machine to a computer indeed would be a good

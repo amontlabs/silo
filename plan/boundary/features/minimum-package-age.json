@@ -9,5 +9,9 @@
     "rule-carries-its-data",
     "allow-hold-or-deny",
     "registry-traffic-read"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Most poisoned releases are found and removed within days, and only a rule outside the computer holds when an agent fetches the package by hand."
+  }
 }

@@ -1,3 +1,4 @@
 {
-  "asks": "What does a precaution do when its classifier answers unsure?"
+  "asks": "What does a precaution do when its classifier answers unsure?",
+  "answer": "When a request is waiting, the precaution holds it for you, and the ask shows the classifier's opinion as an opinion. If the hold ends without your answer, the request is refused as held and not answered. You can set the precaution to deny on unsure, or to do nothing, which leaves the request to the rules. When nothing is waiting, unsure does nothing: the opinion is kept and shown as an opinion. The precaution says which of the three it does when it is set."
 }

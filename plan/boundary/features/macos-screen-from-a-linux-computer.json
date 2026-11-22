@@ -5,5 +5,9 @@
     "computers-macos-screen",
     "computers-linux-beside-main",
     "ways-out-shown"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Agents and code live best on Linux while Safari and the iOS simulator exist only on macOS, and a granted channel is how Silo joins the two."
+  }
 }

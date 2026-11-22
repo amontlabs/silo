@@ -1,4 +1,4 @@
 {
   "asks": "Can several rules be switched on a computer at once?",
-  "answer": "A named set of rules can be switched on a computer in one step."
+  "answer": "Yes. A named set of rules is switched on or off on a computer in one step. A set is only its rules: each applies as if you had set it alone. Rules have no order, so a set never overrides a deny or a hold that already applies."
 }

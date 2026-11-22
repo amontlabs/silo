@@ -10,5 +10,9 @@
   ],
   "keeps": [
     "proposed-rule-changes-nothing"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Nobody writes a list of hosts from memory, and a list taken from real use is how firewalls and system policies have long been set up."
+  }
 }

@@ -1,5 +1,23 @@
 # A macOS screen reached from a Linux computer
 
+## For the owner
+
+An agent's part, 22 November 2026. Your site's code and its agent are in a Linux computer. A layout
+bug shows only in Safari on iOS. You grant the Linux computer the iOS simulator of a macOS computer,
+and the agent opens the site there and looks.
+
+The options:
+
+- Build it (recommended). The agent tries its work on macOS without moving there. It costs a wide
+  channel: through the screen the agent can do whatever a person at that macOS computer can do, so
+  everything in that computer is within its reach. Apple allows two macOS computers on one Mac, so
+  the screen may be main's own. Reaching the simulator without the whole screen is to find out.
+- Leave it out. For such a check you start an agent inside the macOS computer and bring the code
+  there as a commit. It costs a second agent and a second conversation for one look at a screen.
+
+Recommended: build it, in the stage "later" where it sits. It needs a Linux computer beside main and
+agents on a macOS screen first, and both are worth having without it.
+
 From the list of smaller features the owner put on the roadmap on 21 November 2026. The owner's
 words on the list are in `silos-own-extensions`.
 

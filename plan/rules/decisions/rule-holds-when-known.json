@@ -1,6 +1,6 @@
 {
   "asks": "Does a rule still hold when the agent knows it?",
-  "answer": "A rule does not depend on that. It holds even when the agent knows it by heart, because the only way to trigger it or to avoid it is to really do the action.",
+  "answer": "Yes. A rule holds even when the agent knows it by heart. It reads only facts, so the only way to trigger it is to really do the action, and the only way to avoid it is not to do it.",
   "needs": [
     "where-precautions-live"
   ]

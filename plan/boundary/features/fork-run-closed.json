@@ -6,5 +6,9 @@
     "fork-with-network-closed",
     "record-of-a-computer",
     "forking-a-computer"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It costs little once a network can be closed, and it turns \"the tests pass offline\" into something the record shows."
+  }
 }

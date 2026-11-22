@@ -5,5 +5,9 @@
     "worst-case-and-rule-sets",
     "held-requests-and-asks",
     "phone-app"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A merge into the default branch and a deploy are the two actions people most want a say in, and a set that ships with Silo saves writing those rules."
+  }
 }

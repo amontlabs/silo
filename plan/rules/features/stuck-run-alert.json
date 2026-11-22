@@ -5,5 +5,9 @@
     "how-each-run-is-going",
     "precautions-you-set",
     "alerts-on-a-change"
-  ]
+  ],
+  "suggest": {
+    "verdict": "drop",
+    "why": "It is one precaution among those you set, on an opinion Silo already gives, so it belongs in that feature as a ready-made example and not as a feature of its own."
+  }
 }

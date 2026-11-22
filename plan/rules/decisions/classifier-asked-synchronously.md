@@ -1,5 +1,22 @@
 # A classifier asked about each tool call before it runs
 
+## For the owner
+
+An agent's part, 22 November 2026. An agent in main gets a reply from its model that asks to run `rm
+-rf ~/projects/site`. You have set a precaution that asks a classifier about each tool call.
+
+The options:
+
+- Each tool call waits for the opinion (recommended). The classifier says "not safe", the call is
+  denied before it runs, and the model sees that. It costs time on every tool call and the
+  classifier's own model calls, which you pay. It is off unless you set it, and a classifier can be
+  fooled.
+- The classifier looks after the call. Nothing waits. On "not safe" the precaution pauses main and
+  alerts you. It costs the first bad call, which has already run.
+
+Recommended: each tool call waits. You asked for what some agent programs offer as a mode, for any
+agent program, and the point of that mode is that the call does not run.
+
 The owner said this. Some agent programs have a mode in which a classifier looks at each action
 before it runs. The owner wants the same for any agent program.
 

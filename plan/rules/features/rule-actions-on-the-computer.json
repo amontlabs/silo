@@ -16,5 +16,9 @@
     "grant-needs-a-fact-or-you",
     "deny-beats-hold-beats-allow",
     "every-action-has-a-kind"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A fact that should never happen, such as a fake secret leaving, deserves more than one denied request, and it may happen while you are away."
+  }
 }

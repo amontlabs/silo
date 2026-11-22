@@ -1,4 +1,4 @@
 {
   "asks": "What does a rule show you when it is set?",
-  "answer": "Each rule states its worst case in plain words when it is set. Example: allowing this host means anything this computer can read can be sent there."
+  "answer": "Each rule states its worst case in plain words when it is set, and Silo writes that sentence from the rule's own data. An allow says what can then leave or come in: allowing this host means anything this computer can read can be sent there. A hold says that you will be asked and that the request waits. A deny says what will be refused. A rule that acts on the computer says what that ends: a stop ends the programs running in it."
 }

@@ -8,5 +8,9 @@
   ],
   "keeps": [
     "nothing-shared-from-your-device"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "With nothing shared from your Mac, an import you start is the only way a file you already have gets to your agents."
+  }
 }
