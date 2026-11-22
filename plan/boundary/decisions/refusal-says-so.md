@@ -3,20 +3,19 @@
 ## For the owner
 
 An agent's part, 22 November 2026. A program in main connects to a host that no rule allows, and
-Silo refuses the connection. You agreed on 20 November that what comes back says so. What is left to
-decide is the word for it, "refusal", and its meaning.
+Silo refuses the connection. You agreed on 20 November that what comes back says so. What is left
+is the word for it, and its meaning.
 
 The options:
 
-- It says so, and it is called a refusal (recommended). The program gets back "denied", or "not
-  answered" when a hold ended without your answer. The agent knows Silo refused it and stops
-  retrying. It costs telling a hostile agent that a rule sits there, which it can then try to get
-  around another way.
-- It looks like a failure of the network. The connection drops and nothing says why. It costs the
-  agent turns and tokens spent retrying, and what comes back to it is not true.
+- Refusal (recommended). "What comes back to a computer when Silo refuses a request: denied, or not
+  answered." One word covers both endings: a rule or you said no, or a hold ended without your
+  answer. It costs one more word to learn.
+- No word of its own. Each sentence says "denied" or "not answered". It costs a name for the two
+  together, which the reason Silo gives with them and the settings of agent programs both need.
 
-Recommended: it says so, and it is called a refusal. A rule holds even when the agent knows it is
-there, and an agent that knows it was refused wastes less of your money.
+Recommended: refusal. The plan already needs one name for what comes back in both cases, and
+refusal is the plain word for it.
 
 ## Notes
 

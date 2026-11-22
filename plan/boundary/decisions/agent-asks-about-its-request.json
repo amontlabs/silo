@@ -1,4 +1,0 @@
-{
-  "asks": "Can an agent ask Silo what happened to its request?",
-  "answer": "Yes. With the `silo` command an agent reads what the record of its computer holds about its requests: allowed, denied, or held and not answered, and for a rule's denial what the rule refused. By default it reads nothing of the opinions and precautions behind a refusal. This is how an agent learns what happened when the refusal could carry no words, as on a connection that can only be reset."
-}

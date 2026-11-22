@@ -10,8 +10,8 @@ The options:
 
 - A comparison, not the headline (recommended). The words stay Git's, and the comparison is used
   where going back is explained. It costs the shortest pitch Silo has.
-- Still the framing. The headline says it. It costs a promise of merging, which left the core, and
-  it hides the record, which is the core.
+- Still the framing. The headline says it. It costs a promise of merging, which Silo does not build first, and
+  it hides the record, which is the centre of Silo.
 
 Recommended: a comparison, not the headline. A framing should point at the centre of the product,
 and this one points at one third of it.

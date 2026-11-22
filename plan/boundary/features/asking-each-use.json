@@ -3,8 +3,8 @@
   "what": "A rule can ask you each time a named secret or a named destination is used. Without such a rule, or a precaution that holds tool calls, work inside a computer never prompts you per command.",
   "needs": [
     "held-requests-and-asks",
-    "ask-each-time",
-    "no-prompt-per-command",
+    "what-a-rule-may-do",
+    "full-access-inside",
     "allow-hold-or-deny"
   ],
   "suggest": {

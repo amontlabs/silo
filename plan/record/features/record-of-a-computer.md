@@ -14,4 +14,4 @@ The options:
 - Leave it out. Silo runs computers and takes checkpoints, with no account of what happened in them.
   It costs nearly everything else: fifteen features read the record, receipts and rules among them.
 
-Recommended: build it. The record is what the plan calls the core of the product.
+Recommended: build it. The record is the centre of Silo.

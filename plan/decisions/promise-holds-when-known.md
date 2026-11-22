@@ -19,6 +19,6 @@ them hidden is not one. Security engineers know this as no security through obsc
 
 ## Notes
 
-The owner said it about rules: "whether it knows or not the rules it can't go around them". That case is the decision `rule-holds-when-known`.
+The owner said it about rules: "whether it knows or not the rules it can't go around them". That case is settled by `security-framing` and `how-a-rule-is-enforced`.
 
 The general sentence is an agent's, put forward on 20 November 2026. The owner has not answered it.

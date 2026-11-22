@@ -1,4 +1,4 @@
 {
   "asks": "Is \"Git for computers\" still the framing?",
-  "answer": "No. Silo is not presented as Git for computers. Checkpoint, fork and restore stay Git's words, and the comparison may be used to explain going back. It is not the headline: it leads people to expect merging, which is not in the core, and it says nothing of the record, which is the core."
+  "answer": "No. Silo is not presented as Git for computers. Checkpoint, fork and restore stay Git's words, and the comparison may be used to explain going back. It is not the headline: it leads people to expect merging, which Silo does not build first, and it says nothing of the record, which is the centre of Silo."
 }

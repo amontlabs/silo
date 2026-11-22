@@ -7,7 +7,7 @@ the computer, and the agent should not know what can trigger it.
 
 Why it matters for a precaution and not for a rule: a precaution rests on a report or on a
 classifier, which can be fooled. A rule holds even when the agent knows it
-(`rule-holds-when-known`, not decided).
+(`security-framing` and `how-a-rule-is-enforced`).
 
 This answers the second half of the question "May a computer read its own record by default?".
 The first half stays open in `record`: `computer-reads-its-record`.

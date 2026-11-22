@@ -37,6 +37,6 @@ words on the list are in `silos-own-extensions`.
 - A secret is swapped in only on the way to the hosts you allowed. So the ask shows the name and
   those hosts (`what-an-ask-shows`). The agent proposes them and you decide.
 - Bad paths to design: you do not answer, and the agent is told so. You type a wrong value. An agent
-  asks again and again (`no-prompt-per-command`).
+  asks again and again (`full-access-inside`: nothing prompts per command inside).
 - No tool of an extension grants (`what-an-extension-never-does`). So this is part of Silo and not
   an extension.

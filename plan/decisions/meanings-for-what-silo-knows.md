@@ -17,7 +17,7 @@ The options:
   is read as a name for the facts and reports taken together. It costs three answers the word then
   does not give: whose record it is, whether it has an order, and where opinions go.
 
-Recommended: the fuller meaning. The record is the core of the product, and people rely on exactly
+Recommended: the fuller meaning. The record is the centre of Silo, and people rely on exactly
 these three things when they read it.
 
 ## Notes
