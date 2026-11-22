@@ -562,7 +562,10 @@ What a person sees:
   are in or after 180 ms, and while comments still load each one the count
   announces holds its place. Details that are not in when the panel starts to
   open keep their placeholder until it has opened, then the panel grows to
-  them. The panel opens and closes over 260 ms, and grows or shrinks over
+  them. A panel that an address opens waits the same way, and never opens in
+  the page's first frames, where nothing animates: it would jump. Such a row,
+  when it is in the lower half of the screen, comes to the middle, so its panel
+  grows in sight. The panel opens and closes over 260 ms, and grows or shrinks over
   the same time and on the same curve (`--ease`) when Notes or History opens
   or closes, and when their text arrives after its placeholder. A comment
   being sent shows its 👍 disabled, so it keeps its height once confirmed, and

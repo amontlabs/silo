@@ -784,7 +784,13 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
       if (target.kind === 'row') item?.querySelector<HTMLElement>(':scope > .wa-row > .wa-hit, :scope > .ws-line > .ws-row')?.focus({ preventScroll: true });
       // While the map folds, the page under it moves: the row is brought into view once the fold is done.
       const wait = Math.max(0, foldedAt.current + FOLD_MS - Date.now());
-      const show = () => document.getElementById(target.key)?.scrollIntoView?.({ block: 'nearest', behavior: still() ? 'instant' : 'smooth' });
+      const show = () => {
+        const row = document.getElementById(target.key);
+        // A row an address opens has its panel still closed: low on the screen, it would open out of sight. So it comes
+        // to the middle, clear of what sticks at the top, and the panel grows under it.
+        const low = target.kind === 'reveal' && row?.querySelector(':scope > .ws-more:not(.open)') && row.getBoundingClientRect().top > innerHeight / 2;
+        row?.scrollIntoView?.({ block: low ? 'center' : 'nearest', behavior: still() ? 'instant' : 'smooth' });
+      };
       if (target.kind === 'row' && target.reveal === false) return;
       if (wait) later(show, wait);
       else show();
@@ -880,7 +886,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     },
     filmEntries,
   };
-  const ctx: EntryContext = { w, signIn, open: openKeys, onToggle: stableToggle, onFilmEntries: stableFilmEntries };
+  const ctx: EntryContext = { w, signIn, open: openKeys, boot, onToggle: stableToggle, onFilmEntries: stableFilmEntries };
   const list: PlaceList = {
     plan, graph, placed: opened, ctx, store, folds, more, waiting: w.waiting,
     onFold: (key, open) => setFolds((now) => new Map(now).set(key, open)),

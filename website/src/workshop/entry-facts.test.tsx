@@ -1,7 +1,7 @@
 // What an open row shows of the plan's lists and of what it needs, its id and the button that copies it.
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { buildData, DECISIONS, fixtureFacts, FEATURES, LIST_DECISIONS, LIST_FEATURES, LISTS, withLists } from './fixtures';
 import { GROW_MS, HOLD_MS } from './Entry';
 import type { Facts } from './plan';
@@ -154,6 +154,7 @@ Recommended: one computer. Nobody wants the second.
     history.replaceState(null, '', '/workshop#part-b');
     await renderApp(data, undefined, () => new Promise<Facts>((resolve) => { arrive = resolve; }));
     const name = SNAPSHOT.replace('?', '\\?');
+    await waitFor(() => expect(document.querySelector('.ws-boot')).toBeNull());
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       fireEvent.click(rowButton(name));
@@ -168,6 +169,56 @@ Recommended: one computer. Nobody wants the second.
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('holds a panel that an address opens as a pressed one, and opens it only once the first frames are over', async () => {
+    const data = withChoice({ 'name-a-snapshot': CHOICE });
+    let arrive!: (value: Facts) => void;
+    const frames: FrameRequestCallback[] = [];
+    // No transition runs in the first frames: grown in them, a panel would jump.
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => frames.push(callback));
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+    mockApi({ me: owner });
+    history.replaceState(null, '', '/workshop#part-b/name-a-snapshot');
+    await renderApp(data, undefined, () => new Promise<Facts>((resolve) => { arrive = resolve; }));
+    const item = document.getElementById('entry-name-a-snapshot')!;
+    expect(item.querySelector('.ws-more.open')).toBeNull();
+    await act(async () => arrive(fixtureFacts(data)));
+    expect(item.querySelector('.ws-more.open')).toBeNull();
+    // Two frames are the first ones, each asking for the next.
+    for (let i = 0; i < 2; i += 1) await act(async () => { for (const frame of frames.splice(0)) frame(0); });
+    await waitFor(() => expect(item.querySelector('.ws-more.open')).not.toBeNull());
+    expect(within(item).getByText('The case')).toBeInTheDocument();
+    expect(item.querySelector('.ws-ph-notes')).toBeNull();
+  });
+
+  it('brings a row that an address opens, low on the screen, up, so its panel has room to grow', async () => {
+    const data = withChoice({ 'name-a-snapshot': CHOICE });
+    const shows = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: shows });
+    onTestFinished(() => { delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView; });
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ top: innerHeight - 20, y: innerHeight - 20, left: 0, x: 0, right: 0, bottom: innerHeight, width: 0, height: 0, toJSON: () => '' });
+    mockApi({ me: owner });
+    history.replaceState(null, '', '/workshop#part-b/name-a-snapshot');
+    await renderApp(data, undefined, () => new Promise<Facts>(() => {}));
+    expect(shows).toHaveBeenCalledWith(expect.objectContaining({ block: 'center' }));
+  });
+
+  it('keeps the placeholder while a panel opened by an address, that could not wait, opens', async () => {
+    const data = withChoice({ 'name-a-snapshot': CHOICE });
+    let arrive!: (value: Facts) => void;
+    const grows = withheldTimers(GROW_MS, { leaves: true });
+    mockApi({ me: owner });
+    history.replaceState(null, '', '/workshop#part-b/name-a-snapshot');
+    await renderApp(data, undefined, () => new Promise<Facts>((resolve) => { arrive = resolve; }));
+    const item = document.getElementById('entry-name-a-snapshot')!;
+    await waitFor(() => expect(item.querySelector('.ws-more.open')).not.toBeNull());
+    await act(async () => arrive(fixtureFacts(data)));
+    expect(within(item).queryByText('The case')).toBeNull();
+    expect(item.querySelector('.ws-ph-notes')).not.toBeNull();
+    // The details' wait and the comments'.
+    await grows.fire(2);
+    expect(within(item).getByText('The case')).toBeInTheDocument();
   });
 });
 

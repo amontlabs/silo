@@ -29,6 +29,8 @@ export interface EntryContext {
   onToggle: (row: Row, instance?: string) => void;
   /** The rows open now, by instance key (a row on its own line is its own key; all.ts `underKey`). */
   open: ReadonlySet<string>;
+  /** The page's first frames are drawn: nothing animates in them (workshop.css, `.ws-boot`). */
+  boot: boolean;
   /** Shows All with the entries a film shows. */
   onFilmEntries?: (film: string) => void;
 }
@@ -91,8 +93,9 @@ export interface PanelProps {
 }
 
 /**
- * What a row shows once open. It opens at once and grows when its details and comments are in, or after HOLD_MS; its body stays
- * mounted while it closes, so the close animates too.
+ * What a row shows once open, pressed or opened by an address. It opens at once and grows when its details and comments
+ * are in, or after HOLD_MS, and never in the first frames, where it would jump: no transition runs in them. Its body
+ * stays mounted while it closes, so the close animates too.
  */
 export function Panel({ row, open, ctx, id, lead, vote = false }: PanelProps) {
   const { w } = ctx;
@@ -104,13 +107,16 @@ export function Panel({ row, open, ctx, id, lead, vote = false }: PanelProps) {
   const detailsWait = row.more && (w.facts === undefined || w.facts === 'loading');
   const commentsIn = row.issue === null || row.issue <= 0 || !w.liveOk || typeof detail === 'object' || detail === 'error';
   const ready = commentsIn && !detailsWait;
-  const [held, setHeld] = useState(false);
+  const [held, setHeld] = useState(open && !ready);
+  // HOLD_MS has passed since the hold began: it runs through the first frames, though no hold ends in them.
+  const [waited, setWaited] = useState(false);
   if (wasOpen !== open) {
     setWasOpen(open);
     setClosing(!open);
     setHeld(open && !ready);
+    setWaited(false);
   }
-  if (held && ready) setHeld(false);
+  if (held && (ready || waited) && !ctx.boot) setHeld(false);
   useEffect(() => {
     if (!closing) return;
     const timer = setTimeout(() => setClosing(false), CLOSE_MS);
@@ -118,7 +124,7 @@ export function Panel({ row, open, ctx, id, lead, vote = false }: PanelProps) {
   }, [closing]);
   useEffect(() => {
     if (!held) return;
-    const timer = setTimeout(() => setHeld(false), HOLD_MS);
+    const timer = setTimeout(() => setWaited(true), HOLD_MS);
     return () => clearTimeout(timer);
   }, [held]);
   const grown = open && !held;
@@ -129,7 +135,8 @@ export function Panel({ row, open, ctx, id, lead, vote = false }: PanelProps) {
   }, [open, row.more, wantFacts]);
 
   // Comments that arrive while the panel is opening wait, on their placeholders, until the opening has ended.
-  const [wasGrown, setWasGrown] = useState(grown);
+  // False at first, so that a panel that starts open waits as one that is pressed does.
+  const [wasGrown, setWasGrown] = useState(false);
   const [opening, setOpening] = useState<{ detail: typeof detail } | null>(null);
   const [detailsHeld, setDetailsHeld] = useState(false);
   if (wasGrown !== grown) {
