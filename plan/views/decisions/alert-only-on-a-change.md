@@ -10,7 +10,7 @@ The options:
 - On a change (recommended). You get one alert at 14:02 for the disk, and one alert for 12 new
   hosts. The disk stays in your list of what needs you until it drops back under 90%. It costs
   reminders: once you set the alert aside, nothing tells you again while the disk stays full.
-- On every event. An alert each time a rule is triggered, and each minute the disk stays above 90%.
+- Each time. An alert each time a rule is triggered, and each minute the disk stays above 90%.
   It costs dozens of alerts an hour, and the habit of ignoring them.
 
 Recommended: on a change. Alerts that repeat what you already know teach you to stop reading them,
