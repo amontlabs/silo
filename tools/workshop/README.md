@@ -19,7 +19,7 @@ be used.
 | `workshop` | The commands, one line each. |
 | `workshop setup [--org <org>] [--site <url>] [--replace]` | Creates the App (below). |
 | `workshop store [--replace]` | Finishes a setup whose Keychain step failed, from `vercel.env`. |
-| `workshop doctor` | Where each credential comes from (never a value), whether the App is public and installed, its permissions, whether the two labels the site sets exist, and the entries that several issues name. Exit 1 on a problem. |
+| `workshop doctor` | Where each credential comes from (never a value), whether the App is public and installed, its permissions (a problem without Issues or Contents write), whether the two labels the site sets exist, and the entries that several issues name. Exit 1 on a problem. |
 | `workshop decline <issue> --why "…"` | Drops an open suggestion, the Workshop's word for it: closes it with GitHub's own reason for closing, "not planned", and the reason as the bot's comment. Refuses an issue that is not an open suggestion (an entry, an issue without the suggestion label, a closed one). A run stopped after the comment and run again posts no second comment. |
 
 `doctor` checks both labels: `workshop:suggestion`, which the site puts on each new suggestion, and
@@ -39,12 +39,16 @@ others: move what matters to the thread and remove the label from the others.
 ## The App
 
 `workshop setup` opens a page on `127.0.0.1` (it answers no other Host) that posts the manifest to
-GitHub: "Silo Workshop", public, Issues write and Metadata read, no webhook, sign-in callback
+GitHub: "Silo Workshop", public, Issues and Contents write and Metadata read, no webhook, sign-in callback
 `<site>/api/workshop/callback`. The owner clicks "Create GitHub App", then "Install" on
 `amontlabs/silo` only. The command writes the seven variables Vercel needs to
 `~/.local/state/silo-workshop/vercel.env` (0600) first, then the App id, client id, client secret
 and private key to the Keychain (service `silo-workshop`, through `security -i` on stdin). It never
-registers a second App by accident; `--replace` registers a new one.
+registers a second App by accident; `--replace` registers a new one. Contents write is for the
+owner's Take and Drop on the Workshop, which commit to `main` with the owner's token; an App
+registered before it asked for Contents gets it in its settings, and the installation then
+accepts it. This command's own installation token, like the site's, is requested with Issues and
+Metadata only.
 
 Credentials are looked up in the environment, then the Keychain (a locked one stops the command),
 then `~/.config/silo-workshop/credentials.json` (0600 or refused). `WORKSHOP_GITHUB_API` and
@@ -76,5 +80,6 @@ history of an entry comes from git (`tools/plan/history`).
 No push acts on GitHub. The site reads issues, comments, votes and suggestions. As the person
 signed in, it writes comments, votes, votes on comments and suggestions. As the bot, it puts
 `workshop:suggestion` on a new suggestion, and it opens an entry's thread, labelled
-`workshop:entry`, at the first comment or 👍 on that entry. See `website/README.md`, "Storage" and
-"Writing to an entry".
+`workshop:entry`, at the first comment or 👍 on that entry. As the owner, it commits the owner's
+Take and Drop to `main`. See `website/README.md`, "Storage", "Writing to an entry" and "The
+owner's verdict".

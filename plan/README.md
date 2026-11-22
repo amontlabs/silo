@@ -2,8 +2,9 @@
 
 The plan is the design of Silo, kept as small files: its vocabulary, what must always be true of
 it, the questions about it, and the features to build. The Workshop shows these files on the
-site. The owner says yes or no to each question and each feature in a conversation, and the agent
-writes the answer with `plan take` or `plan drop`.
+site. The owner says yes or no to each question and each feature in a conversation, where the
+agent writes the answer with `plan take` or `plan drop`, or on the Workshop, whose Take and Drop
+run the same code and make the same commit on `main`.
 
 This page explains how the files work. To read the plan itself, use the tool: `plan` prints what
 is next, and `plan show <id>` prints one item with everything that applies to it.
@@ -111,7 +112,8 @@ verdict sets it. The word then has the meaning that decision gives it.
 | `take` | `plan take <id>` | Yes to exactly what the entry showed: its text, what it sets and what it removes. |
 | `drop` | `plan drop <id>` | No to what the entry showed. A no does not say what should be true instead. The entry stays in its file, and the tool skips it. |
 
-- Only these two commands write a verdict, and only when the owner said so. The one exception is an
+- A verdict is written only by these two commands, or by the Workshop's Take and Drop, which run
+  the same code and make the same commit, and only when the owner said so. The one exception is an
   entry about how Silo is built: agents decide those, as `owners-part-on-engine` says, and write
   the verdict with `plan take <id> --by agents` or `plan drop <id> --by agents`. The entry then
   holds `"by": "agents"` beside its verdict, and the commit is named `Agents: take <id>` or

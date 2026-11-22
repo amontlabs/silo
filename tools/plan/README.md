@@ -144,7 +144,7 @@ replaced decision.
 | `model/` | Names, key orders, the canonical form and the statuses. Imports no `node:` module, so the site can use it. |
 | `read/` | Reads `plan/` from a directory or a git ref into one plan object. |
 | `check/` | `checkFiles(files, { exists })` for a tree, `checkChange(files, baseFiles)` against the merged plan, `formatProblem`. |
-| `write/` | `take(files, id)` and `drop(files, id)`: pure functions, files in and changed files out, so the Workshop can call them. |
+| `write/` | `take(files, id)` and `drop(files, id)`: pure functions, files in and changed files out, and `verdictSubject`, the subject of the commit that records a verdict. The Workshop's Take and Drop call them as they are (`website/server/verdicts.mjs`). |
 | `history/` | `readSteps(root)` reads from git the commits that changed an entry, and `entryHistory(steps)` turns them into each entry's changes, and `ownerRuled(steps)` into the ids of the entries that held a verdict with no `by` in any step. `readSteps(root, ref)` reads the history as of `ref` (`HEAD` by default). None is a command. `entryHistory` and the names it uses import no `node:` module, so the site can use them. |
 | `cli/` | The command: arguments, the checkout, git. |
 | `bin/plan` | The entry point. |
