@@ -1,7 +1,8 @@
 {
   "asks": "Why are stop, restore and drop destructive?",
-  "answer": "Stop, restore and drop are destructive for what they end: the programs running in the computer and what they hold in memory, which a checkpoint of the disk does not keep. A restore first saves where you were (`restore-saves-first`), so it erases nothing on the disk. If checkpoints come to keep memory, as forks of running Linux computers would need, whether these three stay destructive is asked again.",
+  "answer": "Stop, restore and drop are destructive for what they end: the programs running in the computer and what they hold in memory, which a checkpoint of the disk does not keep. The disk itself is kept: a stop leaves it as it is, a drop keeps it in the bin, and a restore first saves where you were (`restore-saves-first`). A restore you choose to make without saving also erases what is on the disk and in no checkpoint. If checkpoints come to keep memory, as forks of running Linux computers would need, whether these three stay destructive is asked again.",
   "needs": [
-    "kinds-of-action"
+    "kinds-of-action",
+    "restore-saves-first"
   ]
 }

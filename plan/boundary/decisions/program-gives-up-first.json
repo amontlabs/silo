@@ -2,6 +2,7 @@
   "asks": "What does Silo see when an agent program gives up on a hold?",
   "answer": "A program that gives up on a held request closes its connection. The part of Silo that holds the request sees the close, which is a fact, and ends the hold; the record says that the connection closed while the request was held, which is what Silo saw, and not why. On a connection that carries several requests, the cancel of that one request counts as the close. A program that gives up without closing anything is not seen, and Silo's limit ends that hold. In both cases, what the agent and the user then get is the same as for any hold that ends without an answer.",
   "needs": [
-    "hold-limit"
+    "hold-limit",
+    "hold-sentence"
   ]
 }
