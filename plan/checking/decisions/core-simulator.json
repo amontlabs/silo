@@ -1,4 +1,6 @@
 {
   "asks": "How is the core checked?",
-  "answer": "The core touches nothing, so a simulator can drive it with millions of random sequences of inputs, crashes included, and check every property after every step. On a failure the simulator removes inputs until the smallest failing sequence is left."
+  "answer": "The core touches nothing, so a simulator can drive it with millions of random sequences of inputs, crashes included, and check every property after every step. On a failure the simulator removes inputs until the smallest failing sequence is left.",
+  "verdict": "take",
+  "by": "agents"
 }
