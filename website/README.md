@@ -445,9 +445,25 @@ What a person sees:
   not decided come first, then the others, each in the plan's order, so each
   comes after those it needs among the ones still to decide. Six show, then a
   line "N more" opens the rest.
-  A stage starts with its decisions that no feature rests on, one foldable row
-  per part, then its features. "The ground" has no feature, so its section holds
-  only such rows. A stage with no row has no section.
+  All in Build order can be decided from the top. With every fold open, a
+  decision that is not decided never shows above one it needs that is not
+  decided either. A decision shown under several features counts where it shows
+  first. The decisions no feature rests on are placed for this:
+  - An early decision needs no decision a feature rests on, however far its
+    needs are followed. A stage starts with its early decisions, one foldable
+    row per part, then its features. The rows go by the plan's order of their
+    first decision, whatever its state, so a verdict moves none of them.
+  - Any other has a line of its own, with its part, right after the first
+    feature by which all it needs has been listed. `rule-that-names-paths`
+    needs decisions that `thinning-old-checkpoints` and features before it
+    fold, so its line follows that feature.
+  - When such a decision's stage comes after that feature's, its line is at the
+    start of its own stage, after the rows of early decisions.
+  - A filter moves none of these lines. A line keeps its place when the filter
+    takes away the feature it follows.
+
+  "The ground" has no feature, so its section holds only rows of early
+  decisions. A stage with no row has no section.
   A dropped or replaced row is struck through. Above the list,
   under the header and staying there while it scrolls, are the line of controls
   and the strip.

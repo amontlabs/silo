@@ -39,7 +39,7 @@ describe('the list in build order', () => {
   const plan = buildPlan(withNeeds(), null);
   const graph = graphOf(plan);
 
-  it('numbers every feature by its place in the plan and starts each stage with its decisions no feature rests on, one row per part', () => {
+  it('numbers every feature by its place in the plan and starts each stage with its early decisions, one row per part', () => {
     const sections = allSections(plan, graph, withNeeds().stages, query());
     expect(sections.map((section) => section.title)).toEqual(['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth', 'Eleventh', 'Twelfth', 'Gone']);
     const steps = sections.flatMap((section) => section.items).flatMap((item) => (item.type === 'feature' ? [item.step] : []));
@@ -47,8 +47,9 @@ describe('the list in build order', () => {
     const loose = sections.flatMap((section) => section.items.flatMap((item) => (item.type === 'bundle' ? [[section.title, item.title, item.kids.map((kid) => kid.key)]] : [])));
     // one-way, security-properly and tamper-proof-logs are under the feature that rests on them, not here.
     expect(loose).toEqual([
-      ['First', 'Part A', ['entry-core-in-zig']],
+      // The rows go by the plan's order of their first decision.
       ['First', 'The whole product', ['entry-one-host', 'entry-plain-logs']],
+      ['First', 'Part A', ['entry-core-in-zig']],
       ['Eighth', 'Part E', ['entry-who-signs', 'entry-signed-logs']],
       ['Gone', 'Part E', ['entry-old-format']],
     ]);
@@ -151,11 +152,12 @@ describe('what a feature rests on', () => {
     expect(locate(allSections(plan, graph, data.stages, query()), 'entry-deep', new Set())).toEqual({ instance: underKey('entry-deep', 'entry-top'), holder: 'entry-top', more: false });
   });
 
-  it('lists a stage\'s decisions no feature rests on before its features, and gives no section to a stage with neither', () => {
+  it('lists a stage\'s early decisions before its features, the others no feature rests on after the feature they follow, and gives no section to a stage with neither', () => {
     const listed = allSections(plan, graph, data.stages, query()).map((section) => [section.title, section.items.map((item) => item.key)]);
     expect(listed).toEqual([
       ['First', ['bundle-first.part-c']],
-      ['Second', ['bundle-second.part-c', 'entry-base-feature']],
+      // side needs hidden, which base-feature's fold holds.
+      ['Second', ['entry-base-feature', 'entry-side']],
       ['Third', ['entry-top']],
     ]);
   });

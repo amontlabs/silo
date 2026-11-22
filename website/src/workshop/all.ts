@@ -91,15 +91,20 @@ export interface Graph {
   waits: Map<string, string[]>;
   /** The decisions each feature rests on (`restsOn`), in the plan's order. */
   decisions: Map<string, Row[]>;
+  /**
+   * The feature that a decision no feature rests on is listed after, when it needs a decision a feature rests on: the
+   * first one, in build order, by which every such decision is listed. One with no such need has none: it is early.
+   */
+  after: Map<string, Row>;
   /** Every entry of the plan by key, in the plan's order. */
   rows: Map<string, Row>;
 }
 
 /**
- * What a feature rests on: the decisions it needs, those they need, and so on. A feature is never followed, so what
+ * What an entry rests on: the decisions it needs, those they need, and so on. A feature is never followed, so what
  * rests under a needed feature stays there.
  */
-function restsOn(feature: string, needs: ReadonlyMap<string, string[]>, rows: ReadonlyMap<string, Row>): Row[] {
+function restsOn(entry: string, needs: ReadonlyMap<string, string[]>, rows: ReadonlyMap<string, Row>): Row[] {
   const found = new Set<string>();
   const follow = (key: string) => {
     for (const next of needs.get(key) ?? []) {
@@ -108,7 +113,7 @@ function restsOn(feature: string, needs: ReadonlyMap<string, string[]>, rows: Re
       follow(next);
     }
   };
-  follow(feature);
+  follow(entry);
   return [...found].map((key) => rows.get(key)!).sort((a, b) => (a.n ?? 0) - (b.n ?? 0));
 }
 
@@ -126,7 +131,15 @@ export function graphOf(plan: Plan): Graph {
     for (const key of own) waits.set(key, [...(waits.get(key) ?? []), row.key]);
   }
   for (const row of steps) decisions.set(row.key, restsOn(row.key, needs, rows));
-  return { steps, step, needs, waits, decisions, rows };
+  const firstHolder = new Map<string, Row>();
+  for (const row of steps) for (const kid of decisions.get(row.key)!) if (!firstHolder.has(kid.key)) firstHolder.set(kid.key, row);
+  const after = new Map<string, Row>();
+  for (const row of all) {
+    if (row.of !== 'decision' || firstHolder.has(row.key)) continue;
+    const holders = restsOn(row.key, needs, rows).flatMap((need) => firstHolder.get(need.key) ?? []);
+    if (holders.length) after.set(row.key, holders.reduce((last, one) => (step.get(one.key)! > step.get(last.key)! ? one : last)));
+  }
+  return { steps, step, needs, waits, decisions, after, rows };
 }
 
 /**
@@ -178,7 +191,7 @@ export interface DecisionItem {
   change?: string;
 }
 
-/** The decisions of one stage and part that no feature rests on, folded under one row. */
+/** The early decisions of one stage and part (no feature rests on them, nor on what they need), folded under one row. */
 export interface BundleItem {
   type: 'bundle';
   key: string;
@@ -216,10 +229,13 @@ function featureItem(row: Row, graph: Graph, query: Query, placed: Placed, folda
 export const partTitle = (plan: Plan, part: string | null): string => (part ? plan.parts.find((group) => group.part.id === part)?.part.title ?? part : 'The whole product');
 
 /**
- * All's list. In build order: the stages by their titles, each starting with its decisions that no feature rests on,
- * one foldable row per part, then its features, each with the decisions it rests on folded under it. A filter keeps a
- * feature when it or one of its decisions passes. A search, and Latest, list every match on its own line, Latest newest
- * change first under a title per day.
+ * All's list, in an order to decide in. In build order: the stages by their titles, each starting with its early
+ * decisions, one foldable row per part, then its features, each with the decisions it rests on folded under it. Any
+ * other decision no feature rests on has a line of its own right after the feature it follows (`Graph.after`), or,
+ * when that feature's stage comes before its own, under the early ones of its stage. Read from the top with every fold
+ * open, no decision still open comes before an open one it needs. A filter keeps a feature when it or one of its
+ * decisions passes, and moves none of these lines. A search, and Latest, list every match on its own line, Latest
+ * newest change first under a title per day.
  */
 export function allSections(plan: Plan, graph: Graph, stages: Stage[], query: Query, placed: Placed = AS_IS): Section[] {
   const listed = (row: Row) => passes(row, query, placed);
@@ -265,14 +281,27 @@ export function allSections(plan: Plan, graph: Graph, stages: Stage[], query: Qu
     return sections;
   }
 
-  const kept = graph.steps.map((row) => featureItem(row, graph, query, placed, decisions)).filter((item) => listed(item.row) || (decisions && item.passing?.length));
   const loose = decisions ? looseOf(graph) : [];
+  const early = loose.filter((row) => !graph.after.has(row.key));
+  const rank = (row: Row) => stages.findIndex((stage) => stage.id === row.stage);
+  // The lines of the others, by the key of the feature or of the stage's section that each stands after.
+  const lines = new Map<string, DecisionItem[]>();
+  for (const row of loose) {
+    const feature = graph.after.get(row.key);
+    if (!feature || !listed(row)) continue;
+    const at = rank(row) > rank(feature) ? `stage-${row.stage}` : feature.key;
+    lines.set(at, [...(lines.get(at) ?? []), { type: 'decision', key: row.key, row }]);
+  }
   for (const stage of stages) {
-    const items = [
-      ...bundlesOf(plan, stage.id, loose.filter((row) => row.stage === stage.id), query, placed),
-      ...kept.filter((item) => item.row.stage === stage.id),
-    ];
-    if (items.length) sections.push({ key: `stage-${stage.id}`, title: stage.title, items });
+    const key = `stage-${stage.id}`;
+    const items: Item[] = [...bundlesOf(plan, stage.id, early.filter((row) => row.stage === stage.id), query, placed), ...(lines.get(key) ?? [])];
+    for (const row of graph.steps) {
+      if (row.stage !== stage.id) continue;
+      const item = featureItem(row, graph, query, placed, decisions);
+      if (listed(row) || (decisions && item.passing?.length)) items.push(item);
+      items.push(...(lines.get(row.key) ?? []));
+    }
+    if (items.length) sections.push({ key, title: stage.title, items });
   }
   return sections;
 }
@@ -283,12 +312,14 @@ function looseOf(graph: Graph): Row[] {
   return [...graph.rows.values()].filter((row) => row.of === 'decision' && !held.has(row.key));
 }
 
-/** One foldable row per part for a stage's decisions that no feature rests on; under a filter, those where one passes. */
+/**
+ * One foldable row per part for a stage's early decisions; under a filter, those where one passes. The rows go by the
+ * plan's order of their first decision, whatever its state, so a verdict moves none of them.
+ */
 function bundlesOf(plan: Plan, stage: string, rows: Row[], query: Query, placed: Placed): BundleItem[] {
   const bundles: BundleItem[] = [];
-  for (const part of [...plan.parts.map((group) => group.part.id), null]) {
+  for (const part of new Set(rows.map((row) => row.part))) {
     const kids = kidOrder(rows.filter((row) => row.part === part), placed);
-    if (!kids.length) continue;
     const passing = filtered(query) ? kids.filter((kid) => passes(kid, query, placed)) : null;
     if (passing && !passing.length) continue;
     // A stage's id and a part's hold no dot, so no two rows share a key.

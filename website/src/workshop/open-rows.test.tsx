@@ -12,7 +12,7 @@ import { buildPlan, withVerdicts } from './plan';
 import type { Plan, Verdict } from './plan';
 import { clock, mockApi, owner, renderApp } from './test-support';
 
-/** "top" folds eight decisions, the first two of them under "next" too; three are under no feature. */
+/** "top" folds eight decisions, the first two of them under "next" too; four are under no feature, one of them after "top". */
 const DATA = {
   ...buildDataFrom(planFiles({
     features: [
@@ -27,6 +27,7 @@ const DATA = {
         id: `q${i}`, stage: 'second', part: i < 5 ? 'part-a' : 'part-c', asks: `Question ${i}?`,
         ...(i === 6 ? { answer: 'Yes.', verdict: 'take' as const } : {}),
       })),
+      { id: 'after', stage: 'second', part: 'part-a', asks: 'After that question?', needs: ['q0'] },
     ],
   }), { map: NO_MAP }),
   builtFrom: 'c'.repeat(40),
@@ -70,7 +71,7 @@ describe('a row that is open when its state changes', () => {
     expect(drawn()).toEqual(before);
     expect(hitOf(at)).toHaveAttribute('aria-expanded', 'true');
     expect(meter('entry-top')).toBe('2/8');
-    expect(document.querySelector('.wa-count')).toHaveTextContent('10 of 13');
+    expect(document.querySelector('.wa-count')).toHaveTextContent('11 of 14');
 
     hitOf(at).focus();
     await press(at);
