@@ -17,7 +17,8 @@
     "libkrun-patches",
     "network-stack",
     "made-from-a-recipe",
-    "storage-between-computers"
+    "storage-between-computers",
+    "engine-patch-review"
   ],
   "suggest": {
     "verdict": "take",

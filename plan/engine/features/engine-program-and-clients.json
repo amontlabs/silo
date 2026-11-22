@@ -19,7 +19,9 @@
     "how-the-engine-is-built",
     "core-simulator",
     "who-can-call-the-engine",
-    "formats-carry-versions"
+    "formats-carry-versions",
+    "tigerstyle-by-place",
+    "engine-source-checks"
   ],
   "suggest": {
     "verdict": "take",
