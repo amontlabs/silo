@@ -1,4 +1,5 @@
 {
   "asks": "What does the owner decide, and what do agents decide?",
-  "answer": "The owner decides the promises, which are the properties in plain sentences, the product's behaviour, and every choice where a mechanism has a price the user pays. Agents decide how Silo is built. An entry about how Silo is built is taken by agents when it promises nothing, changes nothing the user sees or pays, a second agent agrees with it on its own, and a check can show it holds. A better practice can replace an earlier decision about how Silo is built, even one the owner took, unless its notes hold the owner's own reasons for it; then it goes to the owner."
+  "answer": "The owner decides the promises, which are the properties in plain sentences, the product's behaviour, and every choice where a mechanism has a price the user pays. Agents decide how Silo is built. An entry about how Silo is built is taken by agents when it promises nothing, changes nothing the user sees or pays, a second agent agrees with it on its own, and a check can show it holds. A better practice can replace an earlier decision about how Silo is built, even one the owner took, unless its notes hold the owner's own reasons for it; then it goes to the owner.",
+  "verdict": "take"
 }
