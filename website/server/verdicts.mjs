@@ -5,7 +5,8 @@
 // a push or a reset of main meanwhile is never undone. When main moved, everything is done again from the new main, a
 // bounded number of times. The call either moves main to the commit or changes nothing.
 import { drop, entryFile, take, verdictSubject } from '../../tools/plan/write/index.js';
-import { isHidden } from '../../tools/plan/read/index.js';
+import { isHidden, parsePlan } from '../../tools/plan/read/index.js';
+import { wordId } from '../../tools/plan/model/names.js';
 import { GitHubError } from './github.mjs';
 
 export const BRANCH = 'main';
@@ -25,11 +26,16 @@ const level = (depth) => (depth === 0
   ? 'entries { name type mode }'
   : `entries { name type mode object { ... on Blob { ${FILE} } ... on Tree { ${level(depth - 1)} } } }`);
 
+/** One folder of a tree with the id of each file, `depth` folders more below it. */
+const ids = (depth) => (depth === 0
+  ? 'entries { name type oid }'
+  : `entries { name type oid object { ... on Tree { ${ids(depth - 1)} } } }`);
+
 /**
- * One GraphQL call: the names in main's root folder, every file of plan/ at main with its text, and the entry's file
- * at the commit the page was built from.
+ * One GraphQL call: the names in main's root folder, every file of plan/ at main with its text, the commit the page
+ * was built from, and the id of every file of plan/ at it.
  */
-export const PLAN_QUERY = `query PlanAt($owner: String!, $name: String!, $commit: String!, $plan: String!, $seen: String!) { repository(owner: $owner, name: $name) { commit: object(expression: $commit) { ... on Commit { tree { ${NAMES} } } } plan: object(expression: $plan) { ... on Tree { ${level(LEVELS)} } } seen: object(expression: $seen) { ... on Blob { ${FILE} } } } }`;
+export const PLAN_QUERY = `query PlanAt($owner: String!, $name: String!, $commit: String!, $plan: String!, $built: String!, $builtPlan: String!) { repository(owner: $owner, name: $name) { commit: object(expression: $commit) { ... on Commit { tree { ${NAMES} } } } plan: object(expression: $plan) { ... on Tree { ${level(LEVELS)} } } built: object(expression: $built) { ... on Commit { oid } } builtPlan: object(expression: $builtPlan) { ... on Tree { ${ids(LEVELS)} } } } }`;
 
 /** One GraphQL call: the names in each folder of `dirs` at `commit`, as `d<index>`; a folder that is not one has no entries. */
 export const existsQuery = (commit, dirs) => `query Exists($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${dirs.map((dir, index) => `d${index}: object(expression: ${JSON.stringify(`${commit}:${dir}`)}) { __typename ... on Tree { ${NAMES} } }`).join(' ')} } }`;
@@ -90,9 +96,64 @@ function readTree(tree, prefix, depth, out) {
       const blob = entry.object;
       if (typeof blob?.oid !== 'string' || typeof entry.mode !== 'number') throw partial();
       out.modes.set(path, entry.mode.toString(8).padStart(6, '0'));
+      out.oids.set(path, blob.oid);
       if (typeof blob.text === 'string' && !blob.isTruncated) out.files.set(path, blob.text);
       else out.fetch.push({ path, oid: blob.oid });
     }
+  }
+}
+
+/** The id of each file of a tree from the GraphQL answer, by path; what lies deeper than the query reads is left out. */
+function idsOf(tree, prefix, depth, out) {
+  if (!Array.isArray(tree?.entries)) throw partial();
+  for (const entry of tree.entries) {
+    if (typeof entry?.name !== 'string') throw partial();
+    const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.type === 'tree' && depth > 1) idsOf(entry.object, path, depth - 1, out);
+    else if (entry.type === 'blob') {
+      if (typeof entry.oid !== 'string') throw partial();
+      out.set(path, entry.oid);
+    }
+  }
+  return out;
+}
+
+const LIST_FILE = /^(?:words|principles|(?:[^/]+\/)?properties)\.json$/;
+const strings = (value) => (Array.isArray(value) ? value.filter((item) => typeof item === 'string') : []);
+
+/**
+ * The files whose text the entry's page shows for it beside its own file and notes: the lists that hold a statement
+ * it sets, removes, adds or keeps (the page shows each one's text as it is now), and the files of the decisions it
+ * replaces (their answer). Paths relative to plan/.
+ */
+export function shownFiles(files, id) {
+  const { plan, json } = parsePlan(files);
+  const entry = Object.hasOwn(plan.entries, id) ? plan.entries[id] : null;
+  if (!entry) return [];
+  const statements = new Set(['removes', 'adds', 'keeps'].flatMap((key) => strings(entry[key])));
+  for (const item of Array.isArray(entry.sets) ? entry.sets : []) {
+    if (typeof item?.id === 'string') statements.add(item.id);
+    if (typeof item?.word === 'string') statements.add(wordId(item.word));
+  }
+  const shown = new Set();
+  for (const [file, list] of json) {
+    if (!LIST_FILE.test(file) || !Array.isArray(list)) continue;
+    const idOf = (statement) => (file === 'words.json' ? (typeof statement?.word === 'string' ? wordId(statement.word) : null) : statement?.id);
+    if (list.some((statement) => statements.has(idOf(statement)))) shown.add(file);
+  }
+  for (const replaced of strings(entry.replaces)) if (Object.hasOwn(plan.entries, replaced)) shown.add(entryFile(plan.entries[replaced]));
+  return [...shown];
+}
+
+/** Whether `built` is a commit of the history of `head`, as a page built from main's history names. */
+async function inHistory(call, repo, built, head) {
+  if (built === head) return true;
+  try {
+    const { data } = await call('GET', `/repos/${repo}/compare/${built}...${head}?per_page=1`);
+    return data?.status === 'ahead' || data?.status === 'identical';
+  } catch (error) {
+    if (error instanceof GitHubError && error.status === 404) return false;
+    throw error;
   }
 }
 
@@ -152,14 +213,14 @@ export async function writeVerdict({ call, repo, entry, verdict, built, attempts
     const head = ref?.object?.sha;
     if (typeof head !== 'string') throw new GitHubError(502, { as: 'user' });
 
-    const { data: answer } = await call('POST', '/graphql', { body: { query: PLAN_QUERY, variables: { owner, name, commit: head, plan: `${head}:plan`, seen: `${built}:plan/${path}` } } });
+    const { data: answer } = await call('POST', '/graphql', { body: { query: PLAN_QUERY, variables: { owner, name, commit: head, plan: `${head}:plan`, built, builtPlan: `${built}:plan` } } });
     // Any error, even beside data, means the answer may lack part of plan/.
     const errors = Array.isArray(answer?.errors) ? answer.errors : [];
     if (errors.some((error) => error?.type === 'RATE_LIMITED')) throw new GitHubError(429, { as: 'user', rateLimited: true, retryAfter: 60 });
     const repository = answer?.data?.repository;
     if (errors.length || !repository) throw partial();
     if (!repository.plan) throw new VerdictRefusal(409, 'refused', 'main has no plan/');
-    const read = { files: new Map(), modes: new Map(), fetch: [] };
+    const read = { files: new Map(), modes: new Map(), oids: new Map(), fetch: [] };
     readTree(repository.plan, '', LEVELS, read);
     const blobText = async (oid, where) => {
       let data;
@@ -175,9 +236,6 @@ export async function writeVerdict({ call, repo, entry, verdict, built, attempts
     };
     for (const file of read.fetch) read.files.set(file.path, await blobText(file.oid, file.path));
 
-    const seen = repository.seen;
-    const seenText = !seen ? null : typeof seen.text === 'string' && !seen.isTruncated ? seen.text : await blobText(seen.oid, path);
-    if (seenText === null || read.files.get(path) !== seenText) throw new VerdictRefusal(409, 'changed', CHANGED);
 
     // The options `plan take` passes: `exists`, whether each `at` names a file of the repository, here answered from
     // main. A first run with every path a file names the paths the plan tool asks about.
@@ -186,6 +244,14 @@ export async function writeVerdict({ call, repo, entry, verdict, built, attempts
     write(read.files, entry.id, { exists: (file) => { asked.add(file); return true; } });
     const exists = await filesOnMain({ call, owner, name, head, root: repository.commit?.tree, paths: asked });
     const outcome = write(read.files, entry.id, { exists });
+
+    // A verdict is for the text the owner saw: the page's build is a commit of main's history, and every file the
+    // page showed for the entry, and every file the verdict writes, is at main as it was at that commit.
+    const seen = repository.built?.oid === built && repository.builtPlan ? idsOf(repository.builtPlan, '', LEVELS, new Map()) : null;
+    const compared = new Set([path, path.replace(/\.json$/, '.md'), ...shownFiles(read.files, entry.id), ...(outcome.status === 'done' ? outcome.changed.keys() : [])]);
+    if (!seen || [...compared].some((file) => read.oids.get(file) !== seen.get(file)) || !await inHistory(call, repo, built, head)) {
+      throw new VerdictRefusal(409, 'changed', CHANGED);
+    }
     if (outcome.status === 'refused') throw new VerdictRefusal(409, 'refused', outcome.message);
     if (outcome.status === 'already') return { status: 'already', commit: null, message: outcome.message };
 

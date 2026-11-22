@@ -14,8 +14,10 @@ export function planDir(env = process.env) {
 }
 
 /** The entries of the plan in `dir`, in the order of order.json; throws with every problem of the plan. */
-export function planEntries(dir = planDir()) {
-  const files = loadDir(dir);
+export const planEntries = (dir = planDir()) => entriesFrom(loadDir(dir));
+
+/** The entries of the plan of `files` (by path relative to plan/), in the order of order.json; throws with every problem of the plan. */
+export function entriesFrom(files) {
   const { errors } = checkFiles(files);
   if (errors.length) throw new Error(errors.map(formatProblem).join('\n'));
   const { plan } = parsePlan(files);

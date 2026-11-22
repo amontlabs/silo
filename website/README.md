@@ -1084,8 +1084,9 @@ id answers 400.
 What the server does, with the owner's own token and nothing else:
 
 1. It reads `main`'s commit (`GET /repos/{repo}/git/ref/heads/main`).
-2. In one GraphQL call it reads that commit's tree, the text of every file of
-   `plan/` at it, and the entry's file at `built`. A file GitHub gives cut short
+2. In one GraphQL call it reads the names in that commit's root folder, the
+   text of every file of `plan/` at it, and the id of every file of `plan/` at
+   `built`. A file GitHub gives cut short
    is read whole from its blob. `plan/` is read as `tools/plan/read` reads it:
    a link or a submodule anywhere under it, a folder whose name starts with a
    dot included, refuses the verdict, and so does a folder deeper than
@@ -1094,10 +1095,15 @@ What the server does, with the owner's own token and nothing else:
    its contents, or a blob GitHub does not give, answers 502 `partial`:
    "GitHub answered in part, so nothing was written. Try again." A part of
    `plan/` is never taken for all of it.
-3. When the entry's file on `main` differs from its file at `built`, it refuses
-   with 409 `changed`: "This entry changed since the page was built: reload the
-   page." A verdict is for the text the owner saw. A change to any other file
-   does not matter.
+3. A verdict is for the text the owner saw. The server refuses with 409
+   `changed`, "This entry changed since the page was built: reload the page.",
+   when `built` is not a commit of `main`'s history (GitHub's compare of
+   `built...main`), or when any of these files differs between `main` and
+   `built`: the entry's file and its notes, the files of the decisions it
+   replaces (the page shows their answer), the lists that hold a statement it
+   sets, removes, adds or keeps (the page shows each one's text as it is now),
+   and every file the verdict writes. A change to any other file does not
+   matter.
 4. It runs `take(files, id)` or `drop(files, id)` of `tools/plan/write`, the
    same functions `plan take` and `plan drop` run, with the options `plan take`
    passes, and always as the owner, never `by: agents`. Its `exists`, whether
@@ -1134,8 +1140,8 @@ before any call to GitHub. The origin, cookie and header rules of the other
 writes apply, a verdict counts as a write, and the owner may send 6 verdicts a
 minute per instance.
 
-A verdict costs 3 calls with the owner's token (the ref, the GraphQL read, the
-write), one more when an `at` names a file in a folder, one more to read the
+A verdict costs 4 calls with the owner's token (the ref, the GraphQL read, the
+compare, the write), one more when an `at` names a file in a folder, one more to read the
 ref when the write fails, 3 more for each time
 `main` moved, and one more for each file GitHub cut. The installation token is not used.
 

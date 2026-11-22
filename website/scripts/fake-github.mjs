@@ -392,11 +392,11 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
         return json(res, 200, { data: { repository } });
       }
       if (/^query PlanAt\(/.test(body.query || '')) {
-        const { owner, name, commit, plan, seen } = body.variables || {};
+        const { owner, name, commit, plan, built, builtPlan } = body.variables || {};
         if (`${owner}/${name}` !== repo) return json(res, 200, { data: { repository: null }, errors: [{ type: 'NOT_FOUND', message: 'Could not resolve to a Repository.' }] });
         const git = state.git;
         const options = { truncateOver: state.truncateOver };
-        const answer = { data: { repository: { commit: git.graph(git.resolve(commit), 0, options), plan: git.graph(git.resolve(plan), 3, options), seen: git.graph(git.resolve(seen), 0, options) } } };
+        const answer = { data: { repository: { commit: git.graph(git.resolve(commit), 0, options), plan: git.graph(git.resolve(plan), 3, options), built: git.graph(git.resolve(built), 0, options), builtPlan: git.graph(git.resolve(builtPlan), 3, options) } } };
         return json(res, 200, state.planAnswer ? state.planAnswer(answer) : answer);
       }
       if (who.kind !== 'user') return json(res, 403, { message: 'Forbidden' });
@@ -446,6 +446,15 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
       return json(res, 404, { message: 'Not Found' });
     }
 
+    // Whether a commit is in another's history, as the verdict asks: `status` of base...head.
+    const compareMatch = path.match(new RegExp(`^/repos/${repo}/compare/([0-9a-f]{40})\\.\\.\\.([0-9a-f]{40})$`));
+    if (compareMatch && req.method === 'GET') {
+      const [, base, head] = compareMatch;
+      const git = state.git;
+      if (git.objects.get(base)?.type !== 'commit' || git.objects.get(head)?.type !== 'commit') return json(res, 404, { message: 'Not Found' });
+      const status = base === head ? 'identical' : git.isAncestor(base, head) ? 'ahead' : git.isAncestor(head, base) ? 'behind' : 'diverged';
+      return json(res, 200, { status, commits: [] });
+    }
     const gitMatch = path.match(new RegExp(`^/repos/${repo}/git/(ref|blobs)/(.+)$`));
     if (gitMatch) return gitAnswer(req, res, who, gitMatch[1], gitMatch[2]);
 
