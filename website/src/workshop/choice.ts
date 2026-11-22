@@ -72,12 +72,20 @@ function optionOf(item: string): ChoiceOption | null {
   return { name, what, ...(cost ? { cost } : {}), ...(recommended ? { recommended: true as const } : {}) };
 }
 
-const words = (text: string) => ` ${text.toLowerCase().replace(/[,:]/g, '')} `;
+const plain = (text: string) => text.toLowerCase().replace(/[.,:;!?]+$/, '');
+
+/** Whether a text begins with an option's name, as whole words, without regard to case and trailing punctuation. */
+function beginsWith(text: string, name: string): boolean {
+  const said = plain(text);
+  const start = plain(name);
+  return said.startsWith(start) && !/[\p{L}\p{N}_-]/u.test(said.charAt(start.length));
+}
 
 /**
  * The reason under "Why this one", of "Recommended: <option>. <why>". The option is left out when it only names the
- * marked one, whole or by some of its words. One that says more ("build it, in its later stage") starts the reason,
- * so that is not lost. Null when there is no reason or the option named is not the one marked.
+ * marked one. One that says more ("build it, in its later stage") starts the reason, so that is not lost. Null when
+ * there is no reason, or when what is recommended does not begin with the marked option's name or begins with
+ * another's: the mark and the reason would then be of two options.
  */
 function whyOf(line: string, options: ChoiceOption[]): string | null {
   const end = line.indexOf('. ');
@@ -85,12 +93,11 @@ function whyOf(line: string, options: ChoiceOption[]): string | null {
   const named = line.slice(RECOMMENDED.length, end).trim();
   const why = line.slice(end + 2).trim();
   if (!named || !why) return null;
-  if (options.some((option) => !option.recommended && words(option.name) === words(named))) return null;
-  const marked = options.find((option) => option.recommended)!.name;
-  if (words(marked).includes(words(named))) return why;
-  // The case of the marked name's first word, so a name such as libkrun keeps its small letter.
-  const keeps = words(marked).split(' ')[1] === words(named).split(' ')[1];
-  return `${keeps ? marked[0] : named[0].toUpperCase()}${named.slice(1)}. ${why}`;
+  const marked = options.find((option) => option.recommended)!;
+  if (!beginsWith(named, marked.name) || options.some((option) => option !== marked && beginsWith(named, option.name))) return null;
+  if (plain(named) === plain(marked.name)) return why;
+  // The case of the name's first letter, so a name such as libkrun keeps its small one.
+  return `${marked.name[0]}${named.slice(1)}. ${why}`;
 }
 
 /** The section as a table to draw, or as the Markdown it is when any of it does not fit the shape. */

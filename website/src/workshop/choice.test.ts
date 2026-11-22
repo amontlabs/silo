@@ -135,7 +135,13 @@ Recommended: build it. Budgets need it.
 
   it('keeps the words a recommendation adds to the option it names, at the start of the reason', () => {
     expect(table(SPEND.replace('Recommended: build it.', 'Recommended: build it, in its later stage.')).why).toBe('Build it, in its later stage. Budgets need it, and it tells you which work your money goes to.');
-    expect(table(WORD_AGENT.replace('Recommended: the everyday word, never counted.', 'Recommended: the everyday word.')).why).toMatch(/^People will keep/);
+  });
+
+  it('compares the recommendation with the name marked without case and trailing punctuation', () => {
+    for (const line of ['Recommended: The Everyday Word, Never Counted.', 'Recommended: the everyday word, never counted!.']) {
+      expect(table(WORD_AGENT.replace('Recommended: the everyday word, never counted.', line)).why, line).toMatch(/^People will keep/);
+    }
+    expect(table(SPEND.replace('Recommended: build it.', 'Recommended: build it later.')).why).toMatch(/^Build it later\. Budgets/);
   });
 
   it('keeps the paragraphs after the recommendation apart from the reason, each whole', () => {
@@ -162,6 +168,11 @@ Recommended: build it. Budgets need it.
     ['no option marked', (notes) => notes.replace(' (recommended)', '')],
     ['two options marked', (notes) => notes.replace('Leave it out.', 'Leave it out (recommended).')],
     ['a recommendation of the option not marked', (notes) => notes.replace('Recommended: build it.', 'Recommended: leave it out.')],
+    ['another option named with words that follow it', (notes) => notes.replace('Build it (recommended).', 'Keep it (recommended).').replace('Leave it out.', 'Remove it.').replace(/Recommended: build it\.[^#]*/, 'Recommended: Remove it after the trial. It saves memory.\n\n')],
+    ['a recommendation that starts with no option\'s name', (notes) => notes.replace('Recommended: build it.', 'Recommended: now, build it.')],
+    ['a recommendation of a word that only starts as the name does', (notes) => notes.replace('Recommended: build it.', 'Recommended: build items.')],
+    ['a recommendation of some of the name\'s words', (notes) => notes.replace('Build it (recommended).', 'Build it in Zig (recommended).')],
+    ['a recommendation that starts with another option\'s longer name', (notes) => notes.replace('Leave it out.', 'Build it later.').replace('Recommended: build it.', 'Recommended: build it later, as an extension.')],
     ['a list inside an option', (notes) => notes.replace('- Leave it out.', '  - per model\n- Leave it out.')],
   ];
   it.each(broken)('leaves a section with %s whole, as Markdown', (_, change) => {
