@@ -21,8 +21,8 @@ The need: people who run agents on several machines move files between them by h
   `code-leaves-through-git`). Chosen files go from a fork to its parent before a drop
   (`before-a-drop`, `keeping-from-a-fork`). This entry is the general case, between any two
   computers.
-- `what-silo-does-not-build` proposes that Silo "passes no messages between agents". A file can
-  carry a message. An agent's reading: Silo carries the file and neither reads it nor chooses where
+- `what-silo-does-not-build` proposes that a file crosses only by a rule you set and that Silo
+  carries nothing else between agents. A file can carry a message. An agent's reading: Silo carries the file and neither reads it nor chooses where
   it goes. The owner has not ruled on this.
 - Bad paths to design: the receiving computer is paused, stopped or dropped. Its disk is full. The
   file changes while it is copied. A file of the same name is already there. A hold ends with no

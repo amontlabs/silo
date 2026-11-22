@@ -1,0 +1,18 @@
+{
+  "asks": "When you fork a computer that has a budget, what budget does the fork get?",
+  "answer": "A fork spends from the budget of the computer it was forked from, unless you give it one of its own.",
+  "needs": [
+    "what-a-budget-promises"
+  ],
+  "sets": [
+    {
+      "in": "traffic/properties",
+      "id": "fork-spends-its-parents-budget",
+      "says": "A fork spends from the budget of the computer it was forked from, unless you give it one of its own.",
+      "kind": "safety",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}

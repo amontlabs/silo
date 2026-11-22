@@ -10,6 +10,7 @@
     "core-state-stays-small",
     "multi-step-operations",
     "engine-under-failure",
-    "engine-takes-back-helpers"
+    "engine-takes-back-helpers",
+    "helper-on-broken-assumption"
   ]
 }

@@ -1,5 +1,5 @@
 {
-  "asks": "What do these words for what Silo knows mean: record, classifier?",
+  "asks": "What does this word for what Silo knows mean: record?",
   "needs": [
     "words-for-what-silo-knows"
   ],
@@ -8,15 +8,6 @@
       "in": "words",
       "word": "record",
       "means": "Everything Silo has written down about a computer: its facts and its reports, in the order they came, never changed afterwards. Engineers call this an append-only log. Opinions are computed from it and kept apart."
-    },
-    {
-      "in": "words",
-      "word": "classifier",
-      "means": "Whatever gives an opinion: a pattern, a function, a small model, an agent.",
-      "not": [
-        "labeler",
-        "judge"
-      ]
     }
   ],
   "suggest": {

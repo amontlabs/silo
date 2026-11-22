@@ -15,7 +15,7 @@ The options:
 - Nothing until you write rules. A fresh install stays fully closed. It costs you writing the first
   rules yourself before any agent works.
 
-Recommended: silo proposes, you say yes. One yes keeps a fresh install closed until you say so, and
+Recommended: Silo proposes, you say yes. One yes keeps a fresh install closed until you say so, and
 it costs you a single click.
 
 ## Found by an audit, 22 November 2026

@@ -12,7 +12,9 @@
     "word-budget",
     "where-rules-run",
     "allow-hold-or-deny",
-    "held-requests-and-asks"
+    "held-requests-and-asks",
+    "budgets-together",
+    "budget-of-a-fork"
   ],
   "keeps": [
     "rule-reads-only-facts",

@@ -1,17 +1,18 @@
 {
   "asks": "What makes an extension a classifier?",
-  "answer": "A classifier is an extension that gives a value from a fixed list. It is one case of an extension, not the name for all of them.",
+  "answer": "An extension that answers from a fixed list is a classifier. So is a pattern or a small function of Silo's own that runs inside Silo and gives its opinion from such a list. \"Classifier\" is not the name for all extensions.",
   "needs": [
     "extension-manifest",
-    "shipped-extensions-use-the-manifest"
+    "built-in-classifiers-run-inside"
   ],
   "sets": [
     {
       "in": "words",
       "word": "classifier",
-      "means": "An extension that gives a value from a fixed list.",
+      "means": "Whatever gives a value from a fixed list as its opinion: a pattern or a function inside Silo, or an extension.",
       "not": [
-        "judge"
+        "judge",
+        "labeler"
       ]
     }
   ]

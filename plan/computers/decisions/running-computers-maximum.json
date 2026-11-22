@@ -1,0 +1,18 @@
+{
+  "asks": "How is the number of computers running at once limited?",
+  "answer": "A Mac holds a few running computers, not fifty. Silo has a fixed maximum that fits the Mac's memory, says it plainly and shows it in the app. Raising it takes a new version of Silo.",
+  "replaces": [
+    "computers-per-mac"
+  ],
+  "sets": [
+    {
+      "in": "computers/properties",
+      "id": "running-computers-have-a-maximum",
+      "says": "Silo never runs more computers at once than the maximum it shows.",
+      "kind": "safety",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}

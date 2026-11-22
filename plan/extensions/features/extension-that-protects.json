@@ -16,7 +16,8 @@
     "precautions-you-set",
     "held-requests-and-asks",
     "refusals-that-say-so",
-    "computers-stopped-and-paused"
+    "computers-stopped-and-paused",
+    "extension-that-does-not-answer"
   ],
   "keeps": [
     "no-tool-grants-or-destroys",

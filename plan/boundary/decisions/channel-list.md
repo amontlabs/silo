@@ -1,5 +1,6 @@
-- The first sentence is the record's section 2, on the word "channel". Section 4.2 gives the same
-  list. The second sentence is 4.2, marked Notes.
+- The first sentence comes from the record's section 2, on the word "channel". Section 4.2 gives the
+  same list, with repository access and without the way in from your Mac. That change is put to the
+  owner in `reaching-a-computer`. The second sentence is 4.2, marked Notes.
 - That every channel is listed, has a rule, and none exists by default is the principle put
   forward by the root decision `channel-question`.
 

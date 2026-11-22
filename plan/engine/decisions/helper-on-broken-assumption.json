@@ -1,0 +1,18 @@
+{
+  "asks": "When the part of Silo that runs one computer finds a bug in itself, what does it do?",
+  "answer": "It stops, and its computer stops with it. That part is the helper. The programs running in the computer end, and at worst what happened since its last checkpoint is lost. Other computers keep running.",
+  "needs": [
+    "processes"
+  ],
+  "sets": [
+    {
+      "in": "engine/properties",
+      "id": "broken-helper-stops-only-its-computer",
+      "says": "A helper that finds its own state impossible stops, and only its computer stops with it.",
+      "kind": "safety",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}

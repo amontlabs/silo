@@ -17,7 +17,7 @@ The options:
 - On the Mac only. No phone answers. It costs the work held while you are away, which is refused
   when the limit passes.
 
-Recommended: silo's own apps only. A yes can give a computer more than it has, so it comes only
+Recommended: Silo's own apps only. A yes can give a computer more than it has, so it comes only
 through something Silo controls. The phone app keeps you reachable.
 
 ## Raised on 21 November 2026, by an agent

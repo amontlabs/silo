@@ -15,8 +15,8 @@
   after that one case.
 - Where the case shows: a request waits at the boundary, and the extension answers from a list
   Silo fixes (`what-wakes-an-extension` in the part `extensions`).
-- It needs `shipped-extensions-use-the-manifest`: if what ships with Silo had no manifest, a built-in
-  classifier would not be an extension.
+- It needs `built-in-classifiers-run-inside`, which says whether a built-in classifier is an
+  extension.
 - The word was compared with estimator, detector, monitor, evaluator, reviewer and labeler. None
   is both standard and plainer.
 - `what-a-classifier-is` still says a classifier is whatever gives an opinion. `opinion-is-a-value`
@@ -46,3 +46,5 @@ the first. The built-in classifier for heat is a function that `processes` runs 
 an extension with a computer. The audit proposes that this entry alone sets the word: "Whatever
 gives a value from a fixed list as its opinion: a pattern or a function inside Silo, or an
 extension." A second audit asks instead: is each built-in an extension with a computer?
+
+The question is put to the owner in `built-in-classifiers-run-inside`, under "For the owner".

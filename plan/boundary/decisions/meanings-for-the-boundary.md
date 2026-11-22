@@ -5,7 +5,8 @@ line marked Decided or Agreed, or settled in STATE, holds it. What this decision
 word list's own meaning, which replaces the word in `words.json` when taken.
 
 - boundary: in force as "The edge of a computer." (record l.141–144, l.200); "wall" has no marked source, so it is in this decision's `not` and not in force.
-- channel: in force as "One way through the boundary." (record 4.2, l.351–357).
+- channel: in force as "One way through the boundary." (record 4.2, l.351–357). Its list follows
+  `channel-list`, which `reaching-a-computer` would change.
 - allow: no marked line holds its meaning.
 - hold: no marked line holds its meaning.
 - deny: no marked line holds its meaning.

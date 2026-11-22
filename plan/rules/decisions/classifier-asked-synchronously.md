@@ -10,7 +10,8 @@ In the owner's example:
 - "unsure": the precaution holds it for you.
 
 Whether unsure is held, and what happens when the classifier does not answer, are defaults to
-settle when this is built, with how they are shown and changed: `precaution-on-unsure`. The
+settle when this is built, with how they are shown and changed: `precaution-on-unsure` and
+`extension-that-does-not-answer`. The
 owner also said the wait itself always ends; the wait for a classifier is decided in `boundary`.
 
 The owner's words on what it is: "It is caution and not a promise. A classifier can be fooled,

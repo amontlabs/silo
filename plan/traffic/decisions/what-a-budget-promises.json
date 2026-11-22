@@ -1,11 +1,11 @@
 {
-  "asks": "What does a budget on a computer or on a conversation promise?",
-  "answer": "A budget on a computer or on a conversation denies or holds what it meters: once it is reached, no further metered request leaves.",
+  "asks": "What does a budget on a computer or on a conversation promise at the moment it is reached?",
+  "answer": "A budget on a computer or on a conversation denies or holds what it meters: once it is reached, no further metered request leaves. The calls already under way finish, even past the budget, and none is cut midway. So what is spent can end over the budget by those calls at most.",
   "sets": [
     {
       "in": "traffic/properties",
       "id": "budget-stops-what-it-meters",
-      "says": "A budget on a computer or on a conversation denies or holds what it meters: once it is reached, no further metered request leaves.",
+      "says": "A budget on a computer or on a conversation denies or holds what it meters: once it is reached, no further metered request leaves, and only the calls already under way may end past it.",
       "kind": "safety",
       "check": [
         "hostile test"

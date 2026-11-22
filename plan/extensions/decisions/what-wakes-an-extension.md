@@ -19,3 +19,5 @@ extension granted "deny or hold the requests of main" is silent, and its manifes
 on": what it exists to stop passes. The audit proposes to narrow `precaution-on-unsure` to "What
 does a precaution do when its classifier answers unsure?". If Silo should bound what a manifest may
 say (deny or hold, never let go on), that is a new decision naming this one.
+
+The question is put to the owner in `extension-that-does-not-answer`, under "For the owner".

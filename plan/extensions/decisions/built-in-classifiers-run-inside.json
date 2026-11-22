@@ -1,0 +1,10 @@
+{
+  "asks": "Do the small classifiers that ship with Silo run inside it, or each in a computer of its own?",
+  "answer": "A classifier that ships with Silo and is only a pattern or a small function of Silo's own runs inside Silo, and is not an extension. Everything else that ships with Silo uses the same manifest as what people add, so whatever it executes runs in a computer of its own.",
+  "needs": [
+    "extension-manifest"
+  ],
+  "replaces": [
+    "shipped-extensions-use-the-manifest"
+  ]
+}

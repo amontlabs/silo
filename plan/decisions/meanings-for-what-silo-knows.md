@@ -5,4 +5,5 @@ line marked Decided or Agreed, or settled in STATE, holds it. What this decision
 word list's own meaning, which replaces the word in `words.json` when taken.
 
 - record: in force as "Facts and reports are written once, and together they are the record." (record l.502).
-- classifier: in force as "Whatever gives an opinion."; "labeler" has no marked source, so it is in this decision's `not` and not in force.
+- classifier: in force as "Whatever gives an opinion." Its new meaning is put forward by
+  `what-makes-a-classifier` alone, with "labeler" in its `not`.
