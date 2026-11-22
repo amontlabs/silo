@@ -383,10 +383,11 @@ function VerdictButtons({ row, ctx, held = false }: { row: Row; ctx: EntryContex
 }
 
 /**
- * The state of a row: its words on a row of their own, with the owner's Take and Drop at its end, and under it the id,
- * the button that copies it and the votes. The buttons come after `me` answers, in a column of the state's row whose
- * height is the state's, so they move nothing at any width. They are live only once the entry's details (what a yes
- * would change) show, since the owner decides on them too; until then their room is held.
+ * The state of a row: its words, with the owner's Take and Drop at the end of their line, or of a line of their own
+ * under them when both do not fit (workshop.css), and under that the id, the button that copies it and the votes. The
+ * buttons come after `me` answers; for the owner remembered their room is held until then, so they move nothing. They
+ * are live only once the entry's details (what a yes would change) show, since the owner decides on them too; until
+ * then their room is held.
  */
 function StateLine({ row, ctx, children }: { row: Row; ctx: EntryContext; children?: ReactNode }) {
   const text = stateText(row);
@@ -397,7 +398,7 @@ function StateLine({ row, ctx, children }: { row: Row; ctx: EntryContext; childr
   const detailsShown = !row.more || typeof ctx.w.facts === 'object';
   return (
     <>
-      <div className={`ws-state${offered ? ' ws-offered' : ''}`}>
+      <div className="ws-state">
         <span className={`ws-state-text ${tone}`}>{text}</span>
         {offered && (ctx.w.mayDecide || ctx.w.verdictHeld) ? <VerdictButtons row={row} ctx={ctx} held={!ctx.w.mayDecide || !detailsShown} /> : null}
         {id || children ? <span className="ws-state-more">{id ? <CopyId id={id} /> : null}{children}</span> : null}

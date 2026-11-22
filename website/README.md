@@ -1077,13 +1077,15 @@ done on the page, and neither is a verdict on a part, a word, a principle or a
 property.
 
 The page learns that the person is the owner only when `me` answers, so the
-buttons come after it. The state's words have a row of their own, with the
-buttons' column at its end, and the id, Copy id and the votes are on the row
-under it: the row's height is the state's whether or not the buttons are
-there, so their arrival moves nothing at any width, on a first visit too
-(`scripts/verdict-layout.test.mjs` measures it in a real browser). When the
-person signed in last was the owner, the buttons' room shows placeholders
-until then. The buttons are live only once the entry's details show (what a
+buttons come after it. They go at the end of the line of the state's words
+when both fit on it, and at the end of a line of their own under the words
+when not, as on a phone; the words are never cut. The id, Copy id and the
+votes are on the line under them. When the person signed in last was the
+owner, the buttons' room shows placeholders until `me` answers, so their
+arrival moves nothing at any width. On a first visit (nothing remembered of
+the person), it moves nothing where the buttons fit beside the words, and adds
+their line where they do not (`scripts/verdict-layout.test.mjs` measures both
+in a real browser). The buttons are live only once the entry's details show (what a
 yes would change, from the facts chunk): the owner decides on them too, so
 until they show, the buttons' room holds placeholders.
 
