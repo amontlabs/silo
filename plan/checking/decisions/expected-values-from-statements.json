@@ -1,4 +1,6 @@
 {
   "asks": "Where does a check's expected value come from?",
-  "answer": "From a property or a statement of the plan, or from a published example of an outside format. Never from what the code printed once."
+  "answer": "From a property or a statement of the plan, or from a published example of an outside format. Never from what the code printed once.",
+  "verdict": "take",
+  "by": "agents"
 }
