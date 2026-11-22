@@ -15,5 +15,9 @@
   ],
   "keeps": [
     "never-shown-as-a-fact"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It is the one place that shows every run of every computer at once, whichever agent program started it."
+  }
 }

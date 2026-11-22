@@ -1,4 +1,4 @@
 {
   "asks": "Where does everything that waits on you sit?",
-  "answer": "Everything that waits on the user sits in one queue across all computers, ordered by importance. Each item is answered in place."
+  "answer": "Everything that waits on you sits in one list across all computers: asks, alerts, and runs that ended with a receipt you have not opened. It is the list of the first screen. It is ranked by what waiting costs you: asks first, the one whose hold ends soonest on top, then alerts, newest first, then ended runs. Items that rank the same keep the order in which they arrived, so the list never reorders itself while you read it. Each item is answered in place: allow or deny for an ask, open or set aside for an alert, open for a receipt. An item answered elsewhere, such as with the `silo` command, leaves the list everywhere at once. An ask whose hold ends while it waits leaves the list, and the record says it was refused as held and not answered."
 }

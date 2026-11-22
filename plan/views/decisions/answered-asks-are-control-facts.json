@@ -1,4 +1,4 @@
 {
   "asks": "What is written down when an ask is answered or a grant is made?",
-  "answer": "Each ask that was answered and each grant is a control fact: what was asked, the answer, what was done and the result."
+  "answer": "When you answer an ask, or when you or a rule grants something, the record keeps it as a control fact: what was asked or granted, the answer, who gave it, what Silo did and what came of it. A no is kept as a yes is. A hold that ends without your answer is kept too, with the reason it ended."
 }

@@ -13,5 +13,9 @@
   "keeps": [
     "never-shown-as-a-fact",
     "books-balance"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Agents fill a disk fast, and this is where you free space knowing what a rebuild brings back."
+  }
 }

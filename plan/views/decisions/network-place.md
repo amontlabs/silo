@@ -1,5 +1,24 @@
 # Network
 
+## For the owner
+
+An agent's part, 22 November 2026. In one afternoon, main called api.anthropic.com 1,204 times for
+$18.40, pushed three times to github.com with the secret github, installed 3 packages from npm that
+are less than 3 days old, and sent 2.1 MB to paste.rs, a host it had never reached.
+
+The options:
+
+- One line per host, across runs (recommended). paste.rs stands out as new, with its 2.1 MB and the
+  run that sent it, and you can deny it from its line. It costs the view of one run, which is in
+  that run's receipt and not here.
+- One list per run. Each run shows the hosts it reached. It costs the view of the whole computer: a
+  host reached by six runs shows six times, and a new host is hidden inside one run's list.
+
+Recommended: one line per host. A host is what you allow or deny, so it is what this place should
+list.
+
+## Notes
+
 The sketch shows content, not design.
 
 ```text

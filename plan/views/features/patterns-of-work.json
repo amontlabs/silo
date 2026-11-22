@@ -11,5 +11,9 @@
     "how-each-run-is-going",
     "which-run-did-it",
     "patterns-the-record-shows"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "You asked for the record to be a ground for noticing and improving how agents work, and this is that place."
+  }
 }

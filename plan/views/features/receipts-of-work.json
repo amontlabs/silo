@@ -20,5 +20,9 @@
   "keeps": [
     "never-shown-as-a-fact",
     "books-balance"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The receipt is how a person judges an hour of agent work in a minute without trusting the agent's word."
+  }
 }

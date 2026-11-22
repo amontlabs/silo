@@ -1,4 +1,7 @@
 {
   "asks": "When does Silo alert you?",
-  "answer": "Silo alerts you only on a change that needs a person. It never sends a stream of every event."
+  "answer": "Silo alerts you when something changes and needs a person: a rule or a precaution raises an alert, or Silo has something to say about itself, such as a computer that stopped. An alert about a condition that lasts, such as disk above 90%, comes when the condition starts, and not again while it lasts. It comes again only after the condition has ended and started again. While the condition lasts, it stays in the list of what needs you until it ends or you set it aside. Alerts of one kind in one computer that come close together reach you as one alert with a count. Silo never sends a stream of every event; the record holds them.",
+  "needs": [
+    "meanings-for-what-silo-does"
+  ]
 }

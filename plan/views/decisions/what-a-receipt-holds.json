@@ -1,6 +1,6 @@
 {
   "asks": "What does a receipt hold?",
-  "answer": "What you asked the agent, word for word; the commands that ran, with their exit codes; the checks that ran, and their results; the files that changed, grouped, and what is only here; the hosts reached and what was sent to them; the secrets used, by name; the model calls: spend, which models answered, limits reached; the time, split between work and waiting; the asks raised and their answers; recordings of the screen, when an agent drove it; what could not be attributed, and any gap.",
+  "answer": "A receipt holds, in this order: what you asked the agent, word for word; for a task, the checks Silo ran and their results; the files that changed, grouped, with what is only here; the commands that ran, with their exit codes; the hosts reached, how much was sent to each, and what was sent where Silo reads the traffic; the secrets used, by name; the model calls, with the spend, which models answered and the limits reached; the time, split between work and waiting; the asks raised and their answers; recordings of the screen, when an agent drove it; and what could not be attributed, and any gap. Each item shows whether it is a fact, a report or an opinion. An item Silo has no way to know for this work says so and stays empty.",
   "needs": [
     "what-a-receipt-is",
     "conversation-text-kept"

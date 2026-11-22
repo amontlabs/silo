@@ -1,5 +1,22 @@
 # What needs you
 
+## For the owner
+
+An agent's part, 22 November 2026. At 16:05 main asks to reach api.stripe.com and the request is
+held for 90 seconds, the fork try-bun has written 41 GB, and claude #1 has finished in client-a.
+
+The options:
+
+- Build it (recommended). The app opens on that list, the ask on top with its time left, and you
+  allow or deny it on its line. It costs strict ranking work: the list has to stay short and never
+  reorder itself while you read it.
+- Leave it out. The app opens on Now, and asks come as notifications. It costs the first screen you
+  decided on, and asks that run out while you look elsewhere.
+
+Recommended: build it. Asks with a time limit need one place you always see first.
+
+## Notes
+
 An agent's doubt, from drafting this feature on 21 November 2026.
 
 It reads `first-screen` and `one-queue` as the same list. If the queue is a place of its own, they are two features.

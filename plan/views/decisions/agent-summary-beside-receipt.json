@@ -1,6 +1,6 @@
 {
   "asks": "May the agent's own summary be shown beside a receipt?",
-  "answer": "The agent's own summary can be shown beside it, marked as the agent's. A summary written by an agent is untrusted content.",
+  "answer": "The agent's own summary of its work can be shown beside a receipt, never inside it, marked as the agent's own words. It is shown as plain text: nothing in it becomes a link or a button. In the text that the `silo` command prints, it is marked the same way, so that an agent reading a receipt can tell it from Silo's account. A summary can be wrong, or written to mislead. When there is no summary, or Silo does not have its text, the receipt says so.",
   "needs": [
     "what-a-receipt-is"
   ]

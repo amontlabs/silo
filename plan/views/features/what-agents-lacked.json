@@ -1,4 +1,8 @@
 {
   "name": "What agents lacked",
-  "what": "What agents say they lacked: mistakes, learnings and wishes written by agents, shown per computer."
+  "what": "What agents say they lacked: mistakes, learnings and wishes written by agents, shown per computer.",
+  "suggest": {
+    "verdict": "drop",
+    "why": "What a computer lacked already shows in the record, and what agents learn belongs in the repository's instruction files."
+  }
 }

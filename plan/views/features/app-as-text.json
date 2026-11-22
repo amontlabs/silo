@@ -13,5 +13,9 @@
     "network-in-the-app",
     "patterns-of-work",
     "engine-program-and-clients"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "An agent that reads the record answers \"what did that run do\" from what happened, not from a guess."
+  }
 }

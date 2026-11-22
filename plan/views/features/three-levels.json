@@ -1,4 +1,8 @@
 {
   "name": "Three levels",
-  "what": "Three levels: a status, an overview with a small answer to give, the detail."
+  "what": "Three levels: a status, an overview with a small answer to give, the detail.",
+  "suggest": {
+    "verdict": "drop",
+    "why": "The first screen you decided on already has these three levels, so there is nothing of its own to build."
+  }
 }

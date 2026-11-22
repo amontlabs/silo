@@ -12,5 +12,9 @@
   ],
   "keeps": [
     "never-shown-as-a-fact"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Where data went is the first question once an agent holds a secret, and this place answers it for a whole computer."
+  }
 }

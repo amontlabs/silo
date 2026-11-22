@@ -1,4 +1,4 @@
 {
   "asks": "What does the place Network show?",
-  "answer": "Where the computer connected, what it sent, what it installed and what it spent."
+  "answer": "Network shows each computer's hosts, one line per host: the number of calls, how much was sent, what was sent where Silo reads the traffic, the runs that reached it, and the secrets used, by name. Hosts seen for the first time are marked. Network also shows the packages installed, for the registries whose traffic Silo reads; what was spent with each model provider; and the connections that were denied or held, with what decided each one. Which run made a connection is a report, and is shown as one."
 }

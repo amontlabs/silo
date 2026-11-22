@@ -1,4 +1,4 @@
 {
   "asks": "What does the place Timeline show?",
-  "answer": "One line of time per computer: checkpoints, turns, commands, asks, recordings."
+  "answer": "Timeline shows one line of time per computer: its checkpoints, the turns of each run, their commands, asks, alerts and screen recordings, each marked with its run. You pick a moment on it, and fork from there or restore the computer to it. Both start from the last checkpoint before that moment, and the Timeline says how long before it that checkpoint was taken."
 }

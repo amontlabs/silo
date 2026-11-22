@@ -1,4 +1,4 @@
 {
   "asks": "What does the place Disk show?",
-  "answer": "What takes space, who put it there, what changed and what was produced."
+  "answer": "Disk shows what takes space on your Mac, biggest first: each computer, its checkpoints and the bin, and inside a computer its paths. Each path shows the run that wrote it, or \"unattributed\" when the record shows none. Disk also shows what changed in a computer since a moment you pick, grouped by kind; what is only here; and the files runs produced that are not code or build output, such as reports and screenshots. Which run wrote a path, and what would bring it back, are opinions and are shown as such. A path that a rebuild would bring back offers purge."
 }

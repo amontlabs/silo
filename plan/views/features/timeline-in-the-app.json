@@ -10,9 +10,15 @@
     "mac-app-language",
     "processes-in-the-record",
     "checkpoints-taken-on-their-own",
-    "how-each-run-is-going"
+    "how-each-run-is-going",
+    "forking-a-computer",
+    "restore-to-a-checkpoint"
   ],
   "keeps": [
     "never-shown-as-a-fact"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Going back is useful only once you can find the moment, and alerts open there."
+  }
 }

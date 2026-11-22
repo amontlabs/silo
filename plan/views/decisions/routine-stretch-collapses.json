@@ -1,6 +1,6 @@
 {
   "asks": "How does the timeline show a routine stretch?",
-  "answer": "A routine stretch collapses into one line with a count. Decisions and thrashing stay visible.",
+  "answer": "Between the moments that matter, a run's lines collapse into one line with counts, such as \"13:02 to 13:31, 180 commands, 12 failed, 38 files changed\". The moments that matter keep a line each: what you asked the agent, asks, alerts, checkpoints, forks and restores. What collapses is decided from facts and reports only, so a wrong opinion never hides a line. A collapsed line that holds a stretch a classifier calls thrashing says so, as that classifier's opinion. Opening a collapsed line shows each command in it.",
   "needs": [
     "timeline-place"
   ]

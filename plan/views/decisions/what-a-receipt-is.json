@@ -1,6 +1,6 @@
 {
   "asks": "What is a receipt?",
-  "answer": "A receipt is the account of one run, one task or one fork. It is made from the record. The agent does not write it. Its job is to turn an hour of agent work into something a person can judge in a minute.",
+  "answer": "A receipt is the account of one run, one task or one fork. Silo makes it from the record, and the agent does not write it. Its job is to let a person judge an hour of agent work in a minute. A receipt can be opened while the work goes on, and it then says that the work is not finished. What the record lacks for that work shows in the receipt as missing, and is never filled in.",
   "sets": [
     {
       "in": "words",

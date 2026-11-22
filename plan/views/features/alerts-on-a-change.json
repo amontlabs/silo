@@ -10,5 +10,9 @@
     "timeline-in-the-app",
     "rule-actions-on-the-computer",
     "precautions-you-set"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Rules and precautions that alert you are worth little until the alert reaches you and opens on what caused it."
+  }
 }

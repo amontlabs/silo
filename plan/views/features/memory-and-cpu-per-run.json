@@ -5,5 +5,9 @@
     "now-in-the-app",
     "computers-low-memory-or-disk",
     "which-run-did-it"
-  ]
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It turns a low-memory alert into the name of the run to stop, from figures the record plans to sample anyway."
+  }
 }

@@ -1,7 +1,9 @@
 {
   "asks": "Where does an alert lead?",
-  "answer": "An alert opens here, on what triggered it, and on the turn that led to it when there is one.",
+  "answer": "An alert opens the Timeline of its computer at the moment of the line that raised it, with that line selected, and with the turn that led to it shown when there is one. An alert Silo raises about itself, such as a computer that stopped, opens at its moment, with no turn. The alert also leads to the place of its kind, such as Network for a host. When the computer or its record is gone, the alert keeps its own text and says that the rest is gone.",
   "needs": [
-    "timeline-place"
+    "timeline-place",
+    "meanings-for-what-silo-does",
+    "the-chain"
   ]
 }

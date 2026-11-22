@@ -1,4 +1,8 @@
 {
   "name": "Comments to the agent",
-  "what": "Comments on what a turn changed, sent back to the agent."
+  "what": "Comments on what a turn changed, sent back to the agent.",
+  "suggest": {
+    "verdict": "drop",
+    "why": "Talking to an agent is the job of its client app, such as T3 Code, as you said on 21 November."
+  }
 }
