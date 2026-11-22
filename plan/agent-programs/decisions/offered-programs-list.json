@@ -1,4 +1,8 @@
 {
   "asks": "What is the list of agent programs Silo offers?",
-  "answer": "The programs Silo offers are those that ship with both a data file of `agent-program-data-file` and a piece that adds them to a computer (`recipe-pieces`), and the list is read from those files. Adding or removing a program is adding or removing its data file and its piece, with no change to Silo's code, and no code of Silo names an agent program. A test checks that the list shown is exactly the programs shipped, and that each data file has its piece and each piece that adds an agent program has its data file; a review of the code finds no program named in it."
+  "answer": "The programs Silo offers are those that ship with both a data file of `agent-program-data-file` and a piece that adds them to a computer (`recipe-pieces`), and the list is read from those files. Adding or removing a program is adding or removing its data file and its piece, with no change to Silo's code, and no code of Silo names an agent program. A test checks that the list shown is exactly the programs shipped, and that each data file has its piece and each piece that adds an agent program has its data file; a review of the code finds no program named in it.",
+  "needs": [
+    "recipe-pieces",
+    "agent-program-data-file"
+  ]
 }
