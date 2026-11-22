@@ -2,6 +2,7 @@
 // pending state, the verdict shown at once and kept across a reload until a build carries it, and a refusal.
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import { apiConfig } from './api';
 import type { Me } from './api';
 import { ARM_MS } from './Entry';
 import { buildData, DECISIONS } from './fixtures';
@@ -148,6 +149,40 @@ describe('the owner\'s verdict', () => {
     fireEvent.click(button(/^Drop$/) as HTMLElement);
     fireEvent.click(button(/^Confirm drop$/) as HTMLElement);
     await waitFor(() => expect(within(item()).getByRole('alert')).toHaveTextContent(message));
+  });
+
+  it('asks once more when the answer is lost (no connection, or none in time): the verdict may be on main, and the server then says so', async () => {
+    const lost = [() => Promise.reject(new TypeError('Failed to fetch')), () => new Promise<never>(() => {})] as const;
+    for (const first of lost) {
+      const saved = apiConfig.writeTimeoutMs;
+      apiConfig.writeTimeoutMs = 50;
+      try {
+        let asked = 0;
+        const calls = await openCreate(built(), theOwner, () => {
+          asked += 1;
+          return asked === 1 ? first() : ok({ ok: true, commit: null, already: true });
+        });
+        await waitFor(() => expect(button(/^Take$/)).not.toBeNull());
+        fireEvent.click(button(/^Take$/) as HTMLElement);
+        fireEvent.click(button(/^Confirm take$/) as HTMLElement);
+        await waitFor(() => expect(stateLine()).toBe('Decided.'));
+        expect(posts(calls, 'verdict')).toHaveLength(2);
+        expect(posts(calls, 'verdict')[1].body).toEqual(posts(calls, 'verdict')[0].body);
+        expect(within(item()).queryByRole('alert')).toBeNull();
+      } finally {
+        apiConfig.writeTimeoutMs = saved;
+        cleanup();
+        localStorage.clear();
+      }
+    }
+    // Lost twice: the failure shows, and the entry is left as it was.
+    const calls = await openCreate(built(), theOwner, () => Promise.reject(new TypeError('Failed to fetch')));
+    await waitFor(() => expect(button(/^Take$/)).not.toBeNull());
+    fireEvent.click(button(/^Take$/) as HTMLElement);
+    fireEvent.click(button(/^Confirm take$/) as HTMLElement);
+    await waitFor(() => expect(within(item()).getByRole('alert')).toHaveTextContent('No connection.'));
+    expect(posts(calls, 'verdict')).toHaveLength(2);
+    expect(stateLine()).toBe('Not decided.');
   });
 
   it('a session gone signs the page out and writes nothing', async () => {

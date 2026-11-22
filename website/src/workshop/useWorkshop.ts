@@ -507,7 +507,8 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   const verdictsRef = useRef(new Set<string>());
   /**
    * The owner's verdict on an entry. Pending while the server writes it on main; then shown at once and kept (writes.ts)
-   * until a new build carries it. A refusal leaves the entry as it was and says why, in the plan tool's words.
+   * until a new build carries it. A lost answer is asked once more before it counts as a failure. A refusal leaves the
+   * entry as it was and says why, in the plan tool's words.
    */
   const sendVerdict = async (row: Row, verdict: Verdict) => {
     const id = row.kind === 'entry' ? row.key.slice('entry-'.length) : null;
@@ -521,7 +522,14 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     });
     setAnnounce(verdict === 'take' ? 'Taking' : 'Dropping');
     try {
-      await api.verdict(id, verdict, built);
+      try {
+        await api.verdict(id, verdict, built);
+      } catch (error) {
+        // An answer lost on the way (no connection, or none in time) may hide a verdict written on main: asked once
+        // more, the server answers "already" when it is there.
+        if (!(error instanceof ApiError && error.status === 0)) throw error;
+        await api.verdict(id, verdict, built);
+      }
       keepVerdict({ entry: id, verdict, built }, Date.now());
       setVerdictsTick((tick) => tick + 1);
       setAnnounce(verdict === 'take' ? 'Taken' : 'Dropped');
