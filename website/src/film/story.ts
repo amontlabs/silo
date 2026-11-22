@@ -33,6 +33,14 @@ export interface Shot {
 
 const LEFT: Span = [0, 480];
 const RIGHT: Span = [508, 988];
+/** Now: the commands and the spend of the runs, where the names are out of frame. */
+const SPEND: Span = [190, 670];
+/** The chain of the Timeline: its labels, its marks and main's line above them. */
+const CHAIN: Span = [140, 620];
+/** The gates of Network, with the rule each names and its verdict, and main's wires up to them. */
+const GATES: Span = [50, 530];
+/** The fork's right half, the wire out of it and the gate where its request is denied. */
+const FORK_GATE: Span = [190, 670];
 
 export const SHOTS = [
   {
@@ -53,7 +61,18 @@ export const SHOTS = [
   {
     key: 'now', name: 'Now', dur: 6740,
     plan: ['now-in-the-app', 'spend-per-conversation', 'how-each-run-is-going', 'computers-macos-screen'],
-    camera: { from: LEFT, pans: [{ t: 4120, d: 380, to: RIGHT }] },
+    // The runs are on the left and the spend on the right: the camera goes to the spend as it arrives, comes back
+    // with the line that draws the next run, goes to the screen as it opens, and ends on the runs with the stuck one.
+    camera: {
+      from: LEFT,
+      pans: [
+        { t: 620, d: 400, to: SPEND },
+        { t: 1100, d: 340, to: LEFT, follows: 'the line to the second command' },
+        { t: 3060, d: 300, to: SPEND },
+        { t: 4120, d: 380, to: RIGHT },
+        { t: 5700, d: 400, to: LEFT },
+      ],
+    },
   },
   {
     key: 'main', name: 'main', dur: 6940,
@@ -69,7 +88,7 @@ export const SHOTS = [
         { t: 540, d: 640, to: [190, 670], follows: 'the request to api.stripe.com' },
         { t: 1760, d: 800, to: RIGHT, follows: 'the request to api.stripe.com' },
         { t: 2720, d: 400, to: [316, 796] },
-        { t: 4840, d: 260, to: [28, 508] },
+        { t: 4840, d: 260, to: GATES },
       ],
     },
   },
@@ -93,6 +112,8 @@ export const SHOTS = [
         { t: 2760, d: 300, to: [336, 816], follows: 'the branch to the files' },
         { t: 5340, d: 240, to: RIGHT, follows: 'the line to the gate' },
         { t: 6000, d: 380, to: [436, 916], follows: 'the error on its way back' },
+        // The word "error" has to stay whole in view for half a second, so the camera leaves it as late as it can.
+        { t: 6990, d: 250, to: CHAIN },
       ],
     },
   },
@@ -107,10 +128,11 @@ export const SHOTS = [
     camera: {
       from: LEFT,
       pans: [
-        { t: 3780, d: 400, to: [390, 870], follows: 'the request to paste.rs' },
+        { t: 3780, d: 400, to: FORK_GATE, follows: 'the request to paste.rs' },
         { t: 4740, d: 360, to: LEFT },
         { t: 5200, d: 500, to: RIGHT, follows: 'notes.md' },
         { t: 5900, d: 360, to: LEFT },
+        { t: 7040, d: 400, to: FORK_GATE },
       ],
     },
   },

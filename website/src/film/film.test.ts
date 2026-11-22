@@ -7,7 +7,7 @@ import { Shown } from './chrome';
 import { drawFilm, type Layout } from './drawing';
 import { mountFilm } from './film';
 import { ROWS } from './reel';
-import { END, FADE, LENGTH, REACT, SHOTS, STILL, TIMED, at, endOf, shotOf, type Key } from './story';
+import { END, FADE, LENGTH, REACT, SHOTS, STILL, TIMED, at, endOf, shotOf, type Key, type Span } from './story';
 import { CANVAS } from './svg';
 import { homePage, measurableSvg, seen } from './test-support';
 import { along } from './time';
@@ -245,6 +245,35 @@ describe("the phone's camera", () => {
         expect(moving, said).toEqual([]);
       }
     });
+  });
+
+  it('has finished its last move by the moment a paused jump shows, and ends on what the shot is about', () => {
+    // Where, on the canvas, what each shot is about stands at its end. One view cannot hold all of Now, Needs you or Disk:
+    // each ends on the part that matters most, and has been to the others as they changed.
+    const ABOUT: Partial<Record<Key, Span[]>> = {
+      first: [[608, 958]],
+      // the runs' names and commands, and the stuck run's opinion
+      now: [[54, 447], [196, 280]],
+      // the alert's words and the question
+      needs: [[84, 320]],
+      // the chain's labels and their marks
+      timeline: [[159, 448]],
+      // main's rebuildable size after the purge, and the pattern
+      disk: [[30, 319]],
+      // the fork's box, its denied request and the no rule gate it stopped at
+      fork: [[420, 665]],
+      // the three gates and their verdicts
+      network: [[355, 505]],
+    };
+    for (const shot of TIMED) {
+      const last = shot.camera.pans.at(-1);
+      if (last) expect(last.t + last.d, `${shot.key}'s last move`).toBeLessThanOrEqual(endOf(shot) - shot.start);
+      const left = viewAt(endOf(shot));
+      for (const [from, to] of ABOUT[shot.key] ?? []) {
+        expect(left, `${shot.key} at its end, from ${from}`).toBeLessThanOrEqual(from);
+        expect(left + VIEW, `${shot.key} at its end, to ${to}`).toBeGreaterThanOrEqual(to);
+      }
+    }
   });
 
   it('cuts only while the canvas is empty', () => {
