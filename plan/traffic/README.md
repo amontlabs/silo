@@ -24,6 +24,6 @@ program to say so, and to act on it at the boundary before the agent program rea
 
 ## One example
 
-Silo denies a tool call that Claude Code's model asked for. The model sees its own call,
-unchanged, with an error that says it was denied, and the record holds what Silo added, as a fact.
-The agent's next call is judged on its own, like any other.
+An extension that protects main denies a tool call that Claude Code's model asked for. The model
+sees its own call, unchanged, with an error that says it was denied. The agent's next call is
+judged on its own, like any other.

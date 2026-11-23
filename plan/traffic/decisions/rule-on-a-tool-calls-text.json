@@ -1,4 +1,4 @@
 {
   "asks": "Can a rule deny a tool call by its text?",
-  "answer": "Yes. A rule can deny a tool call by the tool's name and a pattern on its text, for example the shell tool with a command that starts with `git push --force`. The match is exact on the text and on nothing else. The same action written another way, such as `git push -f` or the same command inside a script, does not match, and the rule says so as its worst case."
+  "answer": "No. Denying a tool call is a precaution's, and never a rule's. Without changing the traffic, a tool call can only be made to fail inside the computer, by the probe. A rule is enforced outside the computer. An extension that protects can deny a tool call. It may judge the call with a model, or with a pattern on its text. What a rule can see exactly, such as a push to GitHub, is denied by a rule on that request."
 }

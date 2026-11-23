@@ -1,0 +1,13 @@
+{
+  "asks": "When several ways can do the same thing, which one does Silo use?",
+  "answer": "The most reliable way that can do it. A design starts from the most reliable way, and goes to a less reliable one only when the one above cannot do it. At each step, it asks whether a simpler design would do. For what Silo does by itself, the order is a rule, triggered by a fact, then a precaution on a report, then a precaution on an opinion, such as an extension's.",
+  "sets": [
+    {
+      "in": "principles",
+      "id": "most-reliable-way",
+      "says": "Each thing is done in the most reliable way that can do it.",
+      "asks": "Could a more reliable way do this, or a simpler design?",
+      "why": "Each less reliable way can fail in ways the one above cannot."
+    }
+  ]
+}

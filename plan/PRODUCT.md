@@ -23,6 +23,8 @@ The first user is polarzero, on a Mac (`who-it-is-for`). Where computers run aft
 - **What Silo does by itself depends on how sure it is** (`less-sure-less-power`). Only a fact or
   you can grant (`grant-needs-a-fact-or-you`), and a precaution can only protect
   (`precaution-grants-nothing`).
+- **Each thing is done in the most reliable way that can do it**, a rule wherever a rule can do it
+  (`which-way-first`, still to decide).
 - **Every addition answers the same questions** (`questions-for-an-addition`): what kind each of
   its actions is (`kind-before-design`), what triggers it, and what its bad paths are
   (`bad-paths-principle`, still to decide).

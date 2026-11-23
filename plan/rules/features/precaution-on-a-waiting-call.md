@@ -29,3 +29,10 @@ for the answer, and that it then counts as a request.
 
 The flaw that `no-detour` names, a rule that counts denials, likely touches
 `rule-actions-on-the-computer`, which does not name it.
+
+## How a denial is made
+
+An agent's part, 23 November 2026. Silo passes the reply on unchanged, and the probe makes the
+denied call fail inside the computer (`denied-tool-call-mechanism`). Denying a tool call is a
+precaution's, never a rule's (`rule-on-a-tool-calls-text`), so this feature now needs what
+`denied-tool-calls` needed, and that feature is proposed for a drop.

@@ -8,8 +8,7 @@
     "denied-tool-call-mechanism",
     "each-call-on-its-own",
     "no-hook-for-a-denial",
-    "changed-reply-per-program",
-    "terms-on-changing-a-reply",
+    "denial-per-program",
     "enforcing-and-recording",
     "what-silo-changes-in-traffic",
     "allow-hold-or-deny"
@@ -19,7 +18,7 @@
     "rule-decisions-are-recorded"
   ],
   "suggest": {
-    "verdict": "take",
-    "why": "A few commands are worth denying before they run, by a rule the agent cannot remove and with a refusal the model understands."
+    "verdict": "drop",
+    "why": "A rule cannot deny a tool call (`rule-on-a-tool-calls-text`). `precaution-on-a-waiting-call` lets any extension that protects deny one, and a pattern on the text is one such extension."
   }
 }

@@ -37,4 +37,7 @@ polarzero also said the wait itself always ends; the wait for a classifier is de
 polarzero's words on what it is: "It is caution and not a promise. A classifier can be fooled,
 for example by a bad action cut into innocent steps. The rules stay the promise."
 
-What the model sees of a denied tool call is decided in `traffic`.
+What the model sees of a denied tool call is decided in `traffic`, by `denied-tool-call`. How the
+denial is made without changing the traffic is `denied-tool-call-mechanism`. That denying a tool
+call is always a precaution, polarzero's direction of 23 November 2026, is in
+`rule-on-a-tool-calls-text`.

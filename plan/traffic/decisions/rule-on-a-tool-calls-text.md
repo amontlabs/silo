@@ -2,19 +2,32 @@
 
 ## The choice
 
-An agent's part, 22 November 2026. You set a rule on main that denies `git push --force`. Claude
-Code's model asks for `git push --force origin main`.
+An agent's part, 23 November 2026. You want main never to run `rm -rf ~/projects/site`, a command
+that acts only inside main. The model asks for it.
 
 The options:
 
-- A pattern on the text (recommended). The rule names the shell tool and a command that starts with
-  `git push --force`, so this call is denied. It costs a limit that stays on the text:
-  `git push -f`, or a script that pushes, gets through, and the rule says so.
-- The exact text only, as proposed so far. The rule matches one whole command. It costs this very
-  case: `git push --force origin main` is not `git push --force`, so it passes.
-- No rule on tool calls. Limits are set only on what leaves the computer. It costs any way to deny a
-  command that acts only inside the computer, such as deleting a folder, before it runs. A restore
-  can only undo it afterwards.
+- No: a precaution denies it (recommended). An extension that protects judges the call, with a
+  model or with a pattern on its text, and denies it. The probe makes the call fail inside main,
+  and nothing in the traffic changes (`denied-tool-call-mechanism`). It costs a promise: an agent
+  can get around a precaution, by writing the command another way, or through the probe, which
+  runs inside main.
+- Yes: a rule with a pattern on the text, as proposed on 22 November. It costs one of two things.
+  Either the rule is enforced inside main, by the probe, against `where-a-rule-is-enforced`. Or
+  Silo changes the reply and every later request, which Anthropic's terms may forbid on a Max
+  plan. Either way, `git push -f` still gets past a pattern on `git push --force`.
 
-Recommended: a pattern on the text. It is how the permission rules of agent programs already work,
-and the rule says plainly what it misses.
+Recommended: no. A rule is exact, and a denial carried out inside main is not. What a rule can see
+exactly is denied by a rule: a push to GitHub is a request that a network rule denies.
+
+## polarzero's direction (23 November 2026)
+
+In an agent's words.
+
+- Denying a tool call becomes a precaution rather than a rule, and it always should have been one.
+  The classifier is a precaution anyway, since nobody can be sure it works well. As soon as one
+  part is a precaution, the whole thing is a precaution.
+- A pattern on the text is only one example of an extension that protects.
+- A push to GitHub belongs to the rules on GitHub, and secrets are swapped in at the boundary.
+  Classifying those at the tool call would be the wrong design: more complicated, and less sure.
+  The principle behind this is put forward in `which-way-first`.

@@ -1,0 +1,7 @@
+{
+  "asks": "How does each agent program take a tool call that the probe makes fail?",
+  "answer": "To find out, by a live check per program, before a precaution can deny tool calls in that program. The check denies one call of each of the program's tools. It shows that the program runs nothing of the denied call, and writes the failure as the call's result. It shows that the program sends that result on its next request, without a retry, and goes on working. It shows that the model sees its own call and the error on that request, also when the conversation is resumed later. A tool whose calls the probe cannot make fail is listed, and a denial of it is handled as `denied-tool-call-mechanism` says. The check runs again for each new version a recipe pins. On a version that has not passed, a denial is handled the same way, and the app says so.",
+  "needs": [
+    "denied-tool-call-mechanism"
+  ]
+}

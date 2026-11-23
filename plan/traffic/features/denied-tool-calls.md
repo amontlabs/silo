@@ -2,24 +2,18 @@
 
 ## The choice
 
-An agent's part, 22 November 2026. A rule on main denies `git push --force`. Claude Code's model
-asks for `git push --force origin main`. It gets back its own call with an error that says Silo
-denied it, and goes on with something else.
+An agent's part, 23 November 2026. This feature lets a rule deny a tool call by a pattern on its
+text, such as `git push --force`. A rule cannot deny a tool call (`rule-on-a-tool-calls-text`): a
+tool call is made to fail inside the computer, by the probe, and a rule is enforced outside it.
 
 The options:
 
-- Build it (recommended). A few commands can be denied before they run, by a rule the agent cannot
-  remove. It costs a rule that matches only the text: `git push -f` gets through, and the rule says
-  so. How the error is made and what the vendors' terms say are still open, and it works only for
-  the programs Silo has tested.
-- Leave it out. A command that acts only inside the computer cannot be denied before it runs. It
-  costs a restore to undo it afterwards, or the agent program's own deny rules, which an agent can
-  turn off.
+- Drop this feature (recommended). `precaution-on-a-waiting-call` already lets any extension that
+  protects deny a tool call, and a pattern on the text is one such extension. What this feature
+  needed now sits with that one. It costs a pattern built into Silo: someone writes it as an
+  extension.
+- Keep it, as a precaution built into Silo. It costs a second way to do what an extension already
+  does.
 
-Recommended: build it. A handful of commands are worth denying before they run, and a model that is
-told its call was denied goes on with its work.
-
-## Notes
-
-Deny acts on a request, so a tool call that waits in a reply has to count as one. The question is put
-to polarzero in `classifier-asked-synchronously`, under "The choice".
+Recommended: drop it, with `plan drop`. A push to GitHub, the example this feature gave, is denied
+by a network rule on GitHub, not at the tool call.

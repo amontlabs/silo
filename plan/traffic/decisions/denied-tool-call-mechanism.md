@@ -2,30 +2,66 @@
 
 ## The choice
 
-An agent's part, 22 November 2026. A rule on main denies `git push --force`. Claude Code, on your
-Max plan, gets a reply in which the model asks for `git push --force origin main`.
+An agent's part, 23 November 2026. You install an extension that judges each tool call in main.
+Claude Code, on your Max plan, gets a reply in which the model asks for `rm -rf ~/projects/site`,
+and the extension answers deny.
 
 The options:
 
-- A harmless stand-in (recommended). Claude Code gets the call with its command swapped for one that
-  only says Silo denied it, and runs that. On Claude Code's next request, Silo puts the model's own
-  call back, with the denial as its result. Nothing extra is sent to Anthropic. It costs a stand-in
-  for each tool of each program, and a tool without one cannot be denied. Claude Code's window shows
-  the stand-in, not the model's call. It is not tested yet.
-- Silo answers the model itself, polarzero's idea of 20 November. Silo keeps the reply from Claude Code,
-  sends Anthropic the conversation with the call and the denial, and passes on the model's next
+- The probe makes the call fail (recommended). Silo passes the reply on unchanged once the probe
+  inside main is ready. Claude Code tries to run the command, and it fails. Claude Code then sends
+  the model its own call with the error, as it does for any command that fails. Nothing in the
+  traffic changes, then or when the conversation is resumed. Claude Code's window shows the
+  model's real command failing. It costs four things:
+  - The probe runs inside main, where an agent with `sudo` can interfere with it. So this is a
+    precaution, never a rule.
+  - Until Claude Code sends the error, its other new commands fail too, such as a second call in
+    the same reply or a subagent's command. They come back as errors, and the model runs them
+    again.
+  - The error is Claude Code's own, such as "Permission denied". It does not say that Silo denied
+    the call, or why.
+  - The denied command's text reaches main. A script that an earlier call left running could read
+    it in Claude Code's transcript and run it.
+- A harmless stand-in, the proposal of 22 November. Silo swaps the call's command for one that only
+  says Silo denied it. On every later request of the conversation, Silo puts the model's own call
+  back, with the denial as its result. It costs a change to a reply and to every later request,
+  which Anthropic's terms may forbid on a Max plan. It also costs a stand-in for each tool of each
+  program, and Claude Code's window shows the stand-in, not the model's call.
+- Silo answers the model itself, polarzero's idea of 20 November. Silo keeps the reply from Claude
+  Code, sends Anthropic the conversation with the call and the denial, and passes on the next
   reply. It costs one more model request for each denial, paid on your plan. That request carries
   your Max sign-in though Claude Code did not send it, and Anthropic's terms forbid a developer "to
-  route requests through Free, Pro, Max, or Ultra plan credentials on behalf of their users". Claude
-  Code's copy of the conversation also lacks the call and the denial, so Silo has to add them to
-  every later request.
+  route requests through Free, Pro, Max, or Ultra plan credentials on behalf of their users".
 
-Recommended: a harmless stand-in. The model sees the same thing as with polarzero's idea, and Silo never
-sends a request in your name.
+Recommended: the probe. It is the only way that changes nothing in the traffic, and the error the
+model sees is the one Claude Code itself sent.
 
-## Notes
+## Why a precaution may rest on the probe
 
-Left for when it is built. Silo sits before the agent program, which is what runs the tool.
+An agent's part, 23 November 2026.
+
+- Denying a tool call is a precaution's (`rule-on-a-tool-calls-text`).
+- The decision is still taken at the boundary: the reply waits there while the precaution answers.
+  The probe only carries the denial out.
+- A rule is enforced outside the computer (`where-a-rule-is-enforced`), and limits are set at the
+  boundary (`where-limits-are-set`). Read this way, a precaution is not a limit, so it may rest on
+  the probe. polarzero has not confirmed this reading.
+
+## To find out
+
+- On a Linux computer, the kernel comes from outside the computer's disk. Silo can build the part
+  of the probe that makes a call fail into that kernel, and make the kernel refuse changes. An
+  agent with `sudo` then needs a flaw in the kernel to remove it, not one command. What the probe
+  says stays a report (`processes-from-inside-linux`).
+- On a macOS computer, which main is first, the kernel is Apple's and is on the computer's own
+  disk. The means there would be Apple's Endpoint Security, which can refuse a process start or a
+  file open. What an agent with `sudo` can do to it is not tested.
+- Where an agent program has hooks, a hook could ask Silo and refuse the call with Silo's reason,
+  before the program tries to run it. The hook would decide nothing (`no-hook-for-a-denial`). If
+  the agent removes it, the probe still makes the call fail, with the program's own error.
+- Read on 23 November 2026, in an agent's own Claude Code session: Claude Code 2.1.330 runs each
+  shell call as a new `/bin/bash -c` process that its own process starts, with the command inside
+  an `eval '…'`. How it writes a file was not read.
 
 ## polarzero's way (20 November 2026)
 

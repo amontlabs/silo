@@ -11,7 +11,14 @@
     "synchronous-precaution-path",
     "request-waits-only-by-precaution",
     "model-calls-in-the-record",
-    "denied-tool-calls",
+    "rule-on-a-tool-calls-text",
+    "denied-tool-call",
+    "denied-tool-call-mechanism",
+    "denial-per-program",
+    "each-call-on-its-own",
+    "no-hook-for-a-denial",
+    "enforcing-and-recording",
+    "what-silo-changes-in-traffic",
     "held-requests-and-asks",
     "extension-that-protects",
     "extension-may-protect",
@@ -19,7 +26,8 @@
   ],
   "keeps": [
     "precaution-grants-nothing",
-    "allow-hold-deny-only-synchronous"
+    "allow-hold-deny-only-synchronous",
+    "no-silent-change-to-traffic"
   ],
   "suggest": {
     "verdict": "take",
