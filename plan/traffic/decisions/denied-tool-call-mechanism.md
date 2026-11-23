@@ -45,7 +45,9 @@ An agent's part, 23 November 2026.
   The probe only carries the denial out.
 - A rule is enforced outside the computer (`where-a-rule-is-enforced`), and limits are set at the
   boundary (`where-limits-are-set`). Read this way, a precaution is not a limit, so it may rest on
-  the probe. polarzero has not confirmed this reading.
+  the probe.
+- polarzero's reading, 23 November 2026: a denial of a tool call comes from an extension, not from
+  the core of Silo.
 
 ## To find out
 
