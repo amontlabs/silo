@@ -189,9 +189,8 @@ placeholder and fails. GitHub over HTTPS is the case of most agents' first push.
 What I would add to the answer: in an `Authorization: Basic` header, Silo decodes the value, swaps
 the placeholder in the password and encodes it again. A placeholder can also be looked for in
 base64 without decoding: all of it but a character or two at each end encodes to one of three
-strings, one per offset, which a search
-of the request finds as cheaply as the text itself. That also finds a placeholder in other base64
-fields, such as the `auth` of Docker's `config.json`, for the record.
+strings, one per offset, which a search of the request finds as cheaply as the text itself. That
+also finds a placeholder in other base64 fields, such as the `auth` of Docker's `config.json`, for the record.
 
 ## What other sandboxes do with a secret (24 November 2026)
 
