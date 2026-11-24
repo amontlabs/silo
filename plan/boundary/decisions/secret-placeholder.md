@@ -342,6 +342,15 @@ What this changes for Silo:
     workspace-write` alone, it warned "Credential masking is inactive because the network proxy is
     disabled" and the command saw the token. The scripts are in the project files,
     `research/2026-11-24-codex-network-proxy/two-proxies`.
+  - Claude Code 2.1.331's sandbox did the same, with `GITHUB_TOKEN` set to `mask` with
+    `injectHosts: ["api.github.com"]` and `network.tlsTerminate` on, run with
+    `--dangerously-skip-permissions`: the command saw `fake_value_…`, the stand-in got the real
+    token, and with Silo's placeholder in the environment the stand-in got Silo's placeholder. It
+    masks whatever value it is told to, whatever its shape.
+  - Claude Code's masking fails open on a mistake in its settings. With the credentials given as
+    an object instead of a list, or `tlsTerminate: true` instead of an object, the command saw the
+    real token and nothing in the run said why. A secret Silo holds outside cannot be given away
+    by a wrong line in a program's settings.
 
 ## A database password, held outside (24 November 2026)
 
