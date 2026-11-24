@@ -152,6 +152,14 @@ and both accepting the same user key:
   between the two. Silo's agent, which sees what it is asked to sign, can: a commit signature
   names its purpose (`git`) in the signed data, so Silo can allow it, record it, or ask, beside
   the host limit for logging in. Otherwise the commits of an agent go unsigned. Tried the same day, OpenSSH 9.6.
+- **Silo's own agent, sketched, does both.** A 150-line agent in Python held the key, took
+  OpenSSH's `session-bind@openssh.com` message and checked the host's signature on it, then
+  signed a login only for a session bound to an allowed host key, and a signature only for the
+  namespaces allowed. With host A and the namespace `git` allowed: `ssh` and a `git clone` and
+  `git push` over SSH to A worked; `ssh` to B was refused; `git commit -S` (`gpg.format=ssh`) made
+  a commit that `git log --show-signature` reported as a good signature; a signature for the
+  namespace `file` was refused. Each answer went to the agent's log, which is what the record
+  would keep. The sketch knows only ed25519 keys.
 
 What I would put in the answer's place for SSH keys: Silo holds the key in an agent outside the
 computer, limited to the hosts you allowed, and gives the computer the agent's socket. Every
