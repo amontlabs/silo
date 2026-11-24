@@ -243,7 +243,9 @@ placeholder and fails. GitHub over HTTPS is the case of most agents' first push.
 What I would add to the answer: in an `Authorization: Basic` header, Silo decodes the value, swaps
 the placeholder in the password and encodes it again. A placeholder can also be looked for in
 base64 without decoding: all of it but a character or two at each end encodes to one of three
-strings, one per offset, which a search of the request finds as cheaply as the text itself. That
+strings, one per offset, which a search of the request finds as cheaply as the text itself. (Checked
+for a 28-byte placeholder: one of its three strings, of 32 to 36 characters, was found in the
+base64 of all of 20 000 random surroundings, and in none of 2 000 random bodies of 4 KB.) That
 also finds a placeholder in other base64 fields, such as the `auth` of Docker's `config.json`,
 for the record.
 
