@@ -69,3 +69,11 @@ What this changes:
   nothing.
 
 The scripts and searches are in the project files, `research/2026-11-24-logins`.
+
+Why a copied sign-in signs one copy out, read from the same programs: Codex 0.172.0 carries the
+message "Your access token could not be refreshed because your refresh token was already used.
+Please log out and sign in again." OpenAI's refresh tokens work once. A fork that carries main's
+`auth.json` and runs Codex first renews the login there, and main's next renewal fails with that
+message. Claude Code 2.1.331, when a renewal is refused (`invalid_grant`), clears the login in its
+file. So the second option, "copied, and shown first", costs more than the promise: it can sign
+you out of main without anything in main having changed.
