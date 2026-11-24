@@ -118,3 +118,7 @@ carrying the sentence, as Bedrock words its errors.
 So the answer for Claude Code holds on Bedrock: 451 for a hold, 402 for a budget. A 403, which a
 proxy would send by habit, is the worst choice there: Claude Code takes it for a passing failure
 and keeps asking for minutes.
+
+A hold that answers nothing behaves as on Anthropic's API: Claude Code on Bedrock sent the same
+streamed request again after 361 s with no reply head, though the request said it would wait
+600 s (`x-stainless-timeout`). So the limit of `hold-limit-length` fits Bedrock as it is.
