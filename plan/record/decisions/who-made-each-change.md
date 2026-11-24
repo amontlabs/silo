@@ -22,3 +22,13 @@ The options:
 
 Recommended: settings always, files when known. Silo never fills a hole with a guess, and
 "unattributed" is the honest answer.
+
+## The first build's spec
+
+Agent, 24 November 2026, from [the build specs of the first
+build](../../../research/2026-11-24-first-build-specs/README.md). The first build writes the Mac's
+sleeps and wakes in each running computer's record (`mac-kept-awake`, #348). None of the authors
+here put the Mac to sleep. The specs write the author `device` for what the Mac does by itself; the
+other ways are the author `silo` with the cause `mac-sleep`, which says Silo did what it did not, or
+a new kind of line, which `kinds-of-lines` keeps fixed. Every control fact made by you also names
+your person, as #362's `person-in-a-control-fact` proposes.

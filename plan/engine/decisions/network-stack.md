@@ -28,3 +28,14 @@ second is marked Notes.
 
 The same table puts model calls, secrets and budgets at the boundary on both systems. Those lines
 have their homes in the parts `boundary` and `traffic`.
+
+## The first build's spec
+
+Agent, 24 November 2026, from [the build specs of the first
+build](../../../research/2026-11-24-first-build-specs/README.md). The specs run main on Apple's NAT
+until a patched gvproxy passes the Mac kit's test 07 (#359), then on gvproxy, as #364 proposes.
+Writing them showed one more cost of the NAT: a macOS computer with no network device has no SSH
+either, so a closed main is possible only on gvproxy, which can carry SSH with no other traffic. On
+the NAT, open also reaches your local network and services on your Mac that listen on every address,
+and the first run says so. Whichever carries the network, only the helper's attachment changes; the
+SSH entries stay the same.
