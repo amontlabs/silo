@@ -30,3 +30,12 @@ configuration is not on this machine.
 polarzero accepts that this research belongs to the Workshop stage, with one direction for it: as
 many facts as possible, which cannot be tampered with, and as few reports as possible. A report is
 used only for what can be known only from inside the computer.
+
+## What eBPF on the process tracepoints costs (24 November 2026)
+
+An agent's part, 24 November 2026. A probe on the `sched_process_fork`, `sched_process_exec` and
+`sched_process_exit` tracepoints (BTF tracepoints, into a ring buffer) loaded in a cloud container
+on Linux 6.18, without a kernel built for it. On `go build -a std`, with 2 500 forks, 680 execs and
+690 exits, its reader used 0.08 s of processor time against 60 s for the build, 0.1 %. The build's
+own time did not move beyond the noise of the runs. The details are in `record-speed-cost`. The
+cost of the process connector and of fanotify's FID mode alone was not measured.
