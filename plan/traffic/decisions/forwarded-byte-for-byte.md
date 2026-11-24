@@ -66,3 +66,18 @@ host reached directly:
 Not done in the spike: HTTP/2, the WebSocket that Codex uses with a ChatGPT sign-in (it was
 forwarded unread), a certificate made for each host (one certificate covered all three names), and
 refusing HTTP/3.
+
+## A request sent while you type (24 November 2026)
+
+An agent's part, 24 November 2026. Read from Claude Code 2.1.331's code, not seen in traffic: it
+sits behind a switch of Anthropic's, in a "shadow" or an "on" mode. Claude Code can start the next
+model request while you are still typing ("upload ahead"). It opens the request and sends the
+conversation so far, gzip-compressed, then writes a space into the compressed stream every 10
+seconds to keep it open. When you press Enter it sends the rest of the body, your new message, and
+the request ends. It drops the request if you stop typing for 30 seconds or after 120 seconds in
+all, and if no answer comes in time it sends the request again whole.
+
+For the boundary: a request's body can take up to two minutes to arrive, a few bytes at a time,
+and only its end says what it asks. The boundary must not time out such a request, and a hold or a
+rule on its content starts when the body ends, not when the request opens. A request dropped this
+way gets no reply and costs nothing, but it shows in the record as a request that never ended.
