@@ -439,3 +439,22 @@ tell you, or to ask. Silo can recognise the known ones by their address, and nam
 Asked, it could store the real value itself: for GitHub it would seal the real value with the
 public key it saw in the reply before. That puts your key in a second place, which is your call,
 not the agent's. The script is in the project files, `research/2026-11-24-secret-stored-elsewhere`.
+
+## Azure's shared key, signed again (24 November 2026)
+
+An agent's part, 24 November 2026. The note on AWS says Azure's shared keys sign each request with
+HMAC as AWS does, and twelve services showed Azure Blob sending only a signature. Tried with
+azure-storage-blob 12.31 and Azurite 3.38, Microsoft's storage emulator, which checks shared-key
+signatures as Azure does, set up with a real key.
+
+- With a placeholder key, the emulator refused every request ("Server failed to authenticate the
+  request").
+- Through a stand-in that signed each request again with the real key, built only from what was on
+  the wire (the method, a dozen standard headers, the `x-ms-` headers, the path and the query), the
+  same client created a container, uploaded a blob whose name has a space, listed, downloaded and
+  deleted it. The stand-in is 40 lines.
+
+So Azure Storage joins AWS, Google service accounts and EKS: the key never enters the computer,
+and the boundary signs. Links signed inside the computer (shared access signatures) were not
+tried; like AWS's presigned links, they would work only through the boundary. The script is in the
+project files, `research/2026-11-24-sigv4` (`resign_azure.py`).
