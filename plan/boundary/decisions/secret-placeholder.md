@@ -110,7 +110,13 @@ Tried the same day with boto3 1.44.10 against the same stand-in, now over TLS as
   the boundary signed the query again. That holds only for a link used from inside. A link handed
   out, say in a pull request comment so a reviewer can see a screenshot, carries the
   placeholder's signature and is refused by AWS. Silo should say so when the secret is set up.
-- Signed chunks were still not tried, since boto3 never sent them.
+- Signed chunks were still not tried, since boto3 never sent them. Nor did the AWS SDK for
+  JavaScript 3.1176, tried the same way: a body given as a buffer, and each 5 MB part of a
+  multipart upload, went with the body's hash in `x-amz-content-sha256`; a stream went as
+  boto3's does, unsigned with a trailing checksum. Creating a bucket, both kinds of upload, an
+  upload of 12 MB in parts and a download passed through the re-signing stand-in, and the
+  placeholder sent straight was refused. So the two most used AWS SDKs need no chunk signing
+  over HTTPS.
 
 So the answer's "cannot be swapped in" holds for the value, but not for the key's use. What I
 would put in its place for AWS: the boundary signs the request again with the real key, on the way
