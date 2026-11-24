@@ -1,0 +1,265 @@
+--- stream.zig.orig	2026-11-24 18:36:15.654537520 +0000
++++ stream.zig	2026-11-24 18:41:46.593747312 +0000
+@@ -137,7 +137,23 @@
+     }
+ };
+ 
+-pub const Provider = enum { anthropic, openai };
++pub const Provider = enum {
++    anthropic,
++    openai,
++    /// OpenAI's Chat Completions, which most other providers and local servers also speak.
++    chat,
++    /// Google's generateContent, as the Gemini API and Code Assist serve it.
++    gemini,
++
++    /// The format of one request, from its path: one host can serve several formats.
++    pub fn ofPath(default: Provider, path: []const u8) Provider {
++        if (std.mem.indexOf(u8, path, "/chat/completions") != null) return .chat;
++        if (std.mem.indexOf(u8, path, "enerateContent") != null) return .gemini;
++        if (std.mem.indexOf(u8, path, "/messages") != null) return .anthropic;
++        if (std.mem.indexOf(u8, path, "/responses") != null) return .openai;
++        return default;
++    }
++};
+ 
+ /// One tool call the model asked for, once it is whole.
+ pub const ToolCall = struct {
+@@ -163,6 +179,8 @@
+     output_tokens: ?i64 = null,
+     model: ?[]u8 = null,
+     malformed: u32 = 0,
++    // Chat Completions: the calls of the reply by their index, until finish_reason.
++    chat_calls: std.ArrayList(struct { id: std.ArrayList(u8) = .empty, name: std.ArrayList(u8) = .empty, args: std.ArrayList(u8) = .empty }) = .empty,
+ 
+     pub fn init(gpa: Allocator, provider: Provider) Watcher {
+         return .{ .gpa = gpa, .provider = provider };
+@@ -178,6 +196,12 @@
+             self.gpa.free(t.input);
+         }
+         self.done.deinit(self.gpa);
++        for (self.chat_calls.items) |*cc| {
++            cc.id.deinit(self.gpa);
++            cc.name.deinit(self.gpa);
++            cc.args.deinit(self.gpa);
++        }
++        self.chat_calls.deinit(self.gpa);
+         if (self.model) |m| self.gpa.free(m);
+     }
+ 
+@@ -191,10 +215,11 @@
+         defer parsed.deinit();
+         if (parsed.value != .object) return;
+         const o = parsed.value.object;
+-        const typ = str(o.get("type")) orelse return;
+         switch (self.provider) {
+-            .anthropic => try self.anthropic(typ, o),
+-            .openai => try self.openai(typ, o),
++            .anthropic => try self.anthropic(str(o.get("type")) orelse return, o),
++            .openai => try self.openai(str(o.get("type")) orelse return, o),
++            .chat => try self.chat(o),
++            .gemini => try self.gemini(o),
+         }
+     }
+ 
+@@ -253,6 +278,69 @@
+         }
+     }
+ 
++    /// A tool call starts with the first delta that names its index, and every call of the reply
++    /// is whole when a choice says why it finished.
++    fn chat(self: *Watcher, o: std.json.ObjectMap) !void {
++        if (str(o.get("model"))) |m| self.setModel(m);
++        if (obj(o.get("usage"))) |u| {
++            if (int(u.get("prompt_tokens"))) |v| self.input_tokens = v;
++            if (int(u.get("completion_tokens"))) |v| self.output_tokens = v;
++        }
++        const choices = o.get("choices") orelse return;
++        if (choices != .array or choices.array.items.len == 0) return;
++        const ch = choices.array.items[0];
++        if (ch != .object) return;
++        if (obj(ch.object.get("delta"))) |d| if (d.get("tool_calls")) |tcs| if (tcs == .array) for (tcs.array.items) |tc| {
++            if (tc != .object) continue;
++            const k: usize = @intCast(int(tc.object.get("index")) orelse 0);
++            while (self.chat_calls.items.len <= k) {
++                try self.chat_calls.append(self.gpa, .{});
++                self.open += 1;
++            }
++            const cc = &self.chat_calls.items[k];
++            if (str(tc.object.get("id"))) |v| try cc.id.appendSlice(self.gpa, v);
++            if (obj(tc.object.get("function"))) |f| {
++                if (str(f.get("name"))) |v| try cc.name.appendSlice(self.gpa, v);
++                if (str(f.get("arguments"))) |v| try cc.args.appendSlice(self.gpa, v);
++            }
++        };
++        const fr = ch.object.get("finish_reason") orelse return;
++        if (fr != .string) return;
++        for (self.chat_calls.items) |*cc| {
++            try self.finish(cc.id.items, cc.name.items, cc.args.items);
++            cc.id.deinit(self.gpa);
++            cc.name.deinit(self.gpa);
++            cc.args.deinit(self.gpa);
++        }
++        self.chat_calls.clearRetainingCapacity();
++    }
++
++    /// A function call comes whole, in one event. A call with no id is known by its name.
++    fn gemini(self: *Watcher, o0: std.json.ObjectMap) !void {
++        // Code Assist wraps the same object in "response".
++        const o = obj(o0.get("response")) orelse o0;
++        if (str(o.get("modelVersion"))) |m| self.setModel(m);
++        if (obj(o.get("usageMetadata"))) |u| {
++            if (int(u.get("promptTokenCount"))) |v| self.input_tokens = v;
++            if (int(u.get("candidatesTokenCount"))) |v| self.output_tokens = v;
++        }
++        const cands = o.get("candidates") orelse return;
++        if (cands != .array or cands.array.items.len == 0) return;
++        const content = obj(if (cands.array.items[0] == .object) cands.array.items[0].object.get("content") else null) orelse return;
++        const parts = content.get("parts") orelse return;
++        if (parts != .array) return;
++        for (parts.array.items) |p| {
++            if (p != .object) continue;
++            const fc = obj(p.object.get("functionCall")) orelse continue;
++            const name = str(fc.get("name")) orelse "";
++            var args: std.Io.Writer.Allocating = .init(self.gpa);
++            defer args.deinit();
++            if (fc.get("args")) |a| try std.json.Stringify.value(a, .{}, &args.writer);
++            self.open += 1;
++            try self.finish(str(fc.get("id")) orelse name, name, args.written());
++        }
++    }
++
+     fn isCall(t: []const u8) bool {
+         return eq(t, "function_call") or eq(t, "custom_tool_call") or eq(t, "local_shell_call");
+     }
+@@ -314,6 +402,35 @@
+                 if (str(c.object.get("tool_use_id"))) |id| try ids.append(gpa, try gpa.dupe(u8, id));
+             }
+         },
++        .chat => {
++            // The results after the last message of the assistant.
++            const msgs = o.get("messages") orelse return ids;
++            if (msgs != .array) return ids;
++            var k = msgs.array.items.len;
++            while (k > 0) : (k -= 1) {
++                const m = msgs.array.items[k - 1];
++                if (m != .object) break;
++                if (!eq(str(m.object.get("role")) orelse "", "tool")) break;
++                if (str(m.object.get("tool_call_id"))) |id| try ids.append(gpa, try gpa.dupe(u8, id));
++            }
++        },
++        .gemini => {
++            const req = obj(o.get("request")) orelse o;
++            const contents = req.get("contents") orelse return ids;
++            if (contents != .array or contents.array.items.len == 0) return ids;
++            const last = contents.array.items[contents.array.items.len - 1];
++            if (last != .object) return ids;
++            const parts = last.object.get("parts") orelse return ids;
++            if (parts != .array) return ids;
++            for (parts.array.items) |p| {
++                if (p != .object) continue;
++                const fr = obj(p.object.get("functionResponse")) orelse continue;
++                // A call the model gave no id gets one from the program, so the result is also
++                // known by the call's name.
++                if (str(fr.get("id"))) |id| try ids.append(gpa, try gpa.dupe(u8, id));
++                if (str(fr.get("name"))) |n| try ids.append(gpa, try gpa.dupe(u8, n));
++            }
++        },
+         .openai => {
+             const input = o.get("input") orelse return ids;
+             if (input != .array) return ids;
+@@ -426,3 +543,46 @@
+         } else |_| {}
+     }
+ }
++
++test "chat completions watcher holds from the first tool call delta to finish_reason" {
++    const gpa = std.testing.allocator;
++    var w = Watcher.init(gpa, .chat);
++    defer w.deinit();
++    var s: Sse = .{};
++    defer s.deinit(gpa);
++    try s.feed(gpa, "data: {\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"bash\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n\n", &w);
++    try std.testing.expectEqual(@as(u32, 1), w.open);
++    try s.feed(gpa, "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"cmd\\\":\\\"ls\\\"}\"}}]},\"finish_reason\":null}]}\n\n", &w);
++    try s.feed(gpa, "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"call_2\",\"function\":{\"name\":\"read\",\"arguments\":\"{}\"}}]},\"finish_reason\":null}]}\n\n", &w);
++    try std.testing.expectEqual(@as(u32, 2), w.open);
++    try s.feed(gpa, "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":7}}\n\ndata: [DONE]\n\n", &w);
++    try std.testing.expectEqual(@as(u32, 0), w.open);
++    try std.testing.expectEqualStrings("{\"cmd\":\"ls\"}", w.done.items[0].input);
++    try std.testing.expectEqualStrings("call_2", w.done.items[1].id);
++    try std.testing.expectEqual(@as(?i64, 7), w.output_tokens);
++}
++
++test "gemini watcher takes a whole function call from one event, by id or by name" {
++    const gpa = std.testing.allocator;
++    var w = Watcher.init(gpa, .gemini);
++    defer w.deinit();
++    var s: Sse = .{};
++    defer s.deinit(gpa);
++    try s.feed(gpa, "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"functionCall\":{\"name\":\"run_shell_command\",\"args\":{\"command\":\"ls\"}}}]}}],\"modelVersion\":\"g\"}\r\n\r\n", &w);
++    try std.testing.expectEqual(@as(u32, 0), w.open);
++    try std.testing.expectEqualStrings("run_shell_command", w.done.items[0].id);
++    try std.testing.expectEqualStrings("{\"command\":\"ls\"}", w.done.items[0].input);
++    var ids = try toolResultIds(gpa, .gemini, "{\"contents\":[{\"role\":\"user\",\"parts\":[{\"functionResponse\":{\"id\":\"x1\",\"name\":\"run_shell_command\",\"response\":{}}}]}]}");
++    defer {
++        for (ids.items) |x| gpa.free(x);
++        ids.deinit(gpa);
++    }
++    try std.testing.expectEqualStrings("x1", ids.items[0]);
++    try std.testing.expectEqualStrings("run_shell_command", ids.items[1]);
++    var c = try toolResultIds(gpa, .chat, "{\"messages\":[{\"role\":\"assistant\"},{\"role\":\"tool\",\"tool_call_id\":\"call_1\"},{\"role\":\"tool\",\"tool_call_id\":\"call_2\"}]}");
++    defer {
++        for (c.items) |x| gpa.free(x);
++        c.deinit(gpa);
++    }
++    try std.testing.expectEqual(@as(usize, 2), c.items.len);
++}
+--- main.zig.orig	2026-11-24 18:36:15.656221858 +0000
++++ main.zig	2026-11-24 18:36:43.991925475 +0000
+@@ -516,9 +516,19 @@
+ fn providerOf(host: []const u8) ?stream.Provider {
+     if (std.mem.eql(u8, host, "api.anthropic.com")) return .anthropic;
+     if (std.mem.eql(u8, host, "api.openai.com") or std.mem.eql(u8, host, "chatgpt.com")) return .openai;
++    if (std.mem.eql(u8, host, "generativelanguage.googleapis.com") or std.mem.eql(u8, host, "cloudcode-pa.googleapis.com")) return .gemini;
++    // Hosts that speak Chat Completions (and maybe other formats, chosen by path).
++    const chat_hosts = [_][]const u8{ "dashscope-intl.aliyuncs.com", "openrouter.ai", "api.githubcopilot.com", "api.individual.githubcopilot.com", "api.groq.com", "api.deepseek.com", "api.mistral.ai", "api.x.ai" };
++    for (chat_hosts) |h| if (std.mem.eql(u8, host, h)) return .chat;
+     return null;
+ }
+ 
++fn pathOf(first: []const u8) []const u8 {
++    var it = std.mem.splitScalar(u8, first, ' ');
++    _ = it.next();
++    return it.next() orelse "";
++}
++
+ fn handle(fd: posix.fd_t) void {
+     const id = conn_counter.fetchAdd(1, .monotonic);
+     handleInner(fd, id) catch |e| {
+@@ -545,7 +555,7 @@
+     defer client.close();
+     const sni_c = c.SSL_get_servername(ssl, c.TLSEXT_NAMETYPE_host_name);
+     const sni: []const u8 = if (sni_c != null) std.mem.span(sni_c) else "";
+-    const provider = providerOf(sni) orelse {
++    const host_provider = providerOf(sni) orelse {
+         record("\"conn\":{d},\"kind\":\"refused\",\"sni\":{f}", .{ id, j(sni) });
+         return;
+     };
+@@ -578,6 +588,7 @@
+         var req = (try readHead(client, &cextra)) orelse return;
+         defer gpa.free(req.raw);
+         const t_req = now_ms();
++        const provider = stream.Provider.ofPath(host_provider, pathOf(req.first));
+         var rc: ReqCtx = .{};
+         defer rc.body.deinit(gpa);
+         defer rc.raw.deinit(gpa);
+@@ -601,7 +612,7 @@
+             hh.final(&d);
+             full_hash = std.fmt.bytesToHex(d, .lower);
+         }
+-        record("\"conn\":{d},\"kind\":\"request\",\"line\":{f},\"bytes\":{d},\"body_bytes_decoded\":{d},\"raw_sha256\":\"{s}\",\"results\":{d},\"read_ms\":{d:.2}", .{ id, j(req.first), req.raw.len + rc.raw.items.len, rc.body.items.len, full_hash, results.items.len, t_sent - t_req });
++        record("\"conn\":{d},\"kind\":\"request\",\"format\":\"{s}\",\"line\":{f},\"bytes\":{d},\"body_bytes_decoded\":{d},\"raw_sha256\":\"{s}\",\"results\":{d},\"read_ms\":{d:.2}", .{ id, @tagName(provider), j(req.first), req.raw.len + rc.raw.items.len, rc.body.items.len, full_hash, results.items.len, t_sent - t_req });
+ 
+         var resp = (try readHead(up, &uextra)) orelse return;
+         defer gpa.free(resp.raw);

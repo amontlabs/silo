@@ -96,3 +96,13 @@ in the Workshop.
 An agent's note, not shared by polarzero: the provider keeps no conversation, so the agent
 program's later requests carry neither the call nor the denial unless Silo adds them. To test when
 this is built.
+
+## A call with no id, in Google's format (24 November 2026)
+
+An agent's part, 24 November 2026. The window ends when a request carries the result of the denied
+call, found by the call's id. In Google's format the model may give a call no id. Gemini CLI 0.71.1
+then makes its own, such as `run_shell_command_1795545668931_0`, and sends the result under it. The
+spike, matching by id, never saw the result: the probe stayed armed, and the allowed calls after
+the denied one failed too. Matching a result by the call's name when the call had no id fixed it.
+When the model gives an id, Gemini CLI sends it back unchanged. Two calls to the same tool in one
+reply, with no ids, cannot be told apart this way; that was not tried.

@@ -17,3 +17,22 @@ The options:
 
 Recommended: what Silo sees, and no more. A few providers carry nearly all model traffic, so reading
 a new provider covers every program that uses it, where a reader of files covers one program.
+
+## Local models (24 November 2026)
+
+An agent's part, 24 November 2026. A model served from your Mac, rather than inside the computer,
+does cross the boundary, in plain HTTP. Aider 0.86.2 with an `ollama_chat/` model sent
+`POST /api/chat` to port 11434, Ollama's own API, whose reply is a stream of JSON lines rather than
+of events. Goose 1.60.2 with Ollama sent Chat Completions to the same port. LM Studio's port is
+1234. So Silo can read a model on the Mac without any certificate, with a reader for Chat
+Completions and one for Ollama's lines. Whether to add the second is open. A model the agent runs
+inside the computer sends nothing across, as this entry says.
+
+## Programs that make another provider one setting away (24 November 2026)
+
+An agent's part, 24 November 2026. Cline (`-P openrouter`), OpenCode (a model in its settings),
+Qwen Code (`OPENAI_BASE_URL`) and Aider (`--model`) each switch to another provider with one
+change that an agent with full access can make itself. Traffic to a provider Silo does not read is
+outside spend and budgets, as this entry says. So under a budget, the rule that denies model
+traffic Silo does not read (the research for #351) has to be on by default, or the budget is one
+setting away from not counting.

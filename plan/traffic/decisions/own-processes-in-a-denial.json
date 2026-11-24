@@ -1,0 +1,8 @@
+{
+  "asks": "What happens to the processes an agent program starts for its own work while a denied call is answered?",
+  "answer": "They fail like every other process the program starts in that window, so the probe needs nothing from the program to stay sound. A program that stops working on such a failure does not pass `denial-per-program` for that version. When a setting the vendor documents avoids the failure, such as OpenCode's `\"snapshot\": false`, the app offers it to you and says what it turns off; Silo does not write it without your yes. Until then, a denied call in that program is handled as for a program that has not passed: the reply is not passed on, and the app says so.",
+  "needs": [
+    "denied-tool-call-mechanism",
+    "denial-per-program"
+  ]
+}

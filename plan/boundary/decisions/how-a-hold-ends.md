@@ -29,3 +29,26 @@ Left for when it is built, with what the message of a hold says. What is known:
 - Silo can put words in a reply only while the caller still listens and where the reply has room
   for words.
 - A raw connection can only be refused.
+
+## How each agent program takes a 403 and a 429 from a model host (24 November 2026)
+
+An agent's part, 24 November 2026. A stand-in for each program's model host answered every request
+with 403, then with 429, with the body "Silo: this computer's budget is reached. Raise it in the
+Silo app." in the shape every provider uses for an error. Each run lasted 60 seconds, on Linux. The
+research is in `research/2026-11-24-every-agent-program`.
+
+| Program | 403 | 429 |
+|---|---|---|
+| Claude Code 2.1.331 | retried, 7 requests in 60 s; nothing shown yet | the same |
+| Codex 0.172.0 | 14 requests in 13 s, then stopped and showed the body | 2 requests, stopped, body not shown |
+| Gemini CLI 0.71.1 | 4 requests in 16 s, body shown | 5 in 20 s, body shown |
+| Qwen Code 0.28.4 | retried, 22 requests in 60 s; nothing shown | the same |
+| Cline 3.0.75 | 1 request, body shown | 4 in 14 s, body shown |
+| OpenCode 1.19.6 | retried, 6 requests in 33 s; nothing shown | the same |
+| Goose 1.60.2 | 1 request, body shown | 7 in 7 s, body shown |
+| Aider 0.86.2 | retried, 8 in 32 s, body shown each time | the same |
+
+So the answer's reason does not hold: a 403 is retried by Claude Code, Qwen Code, OpenCode and
+Aider, with growing waits. Only Cline and Goose stop at the first one. No status tried made every
+program stop and show Silo's words. What the user reads has to come from Silo's own app, and the
+record has to expect the same refused request several times.

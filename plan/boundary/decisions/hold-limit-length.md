@@ -24,3 +24,25 @@ measured.
 To find out. The record asks, with it, how each agent program takes the error at the limit.
 
 Nothing has been measured yet.
+
+## How long each agent program waits on a model reply (24 November 2026)
+
+An agent's part, 24 November 2026. A stand-in for each program's model host never answered a model
+request, not even with a first byte, for 12 minutes. Linux, fake keys. The research is in
+`research/2026-11-24-every-agent-program`.
+
+| Program | Gave up after | Then |
+|---|---|---|
+| Codex 0.172.0 | 15 s | sent the request again, five times, then fell back from its WebSocket to plain requests |
+| Gemini CLI 0.71.1 | 60 s | sent it again, five times, then stopped with an error at 327 s |
+| Qwen Code 0.28.4 | 120 s | sent it again, six times in 12 minutes |
+| Goose 1.60.2 | 600 s | sent it again |
+| Aider 0.86.2 | 600 s | sent it again |
+| OpenCode 1.19.6 | never closed it | new requests on other connections at 303 s and 608 s |
+| Claude Code 2.1.331 | never closed it | one more model request on another connection at 183 s |
+
+This measures the wait for a model's reply, not for a command, which the 90 seconds were set
+against. A hold on a model's reply, such as a tool call held while a precaution or you answer
+(`classifier-wait-limit`), is cut by Codex at 15 seconds and by Gemini CLI at 60, each of which
+then sends the whole request again. When the reply had already started before the hold, whether
+the program counts its wait from the last byte was not tried.

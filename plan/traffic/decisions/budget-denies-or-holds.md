@@ -16,3 +16,11 @@ The options:
 
 Recommended: deny, with an alert before. A budget is a limit for the hours you are away, and the
 alert gives you the chance to raise it while you are here.
+
+## Whether the agent program shows the refusal (24 November 2026)
+
+An agent's part, 24 November 2026. Measured on eight agent programs; the table is in the notes of
+`how-a-hold-ends`. With a 403 that says the budget is reached, Cline, Goose, Gemini CLI, Codex and
+Aider showed Silo's sentence. Claude Code, Qwen Code and OpenCode retried for the whole minute and
+showed nothing. So the error the program gets is not enough to tell you: the alert in the app is
+what says the budget is reached, and the record holds each retry as a refused request.
