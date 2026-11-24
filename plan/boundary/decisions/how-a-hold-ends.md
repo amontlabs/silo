@@ -148,3 +148,23 @@ So for Codex on a socket, Silo accepts the connection and refuses the held reque
 `error` event of status 400, carrying the reason in `error.message`. Anything else is sent again
 up to five times and then over HTTPS, where the same hold has to refuse it again: six asks for one
 request, the case `hold-limit-length` warns of, unless the retries are joined to the open ask.
+
+## Where each tool shows Silo's words (24 November 2026)
+
+An agent's part, 24 November 2026. The note above found that git, npm and pip print their own
+error on a 403, not Silo's sentence. A fake server refused git 2.43, npm 10.9 and pip 24.0 in four
+ways, to find a refusal each one shows:
+
+| Refusal | git | npm | pip |
+|---|---|---|---|
+| 403, the sentence as `text/plain` | `remote: <sentence>`, then its own error | its own error only | "No matching distribution found", nothing else |
+| 403, JSON `{"error": <sentence>}` | its own error only | `403 Forbidden - GET <url> - <sentence>` | the same as above |
+| 403 with the sentence as the status line's reason | its own error only | `403 <sentence> - GET <url>` | the same as above |
+| The package's index answered, its file refused with 403 and the sentence as the reason | | | `HTTP error 403 Client Error: <sentence> for url: …` |
+
+So one refusal can carry the sentence to all three: status 403, the sentence as the reason of the
+status line and as a `text/plain` body. git shows the body, npm the reason. pip shows it only when
+the refused request is a file and not the index page: a refused index page reads as a package that
+does not exist, which sends an agent looking in the wrong place. For a hold on a Python package,
+Silo answers the index and holds the file. A reason phrase does not exist in HTTP/2, so this holds
+where the tool speaks HTTP/1.1, as these three do.
