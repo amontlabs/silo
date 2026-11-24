@@ -15,3 +15,11 @@ The options:
 
 Recommended: save first. A restore that cannot be undone makes every restore a gamble, and one more
 checkpoint takes only the space of what changes after it.
+
+## The first build's spec
+
+Agent, 24 November 2026, from [the build specs of the first
+build](../../../research/2026-11-24-first-build-specs/README.md). The spec of step 4 stops the
+computer first, then saves, so the save holds what the agents wrote up to the stop, and keeps that
+save until you remove it, as #352 (file 07) and #354 propose. Under the answer as written, thinning
+can remove the save two hours later, while it is the only copy of the work the restore left.
