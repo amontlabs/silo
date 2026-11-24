@@ -54,6 +54,16 @@ What I would add to the answer:
   pass it as `NODE_EXTRA_CA_CERTS`, `PIP_CERT`, `SSL_CERT_FILE`. Whether a container runtime in the
   computer can add it to every container by itself is to find out.
 
+Tried the same day: it can, for containers that run. A 25-line wrapper around runc, set as Docker's
+default runtime in the computer, adds the computer's bundle of authorities over the image's own,
+read-only, and the variables that point libraries at it, unless the container sets them itself.
+With it, Node's `fetch` and `wget` in `node:22-alpine` trusted Silo's certificate, a public host
+still worked, and nothing changed in the image or the command. `docker build` is not covered: its
+default builder (BuildKit) runs build steps without Docker's default runtime, and a `RUN wget` in a
+build still refused the certificate. So containers can be made to trust Silo by Silo itself, and
+image builds still need the line above. The wrapper is in the project files,
+`research/2026-11-24-container-trust`.
+
 ## Libraries and browsers that keep their own store (24 November 2026)
 
 An agent's part, 24 November 2026. `registry-traffic-read` found which package managers trust
