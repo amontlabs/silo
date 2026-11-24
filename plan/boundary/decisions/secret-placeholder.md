@@ -166,6 +166,33 @@ installation tokens. A secret declared in Silo then has two parts: what the comp
 what the boundary does with the replies that mint new secrets from it. The scripts are in the
 project's files, under `research/2026-11-24-gcp/`.
 
+## A placeholder in a password: Basic authentication (24 November 2026)
+
+An agent's part, 24 November 2026. The answer above has Silo swap a placeholder in a header it
+names. Package managers and git often send a token as the password of Basic authentication, which
+is `user:password` in base64. A fake server logged what each client sent, with a placeholder as
+the token:
+
+| Client, where the token was set | What it sent |
+|---|---|
+| git 2.43, `~/.git-credentials` | Nothing at first; after a 401, `Authorization: Basic` of `x-access-token:<placeholder>` |
+| pip 24.0 and uv 0.11, user and password in the index URL | `Authorization: Basic` of `u:<placeholder>`, from the first request |
+| npm 10.9, `_auth` in `.npmrc` | `Authorization: Basic`, from the first request |
+| npm 10.9, `_authToken` in `.npmrc` | `Authorization: Bearer <placeholder>`, as it is |
+| cargo 1.97, a registry token | Nothing at first; after a 401, `authorization: <placeholder>`, as it is |
+
+So in three of five the placeholder never shows as itself: base64 hides it, and how depends on
+the length of the user name before it. A swap that looks for the placeholder's text in the
+`Authorization` header misses git, pip, uv and npm with `_auth`, and the request goes out with the
+placeholder and fails. GitHub over HTTPS is the case of most agents' first push.
+
+What I would add to the answer: in an `Authorization: Basic` header, Silo decodes the value, swaps
+the placeholder in the password and encodes it again. A placeholder can also be looked for in
+base64 without decoding: all of it but a character or two at each end encodes to one of three
+strings, one per offset, which a search
+of the request finds as cheaply as the text itself. That also finds a placeholder in other base64
+fields, such as the `auth` of Docker's `config.json`, for the record.
+
 ## What other sandboxes do with a secret (24 November 2026)
 
 An agent's part, 24 November 2026. Read from each product's own pages, not tried.
