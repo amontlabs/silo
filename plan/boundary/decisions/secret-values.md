@@ -35,3 +35,46 @@ whoever builds it.
   values at the boundary: it compares them in constant time, wipes the buffer after use, and never
   prints one in a diagnostic.
   ([source](https://github.com/evmts/guillotine/blob/dbdf61bd7902c726cdfb4cf80d60ed0e02da5663/src/kzg/README.md?plain=1#L238))
+
+## Searching replies that come back compressed (24 November 2026)
+
+An agent's part, 24 November 2026. "Where it appears as it is" has a catch: most replies do not
+come back as they are, but compressed.
+
+- Most programs ask for compression by default. Measured against a local server: node `fetch`,
+  npm, pip, Python `requests` and Go ask for gzip. git, bun and `curl --compressed` ask for gzip,
+  brotli and zstd. Plain curl, wget and Python `urllib` do not ask.
+- Hosts answer with it. Through this environment's network, with the header set,
+  `registry.npmjs.org`, `pypi.org` and `api.cloudflare.com` answered gzip, and
+  `api.anthropic.com` and `slack.com` answered brotli. In a compressed reply, a secret's bytes do
+  not appear as they are, so a search of the bytes on the wire never finds it. The boundary has to
+  search the decoded body. That means gzip, brotli and zstd, and the spike of
+  `forwarded-byte-for-byte` decodes only gzip and zstd.
+
+What each step costs, on one processor of this container, for an 824 KB JSON reply (npm's
+document for `express`):
+
+| Step | Speed |
+| --- | --- |
+| Search the decoded body for the 3 secrets sent to that host | 4 600 MB/s |
+| Decode gzip / zstd / brotli | 600 / 1 450 / 950 MB/s |
+| Encode again, gzip level 6 / level 1 | 75 / 175 MB/s |
+| Encode again, zstd 3 / brotli 5 / brotli 1 | 284 / 85 / 628 MB/s |
+| Encode again, brotli 11, as for files compressed ahead of time | 1 MB/s |
+
+On a 2 KB reply, every step stays above 30 MB/s, which is under 0.1 ms.
+
+- The search is not the cost, because a host's replies are searched only for the secrets sent to
+  that host, a handful at most.
+- Decoding is cheap. Encoding again is the cost, and only on the replies where a secret is found.
+- So a proposal. The boundary decodes a copy and searches it as it streams, and forwards the
+  original bytes unchanged. It holds back only the end of what it has searched while that end
+  could still be the start of a secret, which in practice is almost never. When it finds a secret,
+  what it does depends on the reply:
+  - A reply small enough to keep whole, say under 1 MB, was held whole to begin with. It goes on
+    with the value replaced by its placeholder, encoded again at a fast level.
+  - A longer or streamed reply is cut at that point, so the value never reaches the computer. The
+    record says why.
+- What a cut costs: the agent sees a broken reply instead of a placeholder. It happens only when a
+  host sends a secret back in a long reply, which should be rare. Whether it is rare enough is for
+  the owner.
