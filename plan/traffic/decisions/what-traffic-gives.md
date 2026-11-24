@@ -25,3 +25,22 @@ whoever builds it.
   and against captured traffic with every credential removed. Virtio and Apple's framework are named
   as the authorities for theirs.
   ([source](https://github.com/evmts/guillotine/blob/dbdf61bd7902c726cdfb4cf80d60ed0e02da5663/docs/dev/TESTING.md?plain=1#L451))
+
+## The count against the bill (24 November 2026)
+
+An agent's part, 24 November 2026, from `research/2026-11-24-spend-budgets`. A boundary prototype read 140 calls of Claude Code,
+Codex, Gemini CLI and a scripted client, in Anthropic's, OpenAI's two and Gemini's three formats,
+against stand-in providers that billed each call.
+
+- The 134 calls that ended with the provider's count were counted at $8.465880; the stand-in billed
+  $8.465877.
+- Ten calls fell back to another model inside the call. Their top-level counts alone missed 10% of
+  their cost: `usage.iterations` has to be read.
+- Six calls had no final count: three Chat Completions streams that did not ask for usage, and
+  three calls the program dropped while the model reasoned. They were billed $0.20. Their visible
+  output, at four characters a token, came to $0.04. The rest was reasoning, which streams as
+  nothing.
+
+So "a count the provider does not give is recorded as missing" holds, and the spend of such a call
+needs a second figure the app marks as estimated. Visible characters are a poor floor for it.
+Seconds elapsed at the model's speed, up to `max_tokens`, is a better one.

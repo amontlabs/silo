@@ -38,6 +38,16 @@ pub const Config = struct {
     /// conversation sent at the cache-read rate, the rest at the dearest (an estimate, which a
     /// cache that expired makes too low).
     input_price: []const u8 = "dearest",
+    /// While a call runs, count its output by time as well: elapsed seconds times this many
+    /// tokens a second, up to `max_tokens`, when that is more than the visible output. Hidden
+    /// reasoning then counts while it happens. 0 counts visible output only.
+    output_tps: f64 = 0,
+    /// For `reserve_typical`: the output held before the provider's own counts give a better
+    /// figure (the 90th percentile of the model's settled calls).
+    typical_output_tokens: i64 = 8000,
+    /// How a refusal by a rate is sent: "400" like any refusal, which makes the program stop, or
+    /// "429" with `retry-after` until the window passes again, which programs may wait out.
+    rate_refusal: []const u8 = "400",
     /// Known model hosts the boundary cannot count. Refused while a budget covers the computer.
     uncountable_hosts: [][]const u8 = &.{},
     computers: []Computer = &.{},
@@ -240,6 +250,21 @@ pub fn refusal(gpa: Allocator, format: usage.Format, message: []const u8) ![]u8 
     }
     const body = buf.written();
     return std.fmt.allocPrint(gpa, "HTTP/1.1 400 Bad Request\r\ncontent-type: application/json\r\ncontent-length: {d}\r\nx-should-retry: false\r\nx-silo-refused: budget\r\n\r\n{s}", .{ body.len, body });
+}
+
+/// A refusal that asks the program to wait: HTTP 429 in the provider's rate-limit shape, with
+/// `retry-after` in seconds.
+pub fn wait(gpa: Allocator, format: usage.Format, message: []const u8, secs: u64) ![]u8 {
+    var buf: std.Io.Writer.Allocating = .init(gpa);
+    defer buf.deinit();
+    const w = &buf.writer;
+    switch (format) {
+        .anthropic => try w.print("{{\"type\":\"error\",\"error\":{{\"type\":\"rate_limit_error\",\"message\":{f}}}}}", .{std.json.fmt(message, .{})}),
+        .responses, .chat => try w.print("{{\"error\":{{\"message\":{f},\"type\":\"requests\",\"param\":null,\"code\":\"rate_limit_exceeded\"}}}}", .{std.json.fmt(message, .{})}),
+        .gemini => try w.print("{{\"error\":{{\"code\":429,\"message\":{f},\"status\":\"RESOURCE_EXHAUSTED\"}}}}", .{std.json.fmt(message, .{})}),
+    }
+    const body = buf.written();
+    return std.fmt.allocPrint(gpa, "HTTP/1.1 429 Too Many Requests\r\ncontent-type: application/json\r\ncontent-length: {d}\r\nretry-after: {d}\r\nx-silo-refused: rate\r\n\r\n{s}", .{ body.len, secs, body });
 }
 
 pub fn providerKey(format: usage.Format) []const u8 {

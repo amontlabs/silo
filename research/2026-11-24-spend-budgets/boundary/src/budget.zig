@@ -14,6 +14,9 @@ pub const Policy = enum {
     /// LiteLLM's default: each call holds its dearest input plus `max_tokens` of output while it
     /// runs, and leaves only if that hold fits.
     reserve_max,
+    /// The same hold, with the output the model typically writes instead of `max_tokens` (#351's
+    /// `reserve_input`): the boundary passes a smaller reserve, the rule is the same.
+    reserve_typical,
 };
 
 pub const Limits = struct {
@@ -73,9 +76,11 @@ pub const Ledger = struct {
 
 pub const Refusal = struct {
     ledger: []const u8,
-    why: enum { total, rate, plan_5h, plan_7d },
+    why: enum { total, input, held, rate, plan_5h, plan_7d },
     limit: f64,
     counted: f64,
+    /// For `input` and `held`: what this call would have needed.
+    needed: f64 = 0,
     /// For a rate: when spend in the window falls under the limit again, if nothing else is spent.
     passes_again_at: ?f64 = null,
 };
@@ -127,12 +132,15 @@ pub const Book = struct {
                 const refuse = switch (self.policy) {
                     .finish => l.counted() >= total,
                     .admit_input => l.counted() + input_cost > total,
-                    .reserve_max => l.held() + reserve > total,
+                    .reserve_max, .reserve_typical => l.held() + reserve > total,
                 };
                 if (refuse) {
                     l.refused += 1;
-                    if (l.reached_at == null) l.reached_at = now;
-                    return .{ .ledger = l.name, .why = .total, .limit = total, .counted = l.counted() };
+                    // Reached, or this call alone does not fit in what is left, or what the calls
+                    // under way hold leaves no room for it.
+                    const why: @TypeOf(@as(Refusal, undefined).why) = if (l.counted() >= total) .total else if (self.policy == .admit_input) .input else .held;
+                    if (why == .total and l.reached_at == null) l.reached_at = now;
+                    return .{ .ledger = l.name, .why = why, .limit = total, .counted = l.counted(), .needed = if (why == .input) input_cost else reserve };
                 }
             }
             if (l.limits.rate) |rate| {

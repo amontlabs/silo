@@ -94,7 +94,35 @@ const State = struct {
     covers_len: []usize = &.{},
     budgeted: []bool = &.{},
     next_call: std.atomic.Value(u64) = .init(1),
+    /// The calls under way, so an admission can bring their counts up to the moment.
+    live: std.ArrayList(*Call) = .empty,
+    /// The output of the last settled calls, per model, for `reserve_typical`.
+    outputs: std.StringHashMapUnmanaged(std.ArrayList(i64)) = .empty,
+    live_mu: std.Thread.Mutex = .{},
 };
+
+fn typicalOutput(st: *State, model: []const u8) i64 {
+    st.live_mu.lock();
+    defer st.live_mu.unlock();
+    const l = st.outputs.get(model) orelse return st.cfg.typical_output_tokens;
+    if (l.items.len < 5) return st.cfg.typical_output_tokens;
+    const tmp = gpa.dupe(i64, l.items) catch return st.cfg.typical_output_tokens;
+    defer gpa.free(tmp);
+    std.mem.sort(i64, tmp, {}, std.sort.asc(i64));
+    return tmp[(tmp.len * 9) / 10];
+}
+
+fn noteOutput(st: *State, model: []const u8, out: i64) void {
+    st.live_mu.lock();
+    defer st.live_mu.unlock();
+    const gop = st.outputs.getOrPut(gpa, model) catch return;
+    if (!gop.found_existing) {
+        gop.key_ptr.* = gpa.dupe(u8, model) catch return;
+        gop.value_ptr.* = .empty;
+    }
+    if (gop.value_ptr.items.len >= 200) _ = gop.value_ptr.orderedRemove(0);
+    gop.value_ptr.append(gpa, out) catch {};
+}
 var state: ?*State = null;
 
 fn loadState(path: []const u8) !*State {
@@ -172,12 +200,22 @@ const Call = struct {
         var k = self.meter.counts;
         if (!self.meter.input_known) k = .{ .input = self.est_tokens };
         k.output = @max(k.output, @as(i64, @intCast(self.meter.visible_chars / 4)));
+        const tps = state.?.cfg.output_tps;
+        if (tps > 0) {
+            const by_time: i64 = @intFromFloat((now_ms() - self.t0) / 1000 * tps);
+            k.output = @max(k.output, @min(by_time, self.req.max_tokens));
+        }
         return prices.cost(r, k);
     }
 
     fn progress(self: *Call) void {
         if (self.meter.events == self.last_events) return;
         self.last_events = self.meter.events;
+        state.?.book.progress(self.which, self.id, self.counted());
+    }
+
+    /// Brings the count up to now even with no new event: hidden reasoning sends none.
+    fn refresh(self: *Call) void {
         state.?.book.progress(self.which, self.id, self.counted());
     }
 
@@ -188,22 +226,16 @@ const Call = struct {
     }
 };
 
-fn budgetName(st: *State, ledger: []const u8, comp: usize) []const u8 {
-    if (std.mem.startsWith(u8, ledger, "person:")) return ledger[7..];
-    _ = st;
-    _ = comp;
-    return "this computer";
-}
-
 /// The sentence the program shows, in the provider's error shape.
 fn refusalMessage(r: budget.Refusal, buf: []u8) []const u8 {
     const who = if (std.mem.startsWith(u8, r.ledger, "person:")) r.ledger[7..] else "this computer";
-    const pre = if (std.mem.startsWith(u8, r.ledger, "person:")) "the budget of " else "";
     return switch (r.why) {
-        .total => std.fmt.bufPrint(buf, "Silo: {s}{s}'s budget of ${d:.2} is reached (${d:.2} spent). Raise it in the Silo app to go on.", .{ pre, who, r.limit, r.counted }) catch "Silo: the budget is reached.",
+        .total => std.fmt.bufPrint(buf, "Silo: {s}'s budget of ${d:.2} is reached (${d:.2} spent). Raise it in the Silo app to go on.", .{ who, r.limit, r.counted }) catch "Silo: the budget is reached.",
+        .input => std.fmt.bufPrint(buf, "Silo: this request's input alone costs up to ${d:.2}, and {s}'s budget of ${d:.2} has ${d:.2} left. Raise it in the Silo app to go on.", .{ r.needed, who, r.limit, @max(0, r.limit - r.counted) }) catch "Silo: the call does not fit in the budget.",
+        .held => std.fmt.bufPrint(buf, "Silo: the model calls under way hold what is left of {s}'s budget of ${d:.2}. Raise it in the Silo app to go on.", .{ who, r.limit }) catch "Silo: the budget is held.",
         .rate => blk: {
             const wait: f64 = if (r.passes_again_at) |t| @max(0, t - now_s()) else 0;
-            break :blk std.fmt.bufPrint(buf, "Silo: {s}{s}'s limit of ${d:.2} in the window is reached. Model calls pass again in {d:.0} s, or raise it in the Silo app.", .{ pre, who, r.limit, wait }) catch "Silo: the rate is reached.";
+            break :blk std.fmt.bufPrint(buf, "Silo: {s}'s limit of ${d:.2} in the window is reached. Model calls pass again in {d:.0} s, or raise it in the Silo app.", .{ who, r.limit, wait }) catch "Silo: the rate is reached.";
         },
         .plan_5h => std.fmt.bufPrint(buf, "Silo: {s} may bring the plan's 5-hour window to {d:.0}%, and it is at {d:.0}%. Raise it in the Silo app to go on.", .{ who, r.limit * 100, r.counted * 100 }) catch "Silo: the plan share is reached.",
         .plan_7d => std.fmt.bufPrint(buf, "Silo: {s} may bring the plan's weekly window to {d:.0}%, and it is at {d:.0}%. Raise it in the Silo app to go on.", .{ who, r.limit * 100, r.counted * 100 }) catch "Silo: the plan share is reached.",
@@ -214,7 +246,7 @@ fn now_s() f64 {
     return now_ms() / 1000;
 }
 
-const Begin = union(enum) { pass, refuse: []const u8, call: *Call };
+const Begin = union(enum) { pass, refuse: []const u8, wait: struct { msg: []const u8, secs: u64 }, call: *Call };
 
 /// Decides whether a model request leaves, before a byte of it does.
 fn beginCall(st: *State, comp: usize, conn: u32, format: usage.Format, path: []const u8, head: []const u8, body: []const u8, msg_buf: []u8) !Begin {
@@ -268,17 +300,27 @@ fn beginCall(st: *State, comp: usize, conn: u32, format: usage.Format, path: []c
     if (std.mem.eql(u8, from, "cold")) est = @intFromFloat(@as(f64, @floatFromInt(req.body_len)) / st.cfg.cold_bytes_per_token);
     var input_cost: f64 = 0;
     var reserve: f64 = 0;
+    if (st.cfg.output_tps > 0) {
+        st.live_mu.lock();
+        defer st.live_mu.unlock();
+        for (st.live.items) |lc| lc.refresh();
+    }
     if (row) |r| {
         input_cost = @as(f64, @floatFromInt(est)) * prices.dearestInput(r, est) / 1e6;
         if (std.mem.eql(u8, st.cfg.input_price, "likely") and continued > 0) {
             const fresh = est - continued;
             input_cost = (@as(f64, @floatFromInt(continued)) * r.cache_read + @as(f64, @floatFromInt(fresh)) * prices.dearestInput(r, est)) / 1e6;
         }
-        reserve = input_cost + @as(f64, @floatFromInt(req.max_tokens)) * prices.outputRate(r, est) / 1e6;
+        const out_held: i64 = if (st.book.policy == .reserve_typical) @min(req.max_tokens, typicalOutput(st, req.model)) else req.max_tokens;
+        reserve = input_cost + @as(f64, @floatFromInt(out_held)) * prices.outputRate(r, est) / 1e6;
     }
     if (st.book.admit(which, input_cost, reserve, account, now_s())) |r| {
         record("\"conn\":{d},\"kind\":\"refused\",\"why\":\"{s}\",\"ledger\":{f},\"limit\":{d:.4},\"counted\":{d:.4},\"input_cost\":{d:.4},\"est_tokens\":{d},\"model\":{f}", .{ conn, @tagName(r.why), j(r.ledger), r.limit, r.counted, input_cost, est, j(req.model) });
         req.deinit(gpa);
+        if (r.why == .rate and std.mem.eql(u8, st.cfg.rate_refusal, "429")) {
+            const secs: u64 = if (r.passes_again_at) |t| @intFromFloat(@ceil(@max(1, t - now_s()))) else 60;
+            return .{ .wait = .{ .msg = refusalMessage(r, msg_buf), .secs = secs } };
+        }
         return .{ .refuse = refusalMessage(r, msg_buf) };
     }
     const call = try gpa.create(Call);
@@ -301,6 +343,11 @@ fn beginCall(st: *State, comp: usize, conn: u32, format: usage.Format, path: []c
     };
     if (format == .gemini) call.meter.setModel(req.model);
     try st.book.start(which, call.id, reserve);
+    {
+        st.live_mu.lock();
+        defer st.live_mu.unlock();
+        try st.live.append(gpa, call);
+    }
     return .{ .call = call };
 }
 
@@ -308,6 +355,14 @@ fn beginCall(st: *State, comp: usize, conn: u32, format: usage.Format, path: []c
 fn endCall(st: *State, call: *Call, how: []const u8) void {
     if (call.settled) return;
     call.settled = true;
+    {
+        st.live_mu.lock();
+        defer st.live_mu.unlock();
+        for (st.live.items, 0..) |lc, i| if (lc == call) {
+            _ = st.live.swapRemove(i);
+            break;
+        };
+    }
     if (call.body.items.len > 0) call.meter.onBody(call.body.items) catch {};
     var day_buf: [10]u8 = undefined;
     const day = prices.today(&day_buf);
@@ -334,23 +389,27 @@ fn endCall(st: *State, call: *Call, how: []const u8) void {
         estimated = true;
     }
     const s = st.book.settle(call.which, call.id, cost, estimated, now_s()) catch budget.Book.Settled{};
-    if (call.meter.final and billed.totalInput() > 0) {
+    if (call.meter.final) noteOutput(st, call.req.model, billed.output);
+    // The conversation's size is the top-level input: attempts inside one call (a fallback) each
+    // read the same conversation, so their sum is not its size.
+    const context = call.meter.counts.totalInput();
+    if (call.meter.final and context > 0) {
         st.memory_mu.lock();
         defer st.memory_mu.unlock();
         if (st.memory.count() > 1 << 16) st.memory.clearRetainingCapacity();
-        st.memory.put(gpa, call.req.whole(), .{ .bytes = call.req.body_len, .tokens = billed.totalInput() }) catch {};
+        st.memory.put(gpa, call.req.whole(), .{ .bytes = call.req.body_len, .tokens = context }) catch {};
     }
     const l0 = &st.book.ledgers.items[call.which[0]];
     const lp: ?*budget.Ledger = if (call.which.len > 1) &st.book.ledgers.items[call.which[1]] else null;
-    record("\"conn\":{d},\"kind\":\"call\",\"call\":{d},\"computer\":{f},\"format\":\"{s}\",\"model\":{f},\"reply_model\":{f},\"tier\":{f},\"credential\":{f},\"status\":{d},\"end\":{f},\"final\":{},\"estimated\":{},\"priced\":{},\"est_tokens\":{d},\"est_from\":\"{s}\",\"input_cost_bound\":{d:.6},\"reserve\":{d:.6},\"input\":{d},\"cache_read\":{d},\"cache_write_short\":{d},\"cache_write_long\":{d},\"output\":{d},\"reasoning\":{d},\"parts\":{d},\"visible_chars\":{d},\"cost\":{d:.6},\"ms\":{d:.1},\"computer_spent\":{d:.6},\"person_spent\":{d:.6},\"plan_5h_moved\":{d:.4},\"plan_7d_moved\":{d:.4}", .{
+    record("\"conn\":{d},\"kind\":\"call\",\"call\":{d},\"computer\":{f},\"format\":\"{s}\",\"model\":{f},\"reply_model\":{f},\"tier\":{f},\"credential\":{f},\"status\":{d},\"end\":{f},\"final\":{},\"estimated\":{},\"priced\":{},\"est_tokens\":{d},\"context\":{d},\"est_from\":\"{s}\",\"input_cost_bound\":{d:.6},\"reserve\":{d:.6},\"input\":{d},\"cache_read\":{d},\"cache_write_short\":{d},\"cache_write_long\":{d},\"output\":{d},\"reasoning\":{d},\"parts\":{d},\"visible_chars\":{d},\"cost\":{d:.6},\"max_tokens\":{d},\"ms\":{d:.1}", .{
             call.conn,                          call.id,                         j(st.cfg.computers[call.computer].name), @tagName(call.format), j(call.req.model),
             j(call.meter.model orelse ""),      j(call.meter.tier orelse call.req.tier), j(call.cred_kind),             call.status,          j(how),
-            call.meter.final,                   estimated,                       priced,                                  call.est_tokens,      call.est_from,
+            call.meter.final,                   estimated,                       priced,                                  call.est_tokens,      context,              call.est_from,
             call.input_cost,                    call.reserve,                    billed.input,                            billed.cache_read,    billed.cache_write_short,
             billed.cache_write_long,            billed.output,                   billed.reasoning,                        call.meter.parts.items.len, call.meter.visible_chars,
-            cost,                               now_ms() - call.t0,              l0.settled,                              if (lp) |p| p.settled else 0, l0.plan_5h_moved,
-            l0.plan_7d_moved,
+            cost,                               call.req.max_tokens,             now_ms() - call.t0,
         });
+    record("\"conn\":{d},\"kind\":\"ledgers\",\"call\":{d},\"computer_spent\":{d:.6},\"person_spent\":{d:.6},\"plan_5h_moved\":{d:.4},\"plan_7d_moved\":{d:.4}", .{ call.conn, call.id, l0.settled, if (lp) |p| p.settled else 0, l0.plan_5h_moved, l0.plan_7d_moved });
     if (s.alert) |n| record("\"kind\":\"alert\",\"ledger\":{f},\"spent\":{d:.4}", .{ j(n), l0.settled });
     if (s.reached) |n| record("\"kind\":\"reached\",\"ledger\":{f}", .{j(n)});
 }
@@ -948,6 +1007,12 @@ fn handleInner(fd: posix.fd_t, id: u32) !void {
                 .pass => {},
                 .refuse => |m| {
                     try writeRefusal(client, f, m);
+                    continue;
+                },
+                .wait => |wt| {
+                    const r = try spend.wait(gpa, f, wt.msg, wt.secs);
+                    defer gpa.free(r);
+                    try client.writeAll(r);
                     continue;
                 },
                 .call => |cl| call = cl,

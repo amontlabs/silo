@@ -85,7 +85,7 @@ def main():
         errs = []
         for c in calls:
             if c["est_from"] != src or not c["final"]: continue
-            actual = c["input"] + c["cache_read"] + c["cache_write_short"] + c["cache_write_long"]
+            actual = c.get("context", c["input"] + c["cache_read"] + c["cache_write_short"] + c["cache_write_long"])
             if actual > 0: errs.append(c["est_tokens"] / actual - 1)
         if errs:
             errs.sort()
@@ -102,8 +102,27 @@ def main():
     res["final_billed"] = round(sum(truth_cost(rows, l, day) or 0 for l in led if l["completed"] and l.get("usage_sent") is not False), 6)
     if plan:
         last = plan[-1]
-        moved = max((c.get("plan_5h_moved", 0) for c in calls), default=0)
+        moved = max((c.get("plan_5h_moved", 0) for c in rec if c.get("kind") == "ledgers"), default=0)
         res["plan_5h"] = {"reading_end": round(last["u5h"], 4), "moved_by_this_computer_true": round(last["self_5h"], 4), "moved_by_others_true": round(last["other_5h"], 4), "boundary_put_on_computer": round(moved, 4)}
+    # Where an overshoot comes from. Each call's cost accrues evenly from its start to its end;
+    # the moment the sum passes a limit is when the limit was truly reached. A call that started
+    # after it would not have left with a perfect live count; a call under way then could not
+    # have been stopped without cutting it.
+    for name, l in lim.items():
+        if l.get("total") is None: continue
+        cs = sorted(((c["t"] - c["ms"], c["t"], c["cost"]) for c in calls if c["computer"] == name), key=lambda x: x[0])
+        if not cs: continue
+        pts = sorted({x[0] for x in cs} | {x[1] for x in cs})
+        def accrued(t): return sum(cost * min(1, max(0, (t - a) / max(b - a, 1e-9))) for a, b, cost in cs)
+        cross = next((t for t in pts if accrued(t) >= l["total"]), None)
+        if cross is None:
+            res["decompose_" + name] = {"never_reached": True, "unspent": round(l["total"] - by.get(name, 0), 4)}
+            continue
+        lo = max(a for a, _, _ in cs if a <= cross) if any(a <= cross for a, _, _ in cs) else cs[0][0]
+        late = sum(cost for a, _, cost in cs if a > cross)
+        inflight = sum(cost * (b - cross) / max(b - a, 1e-9) for a, b, cost in cs if a <= cross < b)
+        res["decompose_" + name] = {"late_admissions": round(late, 4), "in_flight_at_limit": round(inflight, 4),
+                                    "calls_after_limit": sum(1 for a, _, _ in cs if a > cross), "calls_in_flight": sum(1 for a, b, _ in cs if a <= cross < b)}
     alerts = [r for r in rec if r.get("kind") in ("alert", "reached")]
     res["alerts"] = [(r["kind"], r["ledger"]) for r in alerts]
     if "--json" in sys.argv: print(json.dumps(res))

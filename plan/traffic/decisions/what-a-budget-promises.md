@@ -50,3 +50,39 @@ whoever builds it.
   budget, counted as it streams, and settled on the provider's final usage, so two calls at once
   cannot both spend the same remainder. A call that fails midway still counts what it cost.
   ([source](https://github.com/evmts/guillotine-mini/blob/edafd394bc0aa48a9691b037da36b6f36525121a/CLAUDE.md?plain=1#L669))
+
+## Measured with Claude Code under a budget (24 November 2026)
+
+An agent's part, 24 November 2026, from `research/2026-11-24-spend-budgets`. This refines the choice above with a working
+boundary and real agent programs, where #351 had a simulator.
+
+Main has a budget of $3 and Claude Code on Opus 5.5 starts 8 subagents at once. Each call reasons
+for 2,000 to 12,000 tokens before it writes anything, and the reasoning streams as nothing the
+boundary can read. Three runs per option, the same task each time:
+
+| How a call is admitted | Spent, worst of 3 | Over the budget |
+|---|---|---|
+| Running calls finish, counting what is visible (the answer above) | $4.61 | 54% |
+| The same, and a running call's output also counts by time at the model's speed | $4.05 | 35% |
+| The same, and the call's own input must fit in what is left | $4.05 | 35% |
+| Each running call holds its input and its model's typical output (90th percentile) | $2.80 | 7% to 9% under, every run |
+| Each running call holds `max_tokens` | $0.53 | stopped after 3 calls: Claude Code asks for 128,000 |
+
+Fable 5.2 under $6 gave 56%, 34%, 34%, 7% to 9% under, and 82% under.
+
+What the table says:
+
+- With visible output only, a third to a half of the overshoot came from calls that left after the
+  budget was already spent, because the reasoning of the calls under way was not counted yet.
+  Counting output by time while a call runs removes all of it. What is left is the calls under
+  way at the limit, which the answer above accepts.
+- That rest is large with subagents: a third of the budget here. A promise of "over by the calls
+  under way" should say so in the app, with the number of calls running.
+- The input check changed nothing on this night, since Claude Code's inputs are mostly cache
+  reads. It is for one large call: a 2.4 MB tool result sent with $0.34 left of $1 ended the budget
+  at $7.38 without it, and was refused with it.
+- Holding `max_tokens` is not usable with Claude Code.
+
+Recommended: keep "running calls finish", count a running call's output by time as well as by
+what is visible, and keep the input check. If "never over" matters more than the last 7% to 9% of
+the budget, hold the typical output instead: it was never over in six runs.

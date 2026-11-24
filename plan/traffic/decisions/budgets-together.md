@@ -17,3 +17,10 @@ The options:
 
 Recommended: both, first reached stops. Every limit you set should hold, whatever other limit
 exists.
+
+## A person's budget over several computers (24 November 2026)
+
+An agent's part, 24 November 2026, from `research/2026-11-24-spend-budgets`. Two Claude Codes and one Codex on three computers of
+one person, with $10 on each computer and $2.50 on the person. The person's budget applied to every
+call of the three, and all three stopped at the first refusal, at $2.92 spent in all. The
+overshoot is the calls under way on all the computers together, as for one computer.

@@ -17,7 +17,7 @@ import hashlib, json, math, os, random, socket, ssl, threading, time, uuid, http
 OUT = os.environ.get("OUT", "out"); os.makedirs(OUT, exist_ok=True)
 SC = json.load(open(os.environ["SCENARIO"]))
 RNG = random.Random(SC.get("seed", 1))
-LOCK = threading.Lock()
+LOCK = threading.RLock()
 LEDGER = open(f"{OUT}/ledger.jsonl", "a"); LOG = open(f"{OUT}/fake.log", "a")
 T0 = time.time()
 
