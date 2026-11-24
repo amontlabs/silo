@@ -43,7 +43,8 @@ show what was sent to it, or its size (`record-shows-what-was-sent`).
 - What a computer can reach, to decide: `device-out-of-reach`, `reach-of-a-computer`,
   `paths-out-are-shown`, `guarantees-outside-the-computer`,
   `safe-fresh-install`, `channel-list`.
-- Secrets, to decide: `secret-values`, `secret-placeholder`, `secret-entry`, `secret-limits`,
+- Secrets, to decide: `secret-values`, `secret-placeholder`, `ssh-keys`, `exchanged-tokens`,
+  `cloud-credentials`, `secret-entry`, `secret-limits`,
   `secret-and-prompt-cache`.
 - The network, to decide: `network-modes`, `name-lookups`, `main-network-rules`,
   `package-age-rule`, `package-age-at-the-boundary`, `no-read-freely-preset`.

@@ -1,0 +1,7 @@
+{
+  "asks": "What does a computer get when a secret is exchanged for a token?",
+  "answer": "Silo knows the token endpoints of the providers that matter. When a computer exchanges a secret at one of them, the boundary makes the exchange with the real secret and gives the computer a placeholder for each token it gets back. It swaps the real token in on the way to the hosts that token is for, and refreshes it itself. A token from an endpoint Silo does not know reaches the computer as it is, and the app says so for that secret.",
+  "needs": [
+    "secret-placeholder"
+  ]
+}

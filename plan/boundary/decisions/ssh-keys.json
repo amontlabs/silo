@@ -1,0 +1,7 @@
+{
+  "asks": "How does a computer use an SSH key it cannot read?",
+  "answer": "Git remotes on the hosts Silo knows, such as GitHub, are rewritten to HTTPS inside the computer, so Git goes through the swap a token already has. Every other use of SSH goes through an SSH agent that the boundary holds: the key stays on your Mac, and the computer can only ask for a signature. The agent signs a login only for a connection the computer really opened, to a host you allowed for that key, whose host key Silo checked itself. It signs nothing else, apart from Git commits when you allow it. Each signature is a fact in the record.",
+  "needs": [
+    "secret-placeholder"
+  ]
+}
