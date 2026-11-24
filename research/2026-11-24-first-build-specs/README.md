@@ -1,10 +1,10 @@
-# Build specs for steps 1 to 3 of the first build
+# Build specs for the first build
 
 An agent's work, 24 November 2026, for polarzero and for the agents who will build. #348 cuts the
 first build into six steps, numbered 0 to 5 in its `research/2026-11-24-first-build-milestones.md`:
 the Mac tests, the engine, main runs, a night, the way back, the record. These pages specify
-steps 1 to 3 well enough to start building them the day their features are taken: the engine, main
-runs, and a night.
+steps 1 to 5 well enough to start building each the day its features are taken. Step 0 is #359's
+kit, which needs no spec.
 
 Nothing here is a decision. No entry of the plan gets a verdict, and nothing may be built from
 these pages before polarzero takes the features they serve (`AGENTS.md`). Where a page rests on an
@@ -19,8 +19,10 @@ under each other option. The same notes are on those entries in the Workshop.
 | [1-engine.md](1-engine.md) | Step 1: the engine, the recorder and the `silo` command, with no computer yet. The core's tables and inputs, the access model, the loop, start, crashes, the Zig layout, cost targets, tests |
 | [2-main-runs.md](2-main-runs.md) | Step 2: the Swift helper, the network, the way in over SSH, the first run as one operation of steps, stop and pause, a restart of the Mac |
 | [3-a-night.md](3-a-night.md) | Step 3: `ssh main.keep`, the Mac kept awake, its sleeps and wakes in the record, main running on while the engine restarts |
+| [4-the-way-back.md](4-the-way-back.md) | Step 4: checkpoints by APFS clone, when they are taken, thinning, the floor of free space and the reserve, restore as one operation of steps |
+| [5-the-record.md](5-the-record.md) | Step 5: the disk reader, file facts from comparing checkpoints, `silo` in the morning, `silo changes`, `silo look`, `silo put-back`, `silo import`, `silo verify`, and how this lines up with the morning review prototype (#371) |
 
-Read `formats.md` first: the three steps point to it and repeat none of it.
+Read `formats.md` first: the steps point to it and repeat none of it.
 
 ## What these specs rest on
 
@@ -28,7 +30,9 @@ Read `formats.md` first: the three steps point to it and repeat none of it.
   #352 (second opinions on the 56 decisions, with the proposed text this spec follows), #359 (the
   Mac kit, whose test numbers are used everywhere here), #362 (the record's hash chain and person),
   #364 (the reconciliation of the drafts), #365 (the checkpoint engine's prototype and catalog),
-  #366 (Linux hosts), and #347's boundary checks (`research/2026-11-24-boundary-checks.md` in the
+  #366 (Linux hosts), #351 (what the record needs to hold, and the morning sketches), #354 (the
+  first run, the daily loop and the command), #371 (the morning review prototype), and #347's
+  boundary checks (`research/2026-11-24-boundary-checks.md` in the
   project's files).
 - Where #352 proposes an edit to an open entry, the spec follows the edit, and says so. Where #364
   proposes a position between drafts, the spec follows #364.
@@ -37,7 +41,7 @@ Read `formats.md` first: the three steps point to it and repeat none of it.
 
 ## What these specs change in #348's steps
 
-Five findings from writing the specs move something in #348's plan of steps. Each is a proposal.
+Eight findings from writing the specs move something in #348's plan of steps. Each is a proposal.
 
 1. **The recorder belongs in step 1.** `events-until-the-recorder` keeps the engine's events in
    a table of fixed size until the recorder has them. With no recorder, that table fills, and the
@@ -56,6 +60,15 @@ Five findings from writing the specs move something in #348's plan of steps. Eac
    fork. #359's test 09 checks that a user agent can start a macOS computer.
 5. **The command needs `silo install` in step 1**, to put the engine and the recorder in launchd,
    since there is no app to do it. `silo setup` in step 2 runs it if it was not run.
+6. **`look` and `put-back` need file contents**, and the reader of #352 reads metadata only. The
+   spec gives the reader a second mode for the contents of the paths you name, with APFS's
+   compression (zlib, and LZVN and LZFSE from Apple's open-source `lzfse`). It is the part of the
+   reader no trial has run.
+7. **A put-back cannot pause main** to close the window between checking a path and writing it,
+   as #365 proposed: a paused computer cannot run the copy. The checkpoint saved before it holds
+   what a write in that window would lose.
+8. **The comparer can fall behind without losing anything**, by comparing checkpoints farther
+   apart, so thinning has to keep every checkpoint not yet covered by a comparison.
 
 ## The open entries these specs assume
 
@@ -91,6 +104,18 @@ under the other options.
 | `checkpoint-per-system` | The disk's caching and sync modes chosen by #359 test 04 | The NBD attachment (#365): only the helper's disk attachment changes in step 2 |
 | `engine-limits`, agents | The table sizes in `1-engine.md` | Other sizes: one file, `core/limits.zig` |
 | `how-the-engine-is-built` | The first files of `core/` are read line by line by the people polarzero names | polarzero has to name them before step 1 starts |
+| `checkpoint-per-system` (step 4) | An APFS clone of the image and the auxiliary storage, taken while main runs if #359 test 04 shows it is a moment in time, with a pause otherwise | #365's `delta` behind the NBD attachment, if tests 03, 15, 31 and 32 say so: only the catalog driver and the helper's disk attachment change |
+| `thinning-checkpoints` (step 4) | Every automatic checkpoint for 24 hours, one per hour for 2 days, one per day for 7 days; never a checkpoint you took, a save before a restore or a put-back, an uncompared one, or the newest | The plan's 2 hours, 2 days and 30 days: three settings change, and #365 measured 30 days of dailies at 247 to 413 GB beyond the live disk under its model |
+| The interval of automatic checkpoints | 5 minutes, in awake time | Any other: one setting. A checkpoint at each turn waits for the boundary |
+| `restore-saves-first` (step 4) | Stop, then save, and keep the save until you remove it (#352 file 07) | As written: the save is thinned like the others and can be gone the same day |
+| `space-the-engine-keeps` (step 4) | A floor of 20 GB under which interval checkpoints stop, and a 4 GB reserve, until measured | |
+| `file-changes-from-outside` (step 5) | #352 file 09's text: Silo's own reader, never a mount, a gap for what it cannot read | libfsapfs or a mount: refused by #352 file 11's tests and by the kernel's attack surface |
+| Renames (`file-changes-in-the-record`) | A delete and a create, as the feature says, with the APFS object id on both lines | Renames written as renames on APFS (#352 file 11): the comparer joins the two lines; the format holds it already |
+| `putting-back-a-path`, `fork-from-the-moment` (taken; #364 section 9) | Put-back of the paths you name into a running main | If polarzero reads `fork-from-the-moment` as forbidding it, step 5 drops `put-back` and keeps `look` |
+| "Since you last looked" (#351, a new decision) | The time `silo` last showed the morning, kept outside the record | No such line: `silo` shows what needs you and the last 24 hours |
+| Your repositories, for the morning's first group | The folders of main holding `.git` in the newest checkpoint | Folders you name at setup: one more question in `silo setup` |
+| What `silo` folds by default | What macOS writes by itself (from #359 test 16) and rebuildable folders, each folded, never hidden | Nothing folded: every line shown |
+| Command names (#354 and #371) | `changes`, `look`, `put-back`, `verify` | #371's `diff` and `putback`: names only |
 
 ## The Mac tests, by step
 
@@ -102,3 +127,5 @@ done when the tests named "done" pass with Silo's own code.
 | 1 | 06 (the cost of `F_FULLFSYNC`), 20 (the engine's socket) | the engine killed 1,000 times with a request in flight (`1-engine.md`) |
 | 2 | 00, 01, 10, 14 (first run and provisioning), 07 (gvproxy), 09 (launchd), 04 (the disk's mode) | 02, 08, 11, 12, 13, the hostile test, #347's checks 6 to 10 |
 | 3 | 02 inside tmux | 16 (an idle night), the night's own tests (`3-a-night.md`) |
+| 4 | 03, 04, 15, 17, 31, 32, 33 | 06 and 33 for the floor and the reserve, the full-volume test, a restore during `npm install` |
+| 5 | 05, 16, 18, 19 | the reader on main after a night, FileVault inside, #365's put-back scenario on macOS |

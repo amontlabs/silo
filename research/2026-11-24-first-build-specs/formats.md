@@ -1,7 +1,7 @@
 # The first build's data formats
 
 Part of the build specs in this folder ([README](README.md)). Every file Silo writes to read later,
-and every message between its processes, for steps 1 to 3 of the first build. Each format is said
+and every message between its processes, for steps 1 to 5 of the first build. Each format is said
 here once; the step specs point to it.
 
 All integers are little endian. Silo runs on arm64 and x86-64 only, which are both little endian,
@@ -42,11 +42,15 @@ open to others.
         disk.img aux.img hardware-model.bin machine-id.bin config.json
       live.new/                a start being prepared; removed at the engine's start
       ckpt/                    checkpoints, from step 4 (#365's catalog)
+        <id>/                  disk.img aux.img meta leaves
+        .tmp-<id>/  .trash-<id>/
       ssh/
         id_ed25519  id_ed25519.pub  known_hosts
       helper.plist             the launchd job of this computer's helper
   ssh/
     config                     the file of SSH entries (reaching-a-computer)
+  views/
+    last-looked                when `silo` last showed you the morning screen; not part of the record
   run/
     engine.sock  recorder.sock
     helpers/c1.sock
@@ -59,9 +63,8 @@ open to others.
   letters the longest, `run/helpers/<id>.sock`, is 76 bytes.
 - `live.new/` is what a start or a restore prepares. #365's catalog swaps it with `live/` in one
   call (`renamex_np` with `RENAME_SWAP` on a Mac, `renameat2` with `RENAME_EXCHANGE` on Linux), so
-  a disk never comes back with the auxiliary storage of another moment. Step 2 uses it once: to
-  make main from a clone of the installed system. Steps 4 and 5 use the rest of #365's layout
-  (`ckpt/<id>/`, `.tmp-<id>/`, `.trash-<id>/`, `next-id`) unchanged.
+  a disk never comes back with the auxiliary storage of another moment. Step 2 uses it to make
+  main from a clone of the installed system, and step 4 for every restore.
 - Nothing else is written outside `<data>`, except the one `Include` line in `~/.ssh/config`
   (with your yes, `reaching-a-computer`) and the launchd jobs in `~/Library/LaunchAgents`.
 
@@ -296,7 +299,12 @@ prints.
 | `author` | Control facts only: `by` is `you`, `rule`, `precaution`, `extension` or `silo` (`who-made-each-change`), and `person` the id of the person when `by` is `you` |
 | the rest | The kind's own keys |
 
-Anyone can check the chain with ordinary tools. `silo record c1 --json` prints the lines as stored,
+Facts and reports of a computer share one chain, in the order the recorder wrote them. Opinions,
+which a later build adds, go to a file and a chain of their own, since `what-the-record-holds` keeps
+them apart; #371 does the same. Only the recorder writes the record, so no two writers can break a
+chain.
+
+`silo verify` checks every chain. Anyone can check one with ordinary tools. `silo record c1 --json` prints the lines as stored,
 so the SHA-256 of one printed line, without its newline, is the `prev` of the next:
 
 ```sh
@@ -352,13 +360,74 @@ Rebuilt from its segment when missing or older. It holds the offset of every 1,0
 `seq` and by `time`, so `silo record main --since 02:40` seeks instead of reading every segment. It
 is not part of the record and is never trusted over the segment.
 
+## Checkpoints
+
+The catalog of #365, with one change: ids come from the engine's counter (`engine-state`), which
+is in the saved state, so #365's `next-id` file is not needed.
+
+- A checkpoint is made in `ckpt/.tmp-<id>/`, flushed, and renamed to `ckpt/<id>/`: whole or
+  absent. It goes by a rename to `.trash-<id>/`, then its files are deleted. At start the engine
+  removes every name that starts with a dot.
+- `meta` is written last, before the rename (`checkpoint-storage`, as #352 file 07 proposes):
+
+```json
+{"v":1,"id":412,"computer":"c1","taken":"2026-11-25T02:40:00.512Z","reason":"interval","parent":411,"boot":4,"strategy":"clone","paused_ms":0,"made_ms":1830}
+```
+
+- `leaves` is written by the reader after the first comparison that reads the checkpoint: the
+  list of the file-system tree's leaf blocks, per volume, so the next comparison reads only the new
+  side. It is a cache: missing or refused, the reader reads the tree again.
+
+## The disk reader's output
+
+`silo-reader` writes to its pipe, and the engine reads it as untrusted input. One record per line,
+fields separated by a tab, every field bounded, paths as the reader found them with every byte
+under 0x20, `\`, tab and 0x7f written as `\xHH`. A line that breaks the format ends the
+comparison with a gap, `reader_output_refused`.
+
+```
+silo-reader	1
+read	before	412	apfs-xid	30211	skipped	none
+read	after	413	apfs-xid	30388	skipped	30390
+volume	Data	ok
+F	created	file	8812231	0	2048	content	/Users/polarzero/work/app/src/auth.ts
+F	deleted	dir	7712001	0	0	-	/Users/polarzero/work/shared-fixtures
+F	deleted	file	7712044	1288	0	-	/Users/polarzero/work/shared-fixtures/README.md
+F	changed	file	991203	311	342	content,mode	/Users/polarzero/.gitconfig
+gap	Data	encrypted	nodes-changed	1840
+end	files	4	blocks-read	6260
+```
+
+The columns of an `F` record: the change, the type (`file`, `dir`, `link`), the APFS object id,
+the size before, the size after, what changed (`content`, `mode`, `owner`, `link`, `xattr`, or
+`-`), the path.
+
+## A file fact
+
+The comparer turns each `F` record into a line of the record, with `is` `fact`, `kind` `file`, and
+the source `disk` (`sources`, as #352 file 08 names it):
+
+```json
+{"v":1,"seq":20871,"prev":"…","time":"2026-11-25T02:45:03.120Z","computer":"c1","source":{"id":"disk","count":"k:91","n":5512},"is":"fact","kind":"file","between":[412,413],"change":"deleted","type":"dir","path":"/Users/polarzero/work/shared-fixtures","object":7712001,"size":[0,0],"what":[]}
+```
+
+Each pair ends with one line of `kind` `file` and `change` `compared`, with the count of the
+pair's file facts, the APFS checkpoints read and any skipped; or with a line of `kind` `gap` that
+names the pair, the volume, the reason and how many nodes changed.
+
+Control facts of steps 4 and 5 have the keys of any control fact, and `what` is one of:
+`checkpoint-taken`, `checkpoint-skipped`, `checkpoint-refused`, `checkpoint-removed`,
+`space-floor`, `reserve-deleted`, `restore`, `put-back`, `import`. A put-back line names the
+checkpoint, the paths, the files and bytes copied, and the checkpoint saved before it.
+
 ## What each step writes
 
-| Format | Step 1 | Step 2 | Step 3 |
-|---|---|---|---|
-| `<data>` layout | `engine/`, `record/`, `run/` | `images/`, `computers/`, `ssh/`, `reserve` | |
-| Saved state | yes | adds the computer, image and operation rows | |
-| Engine protocol | `hello` to `ack`, `grant`, `take_back` | `setup`, `start`, `stop`, `pause`, `resume` | |
-| Helper protocol | | yes | |
-| Sources' protocol | the recorder follows the engine | | each helper is a source, for sleeps and wakes |
-| Record | control facts of the access model, gaps, silences | computer state and setup steps | sleeps and wakes of the Mac |
+| Format | Step 1 | Step 2 | Step 3 | Step 4 | Step 5 |
+|---|---|---|---|---|---|
+| `<data>` layout | `engine/`, `record/`, `run/` | `images/`, `computers/`, `ssh/`, `reserve` | | `ckpt/` | `leaves`, `views/` |
+| Saved state | yes | computer, image and operation rows | | checkpoint rows | `compared` on each |
+| Engine protocol | `hello` to `ack`, `grant`, `take_back` | `setup`, `start`, `stop`, `pause`, `resume` | | `checkpoint`, `remove`, `restore` | `put_back`, `import` |
+| Helper protocol | | yes | | `pause` for a clone, if needed | |
+| Sources' protocol | the recorder follows the engine | | each helper | | the comparer |
+| Record | control facts, gaps, silences | computer state, setup steps | sleeps and wakes | checkpoints, restores, space | file facts, put-backs, imports |
+| Reader output | | | | | yes |
