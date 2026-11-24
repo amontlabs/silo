@@ -67,3 +67,30 @@ What it means for the rule:
 Several package managers have a setting of their own for this, such as `uv --exclude-newer` and
 `npm --before`. Those settings live inside the computer, where an agent can change them. The rule
 at the boundary is the one an agent cannot turn off.
+
+## A trustworthy age for Go (24 November 2026)
+
+An agent's part, 24 November 2026. Read from the live Go module proxy, its index and deps.dev.
+
+- The proxy's index (`index.golang.org`) gives the time the proxy first saw each version. The
+  first entry on 24 November, at 00:00:02, was `github.com/cloudfoundry-incubator/receptor`
+  `v0.0.0-20141117152655-c8c6a5a52fe1`. The proxy's `.info` for it says 17 November 2014, the time
+  of its commit. Of the first 2,000 versions the proxy saw that day, 18 were commits made before
+  2026. A rule that trusts `.info` would call each of them years old on the day it first reached
+  anyone.
+- deps.dev is no way out: its `publishedAt` for `github.com/google/uuid` v1.6.0 is the same
+  commit time as the proxy's `.info`.
+- The index cannot be asked about one module, but it is small: 22,000 versions in six hours of
+  23 November, 3 MB as served, so about 90,000 versions and 12 MB a day. It can be read from any
+  past time, so a Mac that slept catches up.
+
+What I would put in place of "still to find out": the boundary keeps the index for as far back as
+the longest age you set (30 days is about 2.6 million versions). A Go version found in it is as
+old as the index says. One not found is older than the kept window, since the index lists every
+version the proxy ever served. It is only as good as the proxy's word, which is the source Go
+itself trusts for the checksum of each version.
+
+A Go module fetched with `GOPROXY=direct`, or any package taken from a Git URL instead of the
+registry, never passes the registry and so is not covered by the rule. One setting inside the
+computer is enough for that, so a rule on age is only firm together with a network rule that
+keeps code hosts such as `github.com` from serving Git to package managers.
