@@ -45,6 +45,6 @@ no going back.
   reply. So the comparison the answer describes has to read the format, as it says, and cannot
   compare bytes.
 
-Over Codex's WebSocket (see `reading-each-agent-program`), the second point does not hold: after
-the first message of a connection, each message carries only the new items and names the previous
+Those requests were plain HTTP. Over Codex's WebSocket (see `reading-each-agent-program`), Codex
+does send `previous_response_id`: after the first message of a connection, each message carries only the new items and names the previous
 reply in `previous_response_id`. The link is the only way to join them.
