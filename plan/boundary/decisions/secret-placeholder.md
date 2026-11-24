@@ -59,3 +59,47 @@ there and nowhere else. A placeholder seen anywhere else, in a body or towards a
 forwarded as it is, and the record keeps it as a fact. Nothing is denied for it, since what leaves
 is only the placeholder. A program that sends its key somewhere else (a query string, a body) is
 found when the secret is set up, and the app says that secret cannot be swapped.
+
+## A key that signs: AWS, signed again at the boundary (24 November 2026)
+
+An agent's part, 24 November 2026. The answer says a key that signs requests "cannot be swapped
+in". For AWS, the most common such key, a sketch shows it can be done another way: the boundary
+does not swap the key into the request, it signs the request again.
+
+The setup: the AWS CLI (1.46.3) ran with a placeholder access key id and secret, against a
+stand-in for AWS. The stand-in checks every signature with botocore, AWS's own Python library,
+and knows only the real key. Between them, a proxy of 90 lines, written from the SigV4
+specification and not from botocore, did what the boundary would do. It read the access key id
+from the `Authorization` header, swapped in the real one, rebuilt the canonical request from the
+bytes on the wire, signed it with the real secret, and replaced the signature. The scripts are in
+the project's files, under `research/2026-11-24-sigv4/`.
+
+- Sent straight to the stand-in, the placeholder was refused, as expected.
+- Through the proxy, every call passed: `sts get-caller-identity`, `dynamodb list-tables`, an
+  S3 upload, a 20 MB upload in three parts (start, parts, finish), a download, a `HEAD`, and a
+  listing whose query held a space, a slash and a `ü`.
+- The real secret never entered the computer. The CLI there held only the placeholder.
+
+What it takes, and what is still open:
+
+- For S3, the hash of the body is in a header (`x-amz-content-sha256`), so the request can be
+  signed again before its body passes. For other services, the body's hash is part of what is
+  signed, so the boundary reads the whole body before it sends anything. Those bodies are small
+  API calls.
+- Not tried: uploads signed chunk by chunk (`STREAMING-AWS4-HMAC-SHA256-PAYLOAD`, which some SDKs
+  use), where each chunk's signature chains to the one before and would be signed again in turn;
+  SigV4a, which signs with a key pair derived from the secret; and a session token
+  (`x-amz-security-token`), which is swapped like any value but is signed too, so it is swapped
+  before signing.
+- A presigned URL made inside the computer carries a signature made with the placeholder. It works
+  when it is used from inside, through the boundary, and fails if it is handed to someone outside.
+  The CLI's `s3 presign` still made the older SigV2 kind, which can be signed again the same way.
+- The same pattern may cover other keys that sign: a Google service account key signs a token
+  request that the boundary could sign again, and Azure's shared keys sign each request with HMAC
+  as AWS does. A protocol that proves the key in an exchange, such as SSH or a database's
+  challenge, cannot be signed again this way. The boundary would have to end that protocol itself.
+
+So the answer's "cannot be swapped in" holds for the value, but not for the key's use. What I
+would put in its place for AWS: the boundary signs the request again with the real key, on the way
+to the hosts you allowed, and the computer holds a placeholder for the key as for any other
+secret.
