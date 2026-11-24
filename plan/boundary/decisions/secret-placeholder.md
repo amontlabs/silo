@@ -325,9 +325,23 @@ What this changes for Silo:
   setting is off too, and it is on by default; Silo's holds whatever the program is told.
 - **A stand-in shaped like the real token** is worth taking: some tools check a token's prefix or
   length before they send it. The answer above does not say what a placeholder looks like.
-- **Two proxies in a row.** Codex with its proxy on, inside Silo, ends TLS itself and reaches the
-  host through Silo's boundary. Its proxy trusts "native root certificates for MITM trust bundle",
-  so Silo's authority in the computer's store should be enough. Not tried.
+- **Two proxies in a row work.** Tried with Codex 0.172.0 on Linux, its sandbox, network proxy
+  and masking on (`features.network_proxy`, `features.credential_masking`, a permissions profile
+  that extends `:workspace` and allows `api.github.com`), and a stand-in for `api.github.com`
+  whose certificate came from a test authority in the system store, as Silo's would. A command
+  ran `curl https://api.github.com/user` with `$GITHUB_TOKEN`:
+  - With a real token in Codex's environment, the command saw `ghp_masked…`, and the stand-in got
+    the real token: Codex's proxy trusted the system store's authority for its own upstream
+    connection, so it works inside a computer that trusts Silo.
+  - With Silo's placeholder shaped like a GitHub token (`ghp_` and 40 characters), Codex masked it
+    in turn, and swapped it back on the way out: the stand-in got Silo's placeholder, which the
+    boundary would then swap for the real token. With a placeholder of another shape, Codex left
+    it alone and it went out as it was. Either way the request reaches Silo with Silo's
+    placeholder, so Silo's swap does not depend on what the program does inside.
+  - Codex's masking is off unless its sandbox profile is set up this way: with `-s
+    workspace-write` alone, it warned "Credential masking is inactive because the network proxy is
+    disabled" and the command saw the token. The scripts are in the project files,
+    `research/2026-11-24-codex-network-proxy/two-proxies`.
 
 ## A database password, held outside (24 November 2026)
 
