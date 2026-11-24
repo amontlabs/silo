@@ -98,7 +98,7 @@ app should say so where the rule is set.
 
 ## Container images (24 November 2026)
 
-An agent's part, 24 November 2026. Read from Docker Hub's API at about 17:10 UTC.
+An agent's part, 24 November 2026. Read from Docker Hub's API at about 16:40 UTC.
 
 Docker Hub says when each tag was last pushed (`tag_last_pushed`) and when each image behind it was
 (`last_pushed`, by digest). The registry protocol itself (`/v2/`) carries no such time, so the
