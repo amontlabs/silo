@@ -132,3 +132,24 @@ Two findings for whoever builds the probe:
   on the next reply, as it waits for the probe to say it is armed.
 - **The window ends on the result, as planned.** Both programs sent the result in their very next
   request, so the window lasted well under a second in every run.
+
+## End to end through a spike of the boundary (24 November 2026)
+
+An agent's part, 24 November 2026. The probe of 24 November (seccomp, see above), driven by a
+spike of the boundary in Zig (see `forwarded-byte-for-byte`), not by the fake provider.
+
+The spike held back a reply from the event where a tool call starts until the event where it
+ends, and put the whole call to a precaution: deny when the input names `existing.txt`. On a deny,
+it told the probe to arm and waited for its answer before it passed on the reply, unchanged. When
+a request carried the result of that call, it told the probe to disarm and waited for its answer
+before it forwarded the request.
+
+- Claude Code 2.1.331: a denied `mv /work/site/existing.txt …` did not run. The model got
+  `EPERM: operation not permitted, posix_spawn '/bin/bash'`, the next call ran, and a resumed
+  conversation showed both.
+- Codex 0.172.0: a denied `exec_command` and a denied `apply_patch` failed as in the first test.
+  A third call, allowed, ran.
+- The probe answered in 0.05 to 0.2 ms.
+- A reply was held for as long as its tool call took to arrive, and no longer: about 180 ms for a
+  call of 35 pieces sent 5 ms apart. The program got the call all at once at its end, and the
+  reply took no longer as a whole.
