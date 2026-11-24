@@ -234,3 +234,28 @@ Three more things were seen in the same runs:
   later versions is not known.
 - **Claude Code calls two more addresses on the same host** before its first model request:
   `GET /api/claude_code/settings` and `GET /api/claude_code/policy_limits`.
+
+## Codex's WebSocket, read through a spike of the boundary (24 November 2026)
+
+An agent's part, 24 November 2026. The spike of the boundary described in `forwarded-byte-for-byte`
+was taught WebSocket: frames, masks, fragmented messages and compression (permessage-deflate,
+with its state kept from message to message). It was then put in front of a fake provider that
+speaks WebSocket, with and without compression. Codex 0.172.0 used it on its own: with an API key,
+it asked for compression and opened `wss://api.openai.com/v1/responses`.
+
+- The spike read every message both ways, with and without compression. It held a reply's frames
+  while a tool call was open, and a denied `exec_command` failed through the probe as over plain
+  requests. The next call ran.
+- Each message from Codex is a `response.create` carrying what a plain request's body would. Each
+  message from the host is one event, the same JSON as an event of the stream.
+- **On a socket, Codex sends only what is new.** Its first message is a warm-up with
+  `"generate": false` and no input. Its second carries the whole conversation and names the
+  warm-up's reply in `previous_response_id`. After that, each message carries only the new items,
+  such as the result of the last call, and names the previous reply. This held with
+  `"store": false`. A conversation resumed later opened a new socket and sent the whole
+  conversation again.
+
+So for Codex on a socket, the boundary cannot read a conversation from one message. It has to
+follow `previous_response_id` from reply to reply within the connection, as
+`recognising-a-conversation` already allows. Whether OpenAI's own server accepts compression, and
+whether Codex signed in with ChatGPT behaves the same, is not known.

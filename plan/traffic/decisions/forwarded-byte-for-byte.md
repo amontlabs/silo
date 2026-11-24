@@ -28,7 +28,7 @@ That Silo's own boundary forwards byte for byte is still to find out: `reading-e
 ## A spike of the boundary, measured (24 November 2026)
 
 An agent's part, 24 November 2026. A spike of the boundary for model traffic was written in Zig,
-about 600 lines, with OpenSSL, zlib and zstd through their C interfaces. It is a trial and is kept
+about 1 000 lines, with OpenSSL, zlib and zstd through their C interfaces. It is a trial and is kept
 outside this repository. It does what `ending-the-encrypted-connection` describes:
 
 - It ends the program's TLS connection and knows the host by the name in the handshake.
