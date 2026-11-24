@@ -67,3 +67,21 @@ path, joins that ask instead of opening a new one. A yes then lets the next such
 and a no or the limit refuses each of them at once. Whether a yes should also cover a request that
 arrives after the first one closed is for the owner: it is what makes pip work, and it is a yes
 that applies to a request you did not see.
+
+## Holding an upload, and boto3 (24 November 2026)
+
+An agent's part, 24 November 2026. The table above measured waiting for a reply. An upload is
+held earlier: Silo reads the request's headers, knows the host, method and path, and stops reading
+the body until you answer. Tried with a 20 MB PUT and a hold of 150 s:
+
+- **curl 8.5 and Python `requests` 2.34 waited it out.** curl asked to continue
+  (`Expect: 100-continue`), got no answer, began sending, and its sending simply blocked until
+  Silo read again. `requests` did the same without asking. Both finished with 200 at 150 s.
+- **boto3 1.44 did not.** It asked to continue, waited 60 s, closed the connection and sent the
+  whole request again, three times, and failed at 184 s with "Connection was closed before we
+  received a valid response". boto3 waits 60 s for each step by default, downloads included, and
+  retries on its own. So an agent's S3 upload or download held past 60 s becomes three requests
+  and, unless they join one ask as proposed above, three asks.
+
+So boto3 joins pip as a tool that gives up first: holding a body costs nothing by itself, and the
+limit is each tool's own wait. The script is in the project files, `research/2026-11-24-holds/uploads`.
