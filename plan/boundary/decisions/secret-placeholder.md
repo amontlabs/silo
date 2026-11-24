@@ -297,10 +297,10 @@ the sandbox … and injects the real value at the proxy"; the usual AWS trio is 
 re-signing"; named claims of a JWT can be masked and the token rebuilt around them; masking
 requires the proxy to end TLS; and "On macOS and Windows `mask` degrades to `deny`" for files.
 
-What Codex refuses, and what Silo's trials passed: presigned links with a masked key, SigV4a, AWS
-signed streams and "declared trailers". boto3 1.44's default upload declares a trailer
-(`STREAMING-UNSIGNED-PAYLOAD-TRAILER`), so it fails under Codex's proxy; re-signing the headers
-let it through in the trial above. Neither the reply of a token request nor SSH is covered.
+Codex refuses presigned links with a masked key, SigV4a, AWS signed streams and "declared
+trailers". Silo's trials above passed two of those: presigned links, and boto3 1.44's default
+upload, which declares a trailer (`STREAMING-UNSIGNED-PAYLOAD-TRAILER`) and so fails under Codex's
+proxy; re-signing the headers let it through. SigV4a and signed streams were not tried. Neither the reply of a token request nor SSH is covered.
 
 What this changes for Silo:
 

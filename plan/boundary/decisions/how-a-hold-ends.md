@@ -201,7 +201,7 @@ does. The scripts are in the project files,
 
 An agent's part, 24 November 2026. The answer leaves open "how each takes the answer on UDP". Of
 the programs tried today, only a browser sends QUIC: Claude Code, Codex, curl as Ubuntu builds it,
-and the Python and Node libraries all use TCP. Playwright's Chromium (build 1243) loaded a test
+and the Python and Node libraries all use TCP. Playwright's Chromium 158 loaded a test
 host over TCP, got `Alt-Svc: h3=":443"` in the reply, and loaded it five more times.
 
 - **Port unreachable**, the answer's choice: Chromium sent one QUIC packet, got the ICMP answer and
