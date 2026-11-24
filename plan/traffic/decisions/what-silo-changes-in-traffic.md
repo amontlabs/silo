@@ -43,5 +43,12 @@ nothing. The answer's "changes it in one way only" rules that out, and with it t
 computer for every Bedrock user. What I would put in its place: "Silo changes model traffic in one
 way only: it puts a secret to use, by swapping its real value in for its placeholder or by signing
 the request again with it. That change is recorded." The record holds the same as for a swap.
-Google's Vertex AI is the same question with a token in place of a signature (the notes of
-`secret-placeholder` on service accounts).
+
+Google's Vertex AI, tried the same day with Claude Code (`CLAUDE_CODE_USE_VERTEX=1`) and a service
+account key file whose private key is a placeholder: the boundary signed each token request again
+with the real key and handed back a placeholder in place of the access token, then swapped the
+real token into each model request. The conversation worked, and neither the real key nor a real
+token reached the computer. Two things showed: Claude Code ignores the key file's `token_uri` and
+always asks `oauth2.googleapis.com`, so the boundary must read that host; and it asked for a new
+token before each model request, five in a short run. For Vertex the change to model traffic is a
+plain swap, which the answer allows; the change to the token traffic is the new kind.
