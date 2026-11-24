@@ -115,7 +115,7 @@ Tried the same day with boto3 1.44.10 against the same stand-in, now over TLS as
   multipart upload, went with the body's hash in `x-amz-content-sha256`; a stream went as
   boto3's does, unsigned with a trailing checksum. Creating a bucket, both kinds of upload, an
   upload of 12 MB in parts and a download passed through the re-signing stand-in, and the
-  placeholder sent straight was refused. So the two most used AWS SDKs need no chunk signing
+  placeholder sent straight was refused. So AWS's Python and JavaScript SDKs need no chunk signing
   over HTTPS.
 
 So the answer's "cannot be swapped in" holds for the value, but not for the key's use. What I
