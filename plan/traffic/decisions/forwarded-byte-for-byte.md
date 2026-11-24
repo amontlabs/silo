@@ -96,3 +96,22 @@ a Google token). So a host Silo reads, to swap a key or hold a request, must be 
 when the client asks for it, with its trailers, which gRPC uses to say how a call ended. Until
 then such hosts can only pass unread, and their keys stay inside the computer. The server is in
 the project files, `research/2026-11-24-trust-libraries/alpnsrv.py`.
+
+## A reply cut in the middle (24 November 2026)
+
+An agent's part, 24 November 2026. Silo's boundary sits in the middle of each model reply, so a
+restart of the boundary, an update of Silo for example, cuts every reply in flight. Tried by
+cutting a streamed reply after its first events, once with a clean close and once with a reset,
+against Claude Code 2.1.331 and Codex 0.172.0 (over HTTPS, not Codex's WebSocket).
+
+- Both programs sent the same request again within a second, got the whole reply, and showed the
+  answer as if nothing had happened. The agent did not notice.
+- The provider still did the work of the cut reply. So each cut costs what the model had written
+  up to the cut, paid for and thrown away, and a budget has to count both requests.
+- A reply that stops without being closed is different: the earlier measure found that both
+  programs wait 300 s before sending again.
+
+What this means for Silo: a restart of the boundary is cheap for the agent if it closes or resets
+its connections, never if it leaves them open. Cutting a reply is no way to refuse one either,
+since the program sends the request again at once. The scripts are in the project files,
+`research/2026-11-24-reply-cut`.
