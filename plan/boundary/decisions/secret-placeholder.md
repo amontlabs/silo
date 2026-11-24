@@ -165,3 +165,42 @@ So holding a key outside covers the secrets it buys too. The same goes for AWS S
 installation tokens. A secret declared in Silo then has two parts: what the computer holds, and
 what the boundary does with the replies that mint new secrets from it. The scripts are in the
 project's files, under `research/2026-11-24-gcp/`.
+
+## What other sandboxes do with a secret (24 November 2026)
+
+An agent's part, 24 November 2026. Read from each product's own pages, not tried.
+
+Keeping a key out of an agent's sandbox and putting it in at a proxy is now common: E2B, Docker
+Sandboxes, Cloudflare's sandboxes, Deno Sandbox and Fly's Tokenizer all do it, and more projects
+propose it. They share one shape: a placeholder in the sandbox, a list of hosts per secret, and the
+value swapped into a request header.
+
+| | Where the value goes | Signing | A reply that echoes the key |
+|---|---|---|---|
+| E2B | Headers, per host | No | Not described |
+| Docker Sandboxes | Headers only, "not request bodies" | No; signs in to the agent's provider itself and renews | Not described |
+| Cloudflare | Headers, in code you write per host | Not described | Not described |
+| Deno Sandbox | Not said, per host | Not described | Not described |
+| Fly Tokenizer | Headers | HMAC of parts of a request | Not described |
+
+What none of them describes, and the trials of this note did:
+
+- **Signing again.** None signs an AWS request again. Without that, an AWS key, and Claude Code on
+  Bedrock, stay inside the sandbox or do not work.
+- **A key that buys tokens.** None signs a Google service account's request for a token and swaps
+  the token on the way back. Docker comes nearest, by signing in for the agent's provider itself.
+- **The reply.** None says it searches replies for the key. One proposal (carapace, issue 561)
+  writes that "an upstream echoing the token defeats the scheme" and leaves it out.
+- **SSH.** Docker forwards an SSH agent and keeps the keys on the host, with no limit on where a
+  key works. The binding of the trial above limits it to the hosts allowed.
+
+Two things to avoid, seen in them:
+
+- **E2B fails open.** When a secret cannot be found, "the request is still forwarded", without the
+  header. Silo should refuse the request with its reason.
+- **Docker hands the token in.** An agent kit may set OAuth `passthrough: true`, which "sends the
+  real token response into the sandbox". The key then sits in the sandbox after all.
+
+So the placeholder in a header is what every product has. What Silo would add is the rest: keys
+that sign, keys that buy tokens, SSH, and the reply. Those are the cases a developer's real keys
+are in (AWS, Google Cloud, a Git host over SSH), and the reason to pick Silo over the others.
