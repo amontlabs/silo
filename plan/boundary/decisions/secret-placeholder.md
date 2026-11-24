@@ -350,3 +350,37 @@ databases, so the password itself never crosses the connection and no swap can w
 What I would add to the answer: PostgreSQL passwords can be held outside, by a boundary that ends
 the protocol, which removes the most common secret from the "ordinary files" list. The
 configuration is in the project files, `research/2026-11-24-db-password`.
+
+## Where twelve services' secrets travel (24 November 2026)
+
+An agent's part, 24 November 2026. The answer covers secrets "sent as they are". To see how many
+of the services agents use send them so, and where, each service's own Python SDK made one call
+with a placeholder key, to a server standing in for the service, and the request was searched for
+the placeholder.
+
+| Service, SDK | Where the placeholder was |
+|---|---|
+| Stripe 17.1, Hugging Face 2.4, Cloudflare 5.10, SendGrid 6.12, Resend 2.55, PostHog 8.2, Slack Web API 3.48 | `Authorization`, in plain |
+| Supabase 2.34 | two headers, `apiKey` and `Authorization` |
+| Sentry 3.0 | `X-Sentry-Auth`, and again in the body, which was gzip-compressed |
+| Twilio 9.13 | `Authorization: Basic`, base64 of the account and the token |
+| Slack incoming webhook | the URL path: the webhook's address is the secret |
+| Azure Blob Storage 12.31, with an account key | nowhere: the request carries `SharedKey account:<signature>`, made with the key inside the computer |
+
+What this shows:
+
+- **Most services fit the swap as the answer has it.** Eight of the twelve send the key in plain
+  in a header. A swap that replaces every place the placeholder appears in the headers serves
+  Supabase's two.
+- **The other four are the cases already raised.** Twilio needs the Basic decoding proposed above.
+  The Slack webhook needs a secret that declares its place in the URL. Azure's shared key signs
+  each request as AWS does, so it needs signing again at the boundary. Sentry's key is public by
+  design, so its copy in a compressed body matters less, but it shows that a placeholder can travel
+  in a body the swap does not decode.
+- **Stripe's Python SDK refused Silo's certificate.** It ships its own list of authorities and
+  reads no variable; only code that sets `stripe.ca_bundle_path` makes it trust another. With
+  that set, its key went in plain in `Authorization`. Stripe is among the APIs agents call most,
+  so this is the clearest case of a program that fails on a host Silo reads
+  (`ending-the-encrypted-connection`).
+
+The scripts are in the project files, `research/2026-11-24-where-secrets-travel`.

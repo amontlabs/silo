@@ -82,6 +82,7 @@ What this changes:
   the environment), uv's, `requests`, `httpx` and boto3's (by the environment), and each user's NSS
   store for browsers. Silo can set all of these when it makes a computer; what it cannot set is a
   library that ships its own roots and reads no setting, and that program then fails on the hosts
-  Silo reads, as a container does above.
+  Silo reads, as a container does above. Stripe's Python SDK is one: only a line of code changes
+  its list (`secret-placeholder`, "Where twelve services' secrets travel").
 
 The scripts are in the project files, `research/2026-11-24-trust-libraries`.
