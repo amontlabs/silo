@@ -57,13 +57,13 @@ and every other connection sent to a stand-in for the boundary that refused it, 
 answered.
 
 - **Claude Code** opened five other connections in one `claude -p` turn, all to
-  `api.anthropic.com`, the model's own host, for its event and metric reports, even with the model
-  at another address. **Codex** opened four: `github.com` and `api.github.com` (its check for a new
+  `api.anthropic.com`, the model's own host, even with the model at another address. The stand-in
+  saw only the host, not what was sent; reports are the likely reason. **Codex** opened four: `github.com` and `api.github.com` (its check for a new
   version), `chatgpt.com` and `ab.chatgpt.com`.
 - **Refused or reset, they cost nothing.** Both programs answered in under a second, as with every
   host open.
 - **Left without an answer, they cost 10 to 12 seconds.** The same turn took 12.5 s in Claude Code
-  and 10.2 s in Codex, waiting on reports that never left, and this is paid on every run of
+  and 10.2 s in Codex, waiting on connections that never answered, and this is paid on every run of
   `claude -p` or `codex exec`, which agents start from commands.
 
 What I would add to the answer: a limited computer refuses at once, never in silence, and the
