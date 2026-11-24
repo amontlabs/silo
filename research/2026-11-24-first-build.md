@@ -16,10 +16,15 @@ Mac overnight and lose nothing: main as a macOS virtual machine, reached over SS
 taken on their own, restore, and a record of which files changed between two checkpoints. It is
 read from the `silo` command. There is no app, no rules, no model traffic and no Linux yet.
 
-That is 14 features. Before they can be built, 62 open decisions need a verdict. The other 244
-open decisions can wait. Eleven of the 62 are about how Silo is built, and agents could take them
-with a judge, as `owners-part-on-engine` allows. Draft #352 gives a second opinion and the exact
-text for 56 of them.
+That is 14 features of the plan and 3 new ones. Before they can be built, 70 open decisions need a
+verdict: the 62 the 14 features need, the 7 new decisions this proposal adds, and
+`record-queried-with-ordinary-tools`. The other 243 open decisions can wait. Eleven of the 70 are
+about how Silo is built, and agents could take them with a judge, as `owners-part-on-engine`
+allows. Draft #352 gives a second opinion and the exact text for 56 of them.
+
+The same PR writes the new entries into `plan/`, cuts three `needs`, and moves what the first build
+needs to the front of `order.json`, so the Workshop shows polarzero these decisions first. No
+verdict is written.
 
 Five things the plan does not say yet decide whether that night goes well:
 
@@ -106,21 +111,22 @@ In the order they would be built:
 | `file-changes-in-the-record` | The first lines worth reading, and they come from comparing checkpoints, which the first build already takes |
 | `files-imported-from-your-mac` | Nothing is shared from your Mac (`device-not-shared`), so this is how a file you have gets in |
 
-Seven entries the plan does not have yet belong to the first build. Each is proposed in a draft
-named beside it, with its text there:
+Seven entries the plan did not have belong to the first build. This PR adds them to `plan/`, each
+with its choice in its notes, as one feature or as decisions with a feature:
 
 | New entry | What it says | From |
 |---|---|---|
-| The command line first | Every feature above is reached from the `silo` command from the day it is built. With no argument it prints what needs you; it prints text for a person and JSON lines with `--json` | #354 (`details/cli.md`) |
-| Which Mac Silo needs | Apple silicon and macOS 27 or later. On an older Mac the first run says so and starts nothing | #352 (05, 10) |
-| Main set up for agents | The first run installs the Command Line Tools, Homebrew, tmux and the agent programs over SSH, after showing the list. It becomes the shipped recipe later | #354 |
-| A run outlives its terminal, and the Mac stays awake | A second SSH entry per computer opens tmux. While a computer runs on power, Silo holds the Mac awake, warns about a closed lid, and writes every sleep and wake in the record | #354, #360 |
-| Reading one path from a checkpoint | `silo look` shows a path as it was in a checkpoint, and `silo put-back` copies it into the running computer after a checkpoint of now | #354 |
-| Space the engine keeps for itself | A reserve file only the engine may delete, and checkpoints stop before the volume is full, so a full disk never leaves you unable to restore | #352 (02, 07) |
-| Main's network in the first build | Open from when you make main, with your yes, and shown as open with no boundary in the first run and in `silo status` | #352 (06, 12), #354 |
+| The command line first: `silo-command` | Every feature above is reached from the `silo` command from the day it is built. With no argument it prints what needs you; it prints text for a person and JSON lines with `--json` | #354 (`details/cli.md`) |
+| Which Mac Silo needs: `mac-silo-needs` | Apple silicon and macOS 27 or later. On an older Mac the first run says so and starts nothing | #352 (05, 10) |
+| Main set up for agents: `main-set-up-for-agents` | The first run installs the Command Line Tools, Homebrew, tmux and the agent programs over SSH, after showing the list. It becomes the shipped recipe later | #354 |
+| A run outlives its terminal, and the Mac stays awake: `runs-outlive-the-terminal`, `mac-kept-awake`, `agents-work-through-the-night` | A second SSH entry per computer opens tmux. While a computer runs on power, Silo holds the Mac awake, warns about a closed lid, and writes every sleep and wake in the record | #354, #360 |
+| Reading one path from a checkpoint: `putting-back-a-path`, `a-path-from-a-checkpoint` | `silo look` shows a path as it was in a checkpoint, and `silo put-back` copies it into the running computer after a checkpoint of now | #354 |
+| Space the engine keeps for itself: `space-the-engine-keeps` | A reserve file only the engine may delete, and checkpoints stop before the volume is full, so a full disk never leaves you unable to restore | #352 (02, 07) |
+| Main's network in the first build: `network-before-rules` | Open from when you make main, with your yes, and shown as open with no boundary in the first run and in `silo status` | #352 (06, 12), #354 |
 
-`silo put-back` is a partial rewind of main outside Git, which `fork-from-the-moment` (taken) does
-not allow. See "Challenges" below.
+`silo put-back` is a partial rewind of main outside Git. `one-run-grain` and
+`putting-back-a-runs-paths` (taken) already allow putting back paths; `fork-from-the-moment` (taken)
+reads against it. See "Challenges" below.
 
 ### What is left out, and why
 
@@ -149,9 +155,10 @@ Without these cuts, the first build pulls in recipes and fork sign-ins. Each cut
 `conversation-resumes-in-a-copy` could also be split: the case of a restore on the same computer
 needs no new sign-in, while the case of a fork does.
 
-### The 62 decisions
+### The decisions
 
-Draft #352 has a ruling sheet for the first 56: 9 to take as written, 45 to take with an edit,
+The 7 new decisions are in `plan/` with their choices. Draft #352 has a ruling sheet for the 56 of
+the first version: 9 to take as written, 45 to take with an edit,
 1 to replace (`core-state-stays-small`) and 1 to split (`computer-image`), each with its exact text.
 Read its "Contradictions" section first: it says which text to adopt where two second opinions
 touch the same entry, and it asks for four engine entries to be ruled in one sitting
@@ -202,17 +209,19 @@ Three of #352's edits matter most for the first build:
 
 Recommended edits to `plan/order.json`, none made here:
 
-1. In the stage `ground`, move the 62 decisions above to the front, in the order of the groups
-   above. polarzero then rules on what the first build needs before anything else.
-2. In the stage `app`, move the 14 features above to the front, in the order of the table, with the
-   new entries beside the features they serve.
-3. Move `simulated-core-histories` after `computers-main-on-a-mac`.
-4. Move `what-to-say`, `presenting-it` and `objections` after the second build. They are about the
+This PR makes these edits to `plan/order.json`:
+
+1. In the stage `ground`, everything the first build needs (110 entries, 70 of them open) comes
+   first, in its old order, with each new decision after what it needs.
+2. In the stage `app`, the 17 features come first, in the order of the table, with the new ones
+   beside the features they serve. `simulated-core-histories` now follows them.
+3. `what-to-say`, `presenting-it` and `objections` move to the end of `app`. They are about the
    public, and the first user is polarzero (`who-it-is-for`).
-5. Move `matching-reports-to-facts`, `precaution-on-unsure`, `how-a-hold-ends`,
-   `reason-in-a-refusal`, `denied-tool-call-mechanism`, `denial-per-program` and
-   `terms-on-changing-a-reply` next to the features that need them. They sit at the top of `app`
-   today, ahead of the engine.
+4. `matching-reports-to-facts`, `precaution-on-unsure`, `how-a-hold-ends`, `reason-in-a-refusal`,
+   `denied-tool-call-mechanism`, `denial-per-program` and `terms-on-changing-a-reply` move to just
+   before the first feature that needs them. They sat at the top of `app`, ahead of the engine.
+
+`plan check` passes with the full history.
 
 ## What changed since the first version
 
@@ -272,13 +281,15 @@ macOS 27. These are the ones that can change the first build, in the order to ru
 As `AGENTS.md` asks. Each stays in force until polarzero changes it.
 
 - **`fork-from-the-moment`** says that on a main shared by several agents you do not rewind; you
-  fork from the moment, and the result leaves the fork through Git. The case: at 03:00 Codex
+  fork from the moment, and the result leaves the fork through Git. `one-run-grain` and
+  `putting-back-a-runs-paths`, also taken, already allow putting back one run's paths, so the new
+  `putting-back-a-path` rests on those. The case: at 03:00 Codex
   deletes `~/work/app/src`, which it never committed, while Claude Code works through the night in
   another repository. The first build has no fork, so the only way back is `silo restore`, which
   undoes Claude Code's night too. With forks (second build) the way is a fork at 02:40, then
-  copying the folder out, which is not Git either, since the folder was never committed. Proposed in
-  its place: you may put back a path of a checkpoint into a running computer, after a checkpoint of
-  now, and the record says who put back what. That is `silo put-back`.
+  copying the folder out, which is not Git either, since the folder was never committed. If polarzero reads
+  `fork-from-the-moment` as forbidding `silo put-back`, the way is a decision that replaces it with
+  both sentences.
 - **`model-of-access-first`** says the first engine code is the part that decides who can get
   what. In the first build almost nothing is granted: your Mac's way in over SSH, and files you
   import. A model of access checked on every short history is worth most when there are secrets,
@@ -297,7 +308,7 @@ As `AGENTS.md` asks. Each stays in force until polarzero changes it.
   `silo-command-reads-the-app` (taken) allows.
 - **`engine-pace`** ("slowly on the engine") has no verdict, and its notes hold polarzero's own
   words. This proposal does not ask to build faster. It asks that the slow, checked work be done on
-  the pieces the first build uses, and not on the 244 decisions it does not.
+  the pieces the first build uses, and not on the 243 decisions it does not.
 
 #352 lists eleven more challenges, among them `core-simulator`, `idle-memory` (a macOS guest may
 not answer Apple's balloon) and `agents-drive-the-screen` (on macOS 27 a program started over SSH
