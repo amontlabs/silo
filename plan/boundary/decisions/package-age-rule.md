@@ -95,3 +95,32 @@ registry, never passes the registry and so is not covered by the rule. One setti
 computer is enough for that. A rule on age is only firm when Git fetches from code hosts such as
 `github.com` are held or denied too, and that also catches the agent's ordinary `git clone`. The
 app should say so where the rule is set.
+
+## Container images (24 November 2026)
+
+An agent's part, 24 November 2026. Read from Docker Hub's API at about 17:10 UTC.
+
+Docker Hub says when each tag was last pushed (`tag_last_pushed`) and when each image behind it was
+(`last_pushed`, by digest). The registry protocol itself (`/v2/`) carries no such time, so the
+boundary would ask Docker Hub's API, and other registries (GHCR, Quay, ECR) each in their own way.
+
+The case that matters is how often a tag moves:
+
+| Tag | Last pushed | Days old |
+| --- | --- | --- |
+| `node:22` | 24 November, 11:38 | 0 |
+| `python:3.12-slim` | 24 November, 14:07 | 0 |
+| `postgres:16` | 24 November, 13:07 | 0 |
+| `redis:7` | 24 November, 12:04 | 0 |
+| `nginx:latest` | 24 November, 13:52 | 0 |
+| `ubuntu:24.04` | 23 November, 22:04 | 0 |
+| `node:22-alpine` | 12 November | 12 |
+| `alpine:3.20` | 17 April | 221 |
+| `golang:1.23` | 13 August 2025 | 467 |
+
+Six of nine everyday tags were pushed again within the day, mostly to take updates of the system
+underneath, not a new release of the program. A rule of three days, read as for packages, denies
+`docker pull node:22` or `postgres:16` on most days, and a pull by tag cannot ask for the version
+before. So the answer, as it reads for packages, does not fit images. What I would add: images are
+named in the rule only by choice, the app says that a tag is usually younger than a few days, and
+the age it reads is the image's (by digest), so that a pinned digest a few weeks old passes.
