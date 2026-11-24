@@ -47,6 +47,13 @@ you are accessing our Services via an Anthropic API Key or where we otherwise ex
 Its closing paragraph forbids "bypassing any of our systems or protective measures". No clause
 speaks of changing an output, and none names Claude Code.
 
+**Anthropic, Commercial Terms, effective 17 June 2025**, which govern an API key. They forbid to
+"reverse engineer or duplicate the Services" (D.4) and to resell them without approval. Nothing in
+them forbids changing an Output: they name "modifications made by Customer to the Services or
+Outputs" only to exclude them from Anthropic's indemnity (K.3), and the customer owns its Outputs
+(B). They say nothing of proxies or automated access, and bind the customer to the Usage Policy
+(D.2), so its bullets above apply to an API key too, except the one on consumer subscriptions.
+
 **OpenAI, Terms of Use, effective 1 January 2026.** Under "What you cannot do": "Interfere with or
 disrupt our Services, including circumvent any rate limits or restrictions", and "bypass any
 protective measures or safety mitigations we put on our Services". Also "Modify, copy, lease, sell
@@ -80,4 +87,4 @@ What I would put in this entry's place, for polarzero: the subscription clause i
 weigh before Silo carries Claude subscription traffic at all, denied calls or not. Until then, an
 API key is the way the terms read here leave clear: the Consumer Terms exempt it from the rule on
 automated access, and the Usage Policy's bullet names consumer subscriptions. Not read: Anthropic's
-Commercial Terms, which govern an API key, and Codex's own pages.
+Service Specific Terms, and Codex's own pages.
