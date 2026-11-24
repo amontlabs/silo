@@ -25,3 +25,31 @@ The options:
 Recommended: only the hosts Silo needs. Each host Silo reads is a place where a program can refuse
 its certificate and break, so it should be only where reading gives something: spend, tool calls, a
 package's age, a secret.
+
+## Containers inside a computer do not trust Silo's certificate (24 November 2026)
+
+An agent's part, 24 November 2026. Tried on Linux with Docker 29.9.3 and `node:22-alpine`. A fake
+host presented a certificate from a test authority that the machine's own store trusts, as the
+computer would trust Silo's.
+
+- From a container, Node refused: `SELF_SIGNED_CERT_IN_CHAIN`. `wget`, which reads the image's own
+  store, refused too.
+- `docker build` of a `RUN wget …` step failed the build: "certificate verify failed".
+- With the authority mounted into the container and `NODE_EXTRA_CA_CERTS` pointing at it, Node
+  passed.
+
+A container brings its own list of authorities, so whatever the computer trusts stops at its edge.
+`docker build` with `npm install` or `pip install` inside is common work for an agent, and those
+registries are hosts Silo reads for the age rule (`registry-traffic-read`). Every such build then
+fails, with an error that names a certificate and not Silo.
+
+What I would add to the answer:
+
+- **Fail closed, and say why.** A client that refuses Silo's certificate must not get the host
+  unread instead, or any agent gets around a rule by using a client that does not trust Silo. The
+  record says that a program in the computer refused Silo's certificate for that host, and the app
+  shows it beside the failed command.
+- **Make the fix one line.** Silo keeps its authority at a fixed path in every computer and tells
+  the agent how to use it in a build: copy it into the image and run `update-ca-certificates`, or
+  pass it as `NODE_EXTRA_CA_CERTS`, `PIP_CERT`, `SSL_CERT_FILE`. Whether a container runtime in the
+  computer can add it to every container by itself is to find out.
