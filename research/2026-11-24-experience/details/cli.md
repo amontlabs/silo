@@ -42,7 +42,7 @@ These conventions come from what works in `git`, `gh`, `tailscale`, `fly` and `o
 
 ## The commands
 
-The first build column follows [the smallest first build](../../2026-11-24-first-build.md) and
+The first build column follows the smallest first build (`research/2026-11-24-first-build.md`, draft PR #348) and
 this research's own proposals (in bold where they add to it).
 
 | Command | What it does | First build | Plan entries |
