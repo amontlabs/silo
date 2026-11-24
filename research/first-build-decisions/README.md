@@ -28,7 +28,7 @@ says what to do and which file holds the reason and the exact proposed text.
 | [09-record-sources.md](09-record-sources.md) | 6 decisions on enforcing while recording, waiting, the record's path, Git, file changes from outside, overhead |
 | [10-macos-unattended-setup.md](10-macos-unattended-setup.md) | How a new macOS computer gets past Setup Assistant with nobody clicking |
 | [11-reading-apfs-from-outside.md](11-reading-apfs-from-outside.md) | How to read main's APFS disk from outside without trusting it; readers tested; a diff prototype |
-| [12-landscape.md](12-landscape.md) | Incidents with agents running with checks off, and every product that deals with them |
+| 12 | Incidents with agents running with checks off, and the products that deal with them. Kept in the owner's private research, because it compares Silo with other products |
 | [13-fact-check.md](13-fact-check.md) | Fact check of 01 to 12, with 07 in its last section: almost all real; five claims wrong, all corrected in place, none changing a recommendation |
 
 ## Headline findings
@@ -170,25 +170,16 @@ be the second test you run.
 Files: 04 (`network-stack`, `who-can-call-the-engine`, measurement), 06 (`computer-reached-over-ssh`,
 `reaching-a-computer`), 05 and 10 (keychain), 13 (gvproxy default and the issue verified).
 
-### 8. Fly Sprites already takes whole-system checkpoints on its own; what is unique is macOS, your Mac and the record
+### 8. The first build answers the most frequent incident, not the ones in the news
 
-The fact-check corrected file 12: Fly's Sprites checkpoints itself "after a stretch of continuous
-work, when it goes idle, and on graceful shutdown, keeping a tiered history", and restores in place.
-It is Linux, in Fly's cloud, with no record of which files changed. Docker Sandboxes already keeps
-keys out of the agent's reach at a proxy. Lima 2.x has experimental macOS guests and a diff-before-apply
-loop for one project. Tart's team joined OpenAI. What no product combines is a macOS computer on your
-own Mac, checkpoints of the whole disk taken on their own, restore in place, and a record of the
-files that changed, for any agent program. File 12 argues the record and agent neutrality are what is
-hard to copy, so `file-changes-in-the-record` deserves the most care of the twelve features.
+The first build answers an agent deleting files on its own machine (`rm -rf ~/`, `git reset --hard`,
+GPT-5.6 deleting `$HOME`), the most frequent incident in bug trackers. It answers none of those in
+the news (Replit, PocketOS through a Railway token, DataTalks' `terraform destroy`), which destroyed
+something outside the machine. And `silo changes` will be unreadable unless it hides what macOS
+writes by itself (Spotlight, caches, logs); the list should be measured on a real main left idle for
+a night. How this compares with other products is in the owner's private research.
 
-Two consequences for what Silo says. The first build answers the most frequent incident (an agent
-deleting files on its own machine: `rm -rf ~/`, `git reset --hard`, GPT-5.6 deleting `$HOME`) and
-none of those in the news (Replit, PocketOS in 9 seconds through a Railway token, DataTalks'
-`terraform destroy`), which destroyed something outside the machine. And `silo changes` will be
-unreadable unless it hides what macOS writes by itself (Spotlight, caches, logs); the list should be
-measured on a real main left idle for a night.
-
-Files: 12, 13 (Sprites correction).
+Files: 12, 13.
 
 ## The ruling sheet
 

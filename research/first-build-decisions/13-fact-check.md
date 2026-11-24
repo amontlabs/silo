@@ -5,8 +5,7 @@ source in the table was fetched today and read; "read" means the page itself, no
 unless the note says so. The research files were not changed.
 
 Overall: almost every load-bearing claim about late 2026 is real. The research agents did not invent
-the macOS 27 APIs, the CVEs, the forum threads or the incidents. Three claims are wrong, and one of
-them changes how Silo should describe its nearest competitor.
+the macOS 27 APIs, the CVEs, the forum threads or the incidents. Three claims are wrong.
 
 ## Table
 
@@ -74,15 +73,7 @@ continuous work, when it goes idle, and on graceful shutdown, keeping a tiered h
 every snapshot forever." Fly also says "A Sprite checkpoints itself while the agent works, so harnesses
 like Claude and Codex find everything where they left it."
 
-What this changes: Sprites already does the thing file 12 calls unique to Silo's first build:
-whole-system checkpoints, taken automatically, kept with thinning, restored in place. What remains
-true: Sprites are Linux, in Fly's cloud, and have no record of which files changed between two
-checkpoints. Silo's difference is therefore narrower than file 12 says: **macOS, on your own Mac, and
-a record of what changed**, not "checkpoints on their own". Any page that compares Silo with Sprites
-must say this, or a reader who knows Sprites will catch it.
-
-The same row's "Claude Code, Codex and Gemini preinstalled and taught to checkpoint" is on none of
-Fly's three pages. Treat it as unverified.
+What this changes for the first build is in the owner's private research.
 
 ### 2. macOS 27 did not close the system TCC database (file 10)
 
