@@ -81,3 +81,18 @@ For the boundary: a request's body can take up to two minutes to arrive, a few b
 and only its end says what it asks. The boundary must not time out such a request, and a hold or a
 rule on its content starts when the body ends, not when the request opens. A request dropped this
 way gets no reply and costs nothing, but it shows in the record as a request that never ended.
+
+## gRPC needs HTTP/2 at the boundary (24 November 2026)
+
+An agent's part, 24 November 2026. The spike left HTTP/2 out. Most traffic does not need it:
+Claude Code's model requests use HTTP/1.1, and clients that are offered only HTTP/1.1 use it. gRPC
+does not. A TLS server that offered only HTTP/1.1, or nothing, got the HTTP/2 opening
+(`PRI * HTTP/2.0`) from grpcio 1.85 and from @grpc/grpc-js 1.14 all the same, and neither client
+offers to fall back.
+
+gRPC is what Google Cloud's client libraries (Firestore, Pub/Sub, Spanner) and OpenTelemetry's
+default exporter use, often with a key in the request's headers (Honeycomb's `x-honeycomb-team`,
+a Google token). So a host Silo reads, to swap a key or hold a request, must be read over HTTP/2
+when the client asks for it, with its trailers, which gRPC uses to say how a call ended. Until
+then such hosts can only pass unread, and their keys stay inside the computer. The server is in
+the project files, `research/2026-11-24-trust-libraries/alpnsrv.py`.
