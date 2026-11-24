@@ -53,3 +53,35 @@ What I would add to the answer:
   the agent how to use it in a build: copy it into the image and run `update-ca-certificates`, or
   pass it as `NODE_EXTRA_CA_CERTS`, `PIP_CERT`, `SSL_CERT_FILE`. Whether a container runtime in the
   computer can add it to every container by itself is to find out.
+
+## Libraries and browsers that keep their own store (24 November 2026)
+
+An agent's part, 24 November 2026. `registry-traffic-read` found which package managers trust
+the computer's own store. Agents also run their own code and browsers through Silo, so the same
+test was run on the libraries that code uses: a server with a certificate from an authority found
+only in Ubuntu's system store, and each client with no certificate setting.
+
+| Trusts the system store | Refuses Silo's certificate | What makes it trust the system store |
+|---|---|---|
+| Python `urllib` and `aiohttp` 3.14; the OpenAI 3.58 and Anthropic 2.13 SDKs, through `truststore` | Python `requests` 2.34 and `httpx` 0.28: their own bundle (`certifi`) | `REQUESTS_CA_BUNDLE`, and `SSL_CERT_FILE` for httpx, set to the system bundle |
+| Ruby `net/http`, PHP, Java (Ubuntu fills its store), curl | boto3 1.44 | `AWS_CA_BUNDLE` |
+| | Node 22 `fetch`, `https`, axios | `--use-system-ca`, as already found |
+| | Chromium 158 from Playwright, and Google Chrome: `ERR_CERT_AUTHORITY_INVALID` | the authority added to the user's `~/.pki/nssdb`, the store Chrome reads on Linux |
+
+What this changes:
+
+- **An agent's own Python script breaks in the most common way.** `requests` is the HTTP library
+  Python code reaches for first, and an agent that writes a script with it gets "certificate
+  verify failed" on every host Silo reads. Each variable above replaces the library's bundle with
+  the file it names, so it must name the whole system bundle, not Silo's authority alone, or
+  every other host fails instead.
+- **A browser the agent drives does not read the system store.** Agents test web apps with
+  Playwright; on a host Silo reads, Chromium refuses the page until Silo's authority is in the
+  NSS store of the user that runs it. Added there, both Chromium and Chrome trusted it.
+- So the list of places a computer needs Silo's authority grows to: the system store, Node's (by
+  the environment), uv's, `requests`, `httpx` and boto3's (by the environment), and each user's NSS
+  store for browsers. Silo can set all of these when it makes a computer; what it cannot set is a
+  library that ships its own roots and reads no setting, and that program then fails on the hosts
+  Silo reads, as a container does above.
+
+The scripts are in the project files, `research/2026-11-24-trust-libraries`.
