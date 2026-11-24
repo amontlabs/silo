@@ -147,7 +147,12 @@ authority:
   Silo can make each host's certificate at the first connection to it, with no cache to keep
   warm, if its keys are elliptic-curve.
 
-What I would add to the answer: each certificate Silo makes has an ECDSA P-256 key, the host in
+Python 3.13's strict check reaches the authority too: an authority made by `openssl req -x509`
+with no key usage extension was refused ("CA cert does not include key usage extension"), found
+while trying a client certificate (`secret-placeholder`, the Kubernetes section).
+
+What I would add to the answer: Silo's authority has `basicConstraints` and `keyUsage`, marked
+critical; each certificate Silo makes has an ECDSA P-256 key, the host in
 `subjectAltName`, and the Authority Key Identifier and Subject Key Identifier extensions, and a
 test connects Python 3.13, Node, curl and Go to it, since each refuses a different omission. The
 script is in the project files, `research/2026-11-24-trust-libraries/mint`.
