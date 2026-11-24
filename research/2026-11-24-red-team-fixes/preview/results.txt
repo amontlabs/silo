@@ -1,0 +1,43 @@
+== plain
+   reached the attacker (26): a-ping +secret, beacon +secret, cookie +secret +cookie:mac_session=MAC-APP-COOKIE; app=1, cookie-beacon +secret +cookie:mac_session=MAC-APP-COOKIE; app=1, css +secret, eventsource +secret, fetch +secret, form +secret, iframe +secret, img +secret, link-blank +secret, link-click +secret, mac-service +secret +mac-data, mac-service-fetch +secret +mac-data, meta-refresh +secret, prefetch +secret, self-navigation +secret, service-worker +secret, speculation +secret, top-navigation +secret, webrtc-stun-binding, webrtc-turn-allocate, webrtc-turn-allocate +secret, window-open +secret, worker +secret, ws +secret
+   reached the Mac service from: ['http://localhost:7000']
+   what the app did on its own origin: /pixel.png, /ws, fetch-own-origin, internal-navigation, localStorage, own-cookie, own-image-404-but-allowed
+   downloads: 1, new windows: 2, page title: 'cookies seen: mac_session=MAC-APP-COOKIE; app=1'
+   the page ended on the attacker's site after: top-navigation, form-top, self-navigation, meta-refresh, click link
+== csp
+   reached the attacker (10): link-blank +secret, link-click +secret, meta-refresh +secret, self-navigation +secret, speculation +secret, top-navigation +secret, webrtc-stun-binding, webrtc-turn-allocate, webrtc-turn-allocate +secret, window-open +secret
+   reached the Mac service from: nothing
+   what the app did on its own origin: /pixel.png, /ws, fetch-own-origin, internal-navigation, localStorage, own-cookie, own-image-404-but-allowed
+   downloads: 1, new windows: 2, page title: 'cookies seen: mac_session=MAC-APP-COOKIE; app=1'
+   the page ended on the attacker's site after: top-navigation, self-navigation, meta-refresh, click link
+== origin
+   reached the attacker (10): link-blank +secret, link-click +secret, meta-refresh +secret, self-navigation +secret, speculation +secret, top-navigation +secret, webrtc-stun-binding, webrtc-turn-allocate, webrtc-turn-allocate +secret, window-open +secret
+   reached the Mac service from: nothing
+   what the app did on its own origin: /pixel.png, /ws, fetch-own-origin, internal-navigation, localStorage, own-cookie, own-image-404-but-allowed
+   downloads: 1, new windows: 2, page title: 'cookies seen: app=1'
+   the page ended on the attacker's site after: top-navigation, self-navigation, meta-refresh, click link
+== shell
+   reached the attacker (3): webrtc-stun-binding, webrtc-turn-allocate, webrtc-turn-allocate +secret
+   reached the Mac service from: nothing
+   what the app did on its own origin: /pixel.png, /ws, fetch-own-origin, internal-navigation, localStorage, own-cookie, own-image-404-but-allowed
+   downloads: 0, new windows: 0, page title: 'c1 · port 3000 · Silo'
+   the page ended on the attacker's site after: nothing
+== shell-webrtc
+   reached the attacker (3): webrtc-stun-binding, webrtc-turn-allocate, webrtc-turn-allocate +secret
+   reached the Mac service from: nothing
+   what the app did on its own origin: /pixel.png, /ws, fetch-own-origin, internal-navigation, localStorage, own-cookie, own-image-404-but-allowed
+   downloads: 0, new windows: 0, page title: 'c1 · port 3000 · Silo'
+   the page ended on the attacker's site after: nothing
+== browser
+   reached the attacker (0): 
+   reached the Mac service from: nothing
+   what the app did on its own origin: /pixel.png, /ws, fetch-own-origin, internal-navigation, localStorage, own-cookie, own-image-404-but-allowed
+   denied and recorded by the computer's rules: 6 requests, 6 of them carrying the secret
+   downloads: 1, new windows: 2, page title: 'cookies seen: app=1'
+   the page ended on the attacker's site after: top-navigation, self-navigation, meta-refresh, click link
+== shell-browser
+   reached the attacker (0): 
+   reached the Mac service from: nothing
+   what the app did on its own origin: /pixel.png, /ws, fetch-own-origin, internal-navigation, localStorage, own-cookie, own-image-404-but-allowed
+   downloads: 0, new windows: 0, page title: 'c1 · port 3000 · Silo'
+   the page ended on the attacker's site after: nothing

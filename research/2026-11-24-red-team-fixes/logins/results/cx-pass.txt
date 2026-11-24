@@ -1,0 +1,30 @@
+
+== 1. sign in inside computer c1, the vendor's own way
+signed in
+
+== 2. work in c1
+exit=0 result="text":"Done." 
+
+== 3. hostile code copies c1's login file out, and uses it from the internet
+  use the access token: 200 works, the provider answered
+  refresh with the refresh token: 200 works, the provider answered
+
+== 4. time passes (every access token expires), and c1 works
+exit=0 result="text":"Done." /tmp/cw/cx-pass/h1/err.txt:401 /tmp/cw/cx-pass/h1/err.txt:refresh available models: unexpected status 401 Unauthorized: OAuth 
+
+==    (the login is spent: sign in again in c1)
+signed in
+
+== 5. a fork c2 keeps the login (fork-and-sign-in: you said so)
+
+== 6. both computers work, three rounds; every access token expires before each round, and c2 runs 11 s after c1
+c1: exit=0 result="text":"Done." /tmp/cw/cx-pass/h1/err.txt:401 /tmp/cw/cx-pass/h1/err.txt:refresh available models: unexpected status 401 Unauthorized: OAuth 
+c2: exit=1 result= /tmp/cw/cx-pass/h2/err.txt:401 /tmp/cw/cx-pass/h2/err.txt:refresh available models: unexpected status 401 Unauthorized: OAuth 
+c1: exit=1 result= /tmp/cw/cx-pass/h1/err.txt:401 /tmp/cw/cx-pass/h1/err.txt:refresh available models: unexpected status 401 Unauthorized: OAuth 
+c2: exit=1 result= /tmp/cw/cx-pass/h2/err.txt:401 /tmp/cw/cx-pass/h2/err.txt:refresh available models: unexpected status 401 Unauthorized: OAuth 
+c1: exit=1 result= /tmp/cw/cx-pass/h1/err.txt:401 /tmp/cw/cx-pass/h1/err.txt:refresh available models: unexpected status 401 Unauthorized: OAuth 
+c2: exit=1 result= /tmp/cw/cx-pass/h2/err.txt:401 /tmp/cw/cx-pass/h2/err.txt:refresh available models: unexpected status 401 Unauthorized: OAuth 
+
+== what the vault did
+{"swapped": 0, "refused": 0, "upstream_refresh": 0, "local_refresh": 0}
+tokens the provider issued: 23; real ones in the file the attacker copied at step 3: 3; in the computers' files at the end: 6 (164 files searched)

@@ -1,0 +1,9 @@
+# Test only: a provider entry that sends the same ChatGPT sign-in to the same host, so that Codex skips
+# its workspace routing discovery, which the fake provider does not implement.
+model = "gpt-x"
+model_provider = "chatgpt-direct"
+[model_providers.chatgpt-direct]
+name = "chatgpt-direct"
+base_url = "https://chatgpt.com/backend-api/codex"
+wire_api = "responses"
+requires_openai_auth = true

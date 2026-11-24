@@ -1,0 +1,169 @@
+diff --git a/cmd/gvproxy/config.go b/cmd/gvproxy/config.go
+index 9413b173..51c49d81 100644
+--- a/cmd/gvproxy/config.go
++++ b/cmd/gvproxy/config.go
+@@ -50,6 +50,7 @@ type GvproxyArgs struct {
+ 	servicesEndpoint   string
+ 	ec2MetadataAccess  bool
+ 	apiTokenFile       string
++	sealed             bool
+ }
+ 
+ type GvproxyConfig struct {
+@@ -70,6 +71,7 @@ type GvproxyConfig struct {
+ 	Ec2MetadataAccess  bool                   `yaml:"ec2-metadata-access,omitempty"`
+ 	NotificationSocket string                 `yaml:"notification,omitempty"`
+ 	APITokenFile       string                 `yaml:"api-token-file,omitempty"`
++	Sealed             bool                   `yaml:"sealed,omitempty"`
+ }
+ 
+ type GvproxyConfigForward struct {
+@@ -144,6 +146,7 @@ func GvproxyArgParse(flagSet *flag.FlagSet, args *GvproxyArgs, argv []string) (*
+ 	flagSet.BoolVar(&args.ec2MetadataAccess, "ec2-metadata-access", false, "Permits access to EC2 Metadata Service and Amazon Time Sync Service")
+ 	flagSet.StringVar(&args.notificationSocket, "notification", "", "Socket to be used to send network-ready notifications")
+ 	flagSet.StringVar(&args.apiTokenFile, "api-token-file", "", "Path to file where API token will be read from (needs 0600 permissions on macOS and Linux)")
++	flagSet.BoolVar(&args.sealed, "sealed", false, "Nothing inside reaches gvproxy itself, the host or a private network: no API on the gateway address, no address translated to the host's loopback, and no connection to the host's own addresses or to private, link-local or multicast ones")
+ 	if err := flagSet.Parse(argv); err != nil {
+ 		return nil, err
+ 	}
+@@ -253,12 +256,19 @@ func GvproxyConfigure(config *GvproxyConfig, args *GvproxyArgs, version string)
+ 	if config.Stack.GatewayMacAddress == "" {
+ 		config.Stack.GatewayMacAddress = "5a:94:ef:e4:0c:dd"
+ 	}
+-	if len(config.Stack.NAT) == 0 {
++	if args.sealed {
++		config.Sealed = true
++	}
++	if config.Sealed {
++		// Not the defaults below: an empty map or list would be refilled with them.
++		config.Stack.NAT = map[string]string{}
++		config.Stack.GatewayVirtualIPs = []string{}
++	} else if len(config.Stack.NAT) == 0 {
+ 		config.Stack.NAT = map[string]string{
+ 			config.Stack.HostIP: "127.0.0.1",
+ 		}
+ 	}
+-	if len(config.Stack.GatewayVirtualIPs) == 0 {
++	if !config.Sealed && len(config.Stack.GatewayVirtualIPs) == 0 {
+ 		config.Stack.GatewayVirtualIPs = []string{
+ 			config.Stack.HostIP,
+ 		}
+diff --git a/cmd/gvproxy/main.go b/cmd/gvproxy/main.go
+index c9041a82..88311ab9 100644
+--- a/cmd/gvproxy/main.go
++++ b/cmd/gvproxy/main.go
+@@ -5,6 +5,7 @@ import (
+ 	"context"
+ 	"errors"
+ 	"fmt"
++	"github.com/containers/gvisor-tap-vsock/pkg/services/forwarder"
+ 	"net"
+ 	"net/http"
+ 	"net/http/pprof"
+@@ -117,7 +118,28 @@ func InDebugMode() bool {
+ 	return log.GetLevel().String() == "debug"
+ }
+ 
++// refuseHostAndPrivate is what --sealed asks of every outbound connection: never the host itself
++// (any of its addresses, loopback included), never a private or link-local network, never multicast.
++func refuseHostAndPrivate() func(net.IP) bool {
++	cgnat := &net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
++	return func(ip net.IP) bool {
++		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() || ip.IsMulticast() || cgnat.Contains(ip) {
++			return true
++		}
++		addrs, _ := net.InterfaceAddrs() // read each time: the host's addresses change with its networks
++		for _, a := range addrs {
++			if n, ok := a.(*net.IPNet); ok && n.IP.Equal(ip) {
++				return true
++			}
++		}
++		return false
++	}
++}
++
+ func run(ctx context.Context, g *errgroup.Group, config *GvproxyConfig) error {
++	if config.Sealed {
++		forwarder.Refuse = refuseHostAndPrivate()
++	}
+ 	vn, err := virtualnetwork.New(&config.Stack)
+ 	if err != nil {
+ 		return err
+@@ -174,11 +196,13 @@ func run(ctx context.Context, g *errgroup.Group, config *GvproxyConfig) error {
+ 		httpServe(ctx, g, ln, vn.ServicesMux())
+ 	}
+ 
+-	ln, err := vn.Listen("tcp", fmt.Sprintf("%s:80", config.Stack.GatewayIP))
+-	if err != nil {
+-		return err
++	if !config.Sealed {
++		ln, err := vn.Listen("tcp", fmt.Sprintf("%s:80", config.Stack.GatewayIP))
++		if err != nil {
++			return err
++		}
++		httpServe(ctx, g, ln, vn.GatewayMux())
+ 	}
+-	httpServe(ctx, g, ln, vn.GatewayMux())
+ 
+ 	if InDebugMode() {
+ 		g.Go(func() error {
+diff --git a/pkg/services/forwarder/tcp.go b/pkg/services/forwarder/tcp.go
+index 6a1f548a..94de635c 100644
+--- a/pkg/services/forwarder/tcp.go
++++ b/pkg/services/forwarder/tcp.go
+@@ -23,6 +23,22 @@ const (
+ 	defaultTCPConnectTimeout = 30 * time.Second
+ )
+ 
++// Refuse, when set, is asked about every destination after translation. A destination it refuses
++// is never dialled: the guest's connection is reset (TCP) or dropped (UDP).
++var Refuse func(ip net.IP) bool
++
++func refused(a tcpip.Address, port uint16, proto string) bool {
++	if Refuse == nil {
++		return false
++	}
++	ip := net.IP(a.AsSlice())
++	if Refuse(ip) {
++		log.Warnf("refused %s to %s:%d: the host or a private network", proto, ip, port)
++		return true
++	}
++	return false
++}
++
+ func TCP(s *stack.Stack, nat map[tcpip.Address]tcpip.Address, natLock *sync.Mutex, ec2MetadataAccess bool, maxInFlight int, connectTimeout time.Duration) *tcp.Forwarder {
+ 	if maxInFlight <= 0 {
+ 		maxInFlight = defaultTCPMaxInFlight
+@@ -43,6 +59,10 @@ func TCP(s *stack.Stack, nat map[tcpip.Address]tcpip.Address, natLock *sync.Mute
+ 			localAddress = replaced
+ 		}
+ 		natLock.Unlock()
++		if refused(localAddress, r.ID().LocalPort, "tcp") {
++			r.Complete(true)
++			return
++		}
+ 		outbound, err := net.DialTimeout("tcp", net.JoinHostPort(localAddress.String(), fmt.Sprint(r.ID().LocalPort)), connectTimeout)
+ 		if err != nil {
+ 			log.Tracef("net.DialTimeout() = %v", err)
+diff --git a/pkg/services/forwarder/udp.go b/pkg/services/forwarder/udp.go
+index 12694496..296d2adc 100644
+--- a/pkg/services/forwarder/udp.go
++++ b/pkg/services/forwarder/udp.go
+@@ -1,6 +1,7 @@
+ package forwarder
+ 
+ import (
++	"fmt"
+ 	"net"
+ 	"strconv"
+ 	"sync"
+@@ -41,6 +42,9 @@ func UDP(s *stack.Stack, nat map[tcpip.Address]tcpip.Address, natLock *sync.Mute
+ 		}
+ 
+ 		p, _ := NewUDPProxy(&autoStoppingListener{underlying: gonet.NewUDPConn(&wq, ep)}, func(_ net.Addr) (net.Conn, error) {
++			if refused(localAddress, r.ID().LocalPort, "udp") {
++				return nil, fmt.Errorf("refused")
++			}
+ 			return net.Dial("udp", net.JoinHostPort(localAddress.String(), strconv.Itoa(int(r.ID().LocalPort))))
+ 		})
+ 		go func() {

