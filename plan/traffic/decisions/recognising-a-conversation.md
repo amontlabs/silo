@@ -48,3 +48,22 @@ no going back.
 Those requests were plain HTTP. Over Codex's WebSocket (see `reading-each-agent-program`), each
 message after the first of a connection carries only the new items, and names the reply before it
 in `previous_response_id`. That link is the only way to join them.
+
+## A fork sends the same session (24 November 2026)
+
+An agent's part, 24 November 2026. In the check of `conversation-resumes-in-a-copy`, a
+conversation taken up in a copy of the computer and in its parent went on as two conversations,
+but both sides sent the same session identifiers, for Claude Code and for Codex alike.
+
+The answer above then gets one case wrong. Its first test, by content, says that a request
+continues a conversation when its messages begin with an earlier request of that conversation and
+the reply to it. The first request of each side passes that test, so both sides count as the same
+conversation. The join by session puts them together again after a compaction. A budget on "this
+conversation" would then count the spend of the fork too, and the app would show one conversation
+where you see two.
+
+What I would put in its place: a conversation belongs to one computer. The tests by content and
+by session apply only to requests from the same computer, and a fork starts its own conversations,
+each with a link to the one it was copied from. Silo knows which computer sent each request
+without asking the program, so this costs nothing to read. Whether a budget set on the parent's
+conversation should also cover the fork's is the owner's to decide.
