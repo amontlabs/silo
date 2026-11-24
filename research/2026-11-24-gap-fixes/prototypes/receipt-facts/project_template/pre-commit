@@ -1,0 +1,3 @@
+#!/bin/sh
+# the project's hook: no commit while a test fails
+python3 -m pytest -q >/dev/null 2>&1 || { echo "pre-commit: tests fail" >&2; exit 1; }

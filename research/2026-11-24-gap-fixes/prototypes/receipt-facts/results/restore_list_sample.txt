@@ -1,0 +1,21 @@
+Not brought back by this restore (since cp-1400)
+
+Sent out to change something elsewhere   [seen at the boundary]
+  14:05  pushed refs/heads/main 9f1c2e0 -> 4b7aa31, forced to github.com/acme/site.git, with the secret github-push, the host answered 200
+  14:06  POST backboard.railway.app/graphql/v2, with the secret railway-token, the host answered 200
+  14:07  DELETE api.cloudflare.com/client/v4/zones/z1/dns_records/r9, with the secret cf-token, the host answered 403, a refusal
+  14:08  POST api.vercel.com/v13/deployments, with the secret vercel-token, no answer seen (connection closed before an answer): it may or may not have happened
+  14:13  db.staging.internal: `DROP TABLE sessions`, the database answered ok
+  14:14  copied report.pdf to your Mac: it stays on your Mac
+Connections Silo did not read: it cannot say what they changed   [seen at the boundary]
+  14:09  db.prod.internal:5432: an encrypted connection, 9 kB sent. Silo did not read it
+  14:10  203.0.113.7:22: an SSH session of 312 s, 15 kB sent. Any command could have run there
+  14:11  s3.amazonaws.com:443: an encrypted connection, 2.4 MB sent. Silo did not read it
+Reads that may have changed something   [Silo's classifier thinks]
+  14:07  GET hooks.example.com/deploy/trigger?env=prod: a read by its method, but its path suggests it changes something
+  14:09  db.prod.internal:5432 is the usual port of a database
+  14:13  db.staging.internal: `SELECT purge_old_rows()` only reads by its form, but calls a function that may write
+5 other requests only asked to read. A host can still change something on a read;
+Silo cannot see that.
+Everything sent since then stays sent: 2.7 MB to 13 hosts.
+Silo sees what left this computer, not what the hosts did with it.

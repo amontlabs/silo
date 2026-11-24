@@ -1,0 +1,2 @@
+thin     pack 1513 bytes, 4 objects, 5 deltas on objects outside the pack, root trees readable 0/3, .github ids read 0
+no-thin  pack 8798 bytes, 10 objects, 0 deltas on objects outside the pack, root trees readable 2/3, .github ids read 2

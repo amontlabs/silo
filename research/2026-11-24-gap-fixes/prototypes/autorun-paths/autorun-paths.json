@@ -1,0 +1,693 @@
+{
+ "about": "Files in a repository that a tool on the Mac runs, or that change what a tool runs, without you asking. One entry per file kind. 'class' is runs (the tool executes a command from it), instructs (its text goes into the prompt of an agent on the Mac), or redirects (it changes which program a command you type runs). 'gate' says what the tool asks first. 'check' says what in the file is compared: any (every change counts), or a named content check of autorun.py. Paths are matched case-folded and Unicode-normalised, because the Mac's disk is case-insensitive and normalisation-insensitive.",
+ "entries": [
+  {
+   "id": "claude-settings",
+   "paths": [
+    "**/.claude/settings.json",
+    "**/.claude/settings.local.json"
+   ],
+   "tool": "Claude Code (also Cursor, which reads .claude hooks)",
+   "class": "runs",
+   "trigger": "session start (SessionStart hook), every tool call (PreToolUse/PostToolUse), status line refresh, key helpers when a request is made",
+   "gate": "trust dialog once per folder; not asked again when the file changes; none under a trusted parent folder; none in claude -p or the SDK",
+   "check": {
+    "kind": "json-keys",
+    "keys": [
+     "hooks",
+     "statusLine",
+     "apiKeyHelper",
+     "awsAuthRefresh",
+     "awsCredentialExport",
+     "otelHeadersHelper",
+     "fileSuggestion",
+     "env",
+     "permissions.allow",
+     "permissions.additionalDirectories",
+     "permissions.defaultMode",
+     "enableAllProjectMcpServers",
+     "enabledMcpjsonServers",
+     "extraKnownMarketplaces",
+     "enabledPlugins",
+     "disableAllHooks",
+     "sandbox"
+    ]
+   },
+   "commands_at": [
+    "hooks.*.*.hooks.*.command",
+    "statusLine.command",
+    "apiKeyHelper",
+    "awsAuthRefresh",
+    "awsCredentialExport",
+    "otelHeadersHelper",
+    "fileSuggestion.command"
+   ],
+   "source": "https://code.claude.com/docs/en/permissions#what-runs-before-you-trust-a-folder"
+  },
+  {
+   "id": "claude-mcp",
+   "paths": [
+    "**/.mcp.json"
+   ],
+   "tool": "Claude Code",
+   "class": "runs",
+   "trigger": "session start: each stdio server's command is started",
+   "gate": "a separate approval per server in an interactive session; none in claude -p or the SDK",
+   "check": {
+    "kind": "json-keys",
+    "keys": [
+     "mcpServers"
+    ]
+   },
+   "commands_at": [
+    "mcpServers.*.command",
+    "mcpServers.*.args"
+   ],
+   "source": "https://code.claude.com/docs/en/mcp#project-scope"
+  },
+  {
+   "id": "claude-skills-agents",
+   "paths": [
+    "**/.claude/skills/**",
+    "**/.claude/agents/**",
+    "**/.claude/commands/**",
+    "**/.claude/output-styles/**",
+    "**/.claude/rules/**"
+   ],
+   "tool": "Claude Code",
+   "class": "runs",
+   "trigger": "hooks in a skill's or subagent's frontmatter run while it is in use, and its allowed-tools run without a prompt; the rest of its text goes into the prompt",
+   "gate": "skill hooks: none, even before trust; subagent frontmatter hooks: after trust",
+   "check": {
+    "kind": "frontmatter",
+    "keys": [
+     "hooks",
+     "allowed-tools",
+     "mcpServers"
+    ]
+   },
+   "source": "https://code.claude.com/docs/en/permissions#what-runs-before-you-trust-a-folder"
+  },
+  {
+   "id": "claude-instructions",
+   "paths": [
+    "**/CLAUDE.md",
+    "**/CLAUDE.local.md"
+   ],
+   "tool": "Claude Code",
+   "class": "instructs",
+   "trigger": "loaded into the prompt at session start",
+   "gate": "none",
+   "check": {
+    "kind": "any"
+   },
+   "source": "https://code.claude.com/docs/en/memory"
+  },
+  {
+   "id": "codex-config",
+   "paths": [
+    "**/.codex/config.toml",
+    "**/.codex/hooks.json"
+   ],
+   "tool": "Codex",
+   "class": "runs",
+   "trigger": "session start: hooks and MCP servers",
+   "gate": "loaded only for a project you trusted in Codex; not asked again when the file changes",
+   "check": {
+    "kind": "any"
+   },
+   "source": "https://learn.chatgpt.com/docs/config-file/config-advanced"
+  },
+  {
+   "id": "codex-skills",
+   "paths": [
+    "**/.agents/skills/**",
+    "**/.codex/skills/**"
+   ],
+   "tool": "Codex",
+   "class": "instructs",
+   "trigger": "a skill's text goes into the prompt when used",
+   "gate": "none",
+   "check": {
+    "kind": "any"
+   },
+   "source": "https://developers.openai.com/codex/skills"
+  },
+  {
+   "id": "agents-md",
+   "paths": [
+    "**/AGENTS.md",
+    "**/AGENTS.override.md"
+   ],
+   "tool": "Codex, Cursor, Copilot, Gemini CLI and others",
+   "class": "instructs",
+   "trigger": "loaded into the prompt at session start",
+   "gate": "none",
+   "check": {
+    "kind": "any"
+   },
+   "source": "https://agents.md"
+  },
+  {
+   "id": "cursor",
+   "paths": [
+    "**/.cursor/mcp.json",
+    "**/.cursor/hooks.json",
+    "**/.cursor/environment.json"
+   ],
+   "tool": "Cursor",
+   "class": "runs",
+   "trigger": "MCP servers and hooks start with the agent",
+   "gate": "MCP: approval, asked again when an entry changes (since 1.3); Workspace Trust is off by default in Cursor",
+   "check": {
+    "kind": "any"
+   },
+   "source": "https://research.checkpoint.com/2025/cursor-vulnerability-mcpoison/"
+  },
+  {
+   "id": "cursor-rules",
+   "paths": [
+    "**/.cursor/rules/**",
+    "**/.cursorrules",
+    "**/.windsurfrules",
+    "**/.windsurf/rules/**",
+    "**/.clinerules",
+    "**/.clinerules/**"
+   ],
+   "tool": "Cursor, Windsurf, Cline",
+   "class": "instructs",
+   "trigger": "loaded into the prompt",
+   "gate": "none",
+   "check": {
+    "kind": "any"
+   },
+   "source": "https://www.pillar.security/blog/new-vulnerability-in-github-copilot-and-cursor-how-hackers-can-weaponize-code-agents"
+  },
+  {
+   "id": "gemini",
+   "paths": [
+    "**/.gemini/settings.json",
+    "**/.gemini/commands/**",
+    "**/.gemini/extensions/**"
+   ],
+   "tool": "Gemini CLI",
+   "class": "runs",
+   "trigger": "session start: hooks, MCP servers, tool discovery command",
+   "gate": "Trusted Folders exists but is off by default",
+   "check": {
+    "kind": "any"
+   },
+   "source": "https://geminicli.com/docs/cli/trusted-folders/"
+  },
+  {
+   "id": "gemini-md",
+   "paths": [
+    "**/GEMINI.md"
+   ],
+   "tool": "Gemini CLI",
+   "class": "instructs",
+   "trigger": "loaded into the prompt",
+   "gate": "none",
+   "check": {
+    "kind": "any"
+   },
+   "source": "https://geminicli.com/docs/cli/gemini-md/"
+  },
+  {
+   "id": "copilot-instructions",
+   "paths": [
+    ".github/copilot-instructions.md",
+    ".github/instructions/**",
+    ".github/prompts/**",
+    ".github/agents/**",
+    ".github/chatmodes/**"
+   ],
+   "tool": "GitHub Copilot",
+   "class": "instructs",
+   "trigger": "loaded into the prompt",
+   "gate": "none",
+   "check": {
+    "kind": "any"
+   },
+   "source": "https://code.visualstudio.com/docs/copilot/customization/custom-instructions"
+  },
+  {
+   "id": "vscode-tasks",
+   "paths": [
+    "**/.vscode/tasks.json"
+   ],
+   "tool": "VS Code, Cursor, Windsurf, VSCodium",
+   "class": "runs",
+   "trigger": "a task with runOptions.runOn folderOpen runs when the folder opens",
+   "gate": "VS Code: Workspace Trust (on by default), then one Allow prompt per workspace (task.allowAutomaticTasks off); Cursor: Workspace Trust off by default",
+   "check": {
+    "kind": "vscode-tasks"
+   },
+   "source": "https://code.visualstudio.com/docs/debugtest/tasks"
+  },
+  {
+   "id": "vscode-workspace-file",
+   "paths": [
+    "**/*.code-workspace"
+   ],
+   "tool": "VS Code and forks",
+   "class": "runs",
+   "trigger": "holds settings and tasks like .vscode/; folderOpen tasks run when the workspace opens",
+   "gate": "as .vscode/tasks.json",
+   "check": {
+    "kind": "vscode-workspace"
+   },
+   "source": "https://code.visualstudio.com/docs/editing/workspaces/multi-root-workspaces"
+  },
+  {
+   "id": "vscode-settings",
+   "paths": [
+    "**/.vscode/settings.json"
+   ],
+   "tool": "VS Code and its extensions",
+   "class": "redirects",
+   "trigger": "a setting that names a program makes the editor or an extension run it on open (interpreter, git, linters, terminal profile)",
+   "gate": "Workspace Trust restricts known keys; any extension may add a key that runs a program",
+   "check": {
+    "kind": "vscode-settings"
+   },
+   "source": "https://code.visualstudio.com/docs/editing/workspaces/workspace-trust"
+  },
+  {
+   "id": "vscode-mcp",
+   "paths": [
+    "**/.vscode/mcp.json"
+   ],
+   "tool": "VS Code (Copilot agent mode)",
+   "class": "runs",
+   "trigger": "MCP servers start with the agent",
+   "gate": "a trust prompt per server on first start",
+   "check": {
+    "kind": "any"
+   },
+   "source": "https://code.visualstudio.com/docs/copilot/customization/mcp-servers"
+  },
+  {
+   "id": "vscode-extensions",
+   "paths": [
+    "**/.vscode/extensions.json"
+   ],
+   "tool": "VS Code",
+   "class": "redirects",
+   "trigger": "recommended extensions are offered for install",
+   "gate": "a prompt; installing is your click",
+   "check": {
+    "kind": "any"
+   },
+   "source": "https://code.visualstudio.com/docs/configure/extensions/extension-marketplace#_workspace-recommended-extensions"
+  },
+  {
+   "id": "devcontainer",
+   "paths": [
+    "**/.devcontainer/devcontainer.json",
+    "**/.devcontainer/*/devcontainer.json",
+    "**/.devcontainer.json"
+   ],
+   "tool": "VS Code Dev Containers, devcontainer CLI, Codespaces",
+   "class": "runs",
+   "trigger": "initializeCommand runs on the Mac itself when the container is built or started; the other commands run in a container on the Mac, to which VS Code forwards your SSH agent and Git credentials",
+   "gate": "VS Code offers 'Reopen in Container'; one click",
+   "check": {
+    "kind": "json-keys",
+    "keys": [
+     "initializeCommand",
+     "onCreateCommand",
+     "updateContentCommand",
+     "postCreateCommand",
+     "postStartCommand",
+     "postAttachCommand",
+     "mounts",
+     "runArgs",
+     "image",
+     "build",
+     "dockerComposeFile",
+     "features",
+     "customizations"
+    ]
+   },
+   "commands_at": [
+    "initializeCommand",
+    "initializeCommand.*"
+   ],
+   "source": "https://containers.dev/implementors/json_reference/"
+  },
+  {
+   "id": "python-venv",
+   "paths": [
+    "**/pyvenv.cfg",
+    "**/*.pth",
+    "**/sitecustomize.py",
+    "**/usercustomize.py",
+    "**/.venv/**/bin/python*",
+    "**/venv/**/bin/python*"
+   ],
+   "tool": "VS Code Python extension, any Python started in the folder",
+   "class": "runs",
+   "trigger": "the Python extension picks a venv inside the workspace and starts its interpreter; a .pth line starting with import runs at every interpreter start",
+   "gate": "Workspace Trust",
+   "check": {
+    "kind": "any"
+   },
+   "source": "https://docs.python.org/3/library/site.html"
+  },
+  {
+   "id": "jetbrains",
+   "paths": [
+    "**/.idea/**",
+    "**/.run/*.run.xml"
+   ],
+   "tool": "IntelliJ IDEA and other JetBrains IDEs",
+   "class": "runs",
+   "trigger": "startup tasks and build-tool import on open; run configurations",
+   "gate": "Trust Project dialog per project, skipped under a trusted location",
+   "check": {
+    "kind": "any"
+   },
+   "source": "https://www.jetbrains.com/help/idea/project-security.html"
+  },
+  {
+   "id": "gradle-maven",
+   "paths": [
+    "**/gradle/wrapper/gradle-wrapper.properties",
+    "**/gradle/wrapper/gradle-wrapper.jar",
+    "**/.mvn/wrapper/**",
+    "**/.mvn/extensions.xml",
+    "**/.mvn/jvm.config",
+    "**/gradle.properties",
+    "**/settings.gradle",
+    "**/settings.gradle.kts",
+    "**/init.gradle",
+    "**/init.gradle.kts"
+   ],
+   "tool": "IntelliJ Gradle and Maven import, ./gradlew, ./mvnw",
+   "class": "redirects",
+   "trigger": "the IDE imports the project on open and runs the wrapper's distribution and the settings scripts",
+   "gate": "JetBrains trust dialog",
+   "check": {
+    "kind": "any"
+   },
+   "source": "https://docs.gradle.org/current/userguide/gradle_wrapper.html"
+  },
+  {
+   "id": "direnv",
+   "paths": [
+    "**/.envrc"
+   ],
+   "tool": "direnv",
+   "class": "runs",
+   "trigger": "a shell entering the folder",
+   "gate": "direnv allow, tied to the file's path and content: any change blocks it again",
+   "check": {
+    "kind": "any"
+   },
+   "source": "https://github.com/direnv/direnv/blob/master/internal/cmd/rc.go"
+  },
+  {
+   "id": "mise",
+   "paths": [
+    "**/mise.toml",
+    "**/.mise.toml",
+    "**/mise.local.toml",
+    "**/.mise.local.toml",
+    "**/.mise/**",
+    "**/.config/mise.toml",
+    "**/.config/mise/**",
+    "**/.tool-versions"
+   ],
+   "tool": "mise, asdf",
+   "class": "runs",
+   "trigger": "mise hooks (enter, cd) and env sources run when a shell enters the folder; .tool-versions picks which tool version runs",
+   "gate": "mise trust for files with code; tied to content only in paranoid mode",
+   "check": {
+    "kind": "any"
+   },
+   "source": "https://mise.jdx.dev/cli/trust.html"
+  },
+  {
+   "id": "version-files",
+   "paths": [
+    "**/.nvmrc",
+    "**/.node-version",
+    "**/.python-version",
+    "**/.ruby-version",
+    "**/rust-toolchain.toml",
+    "**/rust-toolchain"
+   ],
+   "tool": "nvm, fnm, pyenv, rbenv, rustup",
+   "class": "redirects",
+   "trigger": "picks which version of the interpreter or toolchain runs, and rustup downloads it",
+   "gate": "none for rustup and shells that switch on cd",
+   "check": {
+    "kind": "version-file"
+   },
+   "source": "https://rust-lang.github.io/rustup/overrides.html"
+  },
+  {
+   "id": "package-json",
+   "paths": [
+    "**/package.json"
+   ],
+   "tool": "npm, pnpm, Yarn, Bun, corepack",
+   "class": "runs",
+   "trigger": "npm install runs the project's own lifecycle scripts; packageManager makes corepack fetch and run that version; git, URL and file dependencies run their own install scripts and skip the registry",
+   "gate": "none",
+   "check": {
+    "kind": "package-json"
+   },
+   "source": "https://docs.npmjs.com/cli/v11/using-npm/scripts#life-cycle-operation-order"
+  },
+  {
+   "id": "npmrc",
+   "paths": [
+    "**/.npmrc"
+   ],
+   "tool": "npm, pnpm",
+   "class": "redirects",
+   "trigger": "script-shell, node-options, registry and git change what npm install runs and where it fetches from",
+   "gate": "none",
+   "check": {
+    "kind": "ini-keys"
+   },
+   "source": "https://docs.npmjs.com/cli/v11/using-npm/config"
+  },
+  {
+   "id": "yarn",
+   "paths": [
+    "**/.yarnrc.yml",
+    "**/.yarnrc",
+    "**/.yarn/releases/**",
+    "**/.yarn/plugins/**"
+   ],
+   "tool": "Yarn",
+   "class": "runs",
+   "trigger": "yarnPath (yarn-path in Yarn 1) makes every yarn command run a committed JS file instead of Yarn; plugins are committed JS loaded by every command",
+   "gate": "none",
+   "check": {
+    "kind": "any"
+   },
+   "source": "https://yarnpkg.com/configuration/yarnrc#yarnPath"
+  },
+  {
+   "id": "pnpm",
+   "paths": [
+    "**/.pnpmfile.cjs",
+    "**/.pnpmfile.mjs"
+   ],
+   "tool": "pnpm",
+   "class": "runs",
+   "trigger": ".pnpmfile.cjs runs on every pnpm install",
+   "gate": "none",
+   "check": {
+    "kind": "any"
+   },
+   "source": "https://pnpm.io/pnpmfile"
+  },
+  {
+   "id": "pnpm-workspace",
+   "paths": [
+    "**/pnpm-workspace.yaml"
+   ],
+   "tool": "pnpm",
+   "class": "redirects",
+   "trigger": "decides which dependencies may run install scripts, and where the pnpmfile is",
+   "gate": "none",
+   "check": {
+    "kind": "yaml-keys",
+    "keys": [
+     "onlyBuiltDependencies",
+     "neverBuiltDependencies",
+     "ignoredBuiltDependencies",
+     "allowBuilds",
+     "dangerouslyAllowAllBuilds",
+     "pnpmfile",
+     "globalPnpmfile",
+     "registry",
+     "registries",
+     "scriptShell",
+     "nodeOptions",
+     "shellEmulator"
+    ]
+   },
+   "source": "https://pnpm.io/settings"
+  },
+  {
+   "id": "git-hook-managers",
+   "paths": [
+    "**/.husky/**",
+    "**/lefthook.yml",
+    "**/.lefthook.yml",
+    "**/lefthook.yaml",
+    "**/.lefthook/**",
+    "**/.pre-commit-config.yaml",
+    "**/.simple-git-hooks.json",
+    "**/.simple-git-hooks.js",
+    "**/.lintstagedrc*",
+    "**/lint-staged.config.*"
+   ],
+   "tool": "husky, lefthook, pre-commit, simple-git-hooks, lint-staged",
+   "class": "runs",
+   "trigger": "Git hooks on commit, push and checkout, once the manager is installed (npm prepare or postinstall for husky, lefthook and simple-git-hooks; pre-commit install by hand once)",
+   "gate": "none after install",
+   "check": {
+    "kind": "any"
+   },
+   "source": "https://typicode.github.io/husky/how-to.html"
+  },
+  {
+   "id": "git-repo-files",
+   "paths": [
+    "**/.gitmodules",
+    "**/.lfsconfig"
+   ],
+   "tool": "Git",
+   "class": "redirects",
+   "trigger": ".gitmodules URLs are fetched by a recursive clone or submodule update; .lfsconfig points Git LFS at a server on checkout",
+   "gate": "recursion is off unless asked or submodule.recurse is set",
+   "check": {
+    "kind": "any"
+   },
+   "source": "https://git-scm.com/docs/gitmodules"
+  },
+  {
+   "id": "gitattributes",
+   "paths": [
+    "**/.gitattributes"
+   ],
+   "tool": "Git",
+   "class": "redirects",
+   "trigger": "names filter, diff and merge drivers, which run only if your own Git config defines them (Git LFS defines one globally)",
+   "gate": "your own Git config",
+   "check": {
+    "kind": "list"
+   },
+   "source": "https://git-scm.com/docs/gitattributes"
+  },
+  {
+   "id": "python-build",
+   "paths": [
+    "**/pyproject.toml",
+    "**/setup.py",
+    "**/setup.cfg"
+   ],
+   "tool": "pip, uv, Poetry, Hatch",
+   "class": "runs",
+   "trigger": "installing the project (pip install -e ., uv sync) runs its build backend, which backend-path can place inside the repository",
+   "gate": "none",
+   "check": {
+    "kind": "pyproject"
+   },
+   "source": "https://peps.python.org/pep-0517/#in-tree-build-backends"
+  },
+  {
+   "id": "cargo",
+   "paths": [
+    "**/.cargo/config.toml",
+    "**/.cargo/config"
+   ],
+   "tool": "cargo, rust-analyzer",
+   "class": "runs",
+   "trigger": ".cargo/config sets rustc-wrapper, linker and runners, which cargo and rust-analyzer use",
+   "gate": "Workspace Trust in VS Code",
+   "check": {
+    "kind": "any"
+   },
+   "source": "https://rust-analyzer.github.io/book/configuration.html"
+  },
+  {
+   "id": "cargo-build-script",
+   "paths": [
+    "**/build.rs"
+   ],
+   "tool": "cargo, rust-analyzer",
+   "class": "runs",
+   "trigger": "rust-analyzer runs a package's build script when the folder opens",
+   "gate": "Workspace Trust in VS Code",
+   "check": {
+    "kind": "beside",
+    "file": "Cargo.toml"
+   },
+   "source": "https://doc.rust-lang.org/cargo/reference/build-scripts.html"
+  },
+  {
+   "id": "github-actions",
+   "paths": [
+    ".github/workflows/**",
+    ".github/actions/**"
+   ],
+   "tool": "GitHub Actions (on GitHub, not on the Mac)",
+   "class": "runs",
+   "trigger": "a workflow with on: push runs on GitHub's runners as soon as the push lands, with the repository's secrets",
+   "gate": "none for pushes by people with write access",
+   "check": {
+    "kind": "any"
+   },
+   "source": "https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows#push"
+  }
+ ],
+ "vscode_settings_that_run": [
+  "python.defaultInterpreterPath",
+  "python.interpreterPath",
+  "python.venvPath",
+  "python.condaPath",
+  "python.poetryPath",
+  "python.pipenvPath",
+  "git.path",
+  "terminal.integrated.profiles.",
+  "terminal.integrated.defaultProfile.",
+  "terminal.integrated.automationProfile.",
+  "terminal.integrated.env.",
+  "terminal.integrated.shell.",
+  "terminal.integrated.shellArgs.",
+  "eslint.runtime",
+  "eslint.nodePath",
+  "eslint.execArgv",
+  "npm.packageManager",
+  "typescript.tsdk",
+  "typescript.npm",
+  "prettier.prettierPath",
+  "go.alternateTools",
+  "go.toolsGopath",
+  "go.goroot",
+  "rust-analyzer.server.path",
+  "rust-analyzer.cargo.",
+  "rust-analyzer.check.overrideCommand",
+  "java.jdt.ls.java.home",
+  "java.home",
+  "php.validate.executablePath",
+  "clangd.path",
+  "C_Cpp.default.compilerPath",
+  "task.allowAutomaticTasks",
+  "security.workspace.trust.",
+  "chat.tools.autoApprove",
+  "chat.tools.global.autoApprove",
+  "chat.tools.terminal.autoApprove",
+  "github.copilot.chat.agent.",
+  "claudeCode.",
+  "remote.SSH."
+ ]
+}
