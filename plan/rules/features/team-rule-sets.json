@@ -1,0 +1,13 @@
+{
+  "name": "Rules a team shares",
+  "what": "A team keeps its rule sets in a repository. Each member's Silo shows a set, and any change to it, before switching it on. A set the Mac's management installs is marked as managed and cannot be switched off.",
+  "needs": [
+    "team-rule-set",
+    "rules-a-member-cannot-switch-off",
+    "managed-and-shown"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Every team that runs agents together already shares their configuration through a repository or through device management; Silo's rules would follow the same path."
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "asks": "Can a reviewer tell that a receipt someone shared was not edited?",
+  "answer": "Yes. A shared receipt carries a signature made by the Silo that wrote it, with a key that never leaves that Mac. The signature shows that the receipt was not changed after Silo made it, and which Silo made it. It does not show that the Silo itself was unmodified, and the receipt says so.",
+  "needs": [
+    "receipt-on-a-pull-request"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "asks": "Can a team set rules that a member cannot switch off?",
+  "answer": "Only through the Mac's own management: a configuration profile that the company's device management installs, as Claude Code and Codex take their enforced settings. Silo then shows the set as managed, with who manages it, and the member cannot switch it off. A member can still add rules of their own, and since rules have no order, a rule of theirs never lifts a deny or a hold of the managed set. Without device management, every team rule set is one the member chose and can switch off.",
+  "needs": [
+    "team-rule-set",
+    "which-rule-wins"
+  ]
+}

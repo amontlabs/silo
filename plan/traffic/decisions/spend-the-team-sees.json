@@ -1,0 +1,8 @@
+{
+  "asks": "What of each member's spend reaches the team, and how?",
+  "answer": "A summary per member and per day: the dollars spent, by provider and model, and each budget reached. No conversation text, no command and no file name. It leaves through an extension the member installs, which reads the spend lines of the record and writes the summaries to a place the team owns, such as a folder or a bucket. Nothing passes through Amont Labs. The member sees what it sends and where, as for any extension.",
+  "needs": [
+    "team-budget",
+    "forwarding-tool"
+  ]
+}

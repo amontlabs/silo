@@ -1,0 +1,8 @@
+{
+  "asks": "How does a reviewer see what agents did for a pull request?",
+  "answer": "The member asks Silo for the receipts of the runs whose commits are in the pull request, printed as Markdown for its description. The member picks how much it shows: a summary leaves out what was asked word for word and the text of the conversation; in full, it holds the whole receipt. Which commits a run made is a fact when the commit was made in a computer. Line by line attribution in another tool's format, such as Agent Trace or Git notes, comes from an extension.",
+  "needs": [
+    "what-a-receipt-is",
+    "what-a-receipt-holds"
+  ]
+}
