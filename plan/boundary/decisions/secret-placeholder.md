@@ -352,8 +352,7 @@ databases, so the password itself never crosses the connection and no swap can w
 - **It is a proxy of a whole protocol, not a swap.** Silo keeps one connection to the server for
   each connection from the computer, and must answer the start-up, the cancel requests and the
   errors itself. PgBouncer does all of it, in session mode, so it could serve as the part that
-  ends PostgreSQL, or show what Silo's own needs to do. MySQL, which has its own challenge, was
-  not tried.
+  ends PostgreSQL, or show what Silo's own needs to do.
 - **Redis needs only a swap.** Its password travels as it is, in the `AUTH` command (or `HELLO`).
   A stand-in that swapped the placeholder in the command stream worked for redis-cli 7.0,
   redis-py 8.2, ioredis 6.1 and node-redis 6.4, in both versions of the protocol. The swap has to
@@ -361,10 +360,22 @@ databases, so the password itself never crosses the connection and no swap can w
   has the real value's length (the shaped placeholder above). Under TLS (`rediss://`, as hosted
   Redis gives) Silo ends TLS first, as for HTTPS.
 
-What I would add to the answer: PostgreSQL passwords can be held outside by a boundary that ends
-the protocol, and Redis passwords by a swap, which takes database passwords off the "ordinary
-files" list except for MySQL, still to try. The
-configuration is in the project files, `research/2026-11-24-db-password`.
+- **MySQL is ended the same way, in 200 lines.** MySQL 8.0's default sign-in
+  (`caching_sha2_password`) also proves the password by a challenge. A stand-in written for the
+  trial checked the placeholder's answer to its own challenge, then signed in to the server with
+  the real password over TLS and passed the rest of the session through unchanged. The mysql CLI
+  8.0, PyMySQL 2.2, mysql-connector 26.10 (pure and C), and mysql2 3.24 (a URL, prepared
+  statements, a pool of five) all worked; the placeholder sent straight to the server was refused.
+  One detail matters: the computer must be given the server's own connection number, not one of
+  the stand-in's, or a cancel (`KILL QUERY <id>`, what the CLI sends on Ctrl-C) stops someone
+  else's query. Given the real number, a cancel through the stand-in stopped the right query. A
+  client that requires TLS (`--ssl-mode=REQUIRED`) refused the stand-in, which offered none; as
+  for PostgreSQL, Silo would offer TLS with its own certificate there.
+
+What I would add to the answer: PostgreSQL and MySQL passwords can be held outside by a boundary
+that ends the protocol, and Redis passwords by a swap, which takes the common databases off the
+"ordinary files" list. The configuration and the MySQL stand-in are in the project files,
+`research/2026-11-24-db-password`.
 
 ## Where twelve services' secrets travel (24 November 2026)
 
