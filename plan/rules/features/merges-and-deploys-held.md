@@ -72,6 +72,6 @@ branch. Tried with git 2.43 against a local server over git's HTTP, and read fro
   pushed. The set can hold every SSH push to that host, or say that it does not catch them.
 
 What I would add to the answer: the set names what it catches (a push to the default branch over
-HTTPS, `mergePullRequest`, turning auto-merge on, a click in the host's page is not caught), and a
-push it holds is refused in git's own words. The script is in the project files,
+HTTPS, `mergePullRequest`, turning auto-merge on) and what it does not (a push over SSH, a click in
+the host's page, a merge GitHub makes later), and a push it holds is refused in git's own words. The script is in the project files,
 `research/2026-11-24-merges`.
