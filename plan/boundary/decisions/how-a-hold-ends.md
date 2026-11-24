@@ -168,3 +168,30 @@ the refused request is a file and not the index page: a refused index page reads
 does not exist, which sends an agent looking in the wrong place. For a hold on a Python package,
 Silo answers the index and holds the file. A reason phrase does not exist in HTTP/2, so this holds
 where the tool speaks HTTP/1.1, as these three do.
+
+## Words on a connection Silo does not read (24 November 2026)
+
+An agent's part, 24 November 2026. The answer resets an `ssh` connection and "costs the words".
+`refusals-that-say-so` leaves open how the answer is given on a connection that is not HTTP. Tried
+on Linux: a small server stood in for Silo, answered one connection in the protocol's own first
+messages with a sentence, and closed. No key, certificate or password of the real host is needed
+for any of these, because each protocol lets a server refuse before it proves who it is.
+
+| Protocol | What Silo sends | What the program shows |
+|---|---|---|
+| SSH | its version line, then a "disconnect" message in clear, before any key exchange | OpenSSH 9.6: `Received disconnect from …: <words>`. git (clone, ls-remote) shows that line above its own "Could not read from remote repository". Node ssh2 1.17 and asyncssh 2.24 give the words as the error. paramiko 5.1 says "Negotiation failed" and logs the words only at INFO |
+| SSH | a text line before the version line | nothing without `-v` |
+| SSH | a reset, as the answer says | "Connection reset by peer" |
+| PostgreSQL | "no TLS" to the client's TLS request, then an error | psql 16, psycopg 3.3 and Node pg 8.23 show `FATAL: <words>`. With TLS required (`sslmode=require`, as hosted databases give), the client stops at "server does not support SSL" |
+| PostgreSQL, TLS required | "yes" to TLS with Silo's own certificate, then the error inside | `require` shows the words: it encrypts without checking the certificate. `verify-full`, and Node pg with `ssl: true`, show them only where Silo's authority is trusted; otherwise "self-signed certificate" |
+| MySQL | an error packet as the first packet, as MySQL does for a host it refuses | mysql2 3.24 and PyMySQL 1.2 show the words, with the code 1130 |
+| Redis | `-ERR <words>` to the first command | redis-cli 7.0 and redis-py 8.2 show the words. ioredis 6.1 shows them only when the connection stays open and every command gets the error; node-redis 6.4 shows them in its error events but reconnects forever |
+
+What I would put in the answer's place: a refused connection that Silo does not read gets the
+refusal in its protocol's first messages where Silo knows the protocol, and a reset only where it
+does not. That covers SSH, the case the answer names, with no host key: an agent whose `git push`
+over SSH is refused then reads why, instead of a network fault it retries. Silo knows the protocol
+by the port, and for PostgreSQL also by the client's first bytes. A protocol under TLS from its
+first byte (Redis with `rediss://`, MySQL's own TLS comes after the server's first packet) gets
+the words only through Silo's certificate, as HTTPS does. The scripts are in the project files,
+`research/2026-11-24-holds/protocols`.
