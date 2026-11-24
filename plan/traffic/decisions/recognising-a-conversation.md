@@ -67,3 +67,26 @@ by session apply only to requests from the same computer, and a fork starts its 
 each with a link to the one it was copied from. Silo knows which computer sent each request
 without asking the program, so this costs nothing to read. Whether a budget set on the parent's
 conversation should also cover the fork's is the owner's to decide.
+
+## Ways around a budget on a conversation (24 November 2026)
+
+An agent's part, 24 November 2026. The note above leaves open "whether a program can get around a
+budget on a conversation by starting a new one". Claude Code 2.1.331 ran against a fake provider
+whose model asked for a subagent, then for `claude -p 'Say hi.'` from the shell.
+
+- **A subagent stays in the conversation.** Its requests carried the parent's
+  `x-claude-code-session-id`, and the same id in `metadata.user_id`, plus a header of its own,
+  `x-claude-code-agent-id`. Its messages did not begin with the parent's, so the test by content
+  alone would start a new conversation; the join by session keeps it in. Codex names the parent of
+  its subagents too: its code reads and sends `x-codex-parent-thread-id` and `x-openai-subagent`
+  (seen in its binary, not run).
+- **A program started from a command is a new conversation.** The nested `claude -p` sent a new
+  session id, and nothing in its requests named the conversation that started it. By traffic
+  alone, its spend falls outside the parent's budget. An agent that hits its budget can go on
+  this way, by accident or not: running `claude -p` or `codex exec` from a command is common.
+
+What I would add to the answer: Silo knows more than the traffic. It sees which process opened
+each connection (`processes-in-the-record`), and the nested program runs under a command that the
+parent conversation's program started. So a conversation whose program was started, at any depth,
+by a command of another conversation's program counts toward that conversation's budget, and the
+app shows it inside it. A budget on the computer needs none of this, as the note says.
