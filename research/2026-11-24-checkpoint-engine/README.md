@@ -293,3 +293,13 @@ scripts/putback.sh                   # needs root, for loop mounts
 `bench` takes `strategy` (`none`, `full`, `range`, `cbw`, `nbd`, `delta`, `btrfs`), `size_gib`,
 `frag` (writes after the first clone, to make pieces), `rate` (writes a second), `interval_ms`,
 `count`, `drop`, `verify` and `unrelated`. Each line it prints is one phase, as JSON.
+
+## Related
+
+#366 (Linux hosts) measured what this page does not: a second computer on the same file system
+kept 4/5 of its writes a second during a checkpoint on XFS and lost a third on Btrfs; a restore by
+reflink took 10.6 to 11.7 s on XFS and 4.5 s on Btrfs; and a disk restored from a fragmented
+checkpoint read 7 to 8 times slower in order. That last one applies to `cbw` and `delta` too,
+whose checkpoints fragment as they chain. It also found that libkrun 2.0 exposes
+`krun_vmm_handle_pause` and `krun_vmm_handle_resume`, which a Linux computer's swap of bitmaps
+could use if Silo's write log lives outside virtio-blk.
