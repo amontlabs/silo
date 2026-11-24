@@ -64,6 +64,12 @@ build still refused the certificate. So containers can be made to trust Silo by 
 image builds still need the line above. The wrapper is in the project files,
 `research/2026-11-24-container-trust`.
 
+Docker itself trusts the computer's store: a registry whose certificate came from an authority
+found only in Ubuntu's system store took `docker push` and `docker pull` (Docker 29.9), and
+`docker build` fetched its `FROM` image from it, with no setting. So on a registry host Silo
+reads, pulling images works as it is; only the commands that run inside a container or a build
+step need Silo's authority given to them.
+
 ## Libraries and browsers that keep their own store (24 November 2026)
 
 An agent's part, 24 November 2026. `registry-traffic-read` found which package managers trust
