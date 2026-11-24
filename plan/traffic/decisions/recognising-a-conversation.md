@@ -23,3 +23,24 @@ compactions, and where a conversation does start again at zero, the budget on ma
 ## Notes
 
 To find out, with whether a program can get around a budget on a conversation by starting a new one. A budget on a computer has no such way around.
+
+## What captured traffic shows (24 November 2026)
+
+An agent's part, 24 November 2026. Read from the requests of Claude Code 2.1.331 and Codex 0.172.0
+to a fake provider, in the runs of `denial-per-program`. Short conversations only: no compaction,
+no going back.
+
+- **Claude Code** names its session in two places in every request: the header
+  `x-claude-code-session-id`, and `session_id` inside the JSON string `metadata.user_id`, beside
+  `device_id` and `account_uuid`. A conversation resumed with `claude --resume` kept the same
+  session id.
+- **Codex** names its conversation in the headers `session-id` and `thread-id`, in
+  `prompt_cache_key`, and in `client_metadata`, all the same id. It sent no
+  `previous_response_id`: each request carried the whole conversation (`store: false`).
+- **Each request began with the one before it**, for Codex as sent. For Claude Code only once the
+  format is read: its first request gave one message's content as a list holding one text block
+  (a description of the machine that the test machine's own setup added),
+  and every later request gave the same content as a plain string. Compared as the API reads them,
+  string and single text block being the same, every request began with the previous one and its
+  reply. So the comparison the answer describes has to read the format, as it says, and cannot
+  compare bytes.

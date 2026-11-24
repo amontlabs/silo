@@ -96,3 +96,39 @@ in the Workshop.
 An agent's note, not shared by polarzero: the provider keeps no conversation, so the agent
 program's later requests carry neither the call nor the denial unless Silo adds them. To test when
 this is built.
+
+## A probe on Linux, tried (24 November 2026)
+
+An agent's part, 24 November 2026. What the run of `denial-per-program` taught about the probe
+itself, on Linux. Three ways were tried.
+
+- **fanotify permission events** (`FAN_OPEN_EXEC_PERM`, `FAN_OPEN_PERM`). They worked, and the
+  kernel gives the real path. But an open event does not say whether the file is opened for
+  reading or for writing. So the probe had to refuse every open outside a list of folders, reads
+  included. That broke more than the denied call: Codex reads its certificate file again when it
+  builds the connection for its next request, was refused, and logged "failed to build HTTP client
+  with custom CA". Through a real boundary, that next request would have lacked Silo's certificate.
+- **seccomp user notification** (`SECCOMP_RET_USER_NOTIF`). It worked, and it sees the flags of
+  each open, so it refuses writes and lets reads through. The filter is set when the agent program
+  starts, every process the program starts inherits it, and no process can remove it, root
+  included. Two costs:
+  - The path is read from the program's memory, not resolved by the kernel. Claude Code writes
+    through `/proc/self/fd/<n>/<name>`, and a first version of the probe let those writes through
+    until it resolved such paths itself. The program can also change the path between the check
+    and the open. This is fine for a precaution, and it would not be for a rule.
+  - Every exec and every open for writing waits for the probe, armed or not. Codex 0.172.0 caused
+    about 700 such waits in a short run, Claude Code about 80.
+- **A BPF program on the kernel's security hooks** (`lsm/file_open`, `lsm/bprm_check_security`). It
+  would see both the real path and the mode of each open, and cost nothing when unarmed. The kernel
+  had it built in, but the container refused to load the program, so it was not tried. In a Linux
+  computer Silo builds the kernel, so it can be turned on there.
+
+Two findings for whoever builds the probe:
+
+- **Arming and disarming each need an answer from the probe.** In the run, the fake provider
+  passed on the next reply right after it wrote "disarm". In two runs, the probe read "disarm" only
+  after that reply had been passed on. Had the reply asked for a command, it would have failed
+  though nobody denied it. Silo has to wait for the probe to say it is disarmed before it passes
+  on the next reply, as it waits for the probe to say it is armed.
+- **The window ends on the result, as planned.** Both programs sent the result in their very next
+  request, so the window lasted well under a second in every run.

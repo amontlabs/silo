@@ -199,3 +199,38 @@ forwards the sign-in inside each request and stores it nowhere (`logins`).
   and OpenAI's help-centre articles.
 - This is a reading of the terms, not legal advice. No lawyer has read it, and neither vendor was
   asked.
+
+## Trust from the system's store alone, on Linux (24 November 2026)
+
+An agent's part, 24 November 2026. This answers one of the points still to find out above, on
+Linux only.
+
+A test authority was made, and a certificate signed by it for `api.anthropic.com`,
+`api.openai.com` and `chatgpt.com`. A fake provider presented it on port 443 of the same machine,
+and `/etc/hosts` sent those names there, so each program reached it as it would reach a boundary
+that ends the connection. Each program ran with an empty environment apart from its API key, so
+no setting of the machine or of this session told it about the authority. Ubuntu 24.04, Claude
+Code 2.1.331, Codex 0.172.0 with an API key.
+
+| Where the authority was | Claude Code | Codex |
+|---|---|---|
+| Nowhere | Refuses: "Self-signed certificate detected (SELF_SIGNED_CERT_IN_CHAIN) … set NODE_EXTRA_CA_CERTS to that CA bundle, or add it to the system certificate store" | Refuses: its WebSocket fails at the stage `Tls`, and it keeps retrying |
+| Only in the system's store (`update-ca-certificates`) | Works: one tool call, one answer | Works: one tool call, one answer |
+| Only in the program's setting (`NODE_EXTRA_CA_CERTS`, `CODEX_CA_CERTIFICATE` or `SSL_CERT_FILE`) | Works | Works, with either setting |
+
+So on Linux the computer's trust store is enough for both programs, and no setting in the program
+is needed. The Mac, and Codex signed in with ChatGPT, are still to test.
+
+Three more things were seen in the same runs:
+
+- **Claude Code compresses its requests.** To `api.anthropic.com` it sent each request body
+  compressed with gzip (`content-encoding: gzip`). To a provider address set by
+  `ANTHROPIC_BASE_URL` it did not. The boundary reads a decompressed copy and forwards the
+  compressed bytes, as `forwarded-byte-for-byte` already says.
+- **Codex falls back from its WebSocket.** With an API key, Codex 0.172.0 first opened a WebSocket
+  to `api.openai.com/v1/responses`. When that failed (the fake provider did not speak WebSocket),
+  it tried seven times and then sent plain requests with a stream of events. So a boundary that
+  refused the WebSocket would still read Codex, through the fallback. Whether the fallback stays in
+  later versions is not known.
+- **Claude Code calls two more addresses on the same host** before its first model request:
+  `GET /api/claude_code/settings` and `GET /api/claude_code/policy_limits`.
