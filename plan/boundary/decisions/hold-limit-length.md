@@ -79,8 +79,8 @@ the body until you answer. Tried with a 20 MB PUT and a hold of 150 s:
   Silo read again. `requests` did the same without asking. Both finished with 200 at 150 s.
 - **boto3 1.44 did not.** It asked to continue, waited 60 s, closed the connection and sent the
   whole request again, three times, and failed at 184 s with "Connection was closed before we
-  received a valid response". boto3 waits 60 s for each step by default, downloads included, and
-  retries on its own. So an agent's S3 upload or download held past 60 s becomes three requests
+  received a valid response". boto3's default wait for each step is 60 s (`read_timeout`, which
+  applies to downloads too; not tried), and it retries on its own. So an agent's S3 upload or download held past 60 s becomes three requests
   and, unless they join one ask as proposed above, three asks.
 
 So boto3 joins pip as a tool that gives up first: holding a body costs nothing by itself, and the
