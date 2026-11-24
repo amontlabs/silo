@@ -142,9 +142,10 @@ and both accepting the same user key:
 - **A limited key cannot sign a commit.** Many people sign their commits with their SSH key
   (`git commit -S` with `gpg.format=ssh`, shown as "Verified" on GitHub). With the key limited to
   github.com, the signature that `git commit -S` asks for was refused ("agent refused operation"),
-  since it goes to no host; the same key without a limit signed. So a key used for both needs two
-  entries in Silo: one limited to hosts for logging in, and one Silo lets sign commits, or the
-  commits of an agent go unsigned. Tried the same day, OpenSSH 9.6.
+  since it goes to no host; the same key without a limit signed. OpenSSH's own agent offers no limit
+  between the two. Silo's agent, which sees what it is asked to sign, can: a commit signature
+  names its purpose (`git`) in the signed data, so Silo can allow it, record it, or ask, beside
+  the host limit for logging in. Otherwise the commits of an agent go unsigned. Tried the same day, OpenSSH 9.6.
 
 What I would put in the answer's place for SSH keys: Silo holds the key in an agent outside the
 computer, limited to the hosts you allowed, and gives the computer the agent's socket. Every
