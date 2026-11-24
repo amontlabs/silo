@@ -1,0 +1,10 @@
+{
+  "asks": "Can you bring back one path from a checkpoint without restoring the whole computer?",
+  "answer": "Yes. You read any path as it was in a checkpoint, and you can put it back into the computer while it runs. Before a path is put back, Silo takes a checkpoint of now, so nothing is lost, and the record says who put back which path from which checkpoint. Silo never chooses the paths: you name them.",
+  "needs": [
+    "one-run-grain",
+    "putting-back-a-runs-paths",
+    "kinds-of-other-actions",
+    "checkpoint-per-system"
+  ]
+}

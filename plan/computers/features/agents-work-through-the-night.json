@@ -1,0 +1,14 @@
+{
+  "name": "Agents that work through the night",
+  "what": "An agent you start in main goes on when you close the terminal and while the Mac would otherwise sleep. You find it again with `ssh main.keep`, and the record shows any sleep of the Mac.",
+  "needs": [
+    "runs-outlive-the-terminal",
+    "mac-kept-awake",
+    "computers-main-on-a-mac",
+    "agent-programs-reach-every-computer"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Starting agents in the evening and reading their work in the morning is the first use of main, and today a closed terminal or a sleeping Mac ends it."
+  }
+}
