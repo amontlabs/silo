@@ -320,3 +320,33 @@ What this changes for Silo:
 - **Two proxies in a row.** Codex with its proxy on, inside Silo, ends TLS itself and reaches the
   host through Silo's boundary. Its proxy trusts "native root certificates for MITM trust bundle",
   so Silo's authority in the computer's store should be enough. Not tried.
+
+## A database password, held outside (24 November 2026)
+
+An agent's part, 24 November 2026. The answer leaves database passwords as ordinary files "until
+a way is found", and the note on AWS says the boundary "would have to end that protocol itself".
+That was tried for PostgreSQL, the database agents meet most, with PgBouncer 1.22 standing in for
+the boundary. The server was PostgreSQL 16 with TLS and SCRAM-SHA-256, the default of hosted
+databases, so the password itself never crosses the connection and no swap can work.
+
+- **Ending the protocol works.** The computer's `DATABASE_URL` held a placeholder as the password.
+  The stand-in checked the placeholder, then logged in to the server itself with the real
+  password, over TLS it verified. psql 16, psycopg 3.3, asyncpg 0.32, Node `pg` 8.23 and Node
+  `postgres` 4.1 all connected and ran queries, prepared statements and a cancelled query worked.
+  The placeholder sent straight to the server was refused.
+- **It needs no certificate the computer trusts in the usual case.** psql connected with
+  `sslmode=disable` and with `require`, the mode hosted databases print in their connection
+  strings, which encrypts without checking the certificate. `verify-full` needs Silo's authority,
+  as HTTPS does.
+- **It costs channel binding.** A client that demands it (`channel_binding=require`) was refused,
+  because PgBouncer 1.22 does not offer it to its clients. Silo's own end of the protocol would
+  have to offer it to keep such a client working.
+- **It is a proxy of a whole protocol, not a swap.** Silo keeps one connection to the server for
+  each connection from the computer, and must answer the start-up, the cancel requests and the
+  errors itself. PgBouncer does all of it, in session mode, so it could serve as the part that
+  ends PostgreSQL, or show what Silo's own needs to do. MySQL (its own challenge) and Redis (a
+  plain `AUTH` command, which a swap would cover inside TLS) were not tried.
+
+What I would add to the answer: PostgreSQL passwords can be held outside, by a boundary that ends
+the protocol, which removes the most common secret from the "ordinary files" list. The
+configuration is in the project files, `research/2026-11-24-db-password`.
