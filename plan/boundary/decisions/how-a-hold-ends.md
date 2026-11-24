@@ -100,3 +100,21 @@ A proposal: when a rule refuses or holds a host, Silo answers the lookup with th
 boundary, as for any other host, and refuses or holds the request itself. On HTTPS, the boundary
 already ends the encrypted connection, so the refusal comes back with Silo's words. A lookup is
 refused only when the lookup itself is what a rule holds, such as a name used to carry data out.
+
+## The same refusals for Claude Code on Amazon Bedrock (24 November 2026)
+
+An agent's part, 24 November 2026. Claude Code 2.1.331 on Bedrock (`CLAUDE_CODE_USE_BEDROCK=1`)
+against a stand-in that refused each streamed model request with a status and a JSON body
+carrying the sentence, as Bedrock words its errors.
+
+| Status (Bedrock's error type) | Requests sent | What the user saw |
+|---|---|---|
+| 451 (`AccessDeniedException`) | 1 | `API Error: 451` and the sentence, at once |
+| 402 (`AccessDeniedException`) | 1 | `API Error: 402` and the sentence, at once |
+| 400 (`ValidationException`) | 8, in under a second | `API Error: 400` and the sentence |
+| 403 (`AccessDeniedException`) | 8 and counting, retried up to 10 times with waits up to 40 s | nothing yet when the test stopped it at 90 s |
+| 429 (`ThrottlingException`) | 8 and counting, the same | nothing yet at 90 s |
+
+So the answer for Claude Code holds on Bedrock: 451 for a hold, 402 for a budget. A 403, which a
+proxy would send by habit, is the worst choice there: Claude Code takes it for a passing failure
+and keeps asking for minutes.

@@ -259,3 +259,23 @@ So for Codex on a socket, the boundary cannot read a conversation from one messa
 follow `previous_response_id` from reply to reply within the connection, as
 `recognising-a-conversation` already allows. Whether OpenAI's own server accepts compression, and
 whether Codex signed in with ChatGPT behaves the same, is not known.
+
+## Claude Code on Amazon Bedrock (24 November 2026)
+
+An agent's part, 24 November 2026. Claude Code 2.1.331 with `CLAUDE_CODE_USE_BEDROCK=1`, against a
+stand-in for Bedrock. What the boundary reads differs from Anthropic's API in four ways:
+
+- The address names the model: `POST /model/<model id>/invoke-with-response-stream` for the
+  conversation, `/invoke` for short calls. The body is Anthropic's request with
+  `anthropic_version: "bedrock-2023-05-31"`, and the betas move from a header into the body
+  (`anthropic_beta`).
+- The body is sent uncompressed, since its hash is part of the signature
+  (`x-amz-content-sha256`).
+- The reply is not a stream of server-sent events. It is AWS's binary event stream
+  (`application/vnd.amazon.eventstream`): frames with a length, headers and a CRC, each carrying a
+  JSON object whose `bytes` holds one of Anthropic's events, base64-encoded. The reader needs this
+  framing too, and the probe of `denied-tool-call-mechanism` must see a tool call inside it.
+- At start, Claude Code lists the region's inference profiles and sends a short request to three
+  models before the conversation begins. `x-claude-code-session-id` is sent here too.
+
+The scripts are in the project files, `research/2026-11-24-bedrock`.
