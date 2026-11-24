@@ -221,6 +221,22 @@ Code 2.1.331, Codex 0.172.0 with an API key.
 So on Linux the computer's trust store is enough for both programs, and no setting in the program
 is needed. The Mac, and Codex signed in with ChatGPT, are still to test.
 
+On the Mac, read from the programs' own code (not run on a Mac):
+
+- Claude Code 2.1.331 trusts two lists unless told otherwise: the authorities it carries and the
+  system's. `CLAUDE_CODE_CERT_STORE` set to `bundled` alone drops the system's. Its runtime reads
+  the system's list through the operating system, which on a Mac is the keychain.
+  `NODE_EXTRA_CA_CERTS` only adds to the two.
+- Codex 0.172.0 logs "using system root certificates because no CA override environment variable
+  was selected", and its HTTP client uses native-tls, which on a Mac asks the keychain. With
+  `CODEX_CA_CERTIFICATE` or `SSL_CERT_FILE` set it builds a second client with that file as its
+  list. Its Bedrock client is a separate one, from the AWS SDK.
+
+So an authority Silo adds to the computer's keychain should be enough on a Mac too, for the
+model requests of both. What stays to try on a Mac: that the keychain entry is enough for Codex's
+Bedrock client and for its side connection to `github.com`, and that a program with its own
+setting set by the user does not drop the keychain.
+
 Three more things were seen in the same runs:
 
 - **Claude Code compresses its requests.** To `api.anthropic.com` it sent each request body
