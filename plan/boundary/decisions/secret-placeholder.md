@@ -99,6 +99,19 @@ What it takes, and what is still open:
   as AWS does. A protocol that proves the key in an exchange, such as SSH or a database's
   challenge, cannot be signed again this way. The boundary would have to end that protocol itself.
 
+Tried the same day with boto3 1.44.10 against the same stand-in, now over TLS as AWS is reached:
+
+- boto3's default upload is neither a plain body nor signed chunks. It sends the body in
+  `aws-chunked` framing with a checksum after it and declares the payload unsigned
+  (`STREAMING-UNSIGNED-PAYLOAD-TRAILER`), over HTTP chunked transfer. The signature covers only
+  the headers, so the boundary signs the headers again and lets the body stream past. Small
+  uploads and an upload of 20 MB in parts passed.
+- Presigned links, both SigV4 and the older SigV2 that boto3 still makes by default, passed when
+  the boundary signed the query again. That holds only for a link used from inside. A link handed
+  out, say in a pull request comment so a reviewer can see a screenshot, carries the
+  placeholder's signature and is refused by AWS. Silo should say so when the secret is set up.
+- Signed chunks were still not tried, since boto3 never sent them.
+
 So the answer's "cannot be swapped in" holds for the value, but not for the key's use. What I
 would put in its place for AWS: the boundary signs the request again with the real key, on the way
 to the hosts you allowed, and the computer holds a placeholder for the key as for any other
