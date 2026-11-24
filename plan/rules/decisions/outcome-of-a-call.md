@@ -32,3 +32,12 @@ worth saying, and a repository made public cannot be made private again for whoe
 - The calls that turn a protection off include RDS `ModifyDBInstance` with
   `DeletionProtection=false`, S3 `PutBucketVersioning` suspended, Atlas termination protection
   off, Turso delete protection off, and `SkipFinalSnapshot=true` on an RDS delete.
+- Thirteen exposing operations, with their wire forms, are in
+  `research/2026-11-24-destructive-calls/details/undo-paths.md`: a GitHub repository or gist made
+  public, S3 public access block removed or a public ACL, a GCS `allUsers` binding, a public
+  Supabase or R2 bucket, Vercel deployment protection off, Firebase rules, Cloudflare Access app
+  deleted, a Netlify password removed, an npm publish, a public Docker Hub repository, a Drive file
+  shared with anyone who has the link.
+- npm has its own hold for a publish: staged publishing keeps a version hidden until a maintainer
+  approves it with a second factor. A token that may only stage, held by Silo, makes every publish
+  wait for that approval.
