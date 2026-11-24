@@ -70,3 +70,41 @@ What I would add to the answer: a limited computer refuses at once, never in sil
 hosts each program reaches besides its model belong in the piece that adds the program
 (`recipe-names-its-needs`), so that a new computer does not raise an alert or an ask for
 `ab.chatgpt.com`. The scripts are in the project files, `research/2026-11-24-side-hosts`.
+
+## The hosts a common install reaches (24 November 2026)
+
+An agent's part, 24 November 2026. A computer "limited to a list of hosts" is only as good as the
+list. Each install below ran once on Linux with empty caches, through a proxy that logged every
+host it reached:
+
+| Install | Hosts reached |
+|---|---|
+| `npm install esbuild sharp bcrypt typescript prisma@6 @prisma/client@6` (npm 10.9) | registry.npmjs.org; binaries.prisma.sh, where Prisma's install step fetches its engines |
+| `pip install requests numpy pandas` (pip 24) | pypi.org, files.pythonhosted.org |
+| `uv pip install httpx pydantic` (uv 0.11) | pypi.org, files.pythonhosted.org |
+| `uv python install 3.12` | releases.astral.sh |
+| `cargo fetch` of a crate using serde | index.crates.io, static.crates.io |
+| `go mod tidy` of a module using github.com/google/uuid (Go 1.24) | proxy.golang.org, sum.golang.org |
+| `git clone https://github.com/…` | github.com |
+| A GitHub release asset with `curl -L` | github.com, then release-assets.githubusercontent.com |
+| A file from raw.githubusercontent.com | raw.githubusercontent.com |
+| `apt-get update` on Ubuntu 24.04 | archive.ubuntu.com, security.ubuntu.com, and each extra source |
+| `npx playwright install --dry-run chromium` | cdn.playwright.dev, with playwright.download.prss.microsoft.com as the second source |
+| What nvm reads | nodejs.org |
+
+So most installs need a second host that their usual name does not suggest: a list holding
+`pypi.org` fails on the first wheel, one holding `crates.io` fails on the first crate, one holding
+`github.com` fails on the first release asset. The agent then sees, with that second host refused:
+pip named the host and showed the refusal; cargo retried each crate and reported "spurious network
+error" and a 403; curl said only "CONNECT tunnel failed, response 403". (These refusals went
+through a proxy that the tools were told about, where the reason travels in the proxy's answer.
+Silo's boundary is not a proxy the tools know, so on a host it does not read, the words reach
+them only as `how-a-hold-ends` describes.)
+
+What I would add to the answer: Silo offers a limited computer's list in named groups, each holding
+an ecosystem's hosts together: "PyPI" is pypi.org and files.pythonhosted.org, "crates" is
+index.crates.io and static.crates.io, "Go modules" is proxy.golang.org and sum.golang.org,
+"GitHub" includes release-assets.githubusercontent.com and raw.githubusercontent.com. A group is a
+shorthand for its hosts, shown as such, and `network-rules-from-use` still finds what a project
+adds, such as binaries.prisma.sh. Not tried: Docker Hub, Homebrew, Maven. The proxy and the runs
+are in the project files, `research/2026-11-24-install-hosts`.
