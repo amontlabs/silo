@@ -80,7 +80,7 @@ host it reached:
 | Install | Hosts reached |
 |---|---|
 | `npm install esbuild sharp bcrypt typescript prisma@6 @prisma/client@6` (npm 10.9) | registry.npmjs.org; binaries.prisma.sh, where Prisma's install step fetches its engines |
-| `pip install requests numpy pandas` (pip 24) | pypi.org, files.pythonhosted.org |
+| `pip install requests numpy pandas` (pip 26.2) | pypi.org, files.pythonhosted.org |
 | `uv pip install httpx pydantic` (uv 0.11) | pypi.org, files.pythonhosted.org |
 | `uv python install 3.12` | releases.astral.sh |
 | `cargo fetch` of a crate using serde | index.crates.io, static.crates.io |
