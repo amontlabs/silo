@@ -166,6 +166,38 @@ installation tokens. A secret declared in Silo then has two parts: what the comp
 what the boundary does with the replies that mint new secrets from it. The scripts are in the
 project's files, under `research/2026-11-24-gcp/`.
 
+## An MCP server's sign-in, held outside (24 November 2026)
+
+An agent's part, 24 November 2026. A remote MCP server, such as Linear's or Sentry's, is signed in
+to with OAuth. Claude Code 2.1.331 keeps the tokens in `.credentials.json`, under `mcpOAuth`,
+inside the computer: an agent that reads the file holds your Linear account. These are your
+tokens for a service, not the agent program's own login, which `logins` keeps Silo out of.
+
+A fake MCP server with OAuth showed how Claude Code renews them. When the access token has expired
+it sends `grant_type=refresh_token&refresh_token=<token>&resource=<server>&client_id=<id>` to the
+token endpoint as a form, then the new access token as `Authorization: Bearer` on every MCP
+request. The refresh token is in the body.
+
+Then the computer was given two placeholders, and a boundary sketch between Claude Code and the
+server held the real tokens. It swapped the refresh placeholder in the form's `refresh_token`
+field, kept the tokens of the reply and sent placeholders on in their place, and swapped the access
+placeholder in the `Authorization` header. `claude mcp list` connected, through two renewals in a
+row with the server issuing new tokens each time. The credentials file held only the placeholders
+at the end.
+
+So the case of the Google key is general: a token request names its secret in a known field of its
+body, and its reply mints new ones. Two things follow for the answer:
+
+- The swap "in the header the secret names" also needs the form field of a token request. The
+  field is fixed by OAuth (RFC 6749), so it is one more place a secret can name, not a search of
+  bodies.
+- A first sign-in made inside the computer, through the server's own page, ends with the same
+  reply. Silo could keep any MCP server's tokens out of the computer with no step of yours, by
+  reading the token endpoint that the server's own metadata names. Not tried: the first sign-in
+  needs a browser.
+
+The scripts are in the project files, `research/2026-11-24-mcp-oauth`.
+
 ## A placeholder in a password: Basic authentication (24 November 2026)
 
 An agent's part, 24 November 2026. The answer above has Silo swap a placeholder in a header it
