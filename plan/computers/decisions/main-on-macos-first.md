@@ -62,7 +62,7 @@ how the code reaches it.
 
 ## Weighed against a Linux main first
 
-An agent's part, 24 November 2026, from [the comparison of first builds](../../../research/2026-11-24-first-build-and-the-record.md). A Linux main on the Mac in the first build was
+An agent's part, 24 November 2026, from [the comparison of first builds](../../../research/2026-11-24-first-build-and-the-record/README.md). A Linux main on the Mac in the first build was
 weighed, because more of the record has already run on Linux (#347, #367, #371) and a Linux
 computer can give processes from a probe with a kernel of Silo's own. It is not recommended: it
 lands beside free Linux microVM products on the Mac, it gives up Xcode and macOS apps in main, and

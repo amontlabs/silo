@@ -45,7 +45,7 @@ This is a lean, not a verdict. The answer is written from these words.
 
 ## As a fallback for the first build
 
-An agent's part, 24 November 2026, from [the comparison of first builds](../../../research/2026-11-24-first-build-and-the-record.md). If the first build's macOS main fails on the Mac
+An agent's part, 24 November 2026, from [the comparison of first builds](../../../research/2026-11-24-first-build-and-the-record/README.md). If the first build's macOS main fails on the Mac
 kit's tests, this entry is the one that moves forward: a Linux main on the Mac, with the same
 engine, boundary and recorder. The comparison counts 94 open decisions for that first build,
 against 88 for a macOS main with the record of model traffic.

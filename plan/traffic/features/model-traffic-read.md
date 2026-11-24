@@ -21,7 +21,7 @@ rests on it.
 
 ## In the first build
 
-An agent's part, 24 November 2026, from [the comparison of first builds](../../../research/2026-11-24-first-build-and-the-record.md). #348 puts this feature in the third build. The
+An agent's part, 24 November 2026, from [the comparison of first builds](../../../research/2026-11-24-first-build-and-the-record/README.md). #348 puts this feature in the third build. The
 comparison proposes it in the first, beside main and its checkpoints, because the record of what
 agents sent and spent is what no other product found gives, and the first build otherwise records
 only which files changed. It costs 19 more open decisions, most of them already tried in #347,

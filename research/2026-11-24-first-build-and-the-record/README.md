@@ -33,6 +33,10 @@ answers the macOS questions. If the Mac kit shows that macOS 27's provisioning o
 macOS computer does not work, B is the fallback, and it keeps every piece built for the boundary
 and the recorder.
 
+To rule on A in one sitting, two more pages: [decisions.md](decisions.md) gives a second opinion
+on each of the 19 decisions A adds, with the exact text to take, and [specs.md](specs.md) says what
+A changes in #370's build specs and specifies its one new step.
+
 ## One night, under each option
 
 You leave Claude Code and Codex in main for the night. Claude Code ends with «All tests pass.», but
