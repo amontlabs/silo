@@ -1,0 +1,7 @@
+{
+  "asks": "When several agents in one macOS computer test iOS apps, which simulator does each use?",
+  "answer": "Silo does not choose for them. A recipe for Apple platforms can create several simulators with distinct names, and the record shows which process booted, erased or installed into each one, so that an agent that wiped another's simulator is seen.",
+  "needs": [
+    "main-on-macos-first"
+  ]
+}

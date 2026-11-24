@@ -59,3 +59,19 @@ how the code reaches it.
 
 `linux-beside-a-macos-main`, `containers-on-macos`, `record-halves-per-system`,
 `macos-ships-facts-first`, `x86-linux-computers`, `neutral-core`.
+
+## Who needs it most, 24 November 2026
+
+An agent's part, from research on who would use Silo first. It adds a reason and changes neither
+the answer nor the recommendation.
+
+- A Linux computer per agent, with network rules and secrets kept outside, is already free on a
+  Mac. Agents that build Mac and iOS software cannot use one: Linux has no Xcode and no iOS
+  simulator. For these developers the alternatives are a second Mac or a Mac rented by the hour or
+  the month. Main on macOS is where Silo has no free substitute.
+- A developer shipped a small app on 20 November 2026 to watch agents inside macOS virtual
+  machines, because "I couldn't see what the agents were doing in there". That is the record, asked
+  for by someone who already runs agents in a macOS computer.
+- Several agents in one macOS computer clash over the iOS simulator. `simulators-for-parallel-agents`
+  asks what Silo does about it.
+
