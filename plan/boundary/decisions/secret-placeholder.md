@@ -344,8 +344,14 @@ databases, so the password itself never crosses the connection and no swap can w
 - **It is a proxy of a whole protocol, not a swap.** Silo keeps one connection to the server for
   each connection from the computer, and must answer the start-up, the cancel requests and the
   errors itself. PgBouncer does all of it, in session mode, so it could serve as the part that
-  ends PostgreSQL, or show what Silo's own needs to do. MySQL (its own challenge) and Redis (a
-  plain `AUTH` command, which a swap would cover inside TLS) were not tried.
+  ends PostgreSQL, or show what Silo's own needs to do. MySQL, which has its own challenge, was
+  not tried.
+- **Redis needs only a swap.** Its password travels as it is, in the `AUTH` command (or `HELLO`).
+  A stand-in that swapped the placeholder in the command stream worked for redis-cli 7.0,
+  redis-py 8.2, ioredis 6.1 and node-redis 6.4, in both versions of the protocol. The swap has to
+  fix the length written before the value, since the protocol counts bytes, unless the placeholder
+  has the real value's length (the shaped placeholder above). Under TLS (`rediss://`, as hosted
+  Redis gives) Silo ends TLS first, as for HTTPS.
 
 What I would add to the answer: PostgreSQL passwords can be held outside, by a boundary that ends
 the protocol, which removes the most common secret from the "ordinary files" list. The
