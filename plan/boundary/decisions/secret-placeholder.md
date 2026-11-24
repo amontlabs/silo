@@ -430,8 +430,8 @@ OPENAI_API_KEY` (gh 2.89) against a stand-in for GitHub's API:
 - So the boundary cannot swap it: it never sees the value. It should not swap it either way,
   since the real key would then leave for a host the secret was not allowed to reach.
 - The deployment then fails later, far from the computer, with an invalid key, and nothing told
-  you why. A service that takes the value in plain (Vercel, Cloudflare and Fly take JSON over
-  HTTPS) shows the placeholder to the boundary, which can recognise it; GitHub's sealed box does
+  you why. A service whose API takes the value in plain shows the placeholder to the boundary,
+  which can recognise it (Vercel's, Cloudflare's and Fly's are documented so; not tried); GitHub's sealed box does
   not, though the request names the secret (`PUT …/actions/secrets/OPENAI_API_KEY`).
 
 What I would add to the answer: a request that stores a secret in another service is a moment to
