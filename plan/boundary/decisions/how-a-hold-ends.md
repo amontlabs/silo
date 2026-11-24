@@ -196,3 +196,25 @@ server's first packet, so its refusal needs no certificate. A protocol under TLS
 byte, such as Redis with `rediss://`, gets the words only through Silo's certificate, as HTTPS
 does. The scripts are in the project files,
 `research/2026-11-24-holds/protocols`.
+
+## A refused HTTP/3 connection, in a browser (24 November 2026)
+
+An agent's part, 24 November 2026. The answer leaves open "how each takes the answer on UDP". Of
+the programs tried today, only a browser sends QUIC: Claude Code, Codex, curl as Ubuntu builds it,
+and the Python and Node libraries all use TCP. Playwright's Chromium (build 1243) loaded a test
+host over TCP, got `Alt-Svc: h3=":443"` in the reply, and loaded it five more times.
+
+- **Port unreachable**, the answer's choice: Chromium sent one QUIC packet, got the ICMP answer and
+  stayed on TCP. Every page loaded, in the same 10 to 15 ms as with no QUIC at all.
+- **Silence**: two QUIC packets, then nothing more; the pages loaded in the same time, since
+  Chromium starts TCP alongside QUIC instead of waiting for it.
+- **An authority added on the computer is refused for QUIC.** With the test authority in Chromium's
+  store, the QUIC handshake reached the test server and Chromium ended it with
+  `ERR_QUIC_CERT_ROOT_NOT_KNOWN`: it accepts that authority over TCP and not over QUIC. So a
+  connection a browser makes over QUIC can never carry Silo's certificate, which agrees with the
+  answer of `ending-the-encrypted-connection`: a host Silo reads is reached over HTTP/3 only if
+  Silo passes the UDP unread, which the answer does not do.
+
+Not tried: a browser profile that had already used HTTP/3 to the host, where Chromium may wait a
+little for QUIC before starting TCP; a real network delay (the test ran on one machine); Firefox.
+The scripts are in the project files, `research/2026-11-24-quic`.
