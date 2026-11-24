@@ -1,0 +1,14 @@
+{"phase":"fill","strategy":"none","gib":8,"s":6.98}
+{"phase":"frag","writes":300000,"pieces":484823,"s":56.6}
+{"phase":"base","s":9.000,"pieces":484823}
+{"phase":"baseline","p50_ms":0.215,"p99_ms":0.591,"max_ms":45.204}
+{"phase":"ckpt","n":1,"op_s":1.0000,"total_s":1.0002,"pause_ms":0.000,"longest_write_ms":21.33,"in_clone_ms":21.33,"after_clone_ms":21.33,"publish_ms":21.33,"writes_during":974,"ranges":0,"copied_mib":0.0,"cow_copies":0}
+{"phase":"ckpt","n":2,"op_s":1.0000,"total_s":1.0001,"pause_ms":0.000,"longest_write_ms":32.27,"in_clone_ms":32.27,"after_clone_ms":32.27,"publish_ms":32.27,"writes_during":926,"ranges":0,"copied_mib":0.0,"cow_copies":0}
+{"phase":"ckpt","n":3,"op_s":1.0000,"total_s":1.0002,"pause_ms":0.000,"longest_write_ms":66.32,"in_clone_ms":66.32,"after_clone_ms":66.32,"publish_ms":66.32,"writes_during":750,"ranges":0,"copied_mib":0.0,"cow_copies":0}
+{"phase":"ckpt","n":4,"op_s":1.0000,"total_s":1.0001,"pause_ms":0.000,"longest_write_ms":16.36,"in_clone_ms":16.36,"after_clone_ms":16.36,"publish_ms":16.36,"writes_during":965,"ranges":0,"copied_mib":0.0,"cow_copies":0}
+{"phase":"ckpt","n":5,"op_s":1.0000,"total_s":1.0001,"pause_ms":0.000,"longest_write_ms":30.78,"in_clone_ms":30.78,"after_clone_ms":30.78,"publish_ms":30.78,"writes_during":963,"ranges":0,"copied_mib":0.0,"cow_copies":0}
+{"phase":"ckpt","n":6,"op_s":1.0000,"total_s":1.0001,"pause_ms":0.000,"longest_write_ms":84.63,"in_clone_ms":84.63,"after_clone_ms":84.63,"publish_ms":84.63,"writes_during":884,"ranges":0,"copied_mib":0.0,"cow_copies":0}
+{"phase":"ckpt","n":7,"op_s":1.0000,"total_s":1.0001,"pause_ms":0.000,"longest_write_ms":27.13,"in_clone_ms":27.13,"after_clone_ms":27.13,"publish_ms":27.13,"writes_during":941,"ranges":0,"copied_mib":0.0,"cow_copies":0}
+{"phase":"ckpt","n":8,"op_s":1.0000,"total_s":1.0001,"pause_ms":0.000,"longest_write_ms":37.06,"in_clone_ms":37.06,"after_clone_ms":37.06,"publish_ms":37.06,"writes_during":935,"ranges":0,"copied_mib":0.0,"cow_copies":0}
+{"phase":"run","writes":45487,"p50_ms":0.218,"p99_ms":1.313,"max_ms":104.80,"paused_ms":0.000,"pieces_live":552721}
+{"phase":"space","used_mib":16117}
