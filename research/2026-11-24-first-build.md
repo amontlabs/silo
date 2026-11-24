@@ -13,8 +13,8 @@ their own, restore, and a record of which files changed between two checkpoints.
 the `silo` command. There is no app, no rules, no model traffic and no Linux yet.
 
 That is 12 features. Before they can be built, 56 open decisions need a verdict. The other 250 open
-decisions can wait. About 14 of the 56 are about how Silo is built, and agents could take them with
-a judge, as `owners-part-on-engine` allows. That leaves about 42 for polarzero. Eight things can
+decisions can wait. Twelve of the 56 are about how Silo is built, and agents could take them with a
+judge, as `owners-part-on-engine` allows. That leaves 44 for polarzero. Eight things can
 only be measured on a Mac, and two risks are not in the plan at all: getting a fresh macOS
 computer past Setup Assistant with nobody clicking, and reading a disk that a hostile agent wrote
 without mounting it in your Mac's kernel.
