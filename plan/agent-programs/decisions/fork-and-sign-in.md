@@ -61,7 +61,8 @@ What this changes:
   `/etc/machine-id` and the PID namespace; Codex and Gemini CLI keep an `installation_id`. A fork
   with main's `machine-id` looks to these programs like main itself. Gemini CLI's encrypted store
   goes the other way: a fork with a new host name can no longer read the copy, which is the safe
-  failure. Proposed: a fork gets a new `machine-id` and host name, as a cloned VM usually does.
+  failure. `fork-identity` already gives a fork a new machine identifier and name; this is one
+  more reason it must be done before anything in the fork starts.
 - **Every program has a variable that moves its files.** A rule that sets `CODEX_HOME` or
   `CLAUDE_CONFIG_DIR` to a place Silo keeps out of copies would work for these programs without
   knowing their file names, but each program's default still has to be known for a user who sets
