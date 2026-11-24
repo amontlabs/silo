@@ -18,7 +18,7 @@ which this research does not repeat.
 | [`details/daily-loop.md`](details/daily-loop.md) | One day and night, step by step, with seven gaps; the lock-screen ask; which alerts interrupt |
 | [`details/cli.md`](details/cli.md) | The `silo` command: every command, its output on one real case, and the conventions they share |
 | [`details/plan-map.md`](details/plan-map.md) | Each step against its plan entries, the ten entries that hurt the experience, and the new entries proposed |
-| `screens/` | Static pictures of the phone ask, the phone list, the Mac's morning screen and a Mac notification |
+| [`screens/`](screens/README.md) | Static pictures of the phone ask, the phone list, the Mac's morning screen and a Mac notification |
 | [`details/onboarding.md`](details/onboarding.md) | How Docker's `sbx`, OrbStack, Tart, Conductor, Claude Code, Codex and others onboard, and bring people back |
 | [`details/complaints.md`](details/complaints.md) | 103 user reports, sourced and counted, on onboarding, approvals, unattended runs, phones and lost work |
 | [`details/notify-review-cli.md`](details/notify-review-cli.md) | Phone approvals and push, morning review, and command-line conventions in other tools |

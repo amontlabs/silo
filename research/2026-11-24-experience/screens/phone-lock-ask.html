@@ -53,6 +53,7 @@ body {
 .body { color: var(--glass-ink); line-height: 20px; }
 .body .d { color: var(--glass-muted); }
 .m { font-family: "DejaVu Sans", -apple-system, sans-serif; font-size: 13px; color: var(--accent-ink); }
+.q, .nw { white-space: nowrap; }
 .q::before { content: "«"; color: var(--glass-muted); } .q::after { content: "»"; color: var(--glass-muted); }
 
 .actions {
@@ -91,9 +92,10 @@ body.is-folded .folded { display: block; }
     <div class="icon"><i></i></div>
     <div>
       <div class="head"><span><b>SILO</b> · main</span><span>now</span></div>
-      <div class="title">Push to github.com/ana/app, branch main</div>
+      <div class="title">Push to github.com/ana/app, <span class="nw">branch main</span></div>
       <div class="body"><span class="d">3 commits · held, 74 s left</span></div>
-      <div class="body"><span class="m" role="img" aria-label="Opinion of which-run-did-it">◇</span> claude #2 · <span class="q" aria-label="Words claude #2 wrote">tests pass, pushing the fix</span></div>
+      <div class="body"><span class="m" role="img" aria-label="Opinion of which-run-did-it">◇</span> claude #2</div>
+      <div><span class="q" aria-label="Words claude #2 wrote">tests pass, pushing the fix</span></div>
     </div>
   </div>
   <div class="actions">
