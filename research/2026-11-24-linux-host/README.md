@@ -89,9 +89,14 @@ the page cache dropped: 4 KiB random reads for 15 s, then 2 GiB in order, as a b
 | XFS, reflink copy back | 10.6 to 11.7 s | 11,100 | 297 MB/s |
 | XFS, an image never fragmented | | 45,900 | 2,482 MB/s |
 | Btrfs, reflink copy back | 4.5 s | 9,400 | 173 MB/s |
-| Btrfs, the image in its own subvolume, restored by a snapshot of the checkpoint's snapshot | RESULT | RESULT | RESULT |
+| Btrfs, the image in its own subvolume, restored by a snapshot of the checkpoint's snapshot | 0.8 s | 16,900 | 257 MB/s |
+| Btrfs, an image never fragmented, same run | | 17,300 | 1,360 MB/s |
 | Btrfs, an image never fragmented | | 8,800 | 1,256 MB/s |
 
+- Random reads moved between runs of the same case (8,800 and 17,300 for a fresh Btrfs image), so
+  only reading in order is compared here.
+- A Btrfs subvolume restore took 0.8 s: it swaps a subvolume and drops the old one, whatever the
+  disk's pieces.
 - A restore by reflink costs what a checkpoint costs: on XFS about 11 s for a disk in half a
   million pieces. The computer is stopped during a restore, so nothing waits on it; it is time the
   user waits.
