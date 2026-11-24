@@ -163,7 +163,7 @@ ways, to find a refusal each one shows:
 | The package's index answered, its file refused with 403 and the sentence as the reason | | | `HTTP error 403 Client Error: <sentence> for url: …` |
 
 So one refusal can carry the sentence to all three: status 403, the sentence as the reason of the
-status line and as a `text/plain` body. git shows the body, npm the reason. pip shows it only when
+status line and as a `text/plain` body. Tried together: git showed the body and npm the reason. pip shows it only when
 the refused request is a file and not the index page: a refused index page reads as a package that
 does not exist, which sends an agent looking in the wrong place. For a hold on a Python package,
 Silo answers the index and holds the file. A reason phrase does not exist in HTTP/2, so this holds
