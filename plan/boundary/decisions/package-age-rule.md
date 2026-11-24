@@ -51,8 +51,9 @@ What it means for the rule:
   it there.
 - For pnpm, yarn and bun, the same registry gives no age, because they ask for the short form. The
   whole document is 2 to 3 times larger (`express`: 824 KB against 343 KB). The boundary has to ask
-  the registry for it separately, or change what the program asked for, which
-  `what-silo-changes-in-traffic` does not allow.
+  the registry for it separately, or change what the program asked for. Silo changes traffic it
+  reads in one way only, and only model traffic (`what-silo-changes-in-traffic`), so it asks
+  separately.
 - For Go, the time from the proxy is not the publish time. A version published today can carry a
   commit from years ago, so a rule that trusts it can be fooled at no cost. The time the proxy first
   saw a version is in the feed of `index.golang.org`, which can only be read in order, not asked
