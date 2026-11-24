@@ -416,3 +416,26 @@ kubeconfig, which holds both the way to sign in and the cluster's own authority.
 What I would add to the answer: a secret can be a whole file Silo rewrites for the computer (a
 kubeconfig with placeholders and Silo's authority), not only a value. The scripts are in the
 project files, `research/2026-11-24-kubernetes`.
+
+## A placeholder stored as another service's secret (24 November 2026)
+
+An agent's part, 24 November 2026. An agent that sets up a deployment copies your keys into the
+service that runs it: GitHub Actions secrets, Vercel or Cloudflare variables, Fly secrets. In a
+computer with placeholders, what it copies is the placeholder. Tried with `gh secret set
+OPENAI_API_KEY` (gh 2.89) against a stand-in for GitHub's API:
+
+- gh asked for the repository's public key, sealed the value with it inside the computer, and
+  sent only the sealed box. The stand-in, holding the private key as GitHub does, opened it and
+  found the placeholder.
+- So the boundary cannot swap it: it never sees the value. It should not swap it either way,
+  since the real key would then leave for a host the secret was not allowed to reach.
+- The deployment then fails later, far from the computer, with an invalid key, and nothing told
+  you why. A service that takes the value in plain (Vercel, Cloudflare and Fly take JSON over
+  HTTPS) shows the placeholder to the boundary, which can recognise it; GitHub's sealed box does
+  not, though the request names the secret (`PUT …/actions/secrets/OPENAI_API_KEY`).
+
+What I would add to the answer: a request that stores a secret in another service is a moment to
+tell you, or to ask. Silo can recognise the known ones by their address, and name the secret.
+Asked, it could store the real value itself: for GitHub it would seal the real value with the
+public key it saw in the reply before. That puts your key in a second place, which is your call,
+not the agent's. The script is in the project files, `research/2026-11-24-secret-stored-elsewhere`.
