@@ -130,3 +130,25 @@ What I would put in the answer's place for SSH keys: Silo holds the key in an ag
 computer, limited to the hosts you allowed, and gives the computer the agent's socket. Every
 signature it makes is a fact for the record: which key, for which host. A program that does not
 use OpenSSH cannot use such a key, and that is a refusal, not a leak.
+
+## A key that buys tokens: a Google service account (24 November 2026)
+
+An agent's part, 24 November 2026. A Google service account key does not sign every request, as
+an AWS key does. It signs one token request, and Google answers with an access token, which then
+goes on each request as a bearer token. Tried with Google's own Python library (`google-auth`
+2.63) holding a key file whose private key was a placeholder, against a stand-in for Google that
+knows only the real key:
+
+- Straight to the stand-in, the token request was refused: "Invalid JWT Signature."
+- Through a boundary sketch, it passed. The boundary signed the token request again with the real
+  key, as for AWS.
+- **The token in the reply is a new secret.** Had it passed as it came, the computer would hold a
+  real token good for an hour, and the key would have been kept outside for nothing. So the
+  boundary replaced it in the reply with a placeholder of its own, kept the real token outside,
+  and swapped it back on the API request, which passed. The library never noticed.
+
+So holding a key outside covers the secrets it buys too. The same goes for AWS STS
+(`AssumeRole` answers with a temporary secret key), an OAuth refresh token, and a GitHub App's
+installation tokens. A secret declared in Silo then has two parts: what the computer holds, and
+what the boundary does with the replies that mint new secrets from it. The scripts are in the
+project's files, under `research/2026-11-24-gcp/`.
