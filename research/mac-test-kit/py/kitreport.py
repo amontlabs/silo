@@ -20,7 +20,7 @@ def headers(root):
         h = {"path": os.path.relpath(path, root), "outcomes": []}
         for line in open(path):
             m = re.match(r"^# (\w+): (.*)$", line.rstrip("\n"))
-            if m and m.group(1) in FIELDS and m.group(1) not in h:
+            if m and m.group(1) in FIELDS + ["blocks"] and m.group(1) not in h:
                 h[m.group(1)] = m.group(2).strip()
             m = re.match(r"^# outcome ([a-z0-9-]+): (.*)$", line.rstrip("\n"))
             if m:
@@ -79,6 +79,7 @@ def doc(root):
             h.get("question", ""),
             "",
             "- Decides: %s" % h.get("decides", ""),
+        ] + (["- **Blocks: %s.**" % h["blocks"]] if h.get("blocks") else []) + [
             "- Tier: `%s`. Time: %s. Needs: %s." % (h.get("tier"), h.get("time"), h.get("needs")),
             "- Script: [`%s`](%s)" % (h["path"], h["path"]),
             "",
@@ -138,7 +139,8 @@ def report(root, rdir):
             res, mean = "skipped: %s" % sk[-1]["reason"], ""
         else:
             res, mean = "no outcome", "See logs/%s.log" % t
-        out.append("| %s %s | %s | %s |" % (t, m.get("title", ""), res.replace("|", "\\|"), mean.replace("|", "\\|")))
+        title = m.get("title", "") + (" (blocks %s)" % m["blocks"] if m.get("blocks") else "")
+        out.append("| %s %s | %s | %s |" % (t, title, res.replace("|", "\\|"), mean.replace("|", "\\|")))
     out.append("")
     for t in order:
         ev = by[t]

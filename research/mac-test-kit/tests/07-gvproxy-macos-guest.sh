@@ -5,6 +5,7 @@
 # time: about an hour
 # needs: the base computer of test 00, a 27 MB download of gvproxy, about 1 GB downloaded inside the computer (Node, git, npm packages), no sudo; you only for the optional sleep step
 # decides: network-stack, computers-main-on-a-mac, who-can-call-the-engine
+# blocks: option A of the first build (#373): main is on Silo's network stack from its first start, so this runs before main does
 # question: Does a macOS computer work on gvproxy (DHCP, MTU, ssh through a Unix socket forward, bursts of connections, git clone and npm install, measured against Apple's NAT), and what of the Mac can it reach through each?
 # outcome gvproxy-now: gvproxy works for a macOS computer, within 1.5 times of Apple's NAT, and the hardened configuration keeps the Mac's 127.0.0.1 and gvproxy's API out of its reach. network-stack: take it with gvproxy as
 #   the first driver, with research 04's edits (NAT entry removed, API token, ssh through a Unix socket). Read the reach facts: the Mac's LAN address is still reachable through any stack that dials out for the computer, so device-out-of-reach needs a rule in the forwarder.

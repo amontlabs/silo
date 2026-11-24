@@ -32,7 +32,7 @@ cd research/mac-test-kit
 ./kit run 00             # downloads macOS 27 (about 18 GB) and installs the base computer: about an hour
 ./kit run vm             # 01 04 07 10 11 14 21 23 24 26 27 32 33: about 7 hours, unattended after the first questions
 ./kit run guided         # 02 08 09 19 22 28 29 30: you at the keyboard for sign-ins and app checks
-./kit run long           # 12 13 15 16 17 18 25 31: hours; 16 is meant for a night; 31 downloads Zig (51 MB)
+./kit run long           # 12 13 15 16 17 18 25 31 34: hours; 16 and 34 are meant for a night; 31 downloads Zig (51 MB)
 ./kit pack               # one .tar.gz of the last run, to hand back to an agent
 ```
 
@@ -42,6 +42,11 @@ A test asks before anything that downloads, starts a computer or takes more than
 If your time is short, the order that moves the most decisions is: `quick` and `31` (no VM),
 then `00`, `01`, `10`, `04`, `14`, `11`, then `02` (the first build's promise that Claude Code
 stays signed in overnight), then `07`.
+
+If you lean to option A of the first build (#373, the record of model traffic from the first
+build), `07` and `21` block it and move to right after `00`; `./kit list` marks them. `34` runs a
+night of Claude Code and Codex on your plans through a stand-in reading boundary; it spends both
+plans for the night.
 
 ## What it changes on your Mac
 

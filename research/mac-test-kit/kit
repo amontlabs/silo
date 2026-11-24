@@ -46,6 +46,7 @@ cmd_list() {
   for f in $(test_files); do
     printf '%-3s %-7s %-14s %s\n' "$(header "$f" id)" "$(header "$f" tier)" "$(header "$f" time | cut -c1-14)" "$(header "$f" title)"
     printf '            needs: %s\n' "$(header "$f" needs)"
+    [ -n "$(header "$f" blocks)" ] && printf '            BLOCKS: %s\n' "$(header "$f" blocks)"
   done
 }
 

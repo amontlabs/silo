@@ -122,6 +122,7 @@ What do fsync, F_BARRIERFSYNC and F_FULLFSYNC cost, alone, grouped and while ano
 Does a macOS computer work on gvproxy (DHCP, MTU, ssh through a Unix socket forward, bursts of connections, git clone and npm install, measured against Apple's NAT), and what of the Mac can it reach through each?
 
 - Decides: network-stack, computers-main-on-a-mac, who-can-call-the-engine
+- **Blocks: option A of the first build (#373): main is on Silo's network stack from its first start, so this runs before main does.**
 - Tier: `vm`. Time: about an hour. Needs: the base computer of test 00, a 27 MB download of gvproxy, about 1 GB downloaded inside the computer (Node, git, npm packages), no sudo; you only for the optional sleep step.
 - Script: [`tests/07-gvproxy-macos-guest.sh`](tests/07-gvproxy-macos-guest.sh)
 
@@ -340,6 +341,7 @@ What does a Unix socket server on the Mac learn about the process that connected
 Inside a macOS computer, does each agent program accept a TLS certificate from an authority trusted in the System keychain, and does it accept one given only in its own setting (NODE_EXTRA_CA_CERTS, CODEX_CA_CERTIFICATE, SSL_CERT_FILE)?
 
 - Decides: reading-each-agent-program on macOS (how model traffic is read in a macOS computer, second build)
+- **Blocks: option A of the first build (#373): the first run puts Silo's authority in main, and this says where (keychain, or each program's own setting).**
 - Tier: `vm`. Time: about 25 minutes; a person for one approval if macOS asks for it. Needs: the installed computer of test 00, macOS 27 on the Mac, network (downloads Claude Code and Codex inside the computer, about 300 MB).
 - Script: [`tests/21-agent-trust-store.sh`](tests/21-agent-trust-store.sh)
 
@@ -545,3 +547,21 @@ When a macOS guest writes then deletes a few GB, does the disk image on the Mac 
 | `partial` | Between 25% and 75% came back: the guest trims some of what it frees; the sentence says how much per image and when. |
 | `no-trim` | Less than 25% came back on every image, even after a restart: every block a macOS computer ever wrote stays in its image, so each daily checkpoint keeps what the guest's file system moved or deleted; the engine's space numbers are a floor, and Silo needs another way to free it (the NBD route of test 32, where Silo sees each TRIM, or zeroing free space inside the guest). |
 | `inconclusive` | A write did not grow its image or a step failed; look at 33-alloc.csv and the logs. |
+
+## 34. A night of Claude Code and Codex through a boundary that reads them, against an hour without it
+
+Signed in with their plans in a macOS computer and left to work for a whole night through a boundary on the Mac that ends TLS and reads every call, are both programs' conversations recognised whole, are the plan's headers read, is every reply that is not a normal one kept as a fact, does no sign-in reach a file, and do the programs fare as well as in an hour without the boundary?
+
+- Decides: model-traffic-read, recognising-a-conversation, provider-sees-silos-connection, reading-each-agent-program (the night it leaves to find out)
+- **Blocks: option A of the first build (#373): its step 6 is done when a night through the boundary is clean, and this is that night with a stand-in for Silo's boundary.**
+- Tier: `long`. Time: about 10 hours: 8 through the boundary (KIT_34_HOURS), 1 without it (KIT_34_CONTROL_HOURS), and the set-up with you at the keyboard for the sign-ins (about 10 minutes). Needs: the installed computer of test 00, macOS 27 on the Mac, network, Claude Code signed in with a Claude plan (Max) and Codex with a ChatGPT plan (either one is enough), you at the keyboard at the start, the Mac on power and left awake (the test holds a caffeinate assertion); test 21's outcome, when it ran, chooses how the programs trust the boundary.
+- Script: [`tests/34-night-through-the-boundary.sh`](tests/34-night-through-the-boundary.sh)
+
+| Outcome | What it means |
+|---|---|
+| `night-clean` | Every model call of each program carried the one conversation id the program itself named, through its resumes (none without an id, none with two), the plan's headers were in the replies (anthropic-ratelimit-unified-*; Codex's x-codex-* or its rate-limit events), every reply that was not normal is a fact, no sign-in value is in any file, and the programs' own errors and retries were no worse than without the boundary. model-traffic-read and recognising-a-conversation (joined by the program's session) hold on a real night of plan traffic; provider-sees-silos-connection: the providers treated the boundary's connection as the program's own; option A's step 6 has its night, to run again with Silo's own boundary in place of this stand-in. |
+| `conversations-split` | Some model calls carried no conversation id, or two that disagree, or the traffic named a conversation the program never named, or one it named never showed; the facts say which, for which program and how often. recognising-a-conversation's join by session does not hold as it stands for that program, and option A's receipts per conversation would be wrong there: the reader is fixed (a header or field this test did not know) before step 6 is called done. |
+| `headers-missing` | Conversations were whole, but one program's replies carried no plan headers (no anthropic-ratelimit-unified-* for Claude Code, no x-codex-* header and no rate-limit event for Codex): option A shows that plan's share as not known, and spend at API prices only (#351); model-traffic-read reads the share from somewhere else or drops it. |
+| `differs-from-control` | Through the boundary the programs' own errors and retries were clearly more frequent than without it (over twice the control's rate an hour plus 2, or a quarter more failed launches), a provider answered with a challenge, or a program refused the boundary's certificate. provider-sees-silos-connection is in question: the facts say what differed; before option A ships, find whether it is the boundary's connection (TLS, HTTP/1.1 only, this test's SSH hop) or the hour, with a second night. |
+| `credential-leaked` | A sign-in value of the computer (~/.claude/.credentials.json, the keychain item, ~/.codex/auth.json) or a secret the boundary saw in a request was found in a file this run wrote; the facts name the files. Do not pack or share these results until those files are deleted. The stand-in's redaction failed, and Silo's boundary must pass the same search before step 6 is done. |
+| `inconclusive` | Neither program was signed in, the computer's requests never reached the boundary, no model call went through it, or the control did not run; the sentence says which. |
