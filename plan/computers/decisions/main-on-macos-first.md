@@ -18,8 +18,8 @@ The options:
   costs what makes Silo different: a Linux machine for agents is what cloud services already offer,
   and agents that build Mac software, Silo's own app included, cannot do it there.
 
-Recommended: macOS first. A Mac of its own is what people already give their agents, and no cloud
-offers it.
+Recommended: macOS first. A Mac of its own is what people already give their agents. On the Mac
+you already have, it costs nothing by the hour.
 
 ## Notes
 
@@ -33,6 +33,11 @@ polarzero said this, 18 November 2026. polarzero expects much more interest this
    own app.
 4. Under this design a fork is occasional. The limit of two macOS computers per Mac does not rule
    it out.
+
+Reason 2 no longer holds as written. Agents' research of 24 November 2026 found cloud services
+that rent macOS machines to agents by the hour, and local apps that give an agent a macOS virtual
+machine. The recommendation rests on reasons 1, 3 and 4, and on the cost: a macOS computer in main
+runs on a Mac the user already owns.
 
 ## Facts it has to respect
 

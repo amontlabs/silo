@@ -1,0 +1,8 @@
+{
+  "asks": "What does Silo do with a tool that the model provider runs for the agent?",
+  "answer": "Some tools run at the model provider, not in the computer: a web search, a page fetched by URL, a connection to an MCP server that the provider makes itself. They reach the internet from the provider, past the computer's rules. Each request that turns one on is a fact in the record, with the tool. In a limited or closed computer, a rule refuses such a request unless your rules allow that tool: the request is not sent, and the agent program gets an error that says why. Silo knows, for each provider format, which kinds of tool the provider runs. A kind of tool it does not know is treated as one the provider runs. In an open computer, the request is sent and recorded. On traffic that Silo does not read, it cannot see these tools, and the app says so.",
+  "needs": [
+    "network-modes",
+    "ending-the-encrypted-connection"
+  ]
+}
