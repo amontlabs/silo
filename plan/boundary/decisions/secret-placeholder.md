@@ -68,7 +68,7 @@ does not swap the key into the request, it signs the request again.
 
 The setup: the AWS CLI (1.46.3) ran with a placeholder access key id and secret, against a
 stand-in for AWS. The stand-in checks every signature with botocore, AWS's own Python library,
-and knows only the real key. Between them, a proxy of 90 lines, written from the SigV4
+and knows only the real key. Between them, a proxy of 54 lines, written from the SigV4
 specification and not from botocore, did what the boundary would do. It read the access key id
 from the `Authorization` header, swapped in the real one, rebuilt the canonical request from the
 bytes on the wire, signed it with the real secret, and replaced the signature. The scripts are in
