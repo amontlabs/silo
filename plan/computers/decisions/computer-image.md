@@ -28,3 +28,10 @@ The answer above is these two cells, written as one text.
 
 Apple forbids shipping a pre-installed macOS image. Each Mac downloads and installs its own, so
 the first run takes longer than with a Linux image (`first-run-time-macos`).
+
+## With Xcode
+
+An agent's note, 24 November 2026. For a Mac or iOS developer, the installed state worth keeping
+includes Xcode and a simulator runtime, over 20 GB that every later macOS computer would otherwise
+fetch again. `xcode-in-a-computer` proposes keeping it the way this answer keeps the installed
+system. Mac test 23 of `research/2026-11-24-mac-and-ios-developers/README.md` measures it.

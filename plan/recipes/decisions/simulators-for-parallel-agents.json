@@ -1,0 +1,9 @@
+{
+  "asks": "How do several agents in main use simulators at once?",
+  "answer": "Each agent gets a simulator and a build folder of its own for as long as it uses them, and no two agents share one. A piece for Apple development, which Silo ships, sets this up through the agent programs' documented settings. The number of simulators booted at once has a maximum that fits main's memory, and Silo shows it. An agent that asks for a simulator when the maximum is reached waits, and is told why.",
+  "needs": [
+    "recipe-pieces",
+    "silo-ships-recipes",
+    "running-computers-maximum"
+  ]
+}

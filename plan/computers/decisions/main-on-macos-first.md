@@ -59,3 +59,11 @@ how the code reaches it.
 
 `linux-beside-a-macos-main`, `containers-on-macos`, `record-halves-per-system`,
 `macos-ships-facts-first`, `x86-linux-computers`, `neutral-core`.
+
+## The limit, from Apple
+
+An agent's note, 24 November 2026. Apple's developer support said in September 2026 that the
+framework enforces the limit of two for macOS guests only, and "has no fixed cap for Linux VMs".
+It declined to say how to get the written exception the license mentions. For an iOS developer, the
+parallel work then happens inside main, which is what `simulators-for-parallel-agents` is about.
+Details: `research/2026-11-24-mac-and-ios-developers/README.md`.

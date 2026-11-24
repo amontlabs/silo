@@ -1,0 +1,8 @@
+{
+  "asks": "How does Xcode get into a macOS computer?",
+  "answer": "Silo copies the Xcode installed on your Mac into the computer when you ask, and checks Apple's signature on the copy before it is used. In the computer, it accepts Xcode's license, runs its first launch and fetches from Apple the simulator runtimes the project needs, which needs no account. Silo keeps that installed state, so later macOS computers start from a clone that already has Xcode. Your Apple Account never enters a computer for this.",
+  "needs": [
+    "computer-image",
+    "files-through-a-channel"
+  ]
+}

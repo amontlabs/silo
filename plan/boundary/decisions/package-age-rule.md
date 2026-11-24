@@ -28,3 +28,8 @@ Until 21 November 2026 both decisions had the same answer, the sentence on where
 enforced. This one now answers its own question, in the words of the notes of `what-a-rule-may-do`:
 "a package younger than a set age is denied". polarzero let the agent reword it and has not ruled
 on it.
+
+## Swift packages
+
+An agent's note, 24 November 2026. For Swift packages fetched from Git, there is no registry date to
+read. See the note in `registry-traffic-read`.

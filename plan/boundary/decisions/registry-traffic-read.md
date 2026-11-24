@@ -28,3 +28,13 @@ An agent's part, from drafting the feature `minimum-package-age` on 21 November 
 the age of packages is enforced at the boundary (`package-age-at-the-boundary`), and the age of a
 package is in what a registry answers. `ending-the-encrypted-connection` says how the boundary
 reads model traffic. No decision says it reads the traffic to registries.
+
+## Swift packages and CocoaPods
+
+An agent's note, 24 November 2026. Swift packages mostly have no registry: a version is a Git tag
+fetched from GitHub, and the date on a tag's commit is written by whoever made it, so it is not a
+fact. What the boundary could read instead is when GitHub first saw the tag, from GitHub's API,
+which is GitHub's report. CocoaPods' trunk becomes read-only on 2 December 2026, so nothing new is
+published there to judge. An app in a simulator keeps its own certificate store: if a host it calls
+is one where the boundary ends the connection, Silo's certificate has to be added to each simulator.
+Mac test 27 of `research/2026-11-24-mac-and-ios-developers/README.md` checks it.
