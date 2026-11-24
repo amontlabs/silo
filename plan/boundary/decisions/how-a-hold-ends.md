@@ -81,3 +81,22 @@ How long each program waits on its model before trying again, with nothing comin
   reply has started, it waits 300 seconds with nothing new, then sends it again without streaming.
 - Codex waited more than 700 seconds for the head of the reply, without giving up. Once the reply
   has started, it waits 300 seconds with nothing new, then sends it again, up to 5 times.
+
+## A refused name lookup (24 November 2026)
+
+An agent's part, 24 November 2026. A name server answered every query for `held.example` with
+REFUSED, then with NXDOMAIN (the name does not exist), and the same seven tools looked it up.
+
+- With REFUSED, every tool says the lookup failed for now: "Temporary failure in name resolution",
+  `EAI_AGAIN` in node, "Could not resolve host" in curl and git. The system's resolver asks twice,
+  so the server got 38 queries against 19 for NXDOMAIN.
+- With NXDOMAIN, they say the name is not known. That is not true of a host Silo refuses, and other
+  resolvers can keep that answer for a while.
+- pip and npm try again either way: pip 6 times in 8 seconds, npm 3 times in 70 seconds.
+- Neither answer can carry Silo's words. The agent reads a network fault, and a fault that says
+  "temporary" invites it to try again.
+
+A proposal: when a rule refuses or holds a host, Silo answers the lookup with the address of its
+boundary, as for any other host, and refuses or holds the request itself. On HTTPS, the boundary
+already ends the encrypted connection, so the refusal comes back with Silo's words. A lookup is
+refused only when the lookup itself is what a rule holds, such as a name used to carry data out.
