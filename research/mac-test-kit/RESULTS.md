@@ -366,3 +366,182 @@ Inside a macOS computer, does eslogger (Endpoint Security) run as root from an S
 | `es-needs-remote-fda` | eslogger was refused (not permitted) until "Allow full disk access for remote users" was turned on under Remote Login, then saw the events: Silo turns that switch on in setup (a person's click, or a profile; it cannot be scripted from inside without a person), or its recorder runs as a launchd daemon with its own Full Disk Access. |
 | `es-refused` | eslogger was refused even with the switch on: Endpoint Security inside a computer needs a signed, entitled program with its own grant (a system extension); the facts hold the errors. |
 | `inconclusive` | eslogger ran but saw none of the command's events, or the switch was not turned on; read the attached logs. |
+
+## 23. Xcode copied in from the Mac, and the iOS runtime downloaded in the computer
+
+Does Xcode copied from this Mac into a computer pass Apple's signature check, accept its license and finish its first launch over SSH with nobody at the screen, and does the iOS simulator runtime download there with no Apple Account?
+
+- Decides: xcode-in-a-computer, first-run-time-macos, computer-image (whether the kept image can hold Xcode)
+- Tier: `vm`. Time: about an hour, most of it copying Xcode and downloading the runtime. Needs: the installed computer of test 00 (80 GB disk), macOS 27 on the Mac, Xcode installed on this Mac (read, never changed), about 40 GB free, network (the runtime comes from Apple's CDN, about 9 GB).
+- Script: [`tests/23-xcode-into-a-computer.sh`](tests/23-xcode-into-a-computer.sh)
+
+| Outcome | What it means |
+|---|---|
+| `ready` | Xcode passed the signature check, its license and first launch were done over SSH, and the iOS runtime downloaded and shows as available. Bringing Xcode in from the Mac works with nobody clicking; the sizes and times are in the measures. The computer is kept as the Xcode computer for tests 24 to 30. |
+| `signature-refused` | codesign or Gatekeeper refused the copied Xcode in the computer. A copy over SSH loses something (an extended attribute, a signature seal), so Silo must import the .xip instead and expand it inside. |
+| `first-launch-failed` | Xcode passed the signature check but its license or first launch failed or waited on the screen over SSH. xcode-in-a-computer needs a step on the computer's screen, or another way to finish first launch; the sentence says which step. |
+| `runtime-refused` | Xcode is ready but the runtime download failed in the computer (the error is in the sentence). If it asks for an account, xcode-in-a-computer must bring the runtime in from the Mac too. |
+| `inconclusive` | Something else went wrong; the sentence and the attached logs say what. |
+
+## 24. A simulator booted and used over SSH, with and without a user on the screen
+
+Over SSH, does a simulator in a computer boot, install and launch an app, and give a screenshot that is not blank, first as the computer starts, then after its user is logged in on its screen?
+
+- Decides: computers-macos-screen, computer-image (whether main logs its user in on its screen), simulators-for-parallel-agents
+- Tier: `vm`. Time: about 25 minutes. Needs: the Xcode computer of test 23, macOS 27 on the Mac.
+- Script: [`tests/24-simulator-over-ssh.sh`](tests/24-simulator-over-ssh.sh)
+
+| Outcome | What it means |
+|---|---|
+| `works-without-screen-login` | Everything worked over SSH with nobody logged in on the computer's screen. Main needs no login on its screen for simulators; the boot time and the screenshot are in the measures. |
+| `needs-screen-login` | It failed with nobody on the screen and worked once the user was logged in on it (automatic login, then a restart). Main must log its user in on its own screen at every start, and computer-image must set that up. Run 25 and 27 after this one: they log the user in the same way first. |
+| `already-on-screen` | The provisioned computer logged its user in on its screen by itself, and everything worked. Main gets the session simulators need with nothing to set up. |
+| `blank-screenshot` | The app ran but every screenshot was blank (one colour). The guest's graphics do not render the simulator; agents cannot check their work by looking at it. |
+| `fails` | It failed in both cases; the step and error are in the sentence. |
+| `inconclusive` | Something else went wrong; the sentence and the attached logs say what. |
+
+## 25. How many booted simulators fit in one computer
+
+In a computer with its user on the screen, how much memory does each booted simulator with an app running take, and how many boot before the computer starts to swap or a boot fails?
+
+- Decides: simulators-for-parallel-agents (the maximum booted at once), sizing-target (memory of main for an iOS developer)
+- Tier: `long`. Time: about 40 minutes. Needs: the Xcode computer of test 23, macOS 27 on the Mac; KIT_SIMS sets the most simulators booted (8).
+- Script: [`tests/25-simulators-per-computer.sh`](tests/25-simulators-per-computer.sh)
+
+| Outcome | What it means |
+|---|---|
+| `measured` | Simulators were booted one at a time until the computer swapped, a boot failed or the limit of the run was reached. The memory each one added and the number that fit are in the measures; the maximum of simulators-for-parallel-agents is set from them. |
+| `first-boot-failed` | Not even one simulator booted; see test 24 first. |
+| `inconclusive` | Something else went wrong; the sentence and the attached logs say what. |
+
+## 26. codesign in a computer, over SSH, with no dialog
+
+Over SSH, does codesign sign with an identity in the login keychain, and with one in a keychain of its own set up the way CI does it, without a dialog on the screen?
+
+- Decides: apple-keys-in-a-computer (whether a development identity in the computer works for agents with nobody at the screen)
+- Tier: `vm`. Time: about 15 minutes. Needs: the Xcode computer of test 23, macOS 27 on the Mac; no Apple account (a throwaway self-signed identity is made in the computer).
+- Script: [`tests/26-codesign-over-ssh.sh`](tests/26-codesign-over-ssh.sh)
+
+| Outcome | What it means |
+|---|---|
+| `both-sign` | Both keychains signed over SSH. Nothing special is needed for a development identity in a computer. |
+| `own-keychain-only` | The login keychain failed or waited, and a keychain of its own, unlocked in the same session with its partition list set, signed. Silo's Apple development piece sets that keychain up; the fact login_after_unlock says whether unlocking the login keychain with the user's password would have been enough. |
+| `neither` | Neither signed; the errors are in the sentence. errSecInternalComponent means the keychain was locked; a time-out means a dialog waited on the screen. |
+| `inconclusive` | Something else went wrong; the sentence and the attached logs say what. |
+
+## 27. Which certificates an app in a simulator trusts
+
+Does an app in a simulator trust a certificate authority that the computer's system trusts, and does it after `simctl keychain add-root-cert`?
+
+- Decides: registry-traffic-read and secrets-held-outside (whether Silo's certificate must be added to every simulator), simulators-for-parallel-agents (a step for each simulator made)
+- Tier: `vm`. Time: about 20 minutes. Needs: the Xcode computer of test 23, macOS 27 on the Mac.
+- Script: [`tests/27-certificate-in-simulators.sh`](tests/27-certificate-in-simulators.sh)
+
+| Outcome | What it means |
+|---|---|
+| `separate-store` | The app refused the server before, still refused it once the computer's system trusted the authority, and accepted it after add-root-cert. Every simulator Silo or an agent makes needs Silo's certificate added to it. |
+| `shares-system-store` | The app accepted the server once the computer's system trusted the authority. Nothing more is needed for simulators. |
+| `system-trust-refused` | Adding the authority to the computer's system store failed over SSH (as test 21 may find); the simulator step was still tried and its result is in the sentence. |
+| `never-trusted` | The app refused the server even after add-root-cert. |
+| `inconclusive` | Something else went wrong; the sentence and the attached logs say what. |
+
+## 28. App Store Connect tools through a boundary that re-signs their tokens
+
+With the real App Store Connect key kept on the Mac and a placeholder key in the computer, do notarytool, altool and xcodebuild -allowProvisioningUpdates work through a boundary that ends TLS and signs each token again with the real key, also when each GET token is scoped to its one request, and which hosts, audiences and token lifetimes do they use?
+
+- Decides: signing-keys-re-signed, apple-keys-in-a-computer (whether an App Store Connect key can stay out of every computer)
+- Tier: `guided`. Time: about 30 minutes, with you at the keyboard for the key's details and perhaps one approval in the computer's window. Needs: the Xcode computer of test 23, macOS 27 on the Mac, Xcode on this Mac, an App Store Connect API key (.p8) on this Mac with its key ID and issuer ID (KIT_ASC_KEY, KIT_ASC_KEY_ID, KIT_ASC_ISSUER, or asked), network; for xcodebuild, KIT_ASC_PROJECT and KIT_ASC_SCHEME (a project of yours, copied into the computer).
+- Script: [`tests/28-app-store-connect-resigned.sh`](tests/28-app-store-connect-resigned.sh)
+
+| Outcome | What it means |
+|---|---|
+| `works-scoped` | Every tool tried worked through the boundary, also with each GET token scoped to its one request: signing-keys-re-signed can be built as proposed, with the narrowing; the hosts and audiences it must handle are in the facts. |
+| `works-unscoped-only` | Every tool worked when its token was re-signed, but a GET token scoped to its request was refused by Apple: the boundary re-signs without a scope, and its own rule on method and path is the only narrowing. |
+| `some-tools` | Some tools worked and others did not; the facts name, for each, the hosts it called, the audience and lifetime of its token and why it failed (a host outside the list, a longer lifetime, a refused certificate). signing-keys-re-signed handles the ones that worked first, and its notes say what the others need. |
+| `certificate-refused` | The tools refused the boundary's certificate even though the computer's System keychain trusts its authority (they pin Apple's): no boundary can read or re-sign their traffic, and the key must be handled another way (Apple's cloud signing, or the tool run on the Mac). |
+| `none-work` | The boundary saw and re-signed the tools' tokens but none worked; the statuses and errors are in the facts. Read them before changing signing-keys-re-signed. |
+| `inconclusive` | The key did not work from this Mac itself, the computer's requests never reached the boundary, or its authority could not be trusted; the sentence says which. |
+
+## 29. Xcode's agent bridge used over SSH, and who answers its approval
+
+With Xcode open on the computer's screen, can an agent reached over SSH use `xcrun mcpbridge` (Xcode's tools for outside agents), and when Xcode asks to allow it, can a script inside the computer answer, or only a person, and is the answer kept for the next agent process?
+
+- Decides: computers-macos-screen (whether main's screen must carry Xcode for agents), agents-drive-the-screen, xcode-in-a-computer (a step Silo's setup takes)
+- Tier: `guided`. Time: about 25 minutes, with you at the computer's window for one or two clicks. Needs: the Xcode computer of test 23 with Xcode 26.3 or later, macOS 27 on the Mac.
+- Script: [`tests/29-xcode-agent-bridge.sh`](tests/29-xcode-agent-bridge.sh)
+
+| Outcome | What it means |
+|---|---|
+| `works-no-prompt` | mcpbridge listed Xcode's tools over SSH with nothing to approve: agents in main use Xcode's tools as soon as Xcode is open on main's screen. |
+| `script-answers-prompt` | Xcode asked, and a script inside the computer (System Events, over SSH) clicked Allow: Silo's setup, or an agent driving the screen, can answer the prompt with nobody at the Mac. |
+| `approved-once` | Xcode asked, a script could not answer, a person's Allow worked, and the next agent process was not asked again: one click per computer, which Silo's setup can ask for once, on the computer's screen. |
+| `prompt-every-process` | Xcode asked again for each new agent process, and only a person could answer: on main this prompt is on main's screen, not the Mac's, but agents still need someone (or an agent driving the screen) at every start. |
+| `no-bridge` | mcpbridge is missing or listed no tools even with a person at the screen; the facts hold its errors (an older Xcode, or Xcode not running). |
+| `inconclusive` | Xcode did not open on the computer's screen, or nobody answered. |
+
+## 30. An iPhone passed through USB to a computer
+
+On macOS 27, does an iPhone given to a computer with USB passthrough show in the computer, pair with Xcode's device tools there, and take an install from it?
+
+- Decides: builds-on-your-iphone (whether an agent's build reaches your iPhone from inside the computer, or leaves it for the Mac)
+- Tier: `guided`. Time: about 20 minutes, with you at the keyboard to plug in and unlock the iPhone and tap Trust. Needs: the Xcode computer of test 23, macOS 27 on the Mac, an iPhone and its cable, and a VM helper with --usb-device (VZUSBPassthroughDevice), which ./kit build does not make yet; while the computer runs, the iPhone is the computer's and not the Mac's.
+- Script: [`tests/30-iphone-usb-passthrough.sh`](tests/30-iphone-usb-passthrough.sh)
+
+| Outcome | What it means |
+|---|---|
+| `attaches-and-installs` | The computer saw the iPhone, devicectl paired with it, and an install reached the phone (it installed, or the phone refused only the build's signature, which a development identity fixes): an agent's build can go to your iPhone from inside the computer, with the phone handed to that computer while it runs. |
+| `attaches-not-paired` | The computer saw the iPhone on USB, but devicectl did not list it or could not pair: passthrough is not enough for Xcode, and builds-on-your-iphone takes the Mac route (the app comes out to the Mac and is installed from there). |
+| `not-attached` | The computer never saw the iPhone, as reported on the macOS 27 beta: builds-on-your-iphone takes the Mac route. |
+| `attach-refused` | The framework refused to attach the iPhone (the error is in the sentence): builds-on-your-iphone takes the Mac route. |
+| `inconclusive` | No iPhone was found on this Mac, or the computer did not start; read the facts. |
+
+## 31. The checkpoint engine's prototype on APFS: full, cbw, nbd, delta, and the catalog under kill
+
+On APFS, does cloning a file that shares blocks with the live disk image (the last checkpoint, which nobody writes) make the live image's writes wait, as it did on XFS (up to 1.0 s), and how do the prototype's ways compare there?
+
+- Decides: checkpoint-per-system (which way a checkpoint is taken on a Mac: a clone, cbw, or delta), checkpoint-at-each-turn, thinning-checkpoints (the wait of a drop), research 2026-11-24-checkpoint-engine
+- Tier: `long`. Time: about 50 minutes (four runs of an 8 GiB image, then the catalog killed at 300 steps). Needs: 40 GB free, no VM, no sudo; Zig 0.15.2 (downloaded from ziglang.org, about 51 MB, if not on PATH) and the prototype's source (fetched from this repository's branch if not next to the kit); both asked first.
+- Script: [`tests/31-checkpoint-engine-on-apfs.sh`](tests/31-checkpoint-engine-on-apfs.sh)
+
+| Outcome | What it means |
+|---|---|
+| `full-free` | Even a clone of the live image kept every write under 0.1 s: the plan's checkpoint (a clone) holds on APFS at this fragmentation; cbw or delta are needed only for the list of changed blocks, not for the wait. Check the pieces in the sentence against test 03 before relying on it. |
+| `shared-clone-free` | A clone of the live image made writes wait, but cloning a checkpoint that shares blocks with it did not (0.1 s or less): cbw works on a Mac as on the prototype, through Silo's NBD server for a macOS computer (test 32); one copy of each block per checkpoint, no deltas to merge. |
+| `shared-clone-waits` | Cloning a checkpoint that shares blocks with the live image made writes wait 0.1 to 1 s, as cbw did on XFS: cbw costs that wait at each checkpoint; prefer delta (named in the sentence with its own waits) wherever the wait is felt, as with checkpoint-at-each-turn. |
+| `shared-clone-stalls` | Cloning a checkpoint that shares blocks with the live image made writes wait more than 1 s, as on XFS at 1.0 s: on a Mac, nothing that shares blocks with the live image may be cloned while it runs; take checkpoints as delta. |
+| `not-a-moment` | A checkpoint on APFS did not hold exactly the writes up to one moment: the prototype's way is wrong on APFS; nothing is built on it until the cause is found (the run's files are attached). |
+| `catalog-broke` | The catalog, killed at each of 300 steps on APFS with F_FULLFSYNC and RENAME_SWAP, did not recover, or a planted bug was not caught: the catalog's design needs another look before a Mac relies on it. |
+| `inconclusive` | The prototype did not build or a way did not run; look at the attached logs. |
+
+## 32. Does a macOS computer boot and run from a disk Silo serves over NBD
+
+Does a macOS guest boot from its disk served over NBD (VZNetworkBlockDeviceStorageDeviceAttachment, macOS 14) by Silo's prototype server, what does a small flushed write cost inside it against the same disk attached as a file, and does a checkpoint taken through the server while the guest writes hold every flushed write and boot?
+
+- Decides: checkpoint-per-system (whether a macOS computer's checkpoint can be taken from Silo's own log of writes: cbw or delta behind an NBD server), checkpoint-at-each-turn, research 2026-11-24-checkpoint-engine ("Who can keep the bitmap")
+- Tier: `vm`. Time: about 45 minutes (five starts of a computer). Needs: the base computer of test 00 (raw disk), 40 GB free, no sudo; the prototype's server if test 31 built it (~/SiloKit/bin/ckpt), else only the kit's Python server.
+- Script: [`tests/32-boot-from-nbd.sh`](tests/32-boot-from-nbd.sh)
+
+| Outcome | What it means |
+|---|---|
+| `boots-cheap` | The guest booted from the NBD disk within 1.5 times the file's time to SSH, a flushed 4 KiB write cost at most twice the file's, and the checkpoint taken through the server held every flushed write and booted: a macOS computer can have its disk served by Silo, so its checkpoints can be cbw or delta (test 31 says which) with no clone of the live image. |
+| `boots-slow` | The guest booted from the NBD disk and the checkpoint held, but its start or its small writes cost more than that (numbers in the sentence): the NBD route works at a price; weigh it against the clone's wait of test 03 before choosing it for main. |
+| `checkpoint-broke` | The guest booted from the NBD disk, but the checkpoint taken through the server lost a flushed write or did not boot: the server's moment is wrong under a real guest; nothing is built on it until the cause is found. |
+| `no-boot` | The guest did not boot from the NBD disk (the client's errors and the server's are in the sentence): Silo cannot see a macOS computer's writes; its checkpoints stay clones of the live image (checkpoint-per-system as planned, with test 03's wait). |
+| `inconclusive` | The computer did not start from its own file, or a measure is missing; look at the logs attached. |
+
+## 33. Does the guest's TRIM free the blocks of the disk image on the Mac
+
+When a macOS guest writes then deletes a few GB, does the disk image on the Mac shrink back (the guest's TRIM reaching the image as a hole), at once, after a sync and a minute, only when the volume is mounted again, or never; for the main raw image, a raw extra disk and an ASIF extra disk?
+
+- Decides: checkpoint-per-system and thinning-checkpoints (whether a macOS computer's deleted files keep growing its checkpoints), checkpoint-storage, research 2026-11-24-checkpoint-engine ("TRIM")
+- Tier: `vm`. Time: about 30 minutes (two starts of a computer, 9 GB written in it). Needs: the base computer of test 00, 40 GB free, no sudo on the Mac; ASIF needs macOS 26.
+- Script: [`tests/33-trim-reaches-image.sh`](tests/33-trim-reaches-image.sh)
+
+| Outcome | What it means |
+|---|---|
+| `trim-reaches` | A raw image gave back at least 75% of what the write took within a minute of the delete and a sync: what a macOS computer deletes stops costing disk; a checkpoint keeps only what was there when it was taken, and the space model of the engine's research holds as written. |
+| `trim-at-mount` | A raw image gave back at least 75% only after the volume was mounted again or the computer restarted: deleted files cost disk until the next start; Silo can count on the space coming back at each start (and thinning sees it then). |
+| `asif-only` | Only the ASIF image gave space back: main's disk should be ASIF where space matters; a raw image keeps what was deleted. |
+| `partial` | Between 25% and 75% came back: the guest trims some of what it frees; the sentence says how much per image and when. |
+| `no-trim` | Less than 25% came back on every image, even after a restart: every block a macOS computer ever wrote stays in its image, so each daily checkpoint keeps what the guest's file system moved or deleted; the engine's space numbers are a floor, and Silo needs another way to free it (the NBD route of test 32, where Silo sees each TRIM, or zeroing free space inside the guest). |
+| `inconclusive` | A write did not grow its image or a step failed; look at 33-alloc.csv and the logs. |

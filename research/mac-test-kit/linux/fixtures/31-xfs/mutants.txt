@@ -1,0 +1,2 @@
+two-renames caught
+no-tmp caught

@@ -1,7 +1,8 @@
 # silovm: the kit's VM helper
 
 A small command line program on Apple's Virtualization framework. `./kit build` compiles it with
-`swiftc` and signs it ad hoc with the `com.apple.security.virtualization` entitlement, into
+`swiftc` and signs it ad hoc with the `com.apple.security.virtualization` entitlement (and
+`com.apple.security.network.client`, which Apple names for an NBD disk), into
 `~/SiloKit/bin/silovm`. Every VM test goes through it, so the tests measure the framework the way
 Silo would use it, with no Tart or UTM in between.
 
@@ -53,6 +54,13 @@ silovm run --bundle BUNDLE [options]
       --disk-cache automatic|cached|uncached
       --disk-sync full|fsync|none         VZDiskImageStorageDeviceAttachment's two modes
       --extra-disk PATH[:ro]              a second disk, repeatable
+      --disk-nbd URL                      the main disk served over NBD instead of disk.img
+                                          (VZNetworkBlockDeviceStorageDeviceAttachment, macOS 14):
+                                          nbd://HOST:PORT/EXPORT, or nbd+unix:///EXPORT?socket=PATH
+                                          if the framework's validate(_:) takes it. --disk-sync none
+                                          gives the attachment's sync mode none, otherwise full;
+                                          --disk-cache does not apply. Prints "nbd" events
+      --nbd-timeout N                     with --disk-nbd: seconds before the client reconnects (5)
       --max-seconds N                     force a stop after N seconds
       --continue-on-provisioning-error    start anyway when provisioning is refused
 silovm ctl --bundle BUNDLE COMMAND
@@ -70,6 +78,8 @@ silovm ip --bundle BUNDLE [--wait SECONDS]
 {"event":"provisioning","stage":"validate"|"set"|"start","ok":false,"domain":"VZErrorDomain","code":40002,"name":"guestProvisioningInvalidUsername","message":".."}
 {"event":"started","t":1764000000.123}
 {"event":"state","value":"running"|"paused"|"stopping"|"error"}
+{"event":"nbd","state":"connected","connections":1,"t":..}         with --disk-nbd, each (re)connection
+{"event":"nbd","state":"error","domain":"VZErrorDomain","code":20002,"name":"networkBlockDeviceDisconnected",..}
 {"event":"stopped","how":"guest"|"requested"|"forced"|"max-seconds"|"error","error":"..","t":..}
 ```
 

@@ -113,6 +113,16 @@ class VZStorageDeviceAttachment: NSObject {}
 class VZDiskImageStorageDeviceAttachment: VZStorageDeviceAttachment {
   init(url: URL, readOnly: Bool, cachingMode: VZDiskImageCachingMode, synchronizationMode: VZDiskImageSynchronizationMode) throws {}
 }
+enum VZDiskSynchronizationMode: Int { case full = 0, none = 1 }
+protocol VZNetworkBlockDeviceStorageDeviceAttachmentDelegate: NSObjectProtocol {
+  func attachmentWasConnected(_ attachment: VZNetworkBlockDeviceStorageDeviceAttachment)
+  func attachment(_ attachment: VZNetworkBlockDeviceStorageDeviceAttachment, didEncounterError error: Error)
+}
+class VZNetworkBlockDeviceStorageDeviceAttachment: VZStorageDeviceAttachment {
+  init(url: URL, timeout: TimeInterval, isForcedReadOnly: Bool, synchronizationMode: VZDiskSynchronizationMode) throws {}
+  class func validate(_ url: URL) throws {}
+  weak var delegate: VZNetworkBlockDeviceStorageDeviceAttachmentDelegate?
+}
 class VZStorageDeviceConfiguration: NSObject {}
 class VZVirtioBlockDeviceConfiguration: VZStorageDeviceConfiguration {
   init(attachment: VZStorageDeviceAttachment) {}

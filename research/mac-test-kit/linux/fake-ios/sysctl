@@ -1,0 +1,14 @@
+#!/bin/sh
+# A fake of macOS's sysctl for the Linux runs of tests 24 to 27: a computer with 8 GB that starts
+# to swap once three simulators are booted (fake xcrun, $HOME/.fake-sim).
+[ "$1" = -n ] && shift
+n=$(ls "$HOME"/.fake-sim/*/booted 2>/dev/null | wc -l)
+case "$1" in
+  hw.pagesize) echo 16384 ;;
+  hw.memsize) echo 8589934592 ;;
+  hw.ncpu) echo 4 ;;
+  vm.swapusage)
+    used=0; [ "$n" -gt 2 ] && used=$(( (n - 2) * 512 ))
+    echo "total = 2048.00M  used = $used.00M  free = $((2048 - used)).00M  (encrypted)" ;;
+  *) echo "fake sysctl: $1 is not faked" >&2; exit 1 ;;
+esac

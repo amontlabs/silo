@@ -391,7 +391,7 @@ class Run:
                   mtu=int(mtu) if mtu else None,
                   disk_cache=one(self.opts, "disk-cache", "automatic"), disk_sync=one(self.opts, "disk-sync", "full"),
                   disk_format=cfg.get("disk_format", "raw"), extra_disks=len(self.opts.get("extra-disk", [])),
-                  gui="gui" in self.opts, provision_user=user, provisioning_api=api)
+                  gui="gui" in self.opts, disk_nbd=one(self.opts, "disk-nbd"), provision_user=user, provisioning_api=api)
         self.serve_ctl()
         signal.signal(signal.SIGTERM, self.on_signal)
         signal.signal(signal.SIGINT, self.on_signal)
@@ -459,6 +459,19 @@ class Run:
         save_state(self.bundle, st)
         self.started_t = time.time()
         self.emit("started", t=self.started_t, provisioned=will_provision)
+        nbd = one(self.opts, "disk-nbd")
+        if nbd is not None:
+            # The NBD client connects when the machine starts: one handshake and one read, through
+            # the kit's own client (py/nbdserve.py probe).
+            kit = os.environ.get("KIT_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            pr = subprocess.run([sys.executable, "-I", os.path.join(kit, "py", "nbdserve.py"), "probe", nbd],
+                                capture_output=True, text=True)
+            if pr.returncode == 0:
+                self.emit("nbd", state="connected", connections=1, t=time.time())
+            else:
+                self.emit("nbd", state="error", domain="VZErrorDomain", code=20001,
+                          name="networkBlockDeviceNegotiationFailed", message=(pr.stdout + pr.stderr).strip()[:300],
+                          t=time.time())
         self.set_state("running")
 
         boot = float(os.environ.get("FAKE_SILOVM_BOOT_SECONDS", "2"))
@@ -496,7 +509,7 @@ class Run:
 
 def cmd_run(argv):
     opts, _ = parse(argv, {"bundle", "provision-user", "provision-password", "provision-full-name", "net", "disk-cache",
-                           "disk-sync", "extra-disk", "max-seconds", "mtu"},
+                           "disk-sync", "extra-disk", "max-seconds", "mtu", "disk-nbd", "nbd-timeout"},
                     {"no-autologin", "no-ssh", "gui", "continue-on-provisioning-error"})
     b = need(opts, "bundle")
     if not os.path.isdir(b):
@@ -507,6 +520,11 @@ def cmd_run(argv):
             fail("--mtu must be between 1500 and 65535, got %s" % mtu)
         if not one(opts, "net", "nat").startswith("vfkit:"):
             fail("--mtu applies only to --net vfkit:SOCKETPATH")
+    nbd = one(opts, "disk-nbd")
+    if nbd is not None and not nbd.startswith("nbd"):
+        fail("--disk-nbd needs an NBD URL (nbd://host:port/export or nbd+unix:///export?socket=PATH), got %s" % nbd)
+    if one(opts, "nbd-timeout") is not None and nbd is None:
+        fail("--nbd-timeout applies only to --disk-nbd URL")
     if one(opts, "provision-user") is not None and one(opts, "provision-password") is None:
         fail("--provision-password is required", 2)
     return Run(b, opts).main()

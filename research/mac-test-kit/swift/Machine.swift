@@ -132,6 +132,59 @@ struct DiskModes {
   }
 }
 
+/// --disk-nbd URL: the main disk through VZNetworkBlockDeviceStorageDeviceAttachment. Apple's
+/// documentation shows nbd://host:port/export; the NBD URI specification also has
+/// nbd+unix:///export?socket=PATH, which validate(_:) accepts or refuses before the machine is made.
+@available(macOS 14, *)
+struct NBDChoice {
+  let url: URL
+  let timeout: TimeInterval
+  let syncName: String
+  let observer: NBDObserver
+
+  init(_ s: String, timeout: Int, syncName: String) throws {
+    guard let u = URL(string: s), let scheme = u.scheme, scheme.hasPrefix("nbd") else {
+      throw Fail("--disk-nbd needs an NBD URL (nbd://host:port/export or nbd+unix:///export?socket=PATH), got \(s)")
+    }
+    try VZNetworkBlockDeviceStorageDeviceAttachment.validate(u)
+    url = u
+    self.timeout = TimeInterval(timeout)
+    self.syncName = syncName
+    observer = NBDObserver(url: s)
+  }
+
+  /// The attachment has two modes of its own (VZDiskSynchronizationMode): --disk-sync none maps to
+  /// none, full and fsync to full.
+  var sync: VZDiskSynchronizationMode {
+    syncName == "none" ? VZDiskSynchronizationMode.none : .full
+  }
+}
+
+/// Prints the NBD client's connections and its errors as events: {"event":"nbd","state":"connected"}
+/// on each connection or reconnection, {"event":"nbd","state":"error",...} on an error the client
+/// does not recover from.
+@available(macOS 14, *)
+final class NBDObserver: NSObject, VZNetworkBlockDeviceStorageDeviceAttachmentDelegate {
+  let url: String
+  var connections = 0
+
+  init(url: String) {
+    self.url = url
+    super.init()
+  }
+
+  func attachmentWasConnected(_ attachment: VZNetworkBlockDeviceStorageDeviceAttachment) {
+    connections += 1
+    emit("nbd", [("state", .s("connected")), ("connections", .i(connections)), ("t", .d(now()))])
+  }
+
+  func attachment(_ attachment: VZNetworkBlockDeviceStorageDeviceAttachment, didEncounterError error: Error) {
+    let info = ErrorInfo(error)
+    logErr("NBD client error on \(url): \(info.text)")
+    emit("nbd", [("state", .s("error"))] + info.fields + [("t", .d(now()))])
+  }
+}
+
 @available(macOS 14, *)
 func loadHardwareModel(_ b: VMBundle) throws -> VZMacHardwareModel {
   guard let hw = VZMacHardwareModel(dataRepresentation: try readFile(b.hardwareModel)) else {
@@ -147,7 +200,8 @@ func loadHardwareModel(_ b: VMBundle) throws -> VZMacHardwareModel {
 /// configuration's attachment.
 @available(macOS 14, *)
 func makeConfiguration(_ b: VMBundle, _ cfg: BundleConfig, net: NetChoice, disk: DiskModes,
-                       extraDisks: [(String, Bool)], mtu: Int? = nil) throws -> VZVirtualMachineConfiguration {
+                       extraDisks: [(String, Bool)], mtu: Int? = nil,
+                       mainNBD: NBDChoice? = nil) throws -> VZVirtualMachineConfiguration {
   let c = VZVirtualMachineConfiguration()
   c.bootLoader = VZMacOSBootLoader()
 
@@ -175,8 +229,18 @@ func makeConfiguration(_ b: VMBundle, _ cfg: BundleConfig, net: NetChoice, disk:
   c.pointingDevices = [VZUSBScreenCoordinatePointingDeviceConfiguration(), VZMacTrackpadConfiguration()]
   c.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
 
-  let mainDisk = try VZDiskImageStorageDeviceAttachment(url: URL(fileURLWithPath: b.disk), readOnly: false,
-                                                        cachingMode: disk.caching, synchronizationMode: disk.sync)
+  // The main disk: the bundle's disk.img, or with --disk-nbd a disk served over NBD (macOS 14),
+  // which then replaces disk.img; the server decides what the guest reads.
+  let mainDisk: VZStorageDeviceAttachment
+  if let n = mainNBD {
+    let att = try VZNetworkBlockDeviceStorageDeviceAttachment(url: n.url, timeout: n.timeout, isForcedReadOnly: false,
+                                                              synchronizationMode: n.sync)
+    att.delegate = n.observer
+    mainDisk = att
+  } else {
+    mainDisk = try VZDiskImageStorageDeviceAttachment(url: URL(fileURLWithPath: b.disk), readOnly: false,
+                                                      cachingMode: disk.caching, synchronizationMode: disk.sync)
+  }
   var storage: [VZStorageDeviceConfiguration] = [VZVirtioBlockDeviceConfiguration(attachment: mainDisk)]
   for (path, ro) in extraDisks {
     guard FileManager.default.fileExists(atPath: path) else { throw Fail("no disk image at \(path)") }
@@ -741,14 +805,16 @@ final class Runner: NSObject, VZVirtualMachineDelegate {
   }
 }
 
-/// Kept alive while the machine runs.
+/// Kept alive while the machine runs. The NBD attachment's delegate is weak, so its observer is
+/// kept here.
 var runner: AnyObject?
+var nbdObserver: AnyObject?
 
 @available(macOS 14, *)
 func cmdRun(_ argv: [String]) throws {
   let a = try Args(argv,
                    valued: ["bundle", "provision-user", "provision-password", "provision-full-name", "net",
-                            "disk-cache", "disk-sync", "extra-disk", "max-seconds", "mtu"],
+                            "disk-cache", "disk-sync", "extra-disk", "max-seconds", "mtu", "disk-nbd", "nbd-timeout"],
                    flags: ["no-autologin", "no-ssh", "gui", "continue-on-provisioning-error"])
   let b = VMBundle(try a.require("bundle"))
   try b.mustExist()
@@ -772,6 +838,12 @@ func cmdRun(_ argv: [String]) throws {
     guard case .vfkit = net else { throw Fail("--mtu applies only to --net vfkit:SOCKETPATH") }
     mtu = m
   }
+  var nbd: NBDChoice? = nil
+  if let u = a.value("disk-nbd") {
+    nbd = try NBDChoice(u, timeout: try a.int("nbd-timeout", default: 5), syncName: disk.syncName)
+  } else if a.value("nbd-timeout") != nil {
+    throw Fail("--nbd-timeout applies only to --disk-nbd URL")
+  }
   var maxSeconds: Int? = nil
   if a.value("max-seconds") != nil { maxSeconds = try a.int("max-seconds", default: 0) }
 
@@ -789,11 +861,13 @@ func cmdRun(_ argv: [String]) throws {
   let app = NSApplication.shared
   if !a.has("gui") { app.setActivationPolicy(.prohibited) }
 
-  let conf = try makeConfiguration(b, cfg, net: net, disk: disk, extraDisks: extra, mtu: mtu)
+  let conf = try makeConfiguration(b, cfg, net: net, disk: disk, extraDisks: extra, mtu: mtu, mainNBD: nbd)
+  nbdObserver = nbd?.observer
   let vm = VZVirtualMachine(configuration: conf)
   emit("config", [("mac", .s(cfg.mac)), ("cpus", .i(conf.cpuCount)), ("memory_gb", .i(Int(conf.memorySize >> 30))),
                   ("net", .s(net.name)), ("mtu", mtu.map { J.i($0) } ?? J.null), ("disk_cache", .s(disk.cacheName)), ("disk_sync", .s(disk.syncName)),
                   ("disk_format", .s(cfg.diskFormat)), ("extra_disks", .i(extra.count)), ("gui", .b(a.has("gui"))),
+                  ("disk_nbd", nbd.map { J.s($0.url.absoluteString) } ?? J.null),
                   ("provision_user", provision.map { J.s($0.user) } ?? J.null),
                   ("provisioning_api", .b(provisioningAPIAvailable()))])
   let r = Runner(bundle: b, vm: vm, provision: provision,

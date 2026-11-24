@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+"""A fake of xcrun for the Linux runs of tests 24 to 27 (lib/ios.sh puts this folder first on PATH
+when KIT_FAKE=1). It keeps its simulators under $HOME/.fake-sim, $HOME being the fake computer's
+home of lib/guest.sh.
+
+  xcrun [--sdk SDK] swiftc ... -o OUT ...          writes a stub executable at OUT
+  xcrun simctl list -j runtimes devicetypes | list runtimes | runtime list
+  xcrun simctl create NAME TYPE RUNTIME            prints a new UDID
+  xcrun simctl bootstatus UDID -b                  boots it
+  xcrun simctl install UDID APP | launch [--console-pty] [--terminate-running-process] UDID ID
+  xcrun simctl io UDID screenshot [--type=bmp] PATH
+  xcrun simctl keychain UDID add-root-cert PEM
+  xcrun simctl shutdown UDID|all | delete UDID
+
+Behaviour, set by the environment:
+  FAKE_SIM_NEEDS_CONSOLE=1   a boot fails unless someone is on the screen ($HOME/.fake-console,
+                             written by the fake sysadminctl's -autologin set)
+  FAKE_SIM_BLANK=1           screenshots are one colour
+A launch with SIMCTL_CHILD_SILOKIT_URL fetches that URL with curl, trusting only the root
+certificates added to that simulator, as the simulator keeps its own store, and prints the line
+the kit's app prints.
+"""
+import json
+import os
+import shutil
+import struct
+import subprocess
+import sys
+import uuid
+
+HOME = os.environ.get("HOME", "/tmp")
+SIM = os.path.join(HOME, ".fake-sim")
+RT = "com.apple.CoreSimulator.SimRuntime.iOS-27-3"
+TYPES = ["com.apple.CoreSimulator.SimDeviceType.iPhone-16", "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro"]
+
+
+def dev(udid):
+    d = os.path.join(SIM, udid)
+    if not os.path.isdir(d):
+        sys.stderr.write("Invalid device: %s\n" % udid)
+        sys.exit(148)
+    return d
+
+
+def bmp(path, blank):
+    w = h = 32
+    rows = b""
+    for y in range(h):
+        for x in range(w):
+            rows += bytes((0, 128, 255, 255)) if blank else bytes(((x * 8) % 256, (y * 8) % 256, 128, 255))
+    head = b"BM" + struct.pack("<IHHI", 54 + len(rows), 0, 0, 54)
+    info = struct.pack("<IiiHHIIiiII", 40, w, h, 1, 32, 0, len(rows), 2835, 2835, 0, 0)
+    open(path, "wb").write(head + info + rows)
+
+
+def simctl(a):
+    os.makedirs(SIM, exist_ok=True)
+    c = a[0]
+    if c == "list":
+        if "-j" in a:
+            print(json.dumps({
+                "runtimes": [{"identifier": RT, "platform": "iOS", "version": "27.3", "isAvailable": True,
+                              "supportedDeviceTypes": [{"identifier": t} for t in TYPES]}],
+                "devicetypes": [{"identifier": t, "productFamily": "iPhone"} for t in TYPES]}))
+        else:
+            print("== Runtimes ==\niOS 27.3 (27.3 - 24D5000) - " + RT)
+    elif c == "runtime":
+        print("iOS 27.3 (24D5000) - FAKE (Ready)")
+    elif c == "create":
+        udid = str(uuid.uuid4()).upper()
+        os.makedirs(os.path.join(SIM, udid))
+        open(os.path.join(SIM, udid, "name"), "w").write(a[1])
+        print(udid)
+    elif c == "bootstatus":
+        d = dev(a[1])
+        if os.environ.get("FAKE_SIM_NEEDS_CONSOLE") == "1" and not os.path.exists(os.path.join(HOME, ".fake-console")):
+            sys.stderr.write("Unable to boot the Simulator. launchd failed to respond. (fake: nobody on the screen)\n")
+            return 149
+        open(os.path.join(d, "booted"), "w").close()
+        print("Device already booted, nothing to do.")
+    elif c == "install":
+        d = dev(a[1])
+        if not os.path.isdir(a[2]):
+            sys.stderr.write("Failed to install: no app at %s\n" % a[2])
+            return 1
+        open(os.path.join(d, "installed"), "w").close()
+    elif c == "launch":
+        rest = [x for x in a[1:] if not x.startswith("--")]
+        d = dev(rest[0])
+        if not os.path.exists(os.path.join(d, "booted")) or not os.path.exists(os.path.join(d, "installed")):
+            sys.stderr.write("Unable to launch %s\n" % rest[1])
+            return 1
+        print("%s: %d" % (rest[1], os.getpid()))
+        url = os.environ.get("SIMCTL_CHILD_SILOKIT_URL")
+        if url:
+            roots = os.path.join(d, "roots.pem")
+            p = subprocess.run(["curl", "-s", "--noproxy", "*", "--max-time", "10", "-o", "/dev/null",
+                                "-w", "%{http_code}", "--cacert", roots if os.path.exists(roots) else os.path.join(d, "no-roots"), url],
+                               capture_output=True, text=True)
+            line = "SILOKIT-FETCH ok %s" % p.stdout if p.returncode == 0 else "SILOKIT-FETCH error -1202"
+            sys.stdout.write(line + "\r\n")
+    elif c == "io":
+        dev(a[1])
+        bmp(a[-1], os.environ.get("FAKE_SIM_BLANK") == "1")
+    elif c == "keychain":
+        d = dev(a[1])
+        with open(os.path.join(d, "roots.pem"), "a") as f:
+            f.write(open(a[3]).read())
+    elif c == "shutdown":
+        for u in (os.listdir(SIM) if a[1] == "all" else [a[1]]):
+            try:
+                os.unlink(os.path.join(SIM, u, "booted"))
+            except OSError:
+                pass
+    elif c == "delete":
+        shutil.rmtree(dev(a[1]))
+    else:
+        sys.stderr.write("fake simctl: %s is not faked\n" % c)
+        return 2
+    return 0
+
+
+def main():
+    a = sys.argv[1:]
+    while a and a[0].startswith("--"):
+        a = a[2:] if a[0] == "--sdk" else a[1:]
+    if not a:
+        return 2
+    if a[0] == "simctl":
+        return simctl(a[1:])
+    if a[0] == "swiftc":
+        out = a[a.index("-o") + 1]
+        open(out, "w").write("#!/bin/sh\necho fake KitApp\n")
+        os.chmod(out, 0o755)
+        return 0
+    sys.stderr.write("fake xcrun: %s is not faked\n" % a[0])
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

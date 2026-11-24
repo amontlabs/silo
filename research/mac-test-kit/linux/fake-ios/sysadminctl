@@ -1,0 +1,7 @@
+#!/bin/sh
+# A fake of macOS's sysadminctl for the Linux runs of tests 24 to 27: "-autologin set -userName U"
+# puts U on the fake computer's screen ($HOME/.fake-console).
+if [ "$1" = -autologin ] && [ "$2" = set ] && [ "$3" = -userName ]; then
+  echo "$4" > "$HOME/.fake-console"; exit 0
+fi
+echo "fake sysadminctl: $* is not faked" >&2; exit 1

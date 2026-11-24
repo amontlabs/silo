@@ -642,7 +642,8 @@ silovm \(siloVMVersion): the Mac test kit's VM helper (see swift/README.md)
   silovm run --bundle BUNDLE [--provision-user NAME --provision-password PW [--provision-full-name TEXT]
              [--no-autologin] [--no-ssh]] [--net nat|none|vfkit:SOCKETPATH] [--gui]
              [--disk-cache automatic|cached|uncached] [--disk-sync full|fsync|none]
-             [--mtu N] [--extra-disk PATH[:ro]]... [--max-seconds N] [--continue-on-provisioning-error]
+             [--mtu N] [--extra-disk PATH[:ro]]... [--disk-nbd URL [--nbd-timeout S]]
+             [--max-seconds N] [--continue-on-provisioning-error]
   silovm ctl --bundle BUNDLE state|request-stop|stop|pause|resume|screenshot PATH
   silovm ip --bundle BUNDLE [--wait SECONDS]
 """
