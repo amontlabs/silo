@@ -103,3 +103,30 @@ So the answer's "cannot be swapped in" holds for the value, but not for the key'
 would put in its place for AWS: the boundary signs the request again with the real key, on the way
 to the hosts you allowed, and the computer holds a placeholder for the key as for any other
 secret.
+
+## An SSH key, held by an agent outside the computer (24 November 2026)
+
+An agent's part, 24 November 2026. An SSH key cannot be swapped in or signed again on the way,
+because SSH encrypts the whole exchange end to end. But it can stay outside the computer all the
+same, the way SSH itself allows: the key lives in an SSH agent outside, and the computer gets only
+a socket to that agent, `SSH_AUTH_SOCK`. OpenSSH (8.9 and later) can also bind such a key to the
+hosts it may be used for, which is the same limit Silo puts on a secret.
+
+Tried with OpenSSH 9.6, with two SSH servers on this machine, A and B, each with its own host key,
+and both accepting the same user key:
+
+- The key was added to an `ssh-agent` with a destination limit: `ssh-add -H known_hosts -h
+  "[127.0.0.1]:2222" user`. The client side held no key file at all, only the agent's socket.
+- `ssh` to A logged in. `ssh` to B was refused with "Permission denied (publickey)", although B
+  accepts that key.
+- The limit holds because the `ssh` client tells the agent which host it is talking to, signed by
+  that host's key (`session-bind@openssh.com`). The agent checks it against the host key it was
+  given, so a program inside cannot claim to be talking to A when it is talking to B.
+- A client that does not send that message cannot use a limited key at all. curl's SFTP, built on
+  libssh, was refused with the limited key and logged in with the same key added without a limit.
+  Git over SSH uses OpenSSH's `ssh`, so it works.
+
+What I would put in the answer's place for SSH keys: Silo holds the key in an agent outside the
+computer, limited to the hosts you allowed, and gives the computer the agent's socket. Every
+signature it makes is a fact for the record: which key, for which host. A program that does not
+use OpenSSH cannot use such a key, and that is a refusal, not a leak.
