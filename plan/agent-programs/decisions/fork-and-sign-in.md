@@ -25,3 +25,19 @@ starts with none of your secrets, so the sign-in follows the same rule.
 This answers only what a fork carries. The rest of logins stays open in `logins`, as polarzero asked. The
 audit's finding is in the notes of `login-handling`. It put the second option forward first, and
 named this one as the stronger.
+
+## Two more sign-ins on disk (24 November 2026)
+
+An agent's part, 24 November 2026, from the research in `research/2026-11-24-agent-programs-follow-ups`.
+
+- **Ollama** makes a key at its first start, `~/.ollama/id_ed25519`, and signs every request to
+  `ollama.com` with it: `Authorization: <public key>:<signature>`, over the method, the path and
+  a time. After `ollama signin`, that key is the account's sign-in for cloud models. A fork copies
+  it. A placeholder cannot stand in for it, since each request is signed afresh: kept out of the
+  computer, it would have to be held by Silo, which signs each request, as the research on AWS
+  signatures did.
+- **Kiro CLI** keeps the sign-in of `kiro-cli login` in `~/.local/share/kiro-cli/data.sqlite3`,
+  and its sessions in `~/.kiro/`. `KIRO_API_KEY` is the other way in.
+- **LM Studio** keeps its hub sign-in under `~/.lmstudio/credentials`.
+
+Each is a field for the program's data file (`agent-program-data-file`).

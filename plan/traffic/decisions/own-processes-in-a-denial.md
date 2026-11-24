@@ -40,3 +40,43 @@ An agent's part, 24 November 2026, from the research in
 - Claude Code 2.1.331 also runs `git` after a write. That `git` failed with no message, and Claude
   Code carried on.
 - Gemini CLI, Qwen Code, Cline and Goose started nothing of their own in the window.
+
+### The program's own commands, let through by their command line (24 November 2026)
+
+An agent's part, 24 November 2026, from the research in `research/2026-11-24-agent-programs-follow-ups`. This tries the second option and
+challenges the recommendation.
+
+The stand-in probe was given a list of command lines, as prefixes. In the window, an exec whose
+whole command line starts with one of them runs. Every other exec is refused, as before, and
+everything the process that runs writes is judged as before: outside the program's own folders,
+refused. For OpenCode 1.19.6, three prefixes covered all 15 processes it started in the window,
+all of them `git` on its own snapshot folder:
+
+```
+git rev-parse --path-format=absolute --git-path info/exclude
+git -c core.autocrlf=false -c core.longpaths=true -c core.symlinks=true -c core.quotepath=false --git-dir <home>/.local/share/opencode/snapshot/
+git --git-dir <home>/.local/share/opencode/snapshot/
+```
+
+With them, the denied `rm` failed with `EPERM`, the session went on to the end with snapshots on,
+and `existing.txt` stayed.
+
+The hole the option names is narrower than it looks. A shell call starts `bash -c …`, so it never
+matches a prefix that starts with `git`: a prefix is matched from the first word. A `git` that
+does match cannot write the work folder, run a hook, a pager or a helper, or reach the network,
+since each of those is a write or an exec that the probe judges on its own. What is left is a tool
+that runs `git --git-dir <OpenCode's snapshot folder> …` directly, without a shell, which can then
+write only inside that folder.
+
+A rule that disarms after the first refusal was tried too, and fails: Copilot CLI 1.0.115 starts
+its own `bash -l` to read the login shell's environment before the call's shell, so the first
+refusal would be its own, and the call would run.
+
+Seen in the window, with nothing let through: Claude Code started 9 processes of its own (`git`,
+`rg`, `env`, its shell snapshot) and carried on; Copilot started 1 and carried on; Codex, Gemini
+CLI, Cline and Goose started none.
+
+So I would change the recommendation to the second option, with the prefixes as a field of the data
+file (`agent-program-data-file`), shown by the live check of `denial-per-program` for each
+version. It keeps OpenCode's undo, which is what its users rely on, without a setting changed for
+them, and the window still refuses every write that matters.

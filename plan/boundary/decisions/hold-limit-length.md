@@ -46,3 +46,17 @@ against. A hold on a model's reply, such as a tool call held while a precaution 
 (`classifier-wait-limit`), is cut by Codex at 15 seconds and by Gemini CLI at 60, each of which
 then sends the whole request again. When the reply had already started before the hold, whether
 the program counts its wait from the last byte was not tried.
+
+## How long a held reply can last (24 November 2026)
+
+An agent's part, 24 November 2026, from the research in `research/2026-11-24-agent-programs-follow-ups`.
+
+The limits in the section above count from the request to the first byte. Once the status and
+headers are sent, they no longer apply. After them, without anything more, Claude Code gave up at
+180 s and Codex and OpenCode at 300 s, and each sent the whole request again. With a keep-alive byte
+every 5 seconds (`ping` on Anthropic's format, a comment on Gemini's, an event on Codex's), every
+program tried waited 300 s, and Codex 420 s, then took the reply.
+
+So the 90 seconds are not bounded by the programs' waits on a model reply, as long as the boundary
+sends the headers and a keep-alive while it holds. They are bounded by what the person waits for,
+and by the command timeouts named above.

@@ -47,3 +47,27 @@ without a reader is count their spend or see their tool calls.
 
 These vendors also run tools on their own servers: a web search in the vendor's server never
 crosses the boundary at all, whatever Silo reads.
+
+### Copilot's own route and Kiro, further (24 November 2026)
+
+An agent's part, 24 November 2026, from the research in `research/2026-11-24-agent-programs-follow-ups`.
+
+- **Copilot CLI 1.0.115 with a GitHub token** asks `api.github.com/copilot_internal/user` for
+  its plan and hosts (`api.individual.githubcopilot.com` for an individual plan), then managed
+  settings, then the model list at `GET /meta` on that host. A stand-in for `/meta` was not
+  accepted, so its model calls were not reached. It notices a refusal that does not come from
+  GitHub: a 404 without GitHub's headers is logged as "does not appear to originate from GitHub. Is
+  a proxy or firewall intercepting this request?"
+- **Copilot with its own key needs no GitHub sign-in.** With `COPILOT_PROVIDER_TYPE`,
+  `COPILOT_PROVIDER_BASE_URL` and `COPILOT_PROVIDER_API_KEY`, it is an ordinary client of
+  Anthropic, OpenAI (Chat Completions, Responses, or Responses over a WebSocket), Azure or Google.
+  It ran the whole scenario that way, denial included. So Copilot can be read today in that mode.
+- **Kiro CLI 3.6.0** was installed from its release archive into a folder of its own. With a fake
+  `KIRO_API_KEY` it calls AWS-style JSON services on `management.<region>.kiro.dev` and
+  `runtime.<region>.kiro.dev`, with the key as a bearer token. Its own code names the model call
+  `KiroRuntimeService.GenerateAssistantResponse`, answered as an AWS event stream, the framing of
+  Bedrock. It trusted Silo's certificate from the system's store. It stopped at its model list, so
+  no model call was seen.
+- **Kiro asks for its own spend.** Each start calls `GetUsageLimits`, whose answer is Kiro's
+  account of the credits used. Silo could read that answer as it passes, without reading the
+  conversation, and show what the vendor says was spent.

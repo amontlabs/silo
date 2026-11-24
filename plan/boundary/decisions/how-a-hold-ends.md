@@ -52,3 +52,27 @@ So the answer's reason does not hold: a 403 is retried by Claude Code, Qwen Code
 Aider, with growing waits. Only Cline and Goose stop at the first one. No status tried made every
 program stop and show Silo's words. What the user reads has to come from Silo's own app, and the
 record has to expect the same refused request several times.
+
+## A hold the programs wait for, and a refusal they show (24 November 2026)
+
+An agent's part, 24 November 2026, from the research in `research/2026-11-24-agent-programs-follow-ups`.
+
+**While a hold lasts.** The 15 s of Codex and the 60 s of Gemini CLI in the section above are limits
+on the first byte of a reply. When the status and headers were sent at once and the reply held,
+Gemini CLI waited the whole 300 s, and Codex waited 300 s before sending the request again. With a byte every 5 seconds that the format documents and
+that means nothing, every program tried waited the whole hold and took the reply: Anthropic's
+`ping` event on Messages (Claude Code, OpenCode, Cline, Goose, Aider, Copilot CLI, 300 s), a
+comment on Gemini's stream (300 s). Codex needs an event, not a comment: it waited 420 s on an
+event of a name it does not know. Such an event broke OpenCode and Cline on Messages, so it is not
+a general answer, and the Responses format documents no harmless event.
+
+In a real hold the provider's reply has already started, so the headers have already gone to the
+program. What a hold has to cover is the wait after them, and the measures say a documented
+keep-alive byte covers it for every program but Codex, which needs an event on Responses.
+
+**When a hold ends with a refusal.** This entry says a 403 is not retried by the usual programs.
+Measured with a refusal of the model requests only: a 403 in the provider's error shape stopped
+seven of eight programs, but Aider retried it and Copilot replaced Silo's words with its own. A 400
+in the provider's error shape (`invalid_request_error`) stopped all eight within 9 seconds, and each
+printed Silo's sentence. The table is in the notes of `budget-denies-or-holds`. So I would make the
+answer 400 rather than 403, with Silo's words in the provider's error shape.
