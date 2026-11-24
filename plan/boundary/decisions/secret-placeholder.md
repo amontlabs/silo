@@ -333,7 +333,7 @@ What this changes for Silo:
 
 An agent's part, 24 November 2026. The answer leaves database passwords as ordinary files "until
 a way is found", and the note on AWS says the boundary "would have to end that protocol itself".
-That was tried for PostgreSQL, the database agents meet most, with PgBouncer 1.22 standing in for
+That was tried for PostgreSQL, a database agents meet often, with PgBouncer 1.22 standing in for
 the boundary. The server was PostgreSQL 16 with TLS and SCRAM-SHA-256, the default of hosted
 databases, so the password itself never crosses the connection and no swap can work.
 
@@ -361,8 +361,9 @@ databases, so the password itself never crosses the connection and no swap can w
   has the real value's length (the shaped placeholder above). Under TLS (`rediss://`, as hosted
   Redis gives) Silo ends TLS first, as for HTTPS.
 
-What I would add to the answer: PostgreSQL passwords can be held outside, by a boundary that ends
-the protocol, which removes the most common secret from the "ordinary files" list. The
+What I would add to the answer: PostgreSQL passwords can be held outside by a boundary that ends
+the protocol, and Redis passwords by a swap, which takes database passwords off the "ordinary
+files" list except for MySQL, still to try. The
 configuration is in the project files, `research/2026-11-24-db-password`.
 
 ## Where twelve services' secrets travel (24 November 2026)
@@ -439,8 +440,9 @@ OPENAI_API_KEY` (gh 2.89) against a stand-in for GitHub's API:
   since the real key would then leave for a host the secret was not allowed to reach.
 - The deployment then fails later, far from the computer, with an invalid key, and nothing told
   you why. A service whose API takes the value in plain shows the placeholder to the boundary,
-  which can recognise it (Vercel's, Cloudflare's and Fly's are documented so; not tried); GitHub's sealed box does
-  not, though the request names the secret (`PUT …/actions/secrets/OPENAI_API_KEY`).
+  which can recognise it (Vercel's, Cloudflare's and Fly's are documented so; not tried).
+  GitHub's sealed box does not, though the request names the secret
+  (`PUT …/actions/secrets/OPENAI_API_KEY`).
 
 What I would add to the answer: a request that stores a secret in another service is a moment to
 tell you, or to ask. Silo can recognise the known ones by their address, and name the secret.
