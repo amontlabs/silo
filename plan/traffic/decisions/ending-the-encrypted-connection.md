@@ -85,4 +85,11 @@ What this changes:
   Silo reads, as a container does above. Stripe's Python SDK is one: only a line of code changes
   its list (`secret-placeholder`, "Where twelve services' secrets travel").
 
-The scripts are in the project files, `research/2026-11-24-trust-libraries`.
+All of it together was tried from a fresh home folder: six variables pointing at the system
+bundle (`NODE_OPTIONS=--use-system-ca`, `UV_NATIVE_TLS=1`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`,
+`AWS_CA_BUNDLE`, `CURL_CA_BUNDLE`) and Silo's authority added to the user's NSS store. Every
+client above then trusted Silo's certificate, Chromium and Chrome included, and a real public
+host still worked. That is a short, fixed list Silo can apply when it makes a computer.
+
+The scripts are in the project files, `research/2026-11-24-trust-libraries` (`kit.sh` for the
+list).
