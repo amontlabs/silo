@@ -22,3 +22,14 @@ agent work is judged in a minute.
 An agent's doubt, from drafting this feature on 21 November 2026.
 
 It is large: its text carries the whole list of `what-a-receipt-holds`, which has no verdict. It could be cut into a first receipt and the rest.
+
+## A first receipt, in the first build
+
+An agent's part, 24 November 2026, from [the comparison of first builds](../../../research/2026-11-24-first-build-and-the-record.md). The doubt above, made concrete. A first receipt holds
+only what the first build's record has: what you asked, the files that changed in and outside the
+repository, the commands with the exit code the agent program sent to its model (a report read from
+the traffic), the hosts reached and how much was sent, the conversation's spend, and the agent's
+own last words beside them. It says what it does not have yet: processes, and anything a rule
+decided. On a real night it catches the two false claims #371 caught, «All tests pass.» against
+an exit 1 and «I only changed files in the repo.» against files deleted outside it. Proposed: a
+new feature in `views`, split from this one, read from the `silo` command.

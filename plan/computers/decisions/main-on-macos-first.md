@@ -59,3 +59,14 @@ how the code reaches it.
 
 `linux-beside-a-macos-main`, `containers-on-macos`, `record-halves-per-system`,
 `macos-ships-facts-first`, `x86-linux-computers`, `neutral-core`.
+
+## Weighed against a Linux main first
+
+An agent's part, 24 November 2026, from [the comparison of first builds](../../../research/2026-11-24-first-build-and-the-record.md). A Linux main on the Mac in the first build was
+weighed, because more of the record has already run on Linux (#347, #367, #371) and a Linux
+computer can give processes from a probe with a kernel of Silo's own. It is not recommended: it
+lands beside free Linux microVM products on the Mac, it gives up Xcode and macOS apps in main, and
+the macOS main would still have to be built later, which writes the computer, its checkpoints and
+its file comparison twice. It stays the fallback if the Mac kit (#359) shows that macOS 27's
+provisioning or gvproxy under a macOS computer does not work: the engine, the boundary and the
+recorder run on the Mac outside every computer and carry over unchanged.

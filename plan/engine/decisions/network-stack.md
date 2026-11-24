@@ -28,3 +28,11 @@ second is marked Notes.
 
 The same table puts model calls, secrets and budgets at the boundary on both systems. Those lines
 have their homes in the parts `boundary` and `traffic`.
+
+## If the first build records model traffic
+
+An agent's part, 24 November 2026, from [the comparison of first builds](../../../research/2026-11-24-first-build-and-the-record.md). #370's specs run main on Apple's NAT until a patched
+gvproxy passes the Mac kit's test 07. If model calls and hosts are in the first build's record,
+main is on Silo's stack from its first start, as this answer already says, because a host or a
+call is a fact only when every packet passes the boundary. Test 07 and #358's fix for gvproxy's API
+then come before main's first start.
