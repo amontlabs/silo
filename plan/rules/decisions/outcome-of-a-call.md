@@ -1,0 +1,34 @@
+# What does a set of rules say a destructive call does
+
+## The choice
+
+An agent's part, 24 November 2026. Four calls in one night. Neon `DELETE /projects/{id}`: Neon
+keeps a deleted project 7 days. A Stripe refund with a live key: the money leaves. Vercel removes
+a deployment: the site is down until the next deploy. GitHub `PATCH /repos/{o}/{r}` with
+`"private": false`: nothing is lost, but anyone can copy the code from that moment.
+
+The options:
+
+- Five outcomes, and hold all but an outage (recommended). Each operation in a set says gone,
+  recoverable, money, exposed or outage. The first four are held, and so is any call that turns
+  off a protection. An outage alerts and passes. The ask says the outcome, and for a recoverable
+  one what the provider says brings it back and for how long. It costs asks for calls the
+  provider could undo, such as the Neon delete above.
+- Hold only what cannot be undone: gone, money and exposed. It costs the cases where the
+  provider's undo is real but out of your reach in the moment: Railway's 48 hours of a deleted
+  volume can only be used from a link in the owner's email.
+- Four outcomes, without exposed. A repository made public is counted as an outage or not held.
+  It costs the one case that loses nothing and still cannot be taken back.
+
+Recommended: five outcomes, and hold all but an outage. The ask is where the provider's undo is
+worth saying, and a repository made public cannot be made private again for whoever copied it.
+
+## An agent's notes
+
+- The outcomes of about 400 operations, with sources, are in the catalogues of
+  `research/2026-11-24-destructive-calls/details/` (paas, data, clouds, saas).
+- What a provider says it can bring back is a report of the provider, not a fact Silo saw, so the
+  ask shows it as the provider's word (`facts-before-reports`).
+- The calls that turn a protection off include RDS `ModifyDBInstance` with
+  `DeletionProtection=false`, S3 `PutBucketVersioning` suspended, Atlas termination protection
+  off, Turso delete protection off, and `SkipFinalSnapshot=true` on an RDS delete.

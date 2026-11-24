@@ -1,0 +1,9 @@
+{
+  "asks": "How does a rule tell what a request to an API does?",
+  "answer": "By the operation, not by the method. A set of rules for a host lists the operations of its API, and the boundary reads which one a request runs: the method and path of a REST call, each root field of the GraphQL operation that runs, the AWS action from its header, form body or path, the tool and arguments of an MCP call, the ref updates of a Git push, and the statements of SQL sent inside a request. A request to such a host whose operation the boundary cannot read is held: a body it cannot parse, a GraphQL query sent only as a hash, or an operation the set does not list. On these hosts, a secret limited to reading (`secret-limits`) goes out only with the operations the set lists as reads.",
+  "needs": [
+    "control-plane-hosts-read",
+    "rule-carries-its-data",
+    "rules-are-data"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "asks": "When a program sends many held requests at once, how many asks do you get?",
+  "answer": "One for the burst. The requests of one computer to one host that a rule holds while an ask about that host is open join it. The ask lists every request it would let pass, and your yes lets pass only those. A request that a program sends again after its own timeout joins the ask of the request it repeats, when the boundary can tell it is the same one: the same request id from the AWS SDK, or the same method, path and body. A request that arrives after you answered starts a new ask.",
+  "needs": [
+    "what-an-ask-holds",
+    "what-an-ask-shows"
+  ]
+}
