@@ -1,0 +1,5 @@
+{
+  "_note": "Dollars per million tokens at the provider's API list prices, read 24 November 2026. Cache writes at 1.25x input is an assumption of this prototype. A model not listed has no price: its spend shows as not known, never as zero.",
+  "claude-opus-5-5": {"in": 4.0, "out": 20.0, "cache_read": 0.2, "cache_write": 5.0},
+  "claude-haiku-5-5": {"in": 0.1, "out": 0.5, "cache_read": 0.01, "cache_write": 0.125}
+}
