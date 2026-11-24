@@ -263,3 +263,44 @@ Two things to avoid, seen in them:
 So the placeholder in a header is what every product has. What Silo would add is the rest: keys
 that sign, keys that buy tokens, SSH, and the reply. Those are the cases a developer's real keys
 are in (AWS, Google Cloud, a Git host over SSH), and the reason to pick Silo over the others.
+
+## Codex ships the same design, inside the program (24 November 2026)
+
+An agent's part, 24 November 2026. Read from Codex 0.172.0's source (`codex-rs/network-proxy`, its
+README and `credential_broker/`), not run. Codex now carries a network proxy of its own for the
+commands it starts, experimental and off by default ("Network proxy can now be enabled from
+/experimental"). With `credential_masking` on, it does most of what this answer proposes:
+
+- Commands get a stand-in for `GITHUB_TOKEN`, `GH_TOKEN`, `OPENAI_API_KEY` and the like, shaped
+  like the real one (same prefix, at least the same length), and the proxy swaps the real value
+  into `Authorization` for the hosts of that provider only. For GitHub it decodes Basic and swaps
+  the user name or the password, the case found above.
+- AWS: a stand-in key id such as `CODEXMASKEDWORKSPACE`; the proxy finds it in the signature's
+  scope and signs the request again with the real key, keeping the client's timestamp and signed
+  headers. A body with `UNSIGNED-PAYLOAD` streams; a signed body is held, up to 8 MiB.
+- Other secrets: a header set from a secret, which can require one exact stand-in value first, and
+  `body_secret_substitution` with exact markers of 16 to 256 bytes. A compressed body fails closed.
+- Hooks per host, method and path, a mode that allows only `GET`, `HEAD` and `OPTIONS`, and a
+  certificate authority made per run, whose key stays in the proxy's memory.
+
+What it refuses, and what Silo's trials passed: presigned links with a masked key, SigV4a, AWS
+signed streams and "declared trailers". boto3 1.44's default upload declares a trailer
+(`STREAMING-UNSIGNED-PAYLOAD-TRAILER`), so it fails under Codex's proxy; re-signing the headers
+let it through in the trial above. Neither the reply of a token request nor SSH is covered.
+
+What this changes for Silo:
+
+- **The design is not in question.** A large vendor reached the same shape: a stand-in, a swap at
+  a proxy that ends TLS, host binding, signing again for AWS, failing closed. Silo can borrow its
+  limits (exact markers, no escaping, a size cap on held bodies) rather than invent them.
+- **Where the real value lives is the difference.** Codex's proxy runs on the same machine as the
+  agent, and its secrets are files or variables there; "file-backed credentials require filesystem
+  permissions that prevent child access". With the sandbox off, the way polarzero's first build
+  runs agents, Codex says it plainly: "Credential masking is inactive because the network proxy is
+  disabled. Commands will receive unmasked credentials." Silo's boundary is outside the computer,
+  so it holds with every check off and for every program, not only Codex.
+- **A stand-in shaped like the real token** is worth taking: some tools check a token's prefix or
+  length before they send it. The answer above does not say what a placeholder looks like.
+- **Two proxies in a row.** Codex with its proxy on, inside Silo, ends TLS itself and reaches the
+  host through Silo's boundary. Its proxy trusts "native root certificates for MITM trust bundle",
+  so Silo's authority in the computer's store should be enough. Not tried.
