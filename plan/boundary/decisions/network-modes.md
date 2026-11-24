@@ -91,6 +91,8 @@ host it reached:
 | `apt-get update` on Ubuntu 24.04 | archive.ubuntu.com, security.ubuntu.com, and each extra source |
 | `npx playwright install --dry-run chromium` | cdn.playwright.dev, with playwright.download.prss.microsoft.com as the second source |
 | What nvm reads | nodejs.org |
+| `docker pull alpine:3.20` (Docker 29) | registry-1.docker.io, auth.docker.io, production.cloudfront.docker.com |
+| `docker pull ghcr.io/…` | ghcr.io, pkg-containers.githubusercontent.com |
 
 So most installs need a second host that their usual name does not suggest: a list holding
 `pypi.org` fails on the first wheel, one holding `crates.io` fails on the first crate, one holding
@@ -104,7 +106,8 @@ them only as `how-a-hold-ends` describes.)
 What I would add to the answer: Silo offers a limited computer's list in named groups, each holding
 an ecosystem's hosts together: "PyPI" is pypi.org and files.pythonhosted.org, "crates" is
 index.crates.io and static.crates.io, "Go modules" is proxy.golang.org and sum.golang.org,
-"GitHub" includes release-assets.githubusercontent.com and raw.githubusercontent.com. A group is a
+"GitHub" includes release-assets.githubusercontent.com and raw.githubusercontent.com, "Docker
+Hub" is three hosts. A group is a
 shorthand for its hosts, shown as such, and `network-rules-from-use` still finds what a project
-adds, such as binaries.prisma.sh. Not tried: Docker Hub, Homebrew, Maven. The proxy and the runs
+adds, such as binaries.prisma.sh. Not tried: Homebrew, Maven. The proxy and the runs
 are in the project files, `research/2026-11-24-install-hosts`.
