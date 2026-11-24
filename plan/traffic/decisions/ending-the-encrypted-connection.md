@@ -131,10 +131,9 @@ authority:
 
 - **Python 3.13 checks strictly by default.** Its default context sets `VERIFY_X509_STRICT`, so a
   leaf without the Authority Key Identifier extension fails every Python program of 3.13 or later
-  with "certificate verify failed", whatever store it trusts. Some libraries that make
-  certificates leave that extension out unless asked (rcgen, the Rust one, has a switch for it;
-  read from its documentation, not tried). Python 3.13 is the Python of current Ubuntu and macOS
-  installers, so a computer would show it at once.
+  with "certificate verify failed", whatever store it trusts. A library that makes certificates
+  may leave that extension out unless asked, and Node, curl and Go would not notice, so only a
+  test with a recent Python catches it.
 - **The host goes in `subjectAltName`.** Go refuses a certificate that names its host only in the
   common name, as Chrome does (Chrome not tried here). gh, kubectl, terraform and docker are Go.
 - **Making one costs nothing with an elliptic-curve key.** A leaf with a new P-256 key took
