@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+"""A small stand-in for silovm on Linux, for the guest tests' Linux runs (02 09 11 12 14 16 21 22).
+
+No VM: `run` prints the events of swift/README.md, waits, and stops when asked. It keeps Apple's
+limit of two running macOS computers in a state folder, and can leak a place, so a test's stop
+and leak logic runs here. Not the vm-helper agent's linux/fake-silovm.
+
+Environment:
+  FAKE_SILOVM_STATE      folder for the places (default: $TMPDIR/fake-silovm-guest)
+  FAKE_STOP_IGNORE_EVERY N: every Nth run ignores request-stop (so it is forced)
+  FAKE_LEAK_EVERY        N: every Nth stopped run keeps its place taken
+  FAKE_BOOT_SECONDS      seconds before "started" (default 0.3)
+"""
+import json
+import os
+import shutil
+import signal
+import sys
+import tempfile
+import time
+
+STATE = os.environ.get("FAKE_SILOVM_STATE") or os.path.join(tempfile.gettempdir(), "fake-silovm-guest")
+os.makedirs(STATE, exist_ok=True)
+
+
+def emit(**e):
+    sys.stdout.write(json.dumps(e) + "\n")
+    sys.stdout.flush()
+
+
+def arg(args, name, default=None):
+    if name in args:
+        i = args.index(name)
+        if i + 1 < len(args):
+            return args[i + 1]
+    return default
+
+
+def counter(name):
+    p = os.path.join(STATE, name)
+    n = int(open(p).read() or 0) + 1 if os.path.exists(p) else 1
+    open(p, "w").write(str(n))
+    return n
+
+
+def places():
+    live = 0
+    for f in os.listdir(STATE):
+        if f.startswith("place-"):
+            pid = int(f.split("-")[1])
+            if f.endswith("-leaked"):
+                live += 1
+                continue
+            try:
+                os.kill(pid, 0)
+                live += 1
+            except OSError:
+                os.unlink(os.path.join(STATE, f))
+    return live
+
+
+def run(args):
+    bundle = arg(args, "--bundle")
+    maxs = float(arg(args, "--max-seconds", "0") or 0)
+    n = counter("runs")
+    ignore = int(os.environ.get("FAKE_STOP_IGNORE_EVERY", "0") or 0)
+    ignore_stop = ignore > 0 and n % ignore == 0
+    emit(event="config", mac="fa:ke", cpus=2, memory_gb=4, net="nat", disk_cache="automatic", disk_sync="full")
+    if places() >= 2:
+        emit(event="stopped", how="error", error="VZErrorDomain Code=6 (fake) the number of running macOS virtual machines is limited", t=time.time())
+        return 1
+    place = os.path.join(STATE, "place-%d" % os.getpid())
+    open(place, "w").close()
+    open(os.path.join(bundle, "fake.pid"), "w").write(str(os.getpid()))
+    state = {"stop": None}
+
+    def on_term(sig, frame):
+        if not ignore_stop:
+            state["stop"] = "requested"
+
+    def on_usr1(sig, frame):
+        state["stop"] = "forced"
+
+    signal.signal(signal.SIGTERM, on_term)
+    signal.signal(signal.SIGUSR2, on_term)
+    signal.signal(signal.SIGUSR1, on_usr1)
+    time.sleep(float(os.environ.get("FAKE_BOOT_SECONDS", "0.3")))
+    t0 = time.time()
+    emit(event="started", t=t0)
+    emit(event="state", value="running")
+    while state["stop"] is None:
+        time.sleep(0.1)
+        if maxs and time.time() - t0 > maxs:
+            state["stop"] = "max-seconds"
+    emit(event="stopped", how=state["stop"], t=time.time())
+    leak = int(os.environ.get("FAKE_LEAK_EVERY", "0") or 0)
+    if leak and counter("stops") % leak == 0:
+        os.rename(place, place + "-leaked")
+    else:
+        os.unlink(place)
+    try:
+        os.unlink(os.path.join(bundle, "fake.pid"))
+    except OSError:
+        pass
+    return 0
+
+
+def ctl(args):
+    bundle = arg(args, "--bundle")
+    cmd = args[-1] if args else "state"
+    try:
+        pid = int(open(os.path.join(bundle, "fake.pid")).read())
+    except (OSError, ValueError):
+        print(json.dumps({"ok": False, "error": "not running"}))
+        return 1
+    sig = {"request-stop": signal.SIGUSR2, "stop": signal.SIGUSR1}.get(cmd)
+    if sig:
+        os.kill(pid, sig)
+    print(json.dumps({"ok": True, "state": "running"}))
+    return 0
+
+
+def main():
+    a = sys.argv[1:]
+    if not a:
+        return 2
+    c = a[0]
+    if c == "version":
+        print("fake-silovm-guest 0")
+    elif c == "host-check":
+        print(json.dumps({"macos": "fake", "virtualization_supported": True, "provisioning_api": True}))
+    elif c == "clone":
+        src, dst = arg(a, "--from"), arg(a, "--to")
+        shutil.copytree(src, dst, ignore=shutil.ignore_patterns("fake.pid", "run.pid", "ctl.sock"))
+        if "--new-identity" in a:
+            open(os.path.join(dst, "identity"), "w").write(str(time.time()))
+    elif c == "run":
+        return run(a)
+    elif c == "ctl":
+        return ctl(a)
+    elif c == "ip":
+        print("127.0.0.1")
+    else:
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
