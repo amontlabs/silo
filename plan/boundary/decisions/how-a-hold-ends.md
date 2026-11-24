@@ -122,3 +122,29 @@ and keeps asking for minutes.
 A hold that answers nothing behaves as on Anthropic's API: Claude Code on Bedrock sent the same
 streamed request again after 361 s with no reply head, though the request said it would wait
 600 s (`x-stainless-timeout`). So the limit of `hold-limit-length` fits Bedrock as it is.
+
+## A refusal on Codex's WebSocket (24 November 2026)
+
+An agent's part, 24 November 2026. The refusals above were tried on plain requests. Codex 0.172.0
+sends its model traffic over a WebSocket when it can (`reading-each-agent-program`). A fake
+provider on `api.openai.com`, reached through the system's trust store, refused the first
+request of a run in six ways. Each run had no other refusal, so the HTTPS requests Codex fell back
+to were answered.
+
+| Refusal on the socket | What Codex showed | What Codex did next |
+|---|---|---|
+| An event `{"type": "error", "status": 400, "error": {"code", "message"}}` | The event, with Silo's words | Stopped: one refusal, the turn failed |
+| The same event with status 403 | "Reconnecting... 2/5 (unexpected status 403 Forbidden: Silo held this request…)" | Five tries, then "Falling back from WebSockets to HTTPS transport", and the request went out over HTTPS |
+| `response.failed` with Silo's words | "stream disconnected before completion: Silo held this request…" | The same five tries and fallback |
+| A close frame, code 1008, Silo's words as the reason | "websocket closed by server before response.completed" | The same five tries and fallback; the reason was not shown |
+| The upgrade refused with 400 and Silo's words | An empty error | Stopped; the words were lost |
+| The upgrade refused with 403 | "unexpected status 403 Forbidden: Unknown error" | Five tries and fallback; the words were lost |
+
+Codex's code says why: an `error` event that carries a status is treated as the HTTP answer of
+that status (`codex-api/src/endpoint/responses_websocket.rs`), so the rule found for plain
+requests holds on the socket too: 400 is the one status Codex shows once and does not retry.
+
+So for Codex on a socket, Silo accepts the connection and refuses the held request with an
+`error` event of status 400, carrying the reason in `error.message`. Anything else is sent again
+up to five times and then over HTTPS, where the same hold has to refuse it again: six asks for one
+request, the case `hold-limit-length` warns of, unless the retries are joined to the open ask.
