@@ -21,14 +21,16 @@ the ways compare, not what a Mac gives. Each figure names its run in [`proto/res
 2. **On a Mac, cloning anything that shares blocks with the live image may still make it wait.**
    Cloning an older checkpoint that nobody writes made the live image's writes wait up to 1.0 s on
    XFS. A variant that clones nothing while the computer runs (each checkpoint a file of the blocks
-   it copied) removes that cause. Whether APFS behaves like XFS here is the first Mac test to run.
+   it copied, `delta`) removes that cause: its checkpoints took 0.45 to 1.06 s, and most kept the
+   longest write under 160 ms, near the disk's own noise of 16 to 85 ms. Whether APFS behaves like
+   XFS here is the first Mac test to run.
 3. **A full volume is a write error inside the computer, not only a checkpoint that fails.** Once
    the disk image shares blocks with a checkpoint, overwriting its own blocks needs free space: on
    a full XFS volume the computer's overwrites failed with "No space left on device". Removing a
    reserve file let them go on. Silo has to act before the volume is full, not after.
 4. **The 30 days of daily checkpoints hold most of the disk.** Under a model of an agent rewriting
    2 GiB an hour, 10 hours a day, into a working set of 4 to 16 GiB, the kept checkpoints of the
-   proposed thinning hold 250 to 410 GiB beyond the live disk; with 7 days of dailies, 70 to
+   proposed thinning hold 247 to 413 GiB beyond the live disk; with 7 days of dailies, 72 to
    105 GiB. The disk limit, not the 30 days, decides how far back a Mac reaches.
 5. **With a checkpoint at each turn, thinning removes up to 233 checkpoints an hour** (three
    turns a minute), and keeps up to 504. Each removal made the computer's writes wait 0.08 to
@@ -50,12 +52,12 @@ checkpoint; the computer's usual write took 0.2 ms.
 
 | Way | Silo needs | Longest write during a checkpoint | Computer paused | Checkpoint takes | Write wait while one is dropped | Mac |
 |---|---|---|---|---|---|---|
-| None (the disk's own noise) | | 19 to 69 ms | | | | |
+| None (the disk's own noise) | | 16 to 85 ms | | | | |
 | `full`: clone the live image | a file system that clones | 9.2 to 11.8 s | no | 9.2 to 11.8 s | 82 to 101 ms | clonefile; #359 test 01 |
 | `range`: clone the changed ranges into a clone of the last checkpoint | a range clone | 69 to 281 ms | 1.0 to 1.4 s | 13.5 to 18.1 s | 137 to 178 ms | no range clone on APFS |
 | `cbw`: copy-before-write from a write log into a clone of the last checkpoint | to see the writes | 158 to 313 ms | under 1 µs | 12.1 to 15.6 s | 169 to 187 ms | clonefile, pread, pwrite |
-| `nbd`: `cbw` behind Silo's NBD server | to serve the disk | NBD_LONGEST | NBD_PAUSE | NBD_OP | NBD_DROP | NBD attachment, macOS 14 |
-| `delta`: copy-before-write into a new file of the copied blocks only | to see the writes | DELTA_LONGEST | under 1 µs | DELTA_OP | DELTA_DROP (a merge) | pread, pwrite |
+| `nbd`: `cbw` behind Silo's NBD server | to serve the disk | 128 to 326 ms | no; the moment waits for the request in flight, 0.2 to 8.4 ms | 13.4 to 16.6 s | 101 to 134 ms | NBD attachment, macOS 14 |
+| `delta`: copy-before-write into a new file of the copied blocks only | to see the writes | 65 to 395 ms, six of eight under 160 ms | 40 to 50 µs | 0.45 to 1.06 s | 80 to 123 ms (a merge of 0.8 to 1.5 s) | pread, pwrite |
 | `btrfs`: read-only snapshot of the image's subvolume | Btrfs | 217 to 374 ms | no | 0.42 to 0.56 s | 3 to 5 ms | APFS snapshots need an entitlement Apple grants to backup apps only |
 
 Runs: `results/<way>-8g.jsonl`. Each line of a run is one phase; `scripts/show.py` prints them.
@@ -91,9 +93,11 @@ The remaining waits of 0.16 to 0.31 s came from step 1 and step 3, both of which
 shared blocks: cloning a file that shares blocks with the live image made its writes wait up to
 1.0 s in the `full` run (`unrelated-clone`), and 0.18 s in the `cbw` run. `delta` removes both:
 step 1 creates an empty file, and step 3 writes into it, so nothing is shared while the computer
-runs. Reading a `delta` checkpoint as a disk means applying every delta since the first
+runs. In the 8 GiB run, a `delta` checkpoint took 0.45 to 1.06 s instead of 12 to 16 s, the
+computer stopped for 40 to 50 µs (the copy of the bitmap), and six of its eight checkpoints kept
+the longest write under 160 ms, near the disk's own noise. Reading a `delta` checkpoint as a disk means applying every delta since the first
 checkpoint to a clone of it, which a restore does anyway with the computer stopped
-(DELTA_READ s for the 8 GiB run). Dropping a delta moves its blocks into the next one.
+(about 15 to 25 s for the 8 GiB run, with six deltas). Dropping a delta moves its blocks into the next one.
 
 The bitmap is also the list of blocks a checkpoint changed, which `file-changes-in-the-record`
 needs. Comparing the block maps of two clones (FIEMAP on Linux) gave exactly the blocks written,
@@ -109,7 +113,8 @@ Who can keep the bitmap:
   disk is attached with `VZNetworkBlockDeviceStorageDeviceAttachment` (macOS 14) and Silo serves it
   over NBD. [`proto/src/nbd.zig`](proto/src/nbd.zig) is such a server, about 300 lines: `nbdinfo`
   reads it, `nbdcopy` wrote 200 MB into it and read the same bytes back, and the bench's computer
-  wrote through it while checkpoints were taken. Nobody has published whether a macOS guest boots
+  wrote through it while checkpoints were taken: a 4 KiB write took 0.35 ms through it against
+0.2 ms to the file, over a socket in one process. Nobody has published whether a macOS guest boots
   from an NBD disk, or what it costs per write on a Mac. That is a Mac test.
 
 ### Range clones
@@ -192,8 +197,8 @@ auxiliary storage are of one boot; every checkpoint is whole and of one moment; 
 reported done is still there; nothing half-made is left; no id came twice. All 300 passed. Planting
 a bug catches it: swapping the folders with two renames instead of one call failed at a crash
 between them, and building a checkpoint in its final place failed at the first crash inside it.
-Killed at random times instead, the two-renames bug passed 400 rounds: random kills miss short
-windows, which is why the test kills at every step.
+Killed at random times instead, the two-renames bug was caught in one run of 400 rounds and passed
+another: random kills miss short windows, which is why the test kills at every step.
 
 This tests a process crash, not a power cut. What a power cut keeps depends on the flushes, which
 is a Mac test with `F_FULLFSYNC` (#352 file 02).

@@ -122,7 +122,7 @@ const Version = struct { birth: i64, death: i64 };
 
 pub fn sim(gpa: std.mem.Allocator, o: SimOpts) !void {
     var obuf: [4096]u8 = undefined;
-    var ow = std.fs.File.stdout().writer(&obuf);
+    var ow = std.fs.File.stdout().writerStreaming(&obuf);
     const out = &ow.interface;
     const p = Policy{ .all_s = o.keep_all_h * 3600, .hourly_s = o.hourly_days * 86400, .daily_s = o.daily_days * 86400 };
     var prng = std.Random.DefaultPrng.init(o.seed);

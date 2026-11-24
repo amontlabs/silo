@@ -73,7 +73,7 @@ fn ckptPath(gpa: std.mem.Allocator, o: Opts, i: u64) ![:0]u8 {
 }
 
 pub fn run(gpa: std.mem.Allocator, o: Opts) !void {
-    out_w = std.fs.File.stdout().writer(&out_buf);
+    out_w = std.fs.File.stdout().writerStreaming(&out_buf);
     const size = o.size_gib << 30;
     const blocks = size / BS;
     std.fs.cwd().makePath(o.dir) catch {};

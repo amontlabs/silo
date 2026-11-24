@@ -274,7 +274,7 @@ pub fn child(root: []const u8, seed: u64) !void {
     if (posix.getenv("CKPT_CRASH_AT")) |v| crash_at = try std.fmt.parseInt(u64, v, 10);
     const c = Catalog{ .root = root };
     var ob: [256]u8 = undefined;
-    var ow = std.fs.File.stdout().writer(&ob);
+    var ow = std.fs.File.stdout().writerStreaming(&ob);
     const out = &ow.interface;
     var prng = std.Random.DefaultPrng.init(seed);
     const r = prng.random();
@@ -422,7 +422,7 @@ pub fn crashTest(gpa: std.mem.Allocator, o: CrashOpts) !void {
         };
     }
     var ob: [256]u8 = undefined;
-    var ow = std.fs.File.stdout().writer(&ob);
+    var ow = std.fs.File.stdout().writerStreaming(&ob);
     try ow.interface.print("{{\"rounds\":{d},\"ops_reported\":{d},\"restores_started\":{d},\"checkpoints_now\":{d},\"ok\":true}}\n", .{ o.rounds, ops, restores, (try list(o.root)).len });
     try ow.interface.flush();
 }

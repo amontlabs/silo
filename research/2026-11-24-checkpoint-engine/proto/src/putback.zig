@@ -146,7 +146,7 @@ pub fn run(gpa: std.mem.Allocator, args: []const [:0]u8) !void {
     }
     const t2 = sys.now();
     var ob: [4096]u8 = undefined;
-    var ow = std.fs.File.stdout().writer(&ob);
+    var ow = std.fs.File.stdout().writerStreaming(&ob);
     const out = &ow.interface;
     try out.print("{{\"paths_seen\":{d},\"changed_by_run\":{d},\"put_back\":{d},\"removed\":{d},\"shown_not_put_back\":{d},\"find_s\":{d:.2},\"put_s\":{d:.2},\"applied\":{}}}\n", .{ all.count(), changed.items.len, put, removed, shown.items.len, sys.secs(t1 - t0), sys.secs(t2 - t1), apply });
     for (shown.items) |p| try out.print("shown: {s}\n", .{p});
