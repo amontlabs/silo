@@ -60,7 +60,7 @@ What this changes:
 - **A fork should get its own machine identity.** Claude Code tells its own live processes apart by
   `/etc/machine-id` and the PID namespace; Codex and Gemini CLI keep an `installation_id`. A fork
   with main's `machine-id` looks to these programs like main itself. Gemini CLI's encrypted store
-  goes the other way: a fork with a new host name can no longer read the copy, which is the safe
+  goes the other way: a fork with a new host name can no longer read the copy, which is the harmless
   failure. `fork-identity` already gives a fork a new machine identifier and name; this is one
   more reason it must be done before anything in the fork starts.
 - **Every program has a variable that moves its files.** A rule that sets `CODEX_HOME` or

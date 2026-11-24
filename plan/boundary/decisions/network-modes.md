@@ -34,8 +34,8 @@ lie:
 - **A shared front.** On a CDN, the name in the first message picks the certificate, and the name
   inside, which Silo does not read, picks the site. A 2024 study at the ACM Web Conference found
   22 of 30 providers still letting the two differ, Akamai and Fastly among them. So a host on such
-  a CDN, allowed and unread, can carry traffic to any other site there. Hosts Silo reads are safe
-  from this, since it sees the inner name.
+  a CDN, allowed and unread, can carry traffic to any other site there. Hosts Silo reads are out of
+  reach of this, since it sees the inner name.
 - **An encrypted first message (ECH, RFC 9849).** The real name is then encrypted and the visible
   one is the provider's, such as Cloudflare's. A program gets the key for it from a DNS record of
   type `HTTPS`. Silo answers the computer's lookups (`how-a-hold-ends`), so it can leave those keys
