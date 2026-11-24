@@ -206,7 +206,7 @@ host over TCP, got `Alt-Svc: h3=":443"` in the reply, and loaded it five more ti
 
 - **Port unreachable**, the answer's choice: Chromium sent one QUIC packet, got the ICMP answer and
   stayed on TCP. Every page loaded, in the same 10 to 15 ms as with no QUIC at all.
-- **Silence**: two QUIC packets, then nothing more; the pages loaded in the same time, since
+- **Silence**: three QUIC packets within 35 ms, then nothing more; the pages loaded in the same time, since
   Chromium starts TCP alongside QUIC instead of waiting for it.
 - **An authority added on the computer is refused for QUIC.** With the test authority in Chromium's
   store, the QUIC handshake reached the test server and Chromium ended it with
