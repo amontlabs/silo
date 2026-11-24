@@ -48,3 +48,25 @@ the rest of that CDN, unless Silo reads it.
 
 Sources: "Domain fronting in 2026" (routeharden.com/blog/domain-fronting-2026), which cites the
 2024 study; RFC 9849.
+
+## The hosts an agent program reaches besides its model (24 November 2026)
+
+An agent's part, 24 November 2026. In a limited computer, an agent program reaches more than its
+model. Claude Code 2.1.331 and Codex 0.172.0 each ran one turn with the model on a local stand-in
+and every other connection sent to a stand-in for the boundary that refused it, reset it, or never
+answered.
+
+- **Claude Code** opened five other connections in one `claude -p` turn, all to
+  `api.anthropic.com`, the model's own host, for its event and metric reports, even with the model
+  at another address. **Codex** opened four: `github.com` and `api.github.com` (its check for a new
+  version), `chatgpt.com` and `ab.chatgpt.com`.
+- **Refused or reset, they cost nothing.** Both programs answered in under a second, as with every
+  host open.
+- **Left without an answer, they cost 10 to 12 seconds.** The same turn took 12.5 s in Claude Code
+  and 10.2 s in Codex, waiting on reports that never left, and this is paid on every run of
+  `claude -p` or `codex exec`, which agents start from commands.
+
+What I would add to the answer: a limited computer refuses at once, never in silence, and the
+hosts each program reaches besides its model belong in the piece that adds the program
+(`recipe-names-its-needs`), so that a new computer does not raise an alert or an ask for
+`ab.chatgpt.com`. The scripts are in the project files, `research/2026-11-24-side-hosts`.
