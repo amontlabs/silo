@@ -347,9 +347,9 @@ What this changes for Silo:
     `--dangerously-skip-permissions`: the command saw `fake_value_…`, the stand-in got the real
     token, and with Silo's placeholder in the environment the stand-in got Silo's placeholder. It
     masks whatever value it is told to, whatever its shape.
-  - Claude Code's masking fails open on a mistake in its settings. With the credentials given as
-    an object instead of a list, or `tlsTerminate: true` instead of an object, the command saw the
-    real token and nothing in the run said why. A secret Silo holds outside cannot be given away
+  - Claude Code's masking fails open on a mistake in its settings. With `tlsTerminate: true`
+    instead of an object, the rest right, the command saw the real token and nothing in the run
+    said why; so did two tries with the credentials written as an object instead of a list. A secret Silo holds outside cannot be given away
     by a wrong line in a program's settings.
 
 ## A database password, held outside (24 November 2026)
