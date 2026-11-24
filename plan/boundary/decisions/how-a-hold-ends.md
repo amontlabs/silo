@@ -191,7 +191,8 @@ What I would put in the answer's place: a refused connection that Silo does not 
 refusal in its protocol's first messages where Silo knows the protocol, and a reset only where it
 does not. That covers SSH, the case the answer names, with no host key: an agent whose `git push`
 over SSH is refused then reads why, instead of a network fault it retries. Silo knows the protocol
-by the port, and for PostgreSQL also by the client's first bytes. A protocol under TLS from its
-first byte (Redis with `rediss://`, MySQL's own TLS comes after the server's first packet) gets
-the words only through Silo's certificate, as HTTPS does. The scripts are in the project files,
+by the port, and for PostgreSQL also by the client's first bytes. MySQL's TLS starts after the
+server's first packet, so its refusal needs no certificate. A protocol under TLS from its first
+byte, such as Redis with `rediss://`, gets the words only through Silo's certificate, as HTTPS
+does. The scripts are in the project files,
 `research/2026-11-24-holds/protocols`.
