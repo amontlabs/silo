@@ -459,8 +459,17 @@ kubeconfig, which holds both the way to sign in and the cluster's own authority.
   signed again with the real key and wrapped again, it was byte for byte the token the real key
   makes at the same second. So the AWS re-signing above extends to EKS, once Silo knows the shape.
 - **A client certificate in a kubeconfig** (kind, k3s and some managed clusters) proves the key in
-  the TLS handshake. A boundary that ends TLS presents the real certificate to the cluster itself;
-  this was not tried.
+  the TLS handshake, so it cannot be swapped; the boundary presents the real one itself. Tried with
+  a stand-in API server that required a client certificate from its own authority: the computer's
+  kubeconfig held a self-made placeholder certificate and key, and Silo's authority for the
+  server. A boundary stand-in ended the computer's TLS, accepted only the placeholder certificate,
+  and opened its own TLS to the cluster with the real certificate. The Python `kubernetes` client
+  37.0 listed the namespaces, and the server saw the real user; the placeholder sent straight to
+  the server was refused, and so was any other certificate sent to the boundary. The same holds
+  for any service that signs in by client certificate. One detail: the stand-in's first cluster
+  authority, made by `openssl req -x509` without a key usage extension, was refused by Python
+  3.13 as the boundary's own client, the strict check noted in
+  `ending-the-encrypted-connection`.
 
 What I would add to the answer: a secret can be a whole file Silo rewrites for the computer (a
 kubeconfig with placeholders and Silo's authority), not only a value. The scripts are in the
