@@ -1,0 +1,14 @@
+Claude Code 2.1.331 through the strict spike (STRICT=1), in front of the fake Anthropic provider of
+research/2026-11-24-experiments (PR #347), with api.anthropic.com pointed at 127.0.0.1 and Silo's
+test authority in NODE_EXTRA_CA_CERTS. The fake model asks for one Bash call, `echo hello-from-bash`.
+Exit code 0, the call ran, and the boundary refused nothing. The record's lines:
+
+{'kind': 'request', 'line': 'GET /api/claude_code/policy_limits HTTP/1.1', 'body_bytes_decoded': 0}
+{'kind': 'request', 'line': 'GET /api/claude_code/settings HTTP/1.1', 'body_bytes_decoded': 0}
+{'kind': 'reply', 'status': 404, 'tool_calls': 0}
+{'kind': 'reply', 'status': 404, 'tool_calls': 0}
+{'kind': 'request', 'line': 'POST /v1/messages?beta=true HTTP/1.1', 'body_bytes_decoded': 49634}
+{'kind': 'tool-call', 'name': 'Bash'}
+{'kind': 'reply', 'status': 200, 'tool_calls': 1}
+{'kind': 'request', 'line': 'POST /v1/messages?beta=true HTTP/1.1', 'body_bytes_decoded': 49944}
+{'kind': 'reply', 'status': 200, 'tool_calls': 0}

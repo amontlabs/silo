@@ -1,0 +1,19 @@
+Chromium (Playwright's, headless) opens http://127.0.0.1:3000/, the forwarded port. Each line is a
+way the page's script reached the attacker's server on 127.0.0.1:4000, and whether it carried the
+secret that only the computer had. 24 November 2026.
+
+== no Content-Security-Policy (CSP=0)
+   fetch secret
+   beacon secret
+   ws secret
+   prefetch secret
+   iframe secret
+   img secret
+   mac-service secret mac data: {"models":["private-model-on-the-mac"]}
+   a-ping
+   ? (the link's own target, followed on click)
+   navigation secret
+
+== the forwarder adds a strict Content-Security-Policy to every reply (CSP=1)
+   ? (the link's own target, followed on click)
+   navigation secret

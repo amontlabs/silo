@@ -1,0 +1,68 @@
+=== 0-ordinary
+-- the record (boundary) saw:
+   {'line': 'POST /v1/messages HTTP/1.1', 'bytes': 226, 'body_bytes_decoded': 88, 'results': 0}
+   {'line': 'POST /v1/messages HTTP/1.1', 'bytes': 343, 'body_bytes_decoded': 204, 'results': 0}
+-- the host parsed:
+   {'first': 'POST /v1/messages HTTP/1.1', 'host': ['api.anthropic.com'], 'body_len': 88, 'body_head': '{"model": "claude-x", "max_tokens": 10, "messages": [{"role": "user", "content": "hi"}]}', 'sha': '06fa7f99287f2dc8'}
+   {'first': 'POST /v1/messages HTTP/1.1', 'host': ['api.anthropic.com'], 'body_len': 204, 'body_head': '{"model": "claude-x", "max_tokens": 10, "tools": [{"type": "web_fetch_20250910", "name": "web_fetch"}], "messages": [{"r', 'sha': 'c75fd3be1688a185'}
+-- the program got:
+   {"host_parsed_request": 1, "line": "POST /v1/messages HTTP/1.1"}
+   {"host_parsed_request": 2, "line": "POST /v1/messages HTTP/1.1"}
+=== a-host-not-sni
+-- the record (boundary) saw:
+   {'line': 'POST /v1/messages HTTP/1.1', 'bytes': 225, 'body_bytes_decoded': 88, 'results': 0}
+-- the host parsed:
+   {'first': 'POST /v1/messages HTTP/1.1', 'host': ['attacker.example'], 'body_len': 88, 'body_head': '{"model": "claude-x", "max_tokens": 10, "messages": [{"role": "user", "content": "hi"}]}', 'sha': '06fa7f99287f2dc8'}
+-- the program got:
+   {"host_parsed_request": 1, "line": "POST /v1/messages HTTP/1.1"}
+=== b-unknown-encoding
+-- the record (boundary) saw:
+   {'line': 'POST /v1/messages HTTP/1.1', 'bytes': 331, 'body_bytes_decoded': 165, 'results': 0}
+-- the host parsed:
+   {'first': 'POST /v1/messages HTTP/1.1', 'host': ['api.anthropic.com'], 'body_len': 165, 'body_head': 'x\x9cU\x8dK\x0b\x82@\x14\x85ÿ\x8aÌºr\x14Z$D\x8bÒ]\t&m"\x86ÛxKp\x1eâ\\É\x10ÿ{N´iy\x1eß9#Ó¶BÅ\x92\x80I\x05}\x85Ë\x81-\x02¦a\x10d\x1b4nN">;d\xadòâ:2z·è\x81\x17ÞÅ\x03IÖ"æñ\x9ao"îQ\x03ú?eÓÍ/¢sðÄßDgÕ·Ô;ì<$\xad!4ä', 'sha': 'a786ffe542b8903e'}
+-- the program got:
+   {"host_parsed_request": 1, "line": "POST /v1/messages HTTP/1.1"}
+=== c-duplicate-json-key
+-- the record (boundary) saw:
+   {'line': 'POST /v1/messages HTTP/1.1', 'bytes': 328, 'body_bytes_decoded': 189, 'results': 0}
+-- the host parsed:
+   {'first': 'POST /v1/messages HTTP/1.1', 'host': ['api.anthropic.com'], 'body_len': 189, 'body_head': '{"model":"claude-x","max_tokens":10,"tools":[],"tools":[{"type":"web_fetch_20250910","name":"web_fetch"}],"messages":[{"', 'sha': '98b6e775feace8c5'}
+-- the program got:
+   {"host_parsed_request": 1, "line": "POST /v1/messages HTTP/1.1"}
+=== d-two-content-lengths
+-- the record (boundary) saw:
+   {'line': 'POST /v1/messages HTTP/1.1', 'bytes': 472, 'body_bytes_decoded': 345, 'results': 0}
+-- the host parsed:
+   {'first': 'POST /v1/messages HTTP/1.1', 'host': ['api.anthropic.com'], 'body_len': 2, 'body_head': '{}', 'sha': '44136fa355b3678a'}
+   {'first': 'POST /v1/messages HTTP/1.1', 'host': ['api.anthropic.com'], 'body_len': 204, 'body_head': '{"model": "claude-x", "max_tokens": 10, "tools": [{"type": "web_fetch_20250910", "name": "web_fetch"}], "messages": [{"r', 'sha': 'c75fd3be1688a185'}
+-- the program got:
+   {"host_parsed_request": 1, "line": "POST /v1/messages HTTP/1.1"}
+=== e-length-and-chunked
+-- the record (boundary) saw:
+   {'line': 'POST /v1/messages HTTP/1.1', 'bytes': 116, 'body_bytes_decoded': 2, 'results': 0}
+   {'line': 'POST /v1/messages HTTP/1.1', 'bytes': 343, 'body_bytes_decoded': 204, 'results': 0}
+-- the host parsed:
+   {'first': 'POST /v1/messages HTTP/1.1', 'host': ['api.anthropic.com'], 'body_len': 2, 'body_head': '{}', 'sha': '44136fa355b3678a'}
+   {'first': 'POST /v1/messages HTTP/1.1', 'host': ['api.anthropic.com'], 'body_len': 204, 'body_head': '{"model": "claude-x", "max_tokens": 10, "tools": [{"type": "web_fetch_20250910", "name": "web_fetch"}], "messages": [{"r', 'sha': 'c75fd3be1688a185'}
+-- the program got:
+   {"host_parsed_request": 1, "line": "POST /v1/messages HTTP/1.1"}
+   {"host_parsed_request": 2, "line": "POST /v1/messages HTTP/1.1"}
+=== f-tab-before-colon
+-- the record (boundary) saw:
+   {'line': 'POST /v1/messages HTTP/1.1', 'bytes': 460, 'body_bytes_decoded': 355, 'results': 0}
+-- the host parsed:
+   {'first': 'POST /v1/messages HTTP/1.1', 'host': ['api.anthropic.com'], 'body_len': 2, 'body_head': '{}', 'sha': '44136fa355b3678a'}
+   {'first': 'POST /v1/messages HTTP/1.1', 'host': ['api.anthropic.com'], 'body_len': 204, 'body_head': '{"model": "claude-x", "max_tokens": 10, "tools": [{"type": "web_fetch_20250910", "name": "web_fetch"}], "messages": [{"r', 'sha': 'c75fd3be1688a185'}
+-- the program got:
+   {"host_parsed_request": 1, "line": "POST /v1/messages HTTP/1.1"}
+=== g-read-the-smuggled-reply
+-- the record (boundary) saw:
+   {'line': 'POST /v1/messages HTTP/1.1', 'bytes': 472, 'body_bytes_decoded': 345, 'results': 0}
+   {'line': 'POST /v1/messages HTTP/1.1', 'bytes': 226, 'body_bytes_decoded': 88, 'results': 0}
+-- the host parsed:
+   {'first': 'POST /v1/messages HTTP/1.1', 'host': ['api.anthropic.com'], 'body_len': 2, 'body_head': '{}', 'sha': '44136fa355b3678a'}
+   {'first': 'POST /v1/messages HTTP/1.1', 'host': ['api.anthropic.com'], 'body_len': 204, 'body_head': '{"model": "claude-x", "max_tokens": 10, "tools": [{"type": "web_fetch_20250910", "name": "web_fetch"}], "messages": [{"r', 'sha': 'c75fd3be1688a185'}
+   {'first': 'POST /v1/messages HTTP/1.1', 'host': ['api.anthropic.com'], 'body_len': 88, 'body_head': '{"model": "claude-x", "max_tokens": 10, "messages": [{"role": "user", "content": "hi"}]}', 'sha': '06fa7f99287f2dc8'}
+-- the program got:
+   {"host_parsed_request": 1, "line": "POST /v1/messages HTTP/1.1"}
+   {"host_parsed_request": 2, "line": "POST /v1/messages HTTP/1.1"}
