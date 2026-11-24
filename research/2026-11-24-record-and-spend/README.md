@@ -1,9 +1,8 @@
 # The record and the budget: what to build so they hold
 
-Research of 24 November 2026, by agents, for polarzero. It follows the competitor survey of the
-same day (draft PR #349), which found that no product records a whole computer from outside and
-none enforces a model budget at the boundary for any agent program. This research asks what those
-two features need in order to be true for real users, and where the plan leaves them open.
+Research of 24 November 2026, by agents, for polarzero. It asks what the record from outside and
+the model budget at the boundary need in order to be true for real users, and where the plan leaves
+them open.
 
 Nothing here is a decision, and nothing under `plan/` was edited. Every recommendation names the
 plan entries it touches. "Taken" means polarzero gave the entry a verdict, so the recommendation

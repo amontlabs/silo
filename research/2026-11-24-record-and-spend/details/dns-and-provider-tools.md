@@ -616,10 +616,6 @@ lists them and does nothing.
     names locally and binds names to addresses. Placeholder addresses, the SNI check on shared
     addresses and empty HTTPS records are candidates for upstream MicroSandbox changes, where
     Silo's agents already work.
-13. **Positioning** (no entry). The competitor survey proposes saying "DNS cannot carry data out." It
-    is true of limited mode only with recommendation 1, and only once the hostile test of
-    recommendation 2 passes, as `paths-out-are-shown` requires before anything is said in public.
-    The sentence also needs its limit: an allowed host can still carry data out.
 
 ## Sources
 
