@@ -90,3 +90,24 @@ each connection (`processes-in-the-record`), and the nested program runs under a
 parent conversation's program started. So a conversation whose program was started, at any depth,
 by a command of another conversation's program counts toward that conversation's budget, and the
 app shows it inside it. A budget on the computer needs none of this, as the note says.
+
+## A compaction, seen in the traffic (24 November 2026)
+
+An agent's part, 24 November 2026. The answer "rests on a test of each program's real traffic,
+still to run" for compaction. Both programs were made to compact against a fake provider.
+
+- **Claude Code 2.1.331**, `/compact` on a resumed conversation: the request asking for the
+  summary, and the next request, carried the same `x-claude-code-session-id`. The next request
+  began with "This session is being continued from a previous conversation…", not with the
+  earlier messages, so the test by content alone starts a new conversation there and the join by
+  session keeps it in, as the answer expects.
+- **Codex 0.172.0**, with `model_auto_compact_token_limit` set low and signed in to OpenAI with a
+  key: it compacts on the provider's side. The request asking for it is an ordinary request to
+  `/v1/responses` whose last input item is `{"type": "compaction_trigger"}`, and it expects an
+  item of type `compaction` back, an opaque `encrypted_content`. The next request carried the
+  same `session-id` and `thread-id`, and its `x-codex-window-id` went from `<thread>:0` to
+  `<thread>:1`. So Codex names each new window of a conversation itself.
+
+So the join by session holds through a compaction for both, and Codex's window number tells Silo
+where one window ends. The text of a Codex compaction is encrypted, so Silo cannot show what the
+summary kept. The scripts are in the project files, `research/2026-11-24-around-a-budget`.
