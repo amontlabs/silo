@@ -384,3 +384,29 @@ What this shows:
   (`ending-the-encrypted-connection`).
 
 The scripts are in the project files, `research/2026-11-24-where-secrets-travel`.
+
+## Kubernetes: a cluster's own authority, and EKS tokens (24 November 2026)
+
+An agent's part, 24 November 2026. Agents that deploy reach a Kubernetes cluster with a
+kubeconfig, which holds both the way to sign in and the cluster's own authority.
+
+- **A kubeconfig pins the cluster's authority.** The Python `kubernetes` client 37.0 refused a
+  stand-in API server whose certificate the system store trusted, because the kubeconfig named
+  another authority, as every cluster's does. With the kubeconfig naming the stand-in's authority,
+  it connected. So Silo cannot read or hold a cluster's API calls, nor swap a token in them, unless
+  the computer's kubeconfig names Silo's authority. Silo can arrange that when the kubeconfig is
+  brought in as a secret: the computer gets a copy with Silo's authority and placeholders, and
+  Silo checks the real cluster against the real authority. kubectl was not tried; downloading it
+  was not allowed on the test machine.
+- **An EKS token can be signed again.** The token `aws eks get-token` makes is a presigned AWS
+  request to STS, wrapped in base64, that also signs the cluster's name. It crosses the boundary
+  as a bearer token to the cluster, not as a request to AWS. Made with a placeholder key, unwrapped,
+  signed again with the real key and wrapped again, it was byte for byte the token the real key
+  makes at the same second. So the AWS re-signing above extends to EKS, once Silo knows the shape.
+- **A client certificate in a kubeconfig** (kind, k3s and some managed clusters) proves the key in
+  the TLS handshake. A boundary that ends TLS presents the real certificate to the cluster itself;
+  this was not tried.
+
+What I would add to the answer: a secret can be a whole file Silo rewrites for the computer (a
+kubeconfig with placeholders and Silo's authority), not only a value. The scripts are in the
+project files, `research/2026-11-24-kubernetes`.
