@@ -633,3 +633,24 @@ aws_iam_role.fn: Destruction complete after 1s
 aws_dynamodb_table.orders: Destruction complete after 0s
 aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m10s elapsed]
 aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m20s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m30s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m40s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m50s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 01m00s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 01m10s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 01m20s elapsed]
+aws_db_instance.main: Destruction complete after 1m21s
+aws_db_subnet_group.main: Destroying... [id=prod]
+aws_security_group.db: Destroying... [id=sg-f4d819e100b60ceca]
+aws_db_subnet_group.main: Destruction complete after 0s
+aws_security_group.db: Destruction complete after 0s
+aws_subnet.a: Destroying... [id=subnet-99df27faa4ac740e0]
+aws_subnet.b: Destroying... [id=subnet-debb9391a43c9cd70]
+aws_subnet.a: Destruction complete after 0s
+aws_subnet.b: Destruction complete after 0s
+aws_vpc.main: Destroying... [id=vpc-f3662cee2edf9d174]
+aws_vpc.main: Destruction complete after 0s
+
+Destroy complete! Resources: 23 destroyed.
+
+[exit 0 after 93.2 s]

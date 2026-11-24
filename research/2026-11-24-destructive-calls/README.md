@@ -132,7 +132,7 @@ The detector's six misses, and why:
 | Missed | Why | What helps |
 |---|---|---|
 | A Railway service, deployed earlier, that deletes the volume from inside Railway | The delete never crosses the boundary | Hold deploys on control-plane hosts (`merges-and-deploys-held`) |
-| `git push --force` | A force push sends the same ref command as a fast-forward | Silo asks GitHub's compare API whether the old commit is an ancestor of the new one, or makes a backup ref first |
+| `git push --force` | A force push sends the same ref command as a fast-forward | Solved in a second prototype: walk the pack, then ask the host one question about the commit where the walk leaves it (GitHub's compare API). 281 of 281 ref updates classified right, 0.1 to 5 ms added (`details/git-guard.md`) |
 | SQL `DELETE … WHERE id IS NOT NULL` | A `WHERE` clause that matches every row | Row counts, which only the database knows; the gaps thread's Postgres proxy can read them |
 | A SQL function created earlier that drops tables | Calling it looks like a read | Hold `CREATE FUNCTION`; functions that already exist stay out of reach |
 | PostgREST `DELETE ?id=gte.0` | A filter that matches every row | PostgREST's `Prefer: max-affected` header, which Silo would have to add (see the challenge below) |
@@ -183,9 +183,11 @@ Ranked by what they would have changed in the incidents of #351.
    each ref, and that an MCP request gets a JSON-RPC error. A 403 alone may also be read by an MCP
    client as an OAuth scope challenge.
 
-6. **One ask per burst.** `what-an-ask-holds` (answered) says an ask holds one request. Keep that
-   for what a yes grants, and let one ask show every held request of a computer to the same host
-   within a few seconds, listing each, with one answer for all or each. `what-an-ask-shows`
+6. **One open ask per computer.** `what-an-ask-holds` (answered) says an ask holds one request.
+   Keep that for what a yes grants, and let held requests join the computer's open ask until you
+   answer, listing each, with one answer for all or each. Measured on a 23-resource `terraform
+   destroy`: 7 asks per computer, 17 per host, 23 per request. No grouping gets to one, because a
+   held delete blocks the deletes that depend on it (`details/bursts.md`). `what-an-ask-shows`
    (answered): add what the provider says can bring the thing back, as a line the rule set
    carries, and the name of the resource, which may need one read call by Silo before the ask.
 
@@ -218,9 +220,14 @@ Ranked by what they would have changed in the incidents of #351.
     Postgres's own parser (libpg_query) for Postgres dialects, and treat what it cannot parse as
     unknown.
 
-## Two decisions to put to polarzero
+## The choices, in the Workshop
 
-These challenge taken decisions. Until polarzero rules, they stay in force.
+These are now entries of the plan, on this branch, so the Workshop shows each with its case, its
+options and a recommendation: the feature `destructive-calls-held`, and the decisions
+`control-plane-hosts-read`, `operation-of-a-request`, `outcome-of-a-call`, `made-undoable` and
+`asks-for-a-burst`. The two below challenge taken decisions; until polarzero rules, those stay in
+force. `details/undo-paths.md` puts made-undoable among the granting actions, not the protective
+ones: a wrong one costs money and keeps data you meant to erase.
 
 - **May Silo make a call undoable before letting it pass?** A rule allows, holds or denies
   (`allow-hold-or-deny`), and a precaution may alert, checkpoint, pause, deny or hold
@@ -252,9 +259,13 @@ These challenge taken decisions. Until polarzero rules, they stay in force.
 | `details/prior-art.md` | 25 products that hold or deny, provider safeguards, the evidence on asking |
 | `details/cli-capture.md` | what eleven real CLIs send for a delete, how long each waits, what each prints on a refusal |
 | `details/detector.md` | the detector prototype, its rule format, the corpus and every miss |
+| `details/undo-paths.md` | for 48 operations: the provider's undo, a change to the request, or a call of Silo's own first; and 13 operations that expose |
+| `details/git-guard.md` | telling a force push from a fast-forward, backup refs, refusing one ref of a push; 290 real pushes |
+| `details/bursts.md` | `terraform destroy` and `aws s3 rm` held against a fake AWS: how many asks each grouping makes |
 | `details/fact-check.md` | 44 load-bearing claims checked against primary sources; wrong ones corrected in place |
 | `proto/detector/` | the detector, `rules.json`, the corpus, `measure.py`; `python3 -m pytest -q` |
 | `proto/capture/` | the fake HTTPS server, the run scripts, and each CLI's captured requests and output |
+| `proto/git-guard/`, `proto/burst/` | the push guard in front of `git http-backend`; the logging proxy, the grouping simulator and the traces |
 | `proto/aws_destructive.py`, `.json` | AWS's destructive operations from botocore's models: 3,008 candidates, 50 checked by hand |
 | `proto/github_graphql_destructive.py`, `.json` | GitHub's destructive GraphQL mutations from its public schema: 88 of 285 |
 

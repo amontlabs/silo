@@ -1,4 +1,3 @@
 stack/.terraform/
 stack/.terraform.lock.hcl
 stack/terraform.tfstate*
-stack/fn.zip

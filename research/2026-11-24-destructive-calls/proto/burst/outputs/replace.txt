@@ -1,0 +1,123 @@
+aws_iam_role.fn: Refreshing state... [id=orders-fn]
+aws_dynamodb_table.orders: Refreshing state... [id=orders]
+aws_s3_bucket.backups: Refreshing state... [id=prod-backups]
+aws_vpc.main: Refreshing state... [id=vpc-70a06791484284828]
+aws_cloudwatch_log_group.fn: Refreshing state... [id=/aws/lambda/orders]
+aws_iam_policy.fn: Refreshing state... [id=arn:aws:iam::123456789012:policy/orders-fn-dynamo]
+aws_internet_gateway.main: Refreshing state... [id=igw-575ec2a8b96e16a4e]
+aws_security_group.db: Refreshing state... [id=sg-2b2485281f454e8d2]
+aws_subnet.b: Refreshing state... [id=subnet-f084251e5b6ab33c6]
+aws_subnet.a: Refreshing state... [id=subnet-5118689428d878b66]
+aws_route_table.public: Refreshing state... [id=rtb-a1019473fa9d628c4]
+aws_iam_role_policy_attachment.fn: Refreshing state... [id=orders-fn/arn:aws:iam::123456789012:policy/orders-fn-dynamo]
+aws_db_subnet_group.main: Refreshing state... [id=prod]
+aws_vpc_security_group_ingress_rule.pg: Refreshing state... [id=sgr-18613d13975d4ef94]
+aws_vpc_security_group_egress_rule.all: Refreshing state... [id=sgr-ecbf529df2af08f91]
+aws_lambda_function.orders: Refreshing state... [id=orders]
+aws_db_instance.main: Refreshing state... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U]
+aws_s3_object.dump[0]: Refreshing state... [id=prod-backups/db/dump-0.sql]
+aws_s3_object.dump[3]: Refreshing state... [id=prod-backups/db/dump-3.sql]
+aws_s3_bucket_versioning.backups: Refreshing state... [id=prod-backups]
+aws_s3_object.dump[1]: Refreshing state... [id=prod-backups/db/dump-1.sql]
+aws_s3_object.dump[2]: Refreshing state... [id=prod-backups/db/dump-2.sql]
+aws_s3_object.dump[4]: Refreshing state... [id=prod-backups/db/dump-4.sql]
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  ~ update in-place
+-/+ destroy and then create replacement
+
+Terraform will perform the following actions:
+
+  # aws_db_instance.main will be updated in-place
+  ~ resource "aws_db_instance" "main" {
+        id                                    = "db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U"
+      ~ identifier                            = "prod-db" -> "prod-db-v2"
+        tags                                  = {}
+        # (74 unchanged attributes hidden)
+    }
+
+  # aws_dynamodb_table.orders must be replaced
+-/+ resource "aws_dynamodb_table" "orders" {
+      ~ arn                         = "arn:aws:dynamodb:us-east-1:123456789012:table/orders" -> (known after apply)
+      - deletion_protection_enabled = false -> null
+      ~ id                          = "orders" -> (known after apply)
+      ~ name                        = "orders" -> "orders-v2" # forces replacement
+      ~ read_capacity               = 0 -> (known after apply)
+      + stream_arn                  = (known after apply)
+      - stream_enabled              = false -> null
+      + stream_label                = (known after apply)
+      + stream_view_type            = (known after apply)
+      - table_class                 = "STANDARD" -> null
+      - tags                        = {} -> null
+      ~ tags_all                    = {} -> (known after apply)
+      ~ write_capacity              = 0 -> (known after apply)
+        # (3 unchanged attributes hidden)
+
+      ~ global_secondary_index (known after apply)
+
+      ~ global_table_witness (known after apply)
+
+      ~ point_in_time_recovery (known after apply)
+      - point_in_time_recovery {
+          - enabled                 = false -> null
+          - recovery_period_in_days = 0 -> null
+        }
+
+      ~ server_side_encryption (known after apply)
+
+      ~ ttl (known after apply)
+      - ttl {
+          - enabled        = false -> null
+            # (1 unchanged attribute hidden)
+        }
+
+      ~ warm_throughput (known after apply)
+
+        # (1 unchanged block hidden)
+    }
+
+  # aws_iam_policy.fn will be updated in-place
+  ~ resource "aws_iam_policy" "fn" {
+        id               = "arn:aws:iam::123456789012:policy/orders-fn-dynamo"
+        name             = "orders-fn-dynamo"
+      ~ policy           = jsonencode(
+            {
+              - Statement = [
+                  - {
+                      - Action   = [
+                          - "dynamodb:GetItem",
+                          - "dynamodb:PutItem",
+                        ]
+                      - Effect   = "Allow"
+                      - Resource = "arn:aws:dynamodb:us-east-1:123456789012:table/orders"
+                    },
+                ]
+              - Version   = "2012-10-17"
+            }
+        ) -> (known after apply)
+        tags             = {}
+        # (7 unchanged attributes hidden)
+    }
+
+Plan: 1 to add, 2 to change, 1 to destroy.
+aws_dynamodb_table.orders: Destroying... [id=orders]
+aws_db_instance.main: Modifying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U]
+aws_dynamodb_table.orders: Destruction complete after 0s
+aws_dynamodb_table.orders: Creating...
+aws_dynamodb_table.orders: Creation complete after 6s [id=orders-v2]
+aws_iam_policy.fn: Modifying... [id=arn:aws:iam::123456789012:policy/orders-fn-dynamo]
+aws_iam_policy.fn: Modifications complete after 0s [id=arn:aws:iam::123456789012:policy/orders-fn-dynamo]
+aws_db_instance.main: Still modifying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m10s elapsed]
+aws_db_instance.main: Still modifying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m20s elapsed]
+aws_db_instance.main: Still modifying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m30s elapsed]
+aws_db_instance.main: Still modifying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m40s elapsed]
+aws_db_instance.main: Still modifying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m50s elapsed]
+aws_db_instance.main: Still modifying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 01m00s elapsed]
+aws_db_instance.main: Still modifying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 01m10s elapsed]
+aws_db_instance.main: Still modifying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 01m20s elapsed]
+aws_db_instance.main: Modifications complete after 1m21s [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U]
+
+Apply complete! Resources: 1 added, 2 changed, 1 destroyed.
+
+[exit 0 after 90.3 s]

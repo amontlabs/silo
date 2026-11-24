@@ -130,9 +130,45 @@ def simulate(path, answer_after=8.0, window=3.0):
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    if args and args[0] == "--simulate":
+    if args and args[0] == "--check":
+        pass
+    elif args and args[0] == "--simulate":
         for p in args[1:]:
             simulate(p)
     else:
         for p in args:
             summary(p)
+
+
+def check(trace, asks_log):
+    """Every request that passed on a yes is a line of exactly one answered ask, and was on
+    screen before the tap; no request passed twice."""
+    rs = [r for r in load(trace) if r.get("decision")]
+    A = load(asks_log)
+    where = Counter()
+    for a in A:
+        for ln in a["lines"]:
+            where[ln["id"]] += 1
+    lines_by_id = {ln["id"]: (a, ln) for a in A for ln in a["lines"]}
+    bad = 0
+    for r in rs:
+        if r["decision"] != "yes":
+            continue
+        rid = r.get("joined_as_copy_of", r["id"])
+        if where[rid] != 1:
+            bad += 1
+        else:
+            a, ln = lines_by_id[rid]
+            if ln["waited"] < 1.0:      # joined less than a second before the tap: not seen
+                bad += 1
+    sent = Counter(r["identity"] for r in rs if r["decision"] == "yes")
+    moved = sum(len(a["moved_to_new_ask"]) for a in A)
+    print(f"{trace}: {len(A)} asks, {sum(1 for r in rs if r['decision'] == 'yes')} released on a yes, "
+          f"{bad} not covered by exactly one ask, {moved} moved to a new ask, "
+          f"{sum(v - 1 for v in sent.values())} identical requests released more than once")
+
+
+if __name__ == "__main__" and sys.argv[1:2] == ["--check"]:
+    import glob
+    for a in sorted(glob.glob("traces/pol-*.asks.jsonl")):
+        check(a.replace(".asks.jsonl", ".jsonl"), a)

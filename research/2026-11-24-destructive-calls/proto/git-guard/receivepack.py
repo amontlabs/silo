@@ -26,6 +26,8 @@ class Push:
         self.pack_offset = None   # index of "PACK" in body, or None
         self.probe = False
         self.cmd_end = 0          # offset just after the command flush
+        self.signed = False
+        self.unreadable = None    # why Silo cannot read the commands (it then refuses)
 
 
 def parse_request(body: bytes) -> Push:
@@ -43,6 +45,30 @@ def parse_request(body: bytes) -> Push:
             break
         line = body[i + 4:i + n]
         i += n
+        if line.startswith(b"shallow "):
+            continue
+        if line.startswith(b"push-cert"):
+            # signed push: the commands sit inside the certificate, which ends with push-cert-end
+            p.signed = True
+            if b"\0" in line:
+                p.caps = line.split(b"\0", 1)[1].decode().strip().split()
+            while True:
+                n = int(body[i:i + 4], 16)
+                if n == 0:
+                    p.unreadable = "push certificate without an end"
+                    return p
+                l = body[i + 4:i + n].decode("utf-8", "replace").rstrip("\n")
+                i += n
+                if l == "push-cert-end":
+                    break
+                f = l.split(" ")
+                if len(f) == 3 and all(len(x) == 40 and all(c in "0123456789abcdef" for c in x) for x in f[:2]):
+                    p.commands.append(tuple(f))
+            if body[i:i + 4] != b"0000":
+                p.unreadable = "unexpected data after the push certificate"
+                return p
+            i += 4
+            break
         if first:
             if b"\0" in line:
                 line, caps = line.split(b"\0", 1)

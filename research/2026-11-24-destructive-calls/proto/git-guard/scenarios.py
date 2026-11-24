@@ -71,7 +71,8 @@ def fresh(name, hide=False):
     shutil.rmtree(bare, ignore_errors=True)
     sh("git", "init", "-q", "--bare", "-b", "main", bare, env=ENV)
     for k, v in [("http.receivepack", "true"), ("receive.advertisePushOptions", "true"),
-                 ("receive.denyDeletes", "false"), ("receive.denyNonFastForwards", "false")]:
+                 ("receive.denyDeletes", "false"), ("receive.denyNonFastForwards", "false"),
+                 ("receive.certNonceSeed", "test-seed")]:
         sh("git", "-C", bare, "config", k, v, env=ENV)
     if hide:
         sh("git", "-C", bare, "config", "transfer.hideRefs", "refs/silo", env=ENV)
@@ -167,6 +168,16 @@ def s_large_force(c):
     git("reset", "-q", "--hard", "HEAD~1", cwd=c); commit(c, "big.bin", size=3 * 1024 * 1024)
     return ["push", "--force", "origin", "main"]
 
+def s_signed_force(c):
+    gh = os.path.join(W, "home", "gnupg")
+    ENV["GNUPGHOME"] = gh
+    if not os.path.exists(gh):
+        os.makedirs(gh, mode=0o700)
+        sh("gpg", "--batch", "--passphrase", "", "--quick-gen-key", "Agent <agent@example.invalid>",
+           "ed25519", "sign", "1d", env=ENV)
+    git("reset", "-q", "--hard", "HEAD~1", cwd=c); commit(c, "rewritten")
+    return ["push", "--signed", "--force", "origin", "main"]
+
 def s_touch_silo(c):
     return ["push", "origin", "main:refs/silo/backup/heads/main/forged"]
 
@@ -187,6 +198,7 @@ SCEN = [
     ("push-options", s_push_options, {"refs/heads/main": "ff"}),
     ("large", s_large, {"refs/heads/main": "ff"}),
     ("large-force", s_large_force, {"refs/heads/main": "force"}),
+    ("signed-force", s_signed_force, {"refs/heads/main": "force"}),
     ("touch-silo", s_touch_silo, {"refs/silo/backup/heads/main/forged": "create"}),
 ]
 

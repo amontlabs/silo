@@ -1,0 +1,211 @@
+aws_vpc.main: Refreshing state... [id=vpc-0986329a87e9bfc9a]
+aws_subnet.b: Refreshing state... [id=subnet-3957a3f4c0dd696d4]
+aws_subnet.a: Refreshing state... [id=subnet-761b267690a96b950]
+aws_security_group.db: Refreshing state... [id=sg-83e05a85b2209d3e9]
+aws_db_subnet_group.main: Refreshing state... [id=prod]
+aws_db_instance.main: Refreshing state... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U]
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  - destroy
+
+Terraform will perform the following actions:
+
+  # aws_db_instance.main will be destroyed
+  - resource "aws_db_instance" "main" {
+      - address                               = "prod-db.aaaaaaaaaa.us-east-1.rds.amazonaws.com" -> null
+      - allocated_storage                     = 20 -> null
+      - apply_immediately                     = false -> null
+      - arn                                   = "arn:aws:rds:us-east-1:123456789012:db:prod-db" -> null
+      - auto_minor_version_upgrade            = true -> null
+      - availability_zone                     = "us-east-1a" -> null
+      - backup_retention_period               = 0 -> null
+      - backup_window                         = "13:14-13:44" -> null
+      - ca_cert_identifier                    = "rds-ca-default" -> null
+      - copy_tags_to_snapshot                 = false -> null
+      - customer_owned_ip_enabled             = false -> null
+      - db_subnet_group_name                  = "prod" -> null
+      - dedicated_log_volume                  = false -> null
+      - delete_automated_backups              = true -> null
+      - deletion_protection                   = false -> null
+      - domain_dns_ips                        = [] -> null
+      - enabled_cloudwatch_logs_exports       = [] -> null
+      - endpoint                              = "prod-db.aaaaaaaaaa.us-east-1.rds.amazonaws.com:5432" -> null
+      - engine                                = "postgres" -> null
+      - engine_version                        = "9.3.3" -> null
+      - engine_version_actual                 = "9.3.3" -> null
+      - iam_database_authentication_enabled   = false -> null
+      - id                                    = "db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U" -> null
+      - identifier                            = "prod-db" -> null
+      - instance_class                        = "db.t3.micro" -> null
+      - iops                                  = 0 -> null
+      - latest_restorable_time                = "2026-11-24T16:26:40Z" -> null
+      - license_model                         = "general-public-license" -> null
+      - listener_endpoint                     = [] -> null
+      - maintenance_window                    = "wed:06:38-wed:07:08" -> null
+      - master_user_secret                    = [] -> null
+      - max_allocated_storage                 = 0 -> null
+      - monitoring_interval                   = 0 -> null
+      - multi_az                              = false -> null
+      - multi_tenant                          = false -> null
+      - option_group_name                     = "default:postgres-9-3" -> null
+      - parameter_group_name                  = "default.postgres9.3" -> null
+      - password                              = (sensitive value) -> null
+      - password_wo                           = (write-only attribute) -> null
+      - performance_insights_enabled          = false -> null
+      - performance_insights_retention_period = 0 -> null
+      - port                                  = 5432 -> null
+      - publicly_accessible                   = false -> null
+      - region                                = "us-east-1" -> null
+      - replicas                              = [] -> null
+      - resource_id                           = "db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U" -> null
+      - skip_final_snapshot                   = true -> null
+      - status                                = "available" -> null
+      - storage_encrypted                     = false -> null
+      - storage_throughput                    = 0 -> null
+      - storage_type                          = "gp2" -> null
+      - tags                                  = {} -> null
+      - tags_all                              = {} -> null
+      - username                              = "app" -> null
+      - vpc_security_group_ids                = [
+          - "sg-83e05a85b2209d3e9",
+        ] -> null
+        # (22 unchanged attributes hidden)
+    }
+
+  # aws_db_subnet_group.main will be destroyed
+  - resource "aws_db_subnet_group" "main" {
+      - arn                     = "arn:aws:rds:us-east-1:123456789012:subgrp:prod" -> null
+      - description             = "Managed by Terraform" -> null
+      - id                      = "prod" -> null
+      - name                    = "prod" -> null
+      - region                  = "us-east-1" -> null
+      - subnet_ids              = [
+          - "subnet-3957a3f4c0dd696d4",
+          - "subnet-761b267690a96b950",
+        ] -> null
+      - supported_network_types = [] -> null
+      - tags                    = {} -> null
+      - tags_all                = {} -> null
+      - vpc_id                  = "vpc-0986329a87e9bfc9a" -> null
+        # (1 unchanged attribute hidden)
+    }
+
+  # aws_security_group.db will be destroyed
+  - resource "aws_security_group" "db" {
+      - arn                    = "arn:aws:ec2:us-east-1:123456789012:security-group/sg-83e05a85b2209d3e9" -> null
+      - description            = "Managed by Terraform" -> null
+      - egress                 = [] -> null
+      - id                     = "sg-83e05a85b2209d3e9" -> null
+      - ingress                = [] -> null
+      - name                   = "prod-db" -> null
+      - owner_id               = "123456789012" -> null
+      - region                 = "us-east-1" -> null
+      - revoke_rules_on_delete = false -> null
+      - tags                   = {} -> null
+      - tags_all               = {} -> null
+      - vpc_id                 = "vpc-0986329a87e9bfc9a" -> null
+        # (1 unchanged attribute hidden)
+    }
+
+  # aws_subnet.a will be destroyed
+  - resource "aws_subnet" "a" {
+      - arn                                            = "arn:aws:ec2:us-east-1:123456789012:subnet/subnet-761b267690a96b950" -> null
+      - assign_ipv6_address_on_creation                = false -> null
+      - availability_zone                              = "us-east-1a" -> null
+      - availability_zone_id                           = "use1-az6" -> null
+      - cidr_block                                     = "10.0.1.0/24" -> null
+      - enable_dns64                                   = false -> null
+      - enable_lni_at_device_index                     = 0 -> null
+      - enable_resource_name_dns_a_record_on_launch    = false -> null
+      - enable_resource_name_dns_aaaa_record_on_launch = false -> null
+      - id                                             = "subnet-761b267690a96b950" -> null
+      - ipv6_native                                    = false -> null
+      - map_customer_owned_ip_on_launch                = false -> null
+      - map_public_ip_on_launch                        = false -> null
+      - owner_id                                       = "123456789012" -> null
+      - private_dns_hostname_type_on_launch            = "ip-name" -> null
+      - region                                         = "us-east-1" -> null
+      - tags                                           = {} -> null
+      - tags_all                                       = {} -> null
+      - vpc_id                                         = "vpc-0986329a87e9bfc9a" -> null
+        # (5 unchanged attributes hidden)
+    }
+
+  # aws_subnet.b will be destroyed
+  - resource "aws_subnet" "b" {
+      - arn                                            = "arn:aws:ec2:us-east-1:123456789012:subnet/subnet-3957a3f4c0dd696d4" -> null
+      - assign_ipv6_address_on_creation                = false -> null
+      - availability_zone                              = "us-east-1b" -> null
+      - availability_zone_id                           = "use1-az1" -> null
+      - cidr_block                                     = "10.0.2.0/24" -> null
+      - enable_dns64                                   = false -> null
+      - enable_lni_at_device_index                     = 0 -> null
+      - enable_resource_name_dns_a_record_on_launch    = false -> null
+      - enable_resource_name_dns_aaaa_record_on_launch = false -> null
+      - id                                             = "subnet-3957a3f4c0dd696d4" -> null
+      - ipv6_native                                    = false -> null
+      - map_customer_owned_ip_on_launch                = false -> null
+      - map_public_ip_on_launch                        = false -> null
+      - owner_id                                       = "123456789012" -> null
+      - private_dns_hostname_type_on_launch            = "ip-name" -> null
+      - region                                         = "us-east-1" -> null
+      - tags                                           = {} -> null
+      - tags_all                                       = {} -> null
+      - vpc_id                                         = "vpc-0986329a87e9bfc9a" -> null
+        # (5 unchanged attributes hidden)
+    }
+
+  # aws_vpc.main will be destroyed
+  - resource "aws_vpc" "main" {
+      - arn                                  = "arn:aws:ec2:us-east-1:123456789012:vpc/vpc-0986329a87e9bfc9a" -> null
+      - assign_generated_ipv6_cidr_block     = false -> null
+      - cidr_block                           = "10.0.0.0/16" -> null
+      - default_network_acl_id               = "acl-d61ecb5f5c4550e4f" -> null
+      - default_route_table_id               = "rtb-30bb874433ffcd3ce" -> null
+      - default_security_group_id            = "sg-7fe7d933799c0eb38" -> null
+      - dhcp_options_id                      = "default" -> null
+      - enable_dns_hostnames                 = true -> null
+      - enable_dns_support                   = true -> null
+      - enable_network_address_usage_metrics = false -> null
+      - id                                   = "vpc-0986329a87e9bfc9a" -> null
+      - instance_tenancy                     = "default" -> null
+      - ipv6_netmask_length                  = 0 -> null
+      - main_route_table_id                  = "rtb-30bb874433ffcd3ce" -> null
+      - network_firewall_association         = [] -> null
+      - owner_id                             = "123456789012" -> null
+      - region                               = "us-east-1" -> null
+      - tags                                 = {
+          - "Name" = "prod"
+        } -> null
+      - tags_all                             = {
+          - "Name" = "prod"
+        } -> null
+        # (4 unchanged attributes hidden)
+    }
+
+Plan: 0 to add, 0 to change, 6 to destroy.
+aws_db_instance.main: Destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m10s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m20s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m30s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m40s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m50s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 01m00s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 01m10s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 01m20s elapsed]
+aws_db_instance.main: Destruction complete after 1m21s
+aws_security_group.db: Destroying... [id=sg-83e05a85b2209d3e9]
+aws_db_subnet_group.main: Destroying... [id=prod]
+aws_db_subnet_group.main: Destruction complete after 0s
+aws_subnet.a: Destroying... [id=subnet-761b267690a96b950]
+aws_subnet.b: Destroying... [id=subnet-3957a3f4c0dd696d4]
+aws_subnet.b: Destruction complete after 0s
+aws_security_group.db: Destruction complete after 0s
+aws_subnet.a: Destruction complete after 0s
+aws_vpc.main: Destroying... [id=vpc-0986329a87e9bfc9a]
+aws_vpc.main: Destruction complete after 0s
+
+Destroy complete! Resources: 6 destroyed.
+
+[exit 0 after 90.6 s]

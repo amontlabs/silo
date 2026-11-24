@@ -1,0 +1,6 @@
+aws_db_instance.main
+aws_db_subnet_group.main
+aws_security_group.db
+aws_subnet.a
+aws_subnet.b
+aws_vpc.main

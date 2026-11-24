@@ -145,11 +145,16 @@ class Guard(BaseHTTPRequestHandler):
             rec.update(forwarded_sha256=hashlib.sha256(body).hexdigest(), total_ms=ms(t_all))
             self.log(rec)
             return self.reply(st, h, p)
+        if push.unreadable:
+            rec.update(answer="refused: " + push.unreadable, total_ms=ms(t_all))
+            self.log(rec)
+            return self.reply(200, [("Content-Type", "application/x-git-receive-pack-result")],
+                              rp.refusal(push, {}, default=f"Silo cannot read this push ({push.unreadable})"))
         repo = os.path.join(A.root, self.path.split("/git-receive-pack")[0].lstrip("/"))
         server = LocalServer(repo)
         t0 = time.perf_counter()
         refs, stats = classify(push, body, server, methods="b" if A.mode == "observe" else "")
-        rec.update(classify_ms=ms(t0), pack=stats, caps=push.caps,
+        rec.update(classify_ms=ms(t0), pack=stats, caps=push.caps, signed=push.signed,
                    push_options=push.push_options, refs=refs)
         own = {r for r in refs if r.startswith("refs/silo/")}
         bad = {r for r, i in refs.items() if destructive(i["class"])} | own
@@ -166,6 +171,12 @@ class Guard(BaseHTTPRequestHandler):
             rec["total_ms"] = ms(t_all)
             self.log(rec)
             return self.reply(200, hdr, payload)
+        if A.mode == "split" and bad and push.signed:
+            # rebuilding the commands would break the signature: refuse the whole push
+            rec.update(answer="refused", total_ms=ms(t_all))
+            self.log(rec)
+            return self.reply(200, hdr, rp.refusal(push, {r: self.sentence(r, refs[r]) for r in bad},
+                                                   default="signed push: refused with the held refs"))
         if A.mode == "split" and bad:
             keep = [r for r in refs if r not in bad]
             if not keep:

@@ -1,0 +1,15 @@
+delete: s3://prod-backups/db/part-001.dump
+delete: s3://prod-backups/db/part-002.dump
+delete: s3://prod-backups/db/part-003.dump
+delete: s3://prod-backups/db/part-005.dump
+delete: s3://prod-backups/db/part-004.dump
+delete: s3://prod-backups/db/part-006.dump
+delete: s3://prod-backups/db/part-008.dump
+delete: s3://prod-backups/db/part-007.dump
+delete: s3://prod-backups/db/part-009.dump
+delete: s3://prod-backups/db/part-010.dump
+delete: s3://prod-backups/db/part-011.dump
+delete: s3://prod-backups/db/part-012.dump
+delete: s3://prod-backups/db/part-013.dump
+delete: s3://prod-backups/db/part-014.dump
+delete: s3://prod-backups/db/part-015.dump

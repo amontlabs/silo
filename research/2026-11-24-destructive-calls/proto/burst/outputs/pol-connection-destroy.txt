@@ -1,25 +1,25 @@
 aws_cloudwatch_log_group.fn: Refreshing state... [id=/aws/lambda/orders]
-aws_vpc.main: Refreshing state... [id=vpc-a904b492ac8b9a268]
 aws_iam_role.fn: Refreshing state... [id=orders-fn]
 aws_dynamodb_table.orders: Refreshing state... [id=orders]
+aws_vpc.main: Refreshing state... [id=vpc-44de6ebc0078bf011]
 aws_s3_bucket.backups: Refreshing state... [id=prod-backups]
 aws_iam_policy.fn: Refreshing state... [id=arn:aws:iam::123456789012:policy/orders-fn-dynamo]
 aws_iam_role_policy_attachment.fn: Refreshing state... [id=orders-fn/arn:aws:iam::123456789012:policy/orders-fn-dynamo]
-aws_internet_gateway.main: Refreshing state... [id=igw-a102a1c40efb1281e]
-aws_security_group.db: Refreshing state... [id=sg-cef40f34363b129b5]
-aws_subnet.b: Refreshing state... [id=subnet-cd4ce2974b6ccb5de]
-aws_subnet.a: Refreshing state... [id=subnet-ca6752334ffaa7b59]
-aws_vpc_security_group_ingress_rule.pg: Refreshing state... [id=sgr-1340041b26fa740c9]
-aws_vpc_security_group_egress_rule.all: Refreshing state... [id=sgr-68d1ec2c25d8d10bb]
+aws_internet_gateway.main: Refreshing state... [id=igw-162cb045f8aecedbb]
+aws_subnet.b: Refreshing state... [id=subnet-5413c4ca8c8cbdd08]
+aws_subnet.a: Refreshing state... [id=subnet-86bc54f39fd661f14]
+aws_security_group.db: Refreshing state... [id=sg-028859f26dffcf4c3]
+aws_vpc_security_group_egress_rule.all: Refreshing state... [id=sgr-8e3a42002c531edda]
+aws_vpc_security_group_ingress_rule.pg: Refreshing state... [id=sgr-d957c8ef66b439ae6]
 aws_db_subnet_group.main: Refreshing state... [id=prod]
-aws_route_table.public: Refreshing state... [id=rtb-16eef93e05f25dcb8]
 aws_lambda_function.orders: Refreshing state... [id=orders]
+aws_route_table.public: Refreshing state... [id=rtb-06fa65c29741413e2]
 aws_db_instance.main: Refreshing state... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U]
 aws_s3_bucket_versioning.backups: Refreshing state... [id=prod-backups]
-aws_s3_object.dump[1]: Refreshing state... [id=prod-backups/db/dump-1.sql]
 aws_s3_object.dump[4]: Refreshing state... [id=prod-backups/db/dump-4.sql]
-aws_s3_object.dump[3]: Refreshing state... [id=prod-backups/db/dump-3.sql]
 aws_s3_object.dump[2]: Refreshing state... [id=prod-backups/db/dump-2.sql]
+aws_s3_object.dump[3]: Refreshing state... [id=prod-backups/db/dump-3.sql]
+aws_s3_object.dump[1]: Refreshing state... [id=prod-backups/db/dump-1.sql]
 aws_s3_object.dump[0]: Refreshing state... [id=prod-backups/db/dump-0.sql]
 
 Terraform used the selected providers to generate the following execution
@@ -70,7 +70,7 @@ Terraform will perform the following actions:
       - identifier                            = "prod-db" -> null
       - instance_class                        = "db.t3.micro" -> null
       - iops                                  = 0 -> null
-      - latest_restorable_time                = "2026-11-24T16:07:31Z" -> null
+      - latest_restorable_time                = "2026-11-24T16:58:59Z" -> null
       - license_model                         = "general-public-license" -> null
       - listener_endpoint                     = [] -> null
       - maintenance_window                    = "wed:06:38-wed:07:08" -> null
@@ -99,7 +99,7 @@ Terraform will perform the following actions:
       - tags_all                              = {} -> null
       - username                              = "app" -> null
       - vpc_security_group_ids                = [
-          - "sg-cef40f34363b129b5",
+          - "sg-028859f26dffcf4c3",
         ] -> null
         # (22 unchanged attributes hidden)
     }
@@ -112,13 +112,13 @@ Terraform will perform the following actions:
       - name                    = "prod" -> null
       - region                  = "us-east-1" -> null
       - subnet_ids              = [
-          - "subnet-ca6752334ffaa7b59",
-          - "subnet-cd4ce2974b6ccb5de",
+          - "subnet-5413c4ca8c8cbdd08",
+          - "subnet-86bc54f39fd661f14",
         ] -> null
       - supported_network_types = [] -> null
       - tags                    = {} -> null
       - tags_all                = {} -> null
-      - vpc_id                  = "vpc-a904b492ac8b9a268" -> null
+      - vpc_id                  = "vpc-44de6ebc0078bf011" -> null
         # (1 unchanged attribute hidden)
     }
 
@@ -177,7 +177,7 @@ Terraform will perform the following actions:
               - Version   = "2012-10-17"
             }
         ) -> null
-      - policy_id        = "AFUCRUA3TVZZP5LPBXR9T" -> null
+      - policy_id        = "AJN4CH04MQP4PCFP2LGTQ" -> null
       - tags             = {} -> null
       - tags_all         = {} -> null
         # (2 unchanged attributes hidden)
@@ -200,7 +200,7 @@ Terraform will perform the following actions:
               - Version   = "2012-10-17"
             }
         ) -> null
-      - create_date           = "2026-11-24T16:05:55Z" -> null
+      - create_date           = "2026-11-24T16:57:28Z" -> null
       - force_detach_policies = false -> null
       - id                    = "orders-fn" -> null
       - managed_policy_arns   = [
@@ -211,7 +211,7 @@ Terraform will perform the following actions:
       - path                  = "/" -> null
       - tags                  = {} -> null
       - tags_all              = {} -> null
-      - unique_id             = "AROARZPUZDIKCFLYLUHJ3" -> null
+      - unique_id             = "AROARZPUZDIKBQ2IO5LHK" -> null
         # (3 unchanged attributes hidden)
     }
 
@@ -224,13 +224,13 @@ Terraform will perform the following actions:
 
   # aws_internet_gateway.main will be destroyed
   - resource "aws_internet_gateway" "main" {
-      - arn      = "arn:aws:ec2:us-east-1:123456789012:internet-gateway/igw-a102a1c40efb1281e" -> null
-      - id       = "igw-a102a1c40efb1281e" -> null
+      - arn      = "arn:aws:ec2:us-east-1:123456789012:internet-gateway/igw-162cb045f8aecedbb" -> null
+      - id       = "igw-162cb045f8aecedbb" -> null
       - owner_id = "123456789012" -> null
       - region   = "us-east-1" -> null
       - tags     = {} -> null
       - tags_all = {} -> null
-      - vpc_id   = "vpc-a904b492ac8b9a268" -> null
+      - vpc_id   = "vpc-44de6ebc0078bf011" -> null
     }
 
   # aws_lambda_function.orders will be destroyed
@@ -245,7 +245,7 @@ Terraform will perform the following actions:
       - handler                        = "index.handler" -> null
       - id                             = "orders" -> null
       - invoke_arn                     = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:123456789012:function:orders/invocations" -> null
-      - last_modified                  = "2026-11-24T16:06:03.795084000Z" -> null
+      - last_modified                  = "2026-11-24T16:57:36.149549000Z" -> null
       - layers                         = [] -> null
       - memory_size                    = 128 -> null
       - package_type                   = "Zip" -> null
@@ -276,21 +276,21 @@ Terraform will perform the following actions:
 
   # aws_route_table.public will be destroyed
   - resource "aws_route_table" "public" {
-      - arn              = "arn:aws:ec2:us-east-1:123456789012:route-table/rtb-16eef93e05f25dcb8" -> null
-      - id               = "rtb-16eef93e05f25dcb8" -> null
+      - arn              = "arn:aws:ec2:us-east-1:123456789012:route-table/rtb-06fa65c29741413e2" -> null
+      - id               = "rtb-06fa65c29741413e2" -> null
       - owner_id         = "123456789012" -> null
       - propagating_vgws = [] -> null
       - region           = "us-east-1" -> null
       - route            = [
           - {
               - cidr_block                 = "0.0.0.0/0"
-              - gateway_id                 = "igw-a102a1c40efb1281e"
+              - gateway_id                 = "igw-162cb045f8aecedbb"
                 # (12 unchanged attributes hidden)
             },
         ] -> null
       - tags             = {} -> null
       - tags_all         = {} -> null
-      - vpc_id           = "vpc-a904b492ac8b9a268" -> null
+      - vpc_id           = "vpc-44de6ebc0078bf011" -> null
     }
 
   # aws_s3_bucket.backups will be destroyed
@@ -356,8 +356,7 @@ Terraform will perform the following actions:
       - storage_class                         = "STANDARD" -> null
       - tags                                  = {} -> null
       - tags_all                              = {} -> null
-      - version_id                            = "97b80814-6201-4147-9cc9-39fa0f6f115d" -> null
-        # (15 unchanged attributes hidden)
+        # (16 unchanged attributes hidden)
     }
 
   # aws_s3_object.dump[1] will be destroyed
@@ -378,7 +377,7 @@ Terraform will perform the following actions:
       - storage_class                         = "STANDARD" -> null
       - tags                                  = {} -> null
       - tags_all                              = {} -> null
-      - version_id                            = "3bc1f9dd-2a16-41a5-840f-f083a99d5bbe" -> null
+      - version_id                            = "6bad1acb-cfdf-4f9e-9bfe-449000a79e2f" -> null
         # (15 unchanged attributes hidden)
     }
 
@@ -400,8 +399,7 @@ Terraform will perform the following actions:
       - storage_class                         = "STANDARD" -> null
       - tags                                  = {} -> null
       - tags_all                              = {} -> null
-      - version_id                            = "7e2a9695-51ce-40b5-bd32-3b1736d8bb57" -> null
-        # (15 unchanged attributes hidden)
+        # (16 unchanged attributes hidden)
     }
 
   # aws_s3_object.dump[3] will be destroyed
@@ -422,7 +420,7 @@ Terraform will perform the following actions:
       - storage_class                         = "STANDARD" -> null
       - tags                                  = {} -> null
       - tags_all                              = {} -> null
-      - version_id                            = "bbdb1836-5800-4f9a-a209-6598e79c69f2" -> null
+      - version_id                            = "e7a7ec97-4899-4551-835d-c8385d104c9a" -> null
         # (15 unchanged attributes hidden)
     }
 
@@ -444,13 +442,12 @@ Terraform will perform the following actions:
       - storage_class                         = "STANDARD" -> null
       - tags                                  = {} -> null
       - tags_all                              = {} -> null
-      - version_id                            = "2c0957e5-7233-4838-a7ed-ffc0cca4acb3" -> null
-        # (15 unchanged attributes hidden)
+        # (16 unchanged attributes hidden)
     }
 
   # aws_security_group.db will be destroyed
   - resource "aws_security_group" "db" {
-      - arn                    = "arn:aws:ec2:us-east-1:123456789012:security-group/sg-cef40f34363b129b5" -> null
+      - arn                    = "arn:aws:ec2:us-east-1:123456789012:security-group/sg-028859f26dffcf4c3" -> null
       - description            = "Managed by Terraform" -> null
       - egress                 = [
           - {
@@ -467,7 +464,7 @@ Terraform will perform the following actions:
                 # (1 unchanged attribute hidden)
             },
         ] -> null
-      - id                     = "sg-cef40f34363b129b5" -> null
+      - id                     = "sg-028859f26dffcf4c3" -> null
       - ingress                = [
           - {
               - cidr_blocks      = [
@@ -489,13 +486,13 @@ Terraform will perform the following actions:
       - revoke_rules_on_delete = false -> null
       - tags                   = {} -> null
       - tags_all               = {} -> null
-      - vpc_id                 = "vpc-a904b492ac8b9a268" -> null
+      - vpc_id                 = "vpc-44de6ebc0078bf011" -> null
         # (1 unchanged attribute hidden)
     }
 
   # aws_subnet.a will be destroyed
   - resource "aws_subnet" "a" {
-      - arn                                            = "arn:aws:ec2:us-east-1:123456789012:subnet/subnet-ca6752334ffaa7b59" -> null
+      - arn                                            = "arn:aws:ec2:us-east-1:123456789012:subnet/subnet-86bc54f39fd661f14" -> null
       - assign_ipv6_address_on_creation                = false -> null
       - availability_zone                              = "us-east-1a" -> null
       - availability_zone_id                           = "use1-az6" -> null
@@ -504,7 +501,7 @@ Terraform will perform the following actions:
       - enable_lni_at_device_index                     = 0 -> null
       - enable_resource_name_dns_a_record_on_launch    = false -> null
       - enable_resource_name_dns_aaaa_record_on_launch = false -> null
-      - id                                             = "subnet-ca6752334ffaa7b59" -> null
+      - id                                             = "subnet-86bc54f39fd661f14" -> null
       - ipv6_native                                    = false -> null
       - map_customer_owned_ip_on_launch                = false -> null
       - map_public_ip_on_launch                        = false -> null
@@ -513,13 +510,13 @@ Terraform will perform the following actions:
       - region                                         = "us-east-1" -> null
       - tags                                           = {} -> null
       - tags_all                                       = {} -> null
-      - vpc_id                                         = "vpc-a904b492ac8b9a268" -> null
+      - vpc_id                                         = "vpc-44de6ebc0078bf011" -> null
         # (5 unchanged attributes hidden)
     }
 
   # aws_subnet.b will be destroyed
   - resource "aws_subnet" "b" {
-      - arn                                            = "arn:aws:ec2:us-east-1:123456789012:subnet/subnet-cd4ce2974b6ccb5de" -> null
+      - arn                                            = "arn:aws:ec2:us-east-1:123456789012:subnet/subnet-5413c4ca8c8cbdd08" -> null
       - assign_ipv6_address_on_creation                = false -> null
       - availability_zone                              = "us-east-1b" -> null
       - availability_zone_id                           = "use1-az1" -> null
@@ -528,7 +525,7 @@ Terraform will perform the following actions:
       - enable_lni_at_device_index                     = 0 -> null
       - enable_resource_name_dns_a_record_on_launch    = false -> null
       - enable_resource_name_dns_aaaa_record_on_launch = false -> null
-      - id                                             = "subnet-cd4ce2974b6ccb5de" -> null
+      - id                                             = "subnet-5413c4ca8c8cbdd08" -> null
       - ipv6_native                                    = false -> null
       - map_customer_owned_ip_on_launch                = false -> null
       - map_public_ip_on_launch                        = false -> null
@@ -537,26 +534,26 @@ Terraform will perform the following actions:
       - region                                         = "us-east-1" -> null
       - tags                                           = {} -> null
       - tags_all                                       = {} -> null
-      - vpc_id                                         = "vpc-a904b492ac8b9a268" -> null
+      - vpc_id                                         = "vpc-44de6ebc0078bf011" -> null
         # (5 unchanged attributes hidden)
     }
 
   # aws_vpc.main will be destroyed
   - resource "aws_vpc" "main" {
-      - arn                                  = "arn:aws:ec2:us-east-1:123456789012:vpc/vpc-a904b492ac8b9a268" -> null
+      - arn                                  = "arn:aws:ec2:us-east-1:123456789012:vpc/vpc-44de6ebc0078bf011" -> null
       - assign_generated_ipv6_cidr_block     = false -> null
       - cidr_block                           = "10.0.0.0/16" -> null
-      - default_network_acl_id               = "acl-989920b56a28e2a2c" -> null
-      - default_route_table_id               = "rtb-544799fbc9c8e6403" -> null
-      - default_security_group_id            = "sg-32425297fb667b683" -> null
+      - default_network_acl_id               = "acl-6b9cd815f0cd72338" -> null
+      - default_route_table_id               = "rtb-9aadc01975665f9a7" -> null
+      - default_security_group_id            = "sg-8913862321f942660" -> null
       - dhcp_options_id                      = "default" -> null
       - enable_dns_hostnames                 = true -> null
       - enable_dns_support                   = true -> null
       - enable_network_address_usage_metrics = false -> null
-      - id                                   = "vpc-a904b492ac8b9a268" -> null
+      - id                                   = "vpc-44de6ebc0078bf011" -> null
       - instance_tenancy                     = "default" -> null
       - ipv6_netmask_length                  = 0 -> null
-      - main_route_table_id                  = "rtb-544799fbc9c8e6403" -> null
+      - main_route_table_id                  = "rtb-9aadc01975665f9a7" -> null
       - network_firewall_association         = [] -> null
       - owner_id                             = "123456789012" -> null
       - region                               = "us-east-1" -> null
@@ -571,86 +568,200 @@ Terraform will perform the following actions:
 
   # aws_vpc_security_group_egress_rule.all will be destroyed
   - resource "aws_vpc_security_group_egress_rule" "all" {
-      - arn                    = "arn:aws:ec2:us-east-1::security-group-rule/sgr-68d1ec2c25d8d10bb" -> null
+      - arn                    = "arn:aws:ec2:us-east-1::security-group-rule/sgr-8e3a42002c531edda" -> null
       - cidr_ipv4              = "0.0.0.0/0" -> null
-      - id                     = "sgr-68d1ec2c25d8d10bb" -> null
+      - id                     = "sgr-8e3a42002c531edda" -> null
       - ip_protocol            = "-1" -> null
       - region                 = "us-east-1" -> null
-      - security_group_id      = "sg-cef40f34363b129b5" -> null
-      - security_group_rule_id = "sgr-68d1ec2c25d8d10bb" -> null
+      - security_group_id      = "sg-028859f26dffcf4c3" -> null
+      - security_group_rule_id = "sgr-8e3a42002c531edda" -> null
       - tags_all               = {} -> null
     }
 
   # aws_vpc_security_group_ingress_rule.pg will be destroyed
   - resource "aws_vpc_security_group_ingress_rule" "pg" {
-      - arn                    = "arn:aws:ec2:us-east-1::security-group-rule/sgr-1340041b26fa740c9" -> null
+      - arn                    = "arn:aws:ec2:us-east-1::security-group-rule/sgr-d957c8ef66b439ae6" -> null
       - cidr_ipv4              = "10.0.0.0/16" -> null
       - from_port              = 5432 -> null
-      - id                     = "sgr-1340041b26fa740c9" -> null
+      - id                     = "sgr-d957c8ef66b439ae6" -> null
       - ip_protocol            = "tcp" -> null
       - region                 = "us-east-1" -> null
-      - security_group_id      = "sg-cef40f34363b129b5" -> null
-      - security_group_rule_id = "sgr-1340041b26fa740c9" -> null
+      - security_group_id      = "sg-028859f26dffcf4c3" -> null
+      - security_group_rule_id = "sgr-d957c8ef66b439ae6" -> null
       - tags_all               = {} -> null
       - to_port                = 5432 -> null
     }
 
 Plan: 0 to add, 0 to change, 23 to destroy.
-aws_s3_bucket_versioning.backups: Destroying... [id=prod-backups]
-aws_s3_object.dump[0]: Destroying... [id=prod-backups/db/dump-0.sql]
-aws_lambda_function.orders: Destroying... [id=orders]
-aws_s3_object.dump[2]: Destroying... [id=prod-backups/db/dump-2.sql]
-aws_vpc_security_group_ingress_rule.pg: Destroying... [id=sgr-1340041b26fa740c9]
-aws_db_instance.main: Destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U]
+aws_route_table.public: Destroying... [id=rtb-06fa65c29741413e2]
 aws_s3_object.dump[4]: Destroying... [id=prod-backups/db/dump-4.sql]
-aws_vpc_security_group_egress_rule.all: Destroying... [id=sgr-68d1ec2c25d8d10bb]
-aws_route_table.public: Destroying... [id=rtb-16eef93e05f25dcb8]
-aws_s3_object.dump[3]: Destroying... [id=prod-backups/db/dump-3.sql]
-aws_s3_bucket_versioning.backups: Destruction complete after 0s
 aws_s3_object.dump[1]: Destroying... [id=prod-backups/db/dump-1.sql]
-aws_vpc_security_group_ingress_rule.pg: Destruction complete after 0s
-aws_vpc_security_group_egress_rule.all: Destruction complete after 0s
-aws_s3_object.dump[0]: Destruction complete after 0s
-aws_s3_object.dump[3]: Destruction complete after 0s
-aws_s3_object.dump[2]: Destruction complete after 0s
-aws_s3_object.dump[4]: Destruction complete after 0s
-aws_s3_object.dump[1]: Destruction complete after 0s
-aws_s3_bucket.backups: Destroying... [id=prod-backups]
-aws_s3_bucket.backups: Destruction complete after 0s
-aws_route_table.public: Destruction complete after 0s
-aws_internet_gateway.main: Destroying... [id=igw-a102a1c40efb1281e]
-aws_internet_gateway.main: Destruction complete after 0s
-aws_lambda_function.orders: Destruction complete after 5s
-aws_iam_role_policy_attachment.fn: Destroying... [id=orders-fn/arn:aws:iam::123456789012:policy/orders-fn-dynamo]
-aws_cloudwatch_log_group.fn: Destroying... [id=/aws/lambda/orders]
-aws_iam_role_policy_attachment.fn: Destruction complete after 0s
-aws_cloudwatch_log_group.fn: Destruction complete after 0s
-aws_iam_policy.fn: Destroying... [id=arn:aws:iam::123456789012:policy/orders-fn-dynamo]
-aws_iam_role.fn: Destroying... [id=orders-fn]
-aws_iam_policy.fn: Destruction complete after 0s
-aws_dynamodb_table.orders: Destroying... [id=orders]
-aws_iam_role.fn: Destruction complete after 0s
-aws_dynamodb_table.orders: Destruction complete after 0s
+aws_s3_object.dump[2]: Destroying... [id=prod-backups/db/dump-2.sql]
+aws_s3_bucket_versioning.backups: Destroying... [id=prod-backups]
+aws_lambda_function.orders: Destroying... [id=orders]
+aws_vpc_security_group_egress_rule.all: Destroying... [id=sgr-8e3a42002c531edda]
+aws_db_instance.main: Destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U]
+aws_vpc_security_group_ingress_rule.pg: Destroying... [id=sgr-d957c8ef66b439ae6]
+aws_s3_object.dump[3]: Destroying... [id=prod-backups/db/dump-3.sql]
+aws_s3_object.dump[3]: Still destroying... [id=prod-backups/db/dump-3.sql, 00m10s elapsed]
+aws_route_table.public: Still destroying... [id=rtb-06fa65c29741413e2, 00m10s elapsed]
 aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m10s elapsed]
+aws_vpc_security_group_ingress_rule.pg: Still destroying... [id=sgr-d957c8ef66b439ae6, 00m10s elapsed]
+aws_vpc_security_group_egress_rule.all: Still destroying... [id=sgr-8e3a42002c531edda, 00m10s elapsed]
+aws_s3_object.dump[2]: Still destroying... [id=prod-backups/db/dump-2.sql, 00m10s elapsed]
+aws_lambda_function.orders: Still destroying... [id=orders, 00m10s elapsed]
+aws_s3_object.dump[1]: Still destroying... [id=prod-backups/db/dump-1.sql, 00m10s elapsed]
+aws_s3_bucket_versioning.backups: Still destroying... [id=prod-backups, 00m10s elapsed]
+aws_s3_object.dump[4]: Still destroying... [id=prod-backups/db/dump-4.sql, 00m10s elapsed]
+aws_lambda_function.orders: Destruction complete after 16s
+aws_s3_object.dump[0]: Destroying... [id=prod-backups/db/dump-0.sql]
+aws_s3_object.dump[2]: Destruction complete after 19s
+aws_iam_role_policy_attachment.fn: Destroying... [id=orders-fn/arn:aws:iam::123456789012:policy/orders-fn-dynamo]
 aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m20s elapsed]
+aws_s3_object.dump[4]: Still destroying... [id=prod-backups/db/dump-4.sql, 00m20s elapsed]
+aws_s3_object.dump[1]: Still destroying... [id=prod-backups/db/dump-1.sql, 00m20s elapsed]
+aws_route_table.public: Still destroying... [id=rtb-06fa65c29741413e2, 00m20s elapsed]
+aws_vpc_security_group_egress_rule.all: Still destroying... [id=sgr-8e3a42002c531edda, 00m20s elapsed]
+aws_s3_object.dump[3]: Still destroying... [id=prod-backups/db/dump-3.sql, 00m20s elapsed]
+aws_s3_bucket_versioning.backups: Still destroying... [id=prod-backups, 00m20s elapsed]
+aws_vpc_security_group_ingress_rule.pg: Still destroying... [id=sgr-d957c8ef66b439ae6, 00m20s elapsed]
+aws_s3_object.dump[0]: Still destroying... [id=prod-backups/db/dump-0.sql, 00m10s elapsed]
+aws_s3_object.dump[4]: Destruction complete after 27s
+aws_cloudwatch_log_group.fn: Destroying... [id=/aws/lambda/orders]
+aws_iam_role_policy_attachment.fn: Still destroying... [id=orders-fn/arn:aws:iam::123456789012:policy/orders-fn-dynamo, 00m10s elapsed]
+aws_route_table.public: Still destroying... [id=rtb-06fa65c29741413e2, 00m30s elapsed]
+aws_s3_object.dump[3]: Still destroying... [id=prod-backups/db/dump-3.sql, 00m30s elapsed]
+aws_s3_bucket_versioning.backups: Still destroying... [id=prod-backups, 00m30s elapsed]
+aws_vpc_security_group_ingress_rule.pg: Still destroying... [id=sgr-d957c8ef66b439ae6, 00m30s elapsed]
 aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m30s elapsed]
+aws_vpc_security_group_egress_rule.all: Still destroying... [id=sgr-8e3a42002c531edda, 00m30s elapsed]
+aws_s3_object.dump[1]: Still destroying... [id=prod-backups/db/dump-1.sql, 00m30s elapsed]
+aws_s3_object.dump[0]: Still destroying... [id=prod-backups/db/dump-0.sql, 00m20s elapsed]
+aws_cloudwatch_log_group.fn: Still destroying... [id=/aws/lambda/orders, 00m10s elapsed]
+aws_iam_role_policy_attachment.fn: Still destroying... [id=orders-fn/arn:aws:iam::123456789012:policy/orders-fn-dynamo, 00m20s elapsed]
+aws_s3_object.dump[1]: Still destroying... [id=prod-backups/db/dump-1.sql, 00m40s elapsed]
+aws_vpc_security_group_egress_rule.all: Still destroying... [id=sgr-8e3a42002c531edda, 00m40s elapsed]
+aws_route_table.public: Still destroying... [id=rtb-06fa65c29741413e2, 00m40s elapsed]
+aws_s3_object.dump[3]: Still destroying... [id=prod-backups/db/dump-3.sql, 00m40s elapsed]
+aws_s3_bucket_versioning.backups: Still destroying... [id=prod-backups, 00m40s elapsed]
+aws_vpc_security_group_ingress_rule.pg: Still destroying... [id=sgr-d957c8ef66b439ae6, 00m40s elapsed]
 aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m40s elapsed]
+aws_s3_bucket_versioning.backups: Destruction complete after 43s
+aws_s3_object.dump[0]: Still destroying... [id=prod-backups/db/dump-0.sql, 00m30s elapsed]
+aws_cloudwatch_log_group.fn: Still destroying... [id=/aws/lambda/orders, 00m20s elapsed]
+aws_iam_role_policy_attachment.fn: Still destroying... [id=orders-fn/arn:aws:iam::123456789012:policy/orders-fn-dynamo, 00m30s elapsed]
 aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m50s elapsed]
+aws_vpc_security_group_egress_rule.all: Still destroying... [id=sgr-8e3a42002c531edda, 00m50s elapsed]
+aws_vpc_security_group_ingress_rule.pg: Still destroying... [id=sgr-d957c8ef66b439ae6, 00m50s elapsed]
+aws_route_table.public: Still destroying... [id=rtb-06fa65c29741413e2, 00m50s elapsed]
+aws_s3_object.dump[1]: Still destroying... [id=prod-backups/db/dump-1.sql, 00m50s elapsed]
+aws_s3_object.dump[3]: Still destroying... [id=prod-backups/db/dump-3.sql, 00m50s elapsed]
+aws_route_table.public: Destruction complete after 52s
+aws_internet_gateway.main: Destroying... [id=igw-162cb045f8aecedbb]
+aws_s3_object.dump[0]: Still destroying... [id=prod-backups/db/dump-0.sql, 00m40s elapsed]
+aws_cloudwatch_log_group.fn: Still destroying... [id=/aws/lambda/orders, 00m30s elapsed]
+aws_iam_role_policy_attachment.fn: Still destroying... [id=orders-fn/arn:aws:iam::123456789012:policy/orders-fn-dynamo, 00m40s elapsed]
+aws_vpc_security_group_egress_rule.all: Destruction complete after 1m0s
 aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 01m00s elapsed]
+aws_vpc_security_group_ingress_rule.pg: Still destroying... [id=sgr-d957c8ef66b439ae6, 01m00s elapsed]
+aws_s3_object.dump[1]: Still destroying... [id=prod-backups/db/dump-1.sql, 01m00s elapsed]
+aws_s3_object.dump[3]: Still destroying... [id=prod-backups/db/dump-3.sql, 01m00s elapsed]
+aws_internet_gateway.main: Still destroying... [id=igw-162cb045f8aecedbb, 00m10s elapsed]
+aws_s3_object.dump[0]: Still destroying... [id=prod-backups/db/dump-0.sql, 00m50s elapsed]
+aws_cloudwatch_log_group.fn: Still destroying... [id=/aws/lambda/orders, 00m40s elapsed]
+aws_vpc_security_group_ingress_rule.pg: Destruction complete after 1m8s
+aws_iam_role_policy_attachment.fn: Still destroying... [id=orders-fn/arn:aws:iam::123456789012:policy/orders-fn-dynamo, 00m50s elapsed]
 aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 01m10s elapsed]
+aws_s3_object.dump[1]: Still destroying... [id=prod-backups/db/dump-1.sql, 01m10s elapsed]
+aws_s3_object.dump[3]: Still destroying... [id=prod-backups/db/dump-3.sql, 01m10s elapsed]
+aws_internet_gateway.main: Still destroying... [id=igw-162cb045f8aecedbb, 00m20s elapsed]
+aws_s3_object.dump[1]: Destruction complete after 1m16s
+aws_s3_object.dump[0]: Still destroying... [id=prod-backups/db/dump-0.sql, 01m00s elapsed]
+aws_cloudwatch_log_group.fn: Still destroying... [id=/aws/lambda/orders, 00m50s elapsed]
+aws_iam_role_policy_attachment.fn: Still destroying... [id=orders-fn/arn:aws:iam::123456789012:policy/orders-fn-dynamo, 01m00s elapsed]
+aws_s3_object.dump[3]: Still destroying... [id=prod-backups/db/dump-3.sql, 01m20s elapsed]
 aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 01m20s elapsed]
-aws_db_instance.main: Destruction complete after 1m20s
+aws_internet_gateway.main: Still destroying... [id=igw-162cb045f8aecedbb, 00m30s elapsed]
+aws_s3_object.dump[3]: Destruction complete after 1m24s
+aws_s3_object.dump[0]: Still destroying... [id=prod-backups/db/dump-0.sql, 01m10s elapsed]
+aws_cloudwatch_log_group.fn: Still destroying... [id=/aws/lambda/orders, 01m00s elapsed]
+aws_iam_role_policy_attachment.fn: Still destroying... [id=orders-fn/arn:aws:iam::123456789012:policy/orders-fn-dynamo, 01m10s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 01m30s elapsed]
+aws_internet_gateway.main: Still destroying... [id=igw-162cb045f8aecedbb, 00m40s elapsed]
+aws_s3_object.dump[0]: Destruction complete after 1m16s
+aws_s3_bucket.backups: Destroying... [id=prod-backups]
+aws_cloudwatch_log_group.fn: Still destroying... [id=/aws/lambda/orders, 01m10s elapsed]
+aws_iam_role_policy_attachment.fn: Still destroying... [id=orders-fn/arn:aws:iam::123456789012:policy/orders-fn-dynamo, 01m20s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 01m40s elapsed]
+aws_iam_role_policy_attachment.fn: Destruction complete after 1m21s
+aws_iam_role.fn: Destroying... [id=orders-fn]
+aws_iam_policy.fn: Destroying... [id=arn:aws:iam::123456789012:policy/orders-fn-dynamo]
+aws_internet_gateway.main: Still destroying... [id=igw-162cb045f8aecedbb, 00m50s elapsed]
+aws_s3_bucket.backups: Still destroying... [id=prod-backups, 00m10s elapsed]
+aws_cloudwatch_log_group.fn: Still destroying... [id=/aws/lambda/orders, 01m20s elapsed]
+aws_cloudwatch_log_group.fn: Destruction complete after 1m21s
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 01m50s elapsed]
+aws_iam_role.fn: Still destroying... [id=orders-fn, 00m10s elapsed]
+aws_iam_policy.fn: Still destroying... [id=arn:aws:iam::123456789012:policy/orders-fn-dynamo, 00m10s elapsed]
+aws_internet_gateway.main: Still destroying... [id=igw-162cb045f8aecedbb, 01m00s elapsed]
+aws_s3_bucket.backups: Still destroying... [id=prod-backups, 00m20s elapsed]
+aws_db_instance.main: Destruction complete after 1m55s
 aws_db_subnet_group.main: Destroying... [id=prod]
-aws_security_group.db: Destroying... [id=sg-cef40f34363b129b5]
-aws_db_subnet_group.main: Destruction complete after 0s
-aws_subnet.b: Destroying... [id=subnet-cd4ce2974b6ccb5de]
-aws_subnet.a: Destroying... [id=subnet-ca6752334ffaa7b59]
-aws_security_group.db: Destruction complete after 0s
-aws_subnet.b: Destruction complete after 0s
-aws_subnet.a: Destruction complete after 0s
-aws_vpc.main: Destroying... [id=vpc-a904b492ac8b9a268]
-aws_vpc.main: Destruction complete after 0s
+aws_security_group.db: Destroying... [id=sg-028859f26dffcf4c3]
+aws_iam_role.fn: Still destroying... [id=orders-fn, 00m20s elapsed]
+aws_iam_policy.fn: Still destroying... [id=arn:aws:iam::123456789012:policy/orders-fn-dynamo, 00m20s elapsed]
+aws_internet_gateway.main: Still destroying... [id=igw-162cb045f8aecedbb, 01m10s elapsed]
+aws_s3_bucket.backups: Still destroying... [id=prod-backups, 00m30s elapsed]
+aws_db_subnet_group.main: Still destroying... [id=prod, 00m10s elapsed]
+aws_security_group.db: Still destroying... [id=sg-028859f26dffcf4c3, 00m10s elapsed]
+aws_iam_role.fn: Still destroying... [id=orders-fn, 00m30s elapsed]
+aws_iam_policy.fn: Still destroying... [id=arn:aws:iam::123456789012:policy/orders-fn-dynamo, 00m30s elapsed]
+aws_internet_gateway.main: Still destroying... [id=igw-162cb045f8aecedbb, 01m20s elapsed]
+aws_s3_bucket.backups: Still destroying... [id=prod-backups, 00m40s elapsed]
+aws_iam_policy.fn: Destruction complete after 32s
+aws_dynamodb_table.orders: Destroying... [id=orders]
+aws_db_subnet_group.main: Still destroying... [id=prod, 00m20s elapsed]
+aws_security_group.db: Still destroying... [id=sg-028859f26dffcf4c3, 00m20s elapsed]
+aws_iam_role.fn: Still destroying... [id=orders-fn, 00m40s elapsed]
+aws_iam_role.fn: Destruction complete after 40s
+aws_internet_gateway.main: Still destroying... [id=igw-162cb045f8aecedbb, 01m30s elapsed]
+aws_s3_bucket.backups: Still destroying... [id=prod-backups, 00m50s elapsed]
+aws_dynamodb_table.orders: Still destroying... [id=orders, 00m10s elapsed]
+aws_db_subnet_group.main: Still destroying... [id=prod, 00m30s elapsed]
+aws_security_group.db: Still destroying... [id=sg-028859f26dffcf4c3, 00m30s elapsed]
+aws_db_subnet_group.main: Destruction complete after 34s
+aws_subnet.b: Destroying... [id=subnet-5413c4ca8c8cbdd08]
+aws_subnet.a: Destroying... [id=subnet-86bc54f39fd661f14]
+aws_internet_gateway.main: Still destroying... [id=igw-162cb045f8aecedbb, 01m40s elapsed]
+aws_s3_bucket.backups: Still destroying... [id=prod-backups, 01m00s elapsed]
+aws_dynamodb_table.orders: Still destroying... [id=orders, 00m20s elapsed]
+aws_security_group.db: Still destroying... [id=sg-028859f26dffcf4c3, 00m41s elapsed]
+aws_security_group.db: Destruction complete after 42s
+aws_subnet.b: Still destroying... [id=subnet-5413c4ca8c8cbdd08, 00m10s elapsed]
+aws_subnet.a: Still destroying... [id=subnet-86bc54f39fd661f14, 00m10s elapsed]
+aws_internet_gateway.main: Still destroying... [id=igw-162cb045f8aecedbb, 01m50s elapsed]
+aws_s3_bucket.backups: Still destroying... [id=prod-backups, 01m10s elapsed]
+aws_dynamodb_table.orders: Still destroying... [id=orders, 00m30s elapsed]
+aws_internet_gateway.main: Destruction complete after 1m53s
+aws_subnet.b: Still destroying... [id=subnet-5413c4ca8c8cbdd08, 00m20s elapsed]
+aws_subnet.a: Still destroying... [id=subnet-86bc54f39fd661f14, 00m20s elapsed]
+aws_s3_bucket.backups: Still destroying... [id=prod-backups, 01m20s elapsed]
+aws_dynamodb_table.orders: Still destroying... [id=orders, 00m40s elapsed]
+aws_subnet.a: Still destroying... [id=subnet-86bc54f39fd661f14, 00m30s elapsed]
+aws_subnet.b: Still destroying... [id=subnet-5413c4ca8c8cbdd08, 00m30s elapsed]
+aws_dynamodb_table.orders: Destruction complete after 49s
+aws_s3_bucket.backups: Still destroying... [id=prod-backups, 01m30s elapsed]
+aws_subnet.a: Still destroying... [id=subnet-86bc54f39fd661f14, 00m40s elapsed]
+aws_subnet.b: Still destroying... [id=subnet-5413c4ca8c8cbdd08, 00m40s elapsed]
+aws_subnet.a: Destruction complete after 40s
+aws_s3_bucket.backups: Still destroying... [id=prod-backups, 01m40s elapsed]
+aws_subnet.b: Destruction complete after 48s
+aws_vpc.main: Destroying... [id=vpc-44de6ebc0078bf011]
+aws_s3_bucket.backups: Still destroying... [id=prod-backups, 01m50s elapsed]
+aws_s3_bucket.backups: Destruction complete after 1m53s
+aws_vpc.main: Still destroying... [id=vpc-44de6ebc0078bf011, 00m10s elapsed]
+aws_vpc.main: Destruction complete after 16s
 
 Destroy complete! Resources: 23 destroyed.
 
-[exit 0 after 92.7 s]
+[exit 0 after 226.2 s]
