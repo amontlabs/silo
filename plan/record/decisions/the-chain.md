@@ -20,3 +20,13 @@ Where each link comes from. The table stands under the chain and carries no mark
 | tool call → the processes it started | Time. Ambiguous only when one process runs several tool calls at the same instant | An opinion |
 
 Reading tool calls from model traffic is in the part `traffic`.
+
+An agent's part, 24 November 2026, from the prototype in `research/2026-11-24-morning-review`. A challenge to one row of the table: "tool call →
+the processes it started", known from time. On a real night that got it wrong for most tool
+calls of Claude Code, not only at the same instant: Claude Code runs git about six times a turn
+on its own, in the same window as the command the model asked for. The case: claude #2 asked for
+`rm -rf ~/work/shared-fixtures`, and by time alone its tool call took a `git status` Claude Code
+ran for itself, started a few milliseconds earlier. What worked for every tool call that night:
+in the window from the reply to the request that carries its result, the earliest process whose
+command holds the tool call's command text, and every process descended from it. In its place:
+"Time and the command text of the tool call, then descent", still an opinion.

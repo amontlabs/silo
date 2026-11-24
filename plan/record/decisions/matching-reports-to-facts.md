@@ -22,3 +22,10 @@ and it still tells you exactly which two.
 ## Notes
 
 Left for when it is built.
+
+An agent's part, 24 November 2026, from the prototype in `research/2026-11-24-morning-review`. Reports matched to file facts
+between the two checkpoints that found the change, as recommended, worked on a night of four
+runs. What the probe must report for it to work: Codex is a static binary that calls `open`, not
+`openat`; Claude Code writes through `/proc/self/fd/N/...`; git makes files with `link`. A probe
+that watched `openat` alone missed all of those, and their file facts showed as unattributed.
+The files a fork's runs wrote after the fork matched as they did in main.

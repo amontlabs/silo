@@ -28,3 +28,8 @@ The sketch shows content, not design.
  paste.rs               1 call   2.1 MB sent  codex     first time seen ⚠   [deny this host]
  Denied             your Mac ×2 · cloud metadata ×4
 ```
+
+An agent's part, 24 November 2026, from the prototype in `research/2026-11-24-morning-review`. Codex reached four hosts at start, before any
+work: github.com, api.github.com, chatgpt.com and ab.chatgpt.com. "First time seen" alerted on
+all four, and a hold on writes to api.github.com held Codex's own plugin sync, which nobody
+answered. The view would want to tell a program's own traffic from what the model asked for.

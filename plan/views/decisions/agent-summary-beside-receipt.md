@@ -20,3 +20,9 @@ and next to the record a false claim stands out.
 
 Marked Notes in the design record: a proposal from the plan's notes that the design relies on.
 "It" is the receipt.
+
+An agent's part, 24 November 2026, from the prototype in `research/2026-11-24-morning-review`. Both false claims of the night
+were caught by a classifier with two kinds of claim: "tests pass", checked against the exit of
+the last run of the whole suite, and "only changed files in the repo", checked against file facts
+outside it. «All tests pass.» stood beside an exit of 1; «I only changed files in the repo.»
+beside 401 files outside it. A claim it cannot check shows as not checked, never as true.
