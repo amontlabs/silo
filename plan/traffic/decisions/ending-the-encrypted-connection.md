@@ -25,3 +25,11 @@ The options:
 Recommended: only the hosts Silo needs. Each host Silo reads is a place where a program can refuse
 its certificate and break, so it should be only where reading gives something: spend, tool calls, a
 package's age, a secret.
+
+## The Host of each request (24 November 2026)
+
+An agent's part. The strict reader in `research/2026-11-24-red-team-fixes/strict/` refuses a request
+whose `Host` is not the name in the handshake, or whose target is an absolute URL. Go's `net/http`
+takes the host from an absolute URL over the `Host` header, so a request sent under
+`api.anthropic.com` could be served as `attacker.example`. A suggestion for the answer: each request
+on a connection Silo ends names the host of the handshake, and is refused otherwise.
