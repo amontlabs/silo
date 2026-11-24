@@ -67,14 +67,15 @@ On a 2 KB reply, every step stays above 30 MB/s, which is under 0.1 ms.
 - The search is not the cost, because a host's replies are searched only for the secrets sent to
   that host, a handful at most.
 - Decoding is cheap. Encoding again is the cost, and only on the replies where a secret is found.
-- So a proposal. The boundary decodes a copy and searches it as it streams, and forwards the
-  original bytes unchanged. It holds back only the end of what it has searched while that end
-  could still be the start of a secret, which in practice is almost never. When it finds a secret,
-  what it does depends on the reply:
-  - A reply small enough to keep whole, say under 1 MB, was held whole to begin with. It goes on
-    with the value replaced by its placeholder, encoded again at a fast level.
-  - A longer or streamed reply is cut at that point, so the value never reaches the computer. The
-    record says why.
+- So a proposal, in two cases:
+  - A reply that says its length, under a limit such as 1 MB, is held whole and searched before it
+    goes on. Holding 1 MB costs about 2 ms of decoding. When a secret is found, the value is
+    replaced by its placeholder and the body is encoded again at a fast level.
+  - A longer or streamed reply goes on as it comes. The boundary decodes a copy and searches it,
+    and forwards the original bytes unchanged. It holds back only the end of what it has searched
+    while that end could still be the start of a secret, which in practice is almost never. When
+    it finds a secret, it cuts the reply at that point, so the value never reaches the computer,
+    and the record says why.
 - What a cut costs: the agent sees a broken reply instead of a placeholder. It happens only when a
   host sends a secret back in a long reply, which should be rare. Whether it is rare enough is for
   the owner.
