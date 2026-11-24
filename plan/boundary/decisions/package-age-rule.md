@@ -92,5 +92,6 @@ itself trusts for the checksum of each version.
 
 A Go module fetched with `GOPROXY=direct`, or any package taken from a Git URL instead of the
 registry, never passes the registry and so is not covered by the rule. One setting inside the
-computer is enough for that, so a rule on age is only firm together with a network rule that
-keeps code hosts such as `github.com` from serving Git to package managers.
+computer is enough for that. A rule on age is only firm when Git fetches from code hosts such as
+`github.com` are held or denied too, and that also catches the agent's ordinary `git clone`. The
+app should say so where the rule is set.
