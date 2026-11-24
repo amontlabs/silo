@@ -103,3 +103,12 @@ host still worked. That is a short, fixed list Silo can apply when it makes a co
 
 The scripts are in the project files, `research/2026-11-24-trust-libraries` (`kit.sh` for the
 list).
+
+The agent programs themselves, for their own model traffic, tried the same day against a stand-in
+for each provider's host with a certificate from an authority only the system store held:
+Claude Code 2.1.331 (built on Bun) and opencode 1.19.6 (Bun 1.4.4) trusted it, as Codex 0.172.0
+already had. Gemini CLI 0.71.1, which runs on Node, refused it, and said only "fetch failed
+sending request", twice with retries, nothing about a certificate. With
+`NODE_OPTIONS=--use-system-ca`, the first line of the list above, it reached the stand-in. So the
+list covers every agent program tried, and without it Gemini CLI fails in a way that names
+neither the certificate nor Silo.
