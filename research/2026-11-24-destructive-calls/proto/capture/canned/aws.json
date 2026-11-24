@@ -1,0 +1,11 @@
+[
+ {"host": "s3", "method": "GET", "path": "list-type=2|^/silo-test-bucket/?\\?|^/\\?(prefix|delimiter|encoding)", "headers": {"Content-Type": "application/xml"},
+  "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Name>silo-test-bucket</Name><Prefix></Prefix><KeyCount>2</KeyCount><MaxKeys>1000</MaxKeys><IsTruncated>false</IsTruncated><Contents><Key>backups/db-2026-11-23.dump</Key><LastModified>2026-11-23T00:00:00.000Z</LastModified><ETag>&quot;abc&quot;</ETag><Size>1024</Size><StorageClass>STANDARD</StorageClass></Contents><Contents><Key>backups/db-2026-11-24.dump</Key><LastModified>2026-11-24T00:00:00.000Z</LastModified><ETag>&quot;def&quot;</ETag><Size>2048</Size><StorageClass>STANDARD</StorageClass></Contents></ListBucketResult>"},
+ {"host": "s3", "method": "POST", "path": "\\?delete", "headers": {"Content-Type": "application/xml"},
+  "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><DeleteResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Deleted><Key>backups/db-2026-11-23.dump</Key></Deleted><Deleted><Key>backups/db-2026-11-24.dump</Key></Deleted></DeleteResult>"},
+ {"host": "s3", "method": "DELETE", "status": 204, "headers": {"Content-Type": "application/xml"}, "body": ""},
+ {"host": "^rds\\.", "method": "POST", "headers": {"Content-Type": "text/xml"},
+  "body": "<DeleteDBInstanceResponse xmlns=\"http://rds.amazonaws.com/doc/2014-10-31/\"><DeleteDBInstanceResult><DBInstance><DBInstanceIdentifier>prod-db</DBInstanceIdentifier><DBInstanceStatus>deleting</DBInstanceStatus><Engine>postgres</Engine></DBInstance></DeleteDBInstanceResult><ResponseMetadata><RequestId>00000000-0000-0000-0000-000000000000</RequestId></ResponseMetadata></DeleteDBInstanceResponse>"},
+ {"host": "^dynamodb\\.", "method": "POST", "headers": {"Content-Type": "application/x-amz-json-1.0"},
+  "body": {"TableDescription": {"TableName": "orders", "TableStatus": "DELETING", "TableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/orders"}}}
+]

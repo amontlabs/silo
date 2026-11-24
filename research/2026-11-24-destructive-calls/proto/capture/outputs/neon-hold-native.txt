@@ -1,0 +1,4 @@
+$ NEON_API_KEY=test-token-123 -- neonctl projects delete proj-123 --output json
+ERROR: Held by Silo and not answered: deleting volume X needs your yes.
+--- exit=1 seconds=2.806896690
+--- matching requests held: 1

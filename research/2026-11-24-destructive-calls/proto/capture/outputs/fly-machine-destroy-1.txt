@@ -1,0 +1,4 @@
+$ FLY_API_TOKEN=test-token-123 -- flyctl machine destroy 3d8d1 -a my-app --force
+machine  was found and is currently in  state, attempting to destroy...
+ has been destroyed
+--- exit=0 seconds=.245400012

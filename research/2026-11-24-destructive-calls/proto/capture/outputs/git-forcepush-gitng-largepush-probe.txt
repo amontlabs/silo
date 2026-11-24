@@ -1,0 +1,6 @@
+$ -- git push --force https://github.com/o/r.git main
+remote: Held by Silo and not answered: deleting volume X needs your yes.        
+To https://github.com/o/r.git
+ ! [remote rejected] main -> main (Held by Silo and not answered: deleting volume X needs your yes.)
+error: failed to push some refs to 'https://github.com/o/r.git'
+--- exit=1 seconds=6.779542115

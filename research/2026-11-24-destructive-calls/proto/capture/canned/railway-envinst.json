@@ -1,0 +1,9 @@
+{"data": {"environment": {"id": "e1", "name": "production",
+ "serviceInstances": {"edges": [{"node": {"id": "si1", "serviceId": "s1", "serviceName": "api", "environmentId": "e1", "numReplicas": 1,
+   "latestDeployment": {"canRedeploy": true, "id": "d1", "meta": {}, "status": "SUCCESS", "createdAt": "2026-11-24T00:00:00Z", "deploymentStopped": false, "instances": [{"id": "i1", "status": "RUNNING"}]},
+   "activeDeployments": [{"id": "d1", "status": "SUCCESS", "createdAt": "2026-11-24T00:00:00Z", "meta": {}, "deploymentStopped": false, "instances": [{"id": "i1", "status": "RUNNING"}]}],
+   "source": {"repo": null, "image": "postgres:17"}, "domains": {"serviceDomains": [], "customDomains": []},
+   "cronSchedule": null, "nextCronRunAt": null, "startCommand": null, "tracingEnabled": false, "autoInstrumentationEnabled": false}}],
+   "pageInfo": {"hasNextPage": false, "endCursor": null}},
+ "volumeInstances": {"edges": [{"node": {"id": "vi1", "serviceId": "s1", "mountPath": "/var/lib/postgresql/data", "environmentId": "e1", "currentSizeMB": 900, "sizeMB": 5000, "state": "READY", "deletedAt": null, "isPendingDeletion": false, "volume": {"name": "pg-data", "id": "vol-1"}}}],
+   "pageInfo": {"hasNextPage": false, "endCursor": null}}}}}

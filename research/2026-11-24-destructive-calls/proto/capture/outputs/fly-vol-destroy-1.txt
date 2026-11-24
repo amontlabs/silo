@@ -1,0 +1,3 @@
+$ FLY_API_TOKEN=test-token-123 -- flyctl volumes destroy vol_123 -a my-app --yes
+Destroyed volume ID: vol_123 name: 
+--- exit=0 seconds=.361959988

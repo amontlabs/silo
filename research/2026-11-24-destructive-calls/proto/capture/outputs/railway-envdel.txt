@@ -1,0 +1,3 @@
+$ RAILWAY_TOKEN=test-token-123 -- railway environment delete staging --yes
+> Select the environment to delete staging
+--- exit=0 seconds=.194352321

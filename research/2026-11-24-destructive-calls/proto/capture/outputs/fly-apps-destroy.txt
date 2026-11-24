@@ -1,0 +1,3 @@
+$ FLY_API_TOKEN=test-token-123 -- flyctl apps destroy my-app --yes
+Destroyed app my-app
+--- exit=0 seconds=.262913195

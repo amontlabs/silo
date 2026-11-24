@@ -1,0 +1,12 @@
+# ip host...  (one loopback address per CLI, so servers for different CLIs run side by side)
+127.0.0.2 github.com
+127.0.0.3 api.github.com uploads.github.com
+127.0.0.4 s3.amazonaws.com s3.us-east-1.amazonaws.com silo-test-bucket.s3.amazonaws.com silo-test-bucket.s3.us-east-1.amazonaws.com rds.us-east-1.amazonaws.com rds.amazonaws.com dynamodb.us-east-1.amazonaws.com sts.amazonaws.com sts.us-east-1.amazonaws.com iam.amazonaws.com
+127.0.0.5 backboard.railway.app backboard.railway.com api.railway.app
+127.0.0.6 api.vercel.com vercel.com sparkle.vercel.app
+127.0.0.7 api.fly.io api.machines.dev registry.fly.io
+127.0.0.8 api.cloudflare.com
+127.0.0.9 api.stripe.com
+127.0.0.10 api.supabase.com api.supabase.io
+127.0.0.11 console.neon.tech
+127.0.0.12 api.heroku.com

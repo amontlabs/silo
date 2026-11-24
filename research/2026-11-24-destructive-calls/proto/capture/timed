@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# timed <name> [VAR=v ...] -- cmd...: runs cmd through clienv in the current directory,
+# saves output, exit code and seconds to outputs/<name>.txt
+H="$(cd "$(dirname "$0")" && pwd)"; mkdir -p "$H/outputs"
+name=$1; shift
+s=$(date +%s.%N)
+out=$("$H/clienv" "$@" 2>&1 </dev/null); rc=$?
+e=$(date +%s.%N)
+{ echo "\$ ${*}"; echo "$out"; echo "--- exit=$rc seconds=$(echo "$e - $s" | bc)"; } > "$H/outputs/$name.txt"
+tail -n 40 "$H/outputs/$name.txt"

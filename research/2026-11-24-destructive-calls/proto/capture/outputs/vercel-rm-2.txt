@@ -1,0 +1,9 @@
+$ -- vercel remove my-app --yes --token testtoken123
+Vercel CLI 66.6.0
+Fetching deployment(s) "my-app" in alice
+> Found 1 project for removal in alice [51ms]
+! --yes is deprecated for this command. Use --confirm-name my-app.
+Removing 1 project… 0 of 1 done
+> Success! Removed 1 project [3ms]
+- my-app
+--- exit=0 seconds=.481868552

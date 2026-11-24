@@ -1,0 +1,120 @@
+[
+ {
+  "op": "^Deployments ",
+  "body": {
+   "data": {
+    "deployments": {
+     "edges": [
+      {
+       "node": {
+        "id": "d1",
+        "createdAt": "2026-11-24T00:00:00Z",
+        "status": "SUCCESS",
+        "meta": {}
+       }
+      }
+     ]
+    }
+   }
+  }
+ },
+ {
+  "op": "ProjectToken",
+  "body": {
+   "data": {
+    "projectToken": {
+     "id": "tok1",
+     "project": {
+      "id": "p1",
+      "name": "prod-app"
+     },
+     "environment": {
+      "id": "e1",
+      "name": "production"
+     }
+    }
+   }
+  }
+ },
+ {
+  "op": "^Project ",
+  "body_file": "railway-project.json"
+ },
+ {
+  "op": "^Environments ",
+  "body": {
+   "data": {
+    "environments": {
+     "edges": [
+      {
+       "node": {
+        "id": "e1",
+        "name": "production",
+        "isEphemeral": false,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:00Z",
+        "canAccess": true,
+        "unmergedChangesCount": 0,
+        "sourceEnvironment": null,
+        "meta": null
+       }
+      },
+      {
+       "node": {
+        "id": "e2",
+        "name": "staging",
+        "isEphemeral": false,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:00Z",
+        "canAccess": true,
+        "unmergedChangesCount": 0,
+        "sourceEnvironment": null,
+        "meta": null
+       }
+      }
+     ],
+     "pageInfo": {
+      "hasNextPage": false,
+      "endCursor": null
+     }
+    }
+   }
+  }
+ },
+ {
+  "op": "EnvironmentInstances",
+  "body_file": "railway-envinst.json"
+ },
+ {
+  "op": "CliEventTrack",
+  "body": {
+   "data": {
+    "cliEventTrack": true
+   }
+  }
+ },
+ {
+  "op": "VolumeDelete",
+  "body": {
+   "data": {
+    "volumeDelete": true
+   }
+  }
+ },
+ {
+  "op": "EnvironmentDelete",
+  "body": {
+   "data": {
+    "environmentDelete": true
+   }
+  }
+ },
+ {
+  "op": "DeploymentRemove",
+  "body": {
+   "data": {
+    "deploymentRemove": true
+   }
+  }
+ }
+]

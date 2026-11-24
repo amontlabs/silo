@@ -1,0 +1,5629 @@
+{
+ "cases": 372,
+ "plain": 193,
+ "evasion": 105,
+ "capture": 74,
+ "families": {
+  "aws/evasion": {
+   "tp": 11,
+   "fp": 0,
+   "tn": 0,
+   "fn": 0,
+   "unknown": 1,
+   "n": 11
+  },
+  "aws/plain": {
+   "tp": 9,
+   "fp": 1,
+   "tn": 11,
+   "fn": 0,
+   "unknown": 0,
+   "n": 21
+  },
+  "capture-aws/capture": {
+   "tp": 5,
+   "fp": 0,
+   "tn": 1,
+   "fn": 0,
+   "unknown": 0,
+   "n": 6
+  },
+  "capture-fly/capture": {
+   "tp": 4,
+   "fp": 0,
+   "tn": 5,
+   "fn": 0,
+   "unknown": 0,
+   "n": 9
+  },
+  "capture-gh/capture": {
+   "tp": 2,
+   "fp": 0,
+   "tn": 0,
+   "fn": 0,
+   "unknown": 0,
+   "n": 2
+  },
+  "capture-git/capture": {
+   "tp": 2,
+   "fp": 0,
+   "tn": 5,
+   "fn": 0,
+   "unknown": 0,
+   "n": 7
+  },
+  "capture-heroku/capture": {
+   "tp": 1,
+   "fp": 0,
+   "tn": 1,
+   "fn": 0,
+   "unknown": 0,
+   "n": 2
+  },
+  "capture-neon/capture": {
+   "tp": 2,
+   "fp": 0,
+   "tn": 3,
+   "fn": 0,
+   "unknown": 0,
+   "n": 5
+  },
+  "capture-railway/capture": {
+   "tp": 3,
+   "fp": 0,
+   "tn": 16,
+   "fn": 0,
+   "unknown": 0,
+   "n": 19
+  },
+  "capture-stripe/capture": {
+   "tp": 2,
+   "fp": 0,
+   "tn": 0,
+   "fn": 0,
+   "unknown": 0,
+   "n": 2
+  },
+  "capture-supabase/capture": {
+   "tp": 1,
+   "fp": 0,
+   "tn": 1,
+   "fn": 0,
+   "unknown": 0,
+   "n": 2
+  },
+  "capture-vercel/capture": {
+   "tp": 3,
+   "fp": 0,
+   "tn": 7,
+   "fn": 0,
+   "unknown": 0,
+   "n": 10
+  },
+  "capture-wrangler/capture": {
+   "tp": 3,
+   "fp": 0,
+   "tn": 7,
+   "fn": 0,
+   "unknown": 0,
+   "n": 10
+  },
+  "cloudflare/evasion": {
+   "tp": 3,
+   "fp": 0,
+   "tn": 0,
+   "fn": 0,
+   "unknown": 0,
+   "n": 3
+  },
+  "cloudflare/plain": {
+   "tp": 8,
+   "fp": 0,
+   "tn": 6,
+   "fn": 0,
+   "unknown": 0,
+   "n": 14
+  },
+  "fly/evasion": {
+   "tp": 1,
+   "fp": 0,
+   "tn": 0,
+   "fn": 0,
+   "unknown": 0,
+   "n": 1
+  },
+  "fly/plain": {
+   "tp": 5,
+   "fp": 0,
+   "tn": 5,
+   "fn": 0,
+   "unknown": 0,
+   "n": 10
+  },
+  "git/evasion": {
+   "tp": 1,
+   "fp": 0,
+   "tn": 0,
+   "fn": 1,
+   "unknown": 0,
+   "n": 2
+  },
+  "git/plain": {
+   "tp": 1,
+   "fp": 0,
+   "tn": 3,
+   "fn": 0,
+   "unknown": 0,
+   "n": 4
+  },
+  "github/evasion": {
+   "tp": 3,
+   "fp": 0,
+   "tn": 0,
+   "fn": 0,
+   "unknown": 0,
+   "n": 3
+  },
+  "github/plain": {
+   "tp": 12,
+   "fp": 0,
+   "tn": 8,
+   "fn": 0,
+   "unknown": 0,
+   "n": 20
+  },
+  "gmail/evasion": {
+   "tp": 2,
+   "fp": 0,
+   "tn": 0,
+   "fn": 0,
+   "unknown": 1,
+   "n": 2
+  },
+  "gmail/plain": {
+   "tp": 2,
+   "fp": 0,
+   "tn": 3,
+   "fn": 0,
+   "unknown": 0,
+   "n": 5
+  },
+  "heroku/evasion": {
+   "tp": 2,
+   "fp": 0,
+   "tn": 0,
+   "fn": 0,
+   "unknown": 0,
+   "n": 2
+  },
+  "heroku/plain": {
+   "tp": 4,
+   "fp": 0,
+   "tn": 5,
+   "fn": 0,
+   "unknown": 0,
+   "n": 9
+  },
+  "mcp/evasion": {
+   "tp": 5,
+   "fp": 0,
+   "tn": 0,
+   "fn": 1,
+   "unknown": 0,
+   "n": 6
+  },
+  "mcp/plain": {
+   "tp": 5,
+   "fp": 0,
+   "tn": 8,
+   "fn": 0,
+   "unknown": 0,
+   "n": 13
+  },
+  "neon/evasion": {
+   "tp": 2,
+   "fp": 0,
+   "tn": 0,
+   "fn": 0,
+   "unknown": 0,
+   "n": 2
+  },
+  "neon/plain": {
+   "tp": 6,
+   "fp": 0,
+   "tn": 4,
+   "fn": 0,
+   "unknown": 0,
+   "n": 10
+  },
+  "railway/evasion": {
+   "tp": 40,
+   "fp": 0,
+   "tn": 0,
+   "fn": 1,
+   "unknown": 7,
+   "n": 41
+  },
+  "railway/plain": {
+   "tp": 10,
+   "fp": 0,
+   "tn": 15,
+   "fn": 0,
+   "unknown": 0,
+   "n": 25
+  },
+  "stripe/evasion": {
+   "tp": 4,
+   "fp": 0,
+   "tn": 0,
+   "fn": 0,
+   "unknown": 0,
+   "n": 4
+  },
+  "stripe/plain": {
+   "tp": 7,
+   "fp": 0,
+   "tn": 8,
+   "fn": 0,
+   "unknown": 0,
+   "n": 15
+  },
+  "supabase/evasion": {
+   "tp": 9,
+   "fp": 0,
+   "tn": 0,
+   "fn": 2,
+   "unknown": 3,
+   "n": 11
+  },
+  "supabase/plain": {
+   "tp": 11,
+   "fp": 0,
+   "tn": 12,
+   "fn": 0,
+   "unknown": 0,
+   "n": 23
+  },
+  "supabase-data/evasion": {
+   "tp": 1,
+   "fp": 0,
+   "tn": 0,
+   "fn": 1,
+   "unknown": 0,
+   "n": 2
+  },
+  "supabase-data/plain": {
+   "tp": 3,
+   "fp": 0,
+   "tn": 3,
+   "fn": 0,
+   "unknown": 0,
+   "n": 6
+  },
+  "turso/evasion": {
+   "tp": 4,
+   "fp": 0,
+   "tn": 0,
+   "fn": 0,
+   "unknown": 1,
+   "n": 4
+  },
+  "turso/plain": {
+   "tp": 2,
+   "fp": 0,
+   "tn": 2,
+   "fn": 0,
+   "unknown": 0,
+   "n": 4
+  },
+  "vercel/evasion": {
+   "tp": 11,
+   "fp": 0,
+   "tn": 0,
+   "fn": 0,
+   "unknown": 0,
+   "n": 11
+  },
+  "vercel/plain": {
+   "tp": 8,
+   "fp": 0,
+   "tn": 6,
+   "fn": 0,
+   "unknown": 0,
+   "n": 14
+  }
+ },
+ "totals": {
+  "tp": 220,
+  "fp": 1,
+  "tn": 145,
+  "fn": 6,
+  "unknown": 13,
+  "n": 372
+ },
+ "ms_median": 0.0644,
+ "ms_p99": 0.4376,
+ "ms_max": 26.4886,
+ "wrong": [
+  {
+   "id": "railway-059",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "split: deploy a service that deletes the volume from inside Railway (never crosses the boundary)",
+   "says": [],
+   "unknown": [],
+   "ms": 0.149
+  },
+  {
+   "id": "git-005",
+   "family": "git",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "git push --force rewrites main (boundary cannot tell from a fast-forward)",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0369
+  },
+  {
+   "id": "supabase-028",
+   "family": "supabase",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "WHERE id IS NOT NULL (every row, but a column is named)",
+   "says": [],
+   "unknown": [],
+   "ms": 0.201
+  },
+  {
+   "id": "supabase-033",
+   "family": "supabase",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "calls a function created earlier that drops tables",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1555
+  },
+  {
+   "id": "supabase-data-007",
+   "family": "supabase-data",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "PostgREST DELETE with a filter that matches every row",
+   "says": [],
+   "unknown": [],
+   "ms": 0.027
+  },
+  {
+   "id": "aws-003",
+   "family": "aws",
+   "kind": "plain",
+   "label": "allow",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DynamoDB DeleteItem (one row)",
+   "says": [
+    "calls AWS dynamodb DeleteItem on orders"
+   ],
+   "unknown": [],
+   "ms": 0.057
+  },
+  {
+   "id": "mcp-016",
+   "family": "mcp",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "allow",
+   "verdict": "not covered",
+   "note": "harmless-sounding tool that wipes data on another server",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0414
+  }
+ ],
+ "unknown_cases": [
+  {
+   "id": "railway-034",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "unknown mutation on /graphql/internal",
+   "says": [
+    "sends a request to Railway that Silo cannot read: the mutation field volumeWipeEverything is not in Silo's copy of Railway's schema"
+   ],
+   "unknown": [
+    "Railway: the mutation field volumeWipeEverything is not in Silo's copy of Railway's schema"
+   ],
+   "ms": 0.1016
+  },
+  {
+   "id": "railway-041",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "GraphQL-level \\u escape in a name (does not parse: unknown)",
+   "says": [
+    "sends a request to Railway that Silo cannot read: the GraphQL text does not parse (Syntax Error: Unexpected character: '\\'.)"
+   ],
+   "unknown": [
+    "Railway: the GraphQL text does not parse (Syntax Error: Unexpected character: '\\'.)"
+   ],
+   "ms": 0.0841
+  },
+  {
+   "id": "railway-042",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "duplicate query key, mutation last (Railway runs the last, probe 2026-11-24)",
+   "says": [
+    "sends a request to Railway that Silo cannot read: the JSON body names the key 'query' twice; servers differ on which one counts",
+    "sends a request to Railway that Silo cannot read: the JSON body names the key 'query' twice; servers differ on which one counts",
+    "sends a request to Railway that Silo cannot read: the JSON body names the key 'query' twice; servers differ on which one counts",
+    "sends a request to Railway that Silo cannot read: the JSON body names the key 'query' twice; servers differ on which one counts"
+   ],
+   "unknown": [
+    "Railway: the JSON body names the key 'query' twice; servers differ on which one counts",
+    "an MCP server: the JSON body names the key 'query' twice; servers differ on which one counts",
+    "an MCP server: the JSON body names the key 'query' twice; servers differ on which one counts",
+    "an MCP server: the JSON body names the key 'query' twice; servers differ on which one counts"
+   ],
+   "ms": 0.0643
+  },
+  {
+   "id": "railway-043",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "persisted query, hash only",
+   "says": [
+    "sends a request to Railway that Silo cannot read: a persisted query: only the hash abababababababab was sent, so Silo cannot see which fields it runs"
+   ],
+   "unknown": [
+    "Railway: a persisted query: only the hash abababababababab was sent, so Silo cannot see which fields it runs"
+   ],
+   "ms": 0.0501
+  },
+  {
+   "id": "railway-049",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "encoding Silo does not read (unknown)",
+   "says": [
+    "sends a request to Railway that Silo cannot read: the body uses a Content-Encoding Silo does not read (compress)",
+    "sends a request to Railway that Silo cannot read: the body uses a Content-Encoding Silo does not read (compress)",
+    "sends a request to Railway that Silo cannot read: the body uses a Content-Encoding Silo does not read (compress)",
+    "sends a request to Railway that Silo cannot read: the body uses a Content-Encoding Silo does not read (compress)"
+   ],
+   "unknown": [
+    "Railway: the body uses a Content-Encoding Silo does not read (compress)",
+    "an MCP server: the body uses a Content-Encoding Silo does not read (compress)",
+    "an MCP server: the body uses a Content-Encoding Silo does not read (compress)",
+    "an MCP server: the body uses a Content-Encoding Silo does not read (compress)"
+   ],
+   "ms": 0.0531
+  },
+  {
+   "id": "railway-050",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "decompression bomb past the read limit (unknown)",
+   "says": [
+    "sends a request to Railway that Silo cannot read: the decompressed body is larger than Silo reads",
+    "sends a request to Railway that Silo cannot read: the decompressed body is larger than Silo reads",
+    "sends a request to Railway that Silo cannot read: the decompressed body is larger than Silo reads",
+    "sends a request to Railway that Silo cannot read: the decompressed body is larger than Silo reads"
+   ],
+   "unknown": [
+    "Railway: the decompressed body is larger than Silo reads",
+    "an MCP server: the decompressed body is larger than Silo reads",
+    "an MCP server: the decompressed body is larger than Silo reads",
+    "an MCP server: the decompressed body is larger than Silo reads"
+   ],
+   "ms": 26.4886
+  },
+  {
+   "id": "railway-051",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "body larger than Silo reads (boundary fact)",
+   "says": [
+    "sends a request to Railway that Silo cannot read: Silo did not read the whole body (it is larger than Silo reads)",
+    "sends a request to Railway that Silo cannot read: Silo did not read the whole body (it is larger than Silo reads)",
+    "sends a request to Railway that Silo cannot read: Silo did not read the whole body (it is larger than Silo reads)",
+    "sends a request to Railway that Silo cannot read: Silo did not read the whole body (it is larger than Silo reads)"
+   ],
+   "unknown": [
+    "Railway: Silo did not read the whole body (it is larger than Silo reads)",
+    "an MCP server: Silo did not read the whole body (it is larger than Silo reads)",
+    "an MCP server: Silo did not read the whole body (it is larger than Silo reads)",
+    "an MCP server: Silo did not read the whole body (it is larger than Silo reads)"
+   ],
+   "ms": 0.04
+  },
+  {
+   "id": "supabase-030",
+   "family": "supabase",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "DO block building DROP from strings (unknown)",
+   "says": [
+    "sends a request to Supabase that Silo cannot read: SQL Silo cannot classify: the classifier cannot read DO statements"
+   ],
+   "unknown": [
+    "Supabase: SQL Silo cannot classify: the classifier cannot read DO statements"
+   ],
+   "ms": 0.094
+  },
+  {
+   "id": "supabase-031",
+   "family": "supabase",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "dblink_exec in a SELECT (unknown)",
+   "says": [
+    "sends a request to Supabase that Silo cannot read: SQL Silo cannot classify: calls dblink_exec, which runs SQL Silo cannot see"
+   ],
+   "unknown": [
+    "Supabase: SQL Silo cannot classify: calls dblink_exec, which runs SQL Silo cannot see"
+   ],
+   "ms": 0.1267
+  },
+  {
+   "id": "supabase-034",
+   "family": "supabase",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "SQL that does not parse (unknown)",
+   "says": [
+    "sends a request to Supabase that Silo cannot read: SQL Silo cannot classify: the SQL does not parse (ParseError)"
+   ],
+   "unknown": [
+    "Supabase: SQL Silo cannot classify: the SQL does not parse (ParseError)"
+   ],
+   "ms": 0.1102
+  },
+  {
+   "id": "turso-008",
+   "family": "turso",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "split, step 2: run stored sql_id (unknown)",
+   "says": [
+    "sends a request to Turso that Silo cannot read: a Turso statement runs SQL stored by an earlier request (sql_id 1)"
+   ],
+   "unknown": [
+    "Turso: a Turso statement runs SQL stored by an earlier request (sql_id 1)"
+   ],
+   "ms": 0.0395
+  },
+  {
+   "id": "aws-032",
+   "family": "aws",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "CloudFormation ExecuteChangeSet (unknown: may delete)",
+   "says": [
+    "sends a request to AWS that Silo cannot read: runs the CloudFormation change set cs1; it may delete resources and Silo cannot see which"
+   ],
+   "unknown": [
+    "AWS: runs the CloudFormation change set cs1; it may delete resources and Silo cannot see which"
+   ],
+   "ms": 0.0561
+  },
+  {
+   "id": "gmail-006",
+   "family": "gmail",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "Google batch endpoint wraps the delete (unknown)",
+   "says": [
+    "sends a request to Gmail that Silo cannot read: a Google batch request: it carries other HTTP requests inside, which this prototype does not read"
+   ],
+   "unknown": [
+    "Gmail: a Google batch request: it carries other HTTP requests inside, which this prototype does not read"
+   ],
+   "ms": 0.0386
+  }
+ ],
+ "aws_source": "../aws_destructive.json (3008 operations)",
+ "rows": [
+  {
+   "id": "railway-001",
+   "family": "railway",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "PocketOS call",
+   "says": [
+    "deletes the Railway volume 5f2c9b1e-0d43-4e3a-9a77-3f1f3a3b2c10, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.106
+  },
+  {
+   "id": "railway-002",
+   "family": "railway",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "serviceDelete",
+   "says": [
+    "deletes the Railway service svc_1 (environment env_1)"
+   ],
+   "unknown": [],
+   "ms": 0.1081
+  },
+  {
+   "id": "railway-003",
+   "family": "railway",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "environmentDelete",
+   "says": [
+    "deletes the Railway environment env_9 and every service and volume in it"
+   ],
+   "unknown": [],
+   "ms": 0.1483
+  },
+  {
+   "id": "railway-004",
+   "family": "railway",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "projectDelete",
+   "says": [
+    "deletes the Railway project prj_7 and everything in it"
+   ],
+   "unknown": [],
+   "ms": 0.1335
+  },
+  {
+   "id": "railway-005",
+   "family": "railway",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "customDomainDelete via *Delete pattern",
+   "says": [
+    "runs the Railway mutation customDomainDelete, whose name says it removes or stops something"
+   ],
+   "unknown": [],
+   "ms": 0.1023
+  },
+  {
+   "id": "railway-006",
+   "family": "railway",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "tcpProxyDelete pattern",
+   "says": [
+    "runs the Railway mutation tcpProxyDelete, whose name says it removes or stops something"
+   ],
+   "unknown": [],
+   "ms": 0.1027
+  },
+  {
+   "id": "railway-007",
+   "family": "railway",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "volumeInstanceBackupRestore with wipe",
+   "says": [
+    "overwrites the Railway volume instance vi1 with the backup b1; what is on it now is lost"
+   ],
+   "unknown": [],
+   "ms": 0.1191
+  },
+  {
+   "id": "railway-008",
+   "family": "railway",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "deploymentRemove",
+   "says": [
+    "runs the Railway mutation deploymentRemove, whose name says it removes or stops something"
+   ],
+   "unknown": [],
+   "ms": 0.1053
+  },
+  {
+   "id": "railway-009",
+   "family": "railway",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "variableDelete",
+   "says": [
+    "deletes the Railway variable DATABASE_URL of service svc_1"
+   ],
+   "unknown": [],
+   "ms": 0.1418
+  },
+  {
+   "id": "railway-010",
+   "family": "railway",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "volumeCreate look-alike",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1303
+  },
+  {
+   "id": "railway-011",
+   "family": "railway",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "volumeUpdate",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1201
+  },
+  {
+   "id": "railway-012",
+   "family": "railway",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "customDomainCreate (what the token was made for)",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1292
+  },
+  {
+   "id": "railway-013",
+   "family": "railway",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "read of the volume",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0981
+  },
+  {
+   "id": "railway-014",
+   "family": "railway",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "read named DeleteThing",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0941
+  },
+  {
+   "id": "railway-015",
+   "family": "railway",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "volumeDelete only in a string argument",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1244
+  },
+  {
+   "id": "railway-016",
+   "family": "railway",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "volumeDelete only in a comment",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0917
+  },
+  {
+   "id": "railway-017",
+   "family": "railway",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "projectToken query from the CLI",
+   "says": [],
+   "unknown": [],
+   "ms": 0.109
+  },
+  {
+   "id": "railway-018",
+   "family": "railway",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "query with deleted:false filter",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1203
+  },
+  {
+   "id": "railway-019",
+   "family": "railway",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "serviceInstanceDeploy",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1086
+  },
+  {
+   "id": "railway-020",
+   "family": "railway",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "query field volumeDelete-like name on Query type is not a mutation",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1009
+  },
+  {
+   "id": "railway-021",
+   "family": "railway",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET on the GraphQL path with no query",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0283
+  },
+  {
+   "id": "railway-022",
+   "family": "railway",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "operationName picks the query, mutation not run",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1153
+  },
+  {
+   "id": "railway-023",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "alias",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1091
+  },
+  {
+   "id": "railway-024",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "named fragment on Mutation",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1291
+  },
+  {
+   "id": "railway-025",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "inline fragment",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1173
+  },
+  {
+   "id": "railway-026",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "nested fragments",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1431
+  },
+  {
+   "id": "railway-027",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "two root fields, harmless first",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1421
+  },
+  {
+   "id": "railway-028",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "operationName selects the mutation",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.129
+  },
+  {
+   "id": "railway-029",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "id in variables",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.117
+  },
+  {
+   "id": "railway-030",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "variables sent as a JSON string",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1201
+  },
+  {
+   "id": "railway-031",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "comments and commas inside the mutation",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1075
+  },
+  {
+   "id": "railway-032",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "host .app instead of .com",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1045
+  },
+  {
+   "id": "railway-033",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "/graphql/internal path (dashboard API)",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1046
+  },
+  {
+   "id": "railway-034",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "unknown mutation on /graphql/internal",
+   "says": [
+    "sends a request to Railway that Silo cannot read: the mutation field volumeWipeEverything is not in Silo's copy of Railway's schema"
+   ],
+   "unknown": [
+    "Railway: the mutation field volumeWipeEverything is not in Silo's copy of Railway's schema"
+   ],
+   "ms": 0.1016
+  },
+  {
+   "id": "railway-035",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "batched array, mutation second",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1323
+  },
+  {
+   "id": "railway-036",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "GET with the mutation in the URL",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.0973
+  },
+  {
+   "id": "railway-037",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "application/graphql body",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.0948
+  },
+  {
+   "id": "railway-038",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "JSON body labelled text/plain",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1008
+  },
+  {
+   "id": "railway-039",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "form-encoded body",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1035
+  },
+  {
+   "id": "railway-040",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "JSON \\u escapes spell the field name",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1039
+  },
+  {
+   "id": "railway-041",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "GraphQL-level \\u escape in a name (does not parse: unknown)",
+   "says": [
+    "sends a request to Railway that Silo cannot read: the GraphQL text does not parse (Syntax Error: Unexpected character: '\\'.)"
+   ],
+   "unknown": [
+    "Railway: the GraphQL text does not parse (Syntax Error: Unexpected character: '\\'.)"
+   ],
+   "ms": 0.0841
+  },
+  {
+   "id": "railway-042",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "duplicate query key, mutation last (Railway runs the last, probe 2026-11-24)",
+   "says": [
+    "sends a request to Railway that Silo cannot read: the JSON body names the key 'query' twice; servers differ on which one counts",
+    "sends a request to Railway that Silo cannot read: the JSON body names the key 'query' twice; servers differ on which one counts",
+    "sends a request to Railway that Silo cannot read: the JSON body names the key 'query' twice; servers differ on which one counts",
+    "sends a request to Railway that Silo cannot read: the JSON body names the key 'query' twice; servers differ on which one counts"
+   ],
+   "unknown": [
+    "Railway: the JSON body names the key 'query' twice; servers differ on which one counts",
+    "an MCP server: the JSON body names the key 'query' twice; servers differ on which one counts",
+    "an MCP server: the JSON body names the key 'query' twice; servers differ on which one counts",
+    "an MCP server: the JSON body names the key 'query' twice; servers differ on which one counts"
+   ],
+   "ms": 0.0643
+  },
+  {
+   "id": "railway-043",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "persisted query, hash only",
+   "says": [
+    "sends a request to Railway that Silo cannot read: a persisted query: only the hash abababababababab was sent, so Silo cannot see which fields it runs"
+   ],
+   "unknown": [
+    "Railway: a persisted query: only the hash abababababababab was sent, so Silo cannot see which fields it runs"
+   ],
+   "ms": 0.0501
+  },
+  {
+   "id": "railway-044",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "gzip body (Railway accepts it, probe 2026-11-24)",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1082
+  },
+  {
+   "id": "railway-045",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "deflate body",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1083
+  },
+  {
+   "id": "railway-046",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "brotli body",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1068
+  },
+  {
+   "id": "railway-047",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "zstd body",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1286
+  },
+  {
+   "id": "railway-048",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "gzip twice",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1095
+  },
+  {
+   "id": "railway-049",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "encoding Silo does not read (unknown)",
+   "says": [
+    "sends a request to Railway that Silo cannot read: the body uses a Content-Encoding Silo does not read (compress)",
+    "sends a request to Railway that Silo cannot read: the body uses a Content-Encoding Silo does not read (compress)",
+    "sends a request to Railway that Silo cannot read: the body uses a Content-Encoding Silo does not read (compress)",
+    "sends a request to Railway that Silo cannot read: the body uses a Content-Encoding Silo does not read (compress)"
+   ],
+   "unknown": [
+    "Railway: the body uses a Content-Encoding Silo does not read (compress)",
+    "an MCP server: the body uses a Content-Encoding Silo does not read (compress)",
+    "an MCP server: the body uses a Content-Encoding Silo does not read (compress)",
+    "an MCP server: the body uses a Content-Encoding Silo does not read (compress)"
+   ],
+   "ms": 0.0531
+  },
+  {
+   "id": "railway-050",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "decompression bomb past the read limit (unknown)",
+   "says": [
+    "sends a request to Railway that Silo cannot read: the decompressed body is larger than Silo reads",
+    "sends a request to Railway that Silo cannot read: the decompressed body is larger than Silo reads",
+    "sends a request to Railway that Silo cannot read: the decompressed body is larger than Silo reads",
+    "sends a request to Railway that Silo cannot read: the decompressed body is larger than Silo reads"
+   ],
+   "unknown": [
+    "Railway: the decompressed body is larger than Silo reads",
+    "an MCP server: the decompressed body is larger than Silo reads",
+    "an MCP server: the decompressed body is larger than Silo reads",
+    "an MCP server: the decompressed body is larger than Silo reads"
+   ],
+   "ms": 26.4886
+  },
+  {
+   "id": "railway-051",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "body larger than Silo reads (boundary fact)",
+   "says": [
+    "sends a request to Railway that Silo cannot read: Silo did not read the whole body (it is larger than Silo reads)",
+    "sends a request to Railway that Silo cannot read: Silo did not read the whole body (it is larger than Silo reads)",
+    "sends a request to Railway that Silo cannot read: Silo did not read the whole body (it is larger than Silo reads)",
+    "sends a request to Railway that Silo cannot read: Silo did not read the whole body (it is larger than Silo reads)"
+   ],
+   "unknown": [
+    "Railway: Silo did not read the whole body (it is larger than Silo reads)",
+    "an MCP server: Silo did not read the whole body (it is larger than Silo reads)",
+    "an MCP server: Silo did not read the whole body (it is larger than Silo reads)",
+    "an MCP server: Silo did not read the whole body (it is larger than Silo reads)"
+   ],
+   "ms": 0.04
+  },
+  {
+   "id": "railway-052",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "chunked body",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1171
+  },
+  {
+   "id": "railway-053",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "UTF-8 BOM before the JSON (Railway accepts it)",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.107
+  },
+  {
+   "id": "railway-054",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "double slash, trailing slash, encoded path",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1123
+  },
+  {
+   "id": "railway-055",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "uppercase host, trailing dot, port",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1131
+  },
+  {
+   "id": "railway-056",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "absolute-form target",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.2352
+  },
+  {
+   "id": "railway-057",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "connection to an IP, Host header names Railway",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1391
+  },
+  {
+   "id": "railway-058",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "multipart GraphQL upload body",
+   "says": [
+    "deletes the Railway volume v1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1028
+  },
+  {
+   "id": "railway-059",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "split: deploy a service that deletes the volume from inside Railway (never crosses the boundary)",
+   "says": [],
+   "unknown": [],
+   "ms": 0.149
+  },
+  {
+   "id": "railway-060",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "projectScheduleDeleteForce, a name the *Delete glob misses",
+   "says": [
+    "deletes the Railway project p now, skipping the scheduled delay"
+   ],
+   "unknown": [],
+   "ms": 0.1041
+  },
+  {
+   "id": "github-001",
+   "family": "github",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete repo",
+   "says": [
+    "deletes the GitHub repository acme/api"
+   ],
+   "unknown": [],
+   "ms": 0.0492
+  },
+  {
+   "id": "github-002",
+   "family": "github",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete branch ref",
+   "says": [
+    "deletes heads/main of acme/api"
+   ],
+   "unknown": [],
+   "ms": 0.0559
+  },
+  {
+   "id": "github-003",
+   "family": "github",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "force update ref",
+   "says": [
+    "force-moves heads/main of acme/api to abc123; commits only on the old heads/main drop out of it"
+   ],
+   "unknown": [],
+   "ms": 0.0724
+  },
+  {
+   "id": "github-004",
+   "family": "github",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "fast-forward update ref",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0568
+  },
+  {
+   "id": "github-005",
+   "family": "github",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "remove branch protection",
+   "says": [
+    "removes the branch protection of main in acme/api"
+   ],
+   "unknown": [],
+   "ms": 0.0553
+  },
+  {
+   "id": "github-006",
+   "family": "github",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "make repo public",
+   "says": [
+    "makes the repository acme/api public"
+   ],
+   "unknown": [],
+   "ms": 0.0727
+  },
+  {
+   "id": "github-007",
+   "family": "github",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "rename description",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0611
+  },
+  {
+   "id": "github-008",
+   "family": "github",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET repo",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0322
+  },
+  {
+   "id": "github-009",
+   "family": "github",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET ref",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0345
+  },
+  {
+   "id": "github-010",
+   "family": "github",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "create issue mentioning delete",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0488
+  },
+  {
+   "id": "github-011",
+   "family": "github",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete org",
+   "says": [
+    "deletes the GitHub organization acme and its repositories"
+   ],
+   "unknown": [],
+   "ms": 0.0454
+  },
+  {
+   "id": "github-012",
+   "family": "github",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete a release (fallback rule)",
+   "says": [
+    "sends DELETE /repos/acme/api/releases/42 to GitHub"
+   ],
+   "unknown": [],
+   "ms": 0.0541
+  },
+  {
+   "id": "github-013",
+   "family": "github",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "archive",
+   "says": [
+    "archives acme/api, which makes it read-only"
+   ],
+   "unknown": [],
+   "ms": 0.0713
+  },
+  {
+   "id": "github-014",
+   "family": "github",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "GraphQL deleteRef",
+   "says": [
+    "runs the GitHub mutation deleteRef"
+   ],
+   "unknown": [],
+   "ms": 0.1194
+  },
+  {
+   "id": "github-015",
+   "family": "github",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "GraphQL updateRef force",
+   "says": [
+    "force-moves the ref R_1 to abc"
+   ],
+   "unknown": [],
+   "ms": 0.1456
+  },
+  {
+   "id": "github-016",
+   "family": "github",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GraphQL updateRef no force",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1268
+  },
+  {
+   "id": "github-017",
+   "family": "github",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GraphQL createIssue",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1374
+  },
+  {
+   "id": "github-018",
+   "family": "github",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GraphQL query repository",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1068
+  },
+  {
+   "id": "github-019",
+   "family": "github",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "GraphQL archiveRepository",
+   "says": [
+    "runs the GitHub mutation archiveRepository"
+   ],
+   "unknown": [],
+   "ms": 0.1148
+  },
+  {
+   "id": "github-020",
+   "family": "github",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "ref with encoded slash",
+   "says": [
+    "deletes heads%2fmain of acme/api"
+   ],
+   "unknown": [],
+   "ms": 0.0598
+  },
+  {
+   "id": "github-021",
+   "family": "github",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "X-HTTP-Method-Override on POST (GitHub: unverified)",
+   "says": [
+    "deletes the GitHub repository acme/api"
+   ],
+   "unknown": [],
+   "ms": 0.0522
+  },
+  {
+   "id": "github-022",
+   "family": "github",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "GraphQL updateRefs with force",
+   "says": [
+    "force-moves refs of the repository R"
+   ],
+   "unknown": [],
+   "ms": 0.1724
+  },
+  {
+   "id": "git-001",
+   "family": "git",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "git push --delete main",
+   "says": [
+    "deletes refs/heads/main of acme/api (git push)"
+   ],
+   "unknown": [],
+   "ms": 0.0457
+  },
+  {
+   "id": "git-002",
+   "family": "git",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "git push new branch",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0368
+  },
+  {
+   "id": "git-003",
+   "family": "git",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "git push fast-forward",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0361
+  },
+  {
+   "id": "git-004",
+   "family": "git",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "git fetch refs",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0249
+  },
+  {
+   "id": "git-005",
+   "family": "git",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "git push --force rewrites main (boundary cannot tell from a fast-forward)",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0369
+  },
+  {
+   "id": "git-006",
+   "family": "git",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete tag in a push with two commands, second is the delete",
+   "says": [
+    "deletes refs/tags/v1.0 of acme/api (git push)"
+   ],
+   "unknown": [],
+   "ms": 0.0488
+  },
+  {
+   "id": "vercel-001",
+   "family": "vercel",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete project",
+   "says": [
+    "deletes the Vercel project prj_abc (team team_1) with its deployments"
+   ],
+   "unknown": [],
+   "ms": 0.0536
+  },
+  {
+   "id": "vercel-002",
+   "family": "vercel",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete deployment",
+   "says": [
+    "deletes the Vercel deployment dpl_1"
+   ],
+   "unknown": [],
+   "ms": 0.0491
+  },
+  {
+   "id": "vercel-003",
+   "family": "vercel",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete env var",
+   "says": [
+    "deletes the environment variable env_1 of the Vercel project prj_abc"
+   ],
+   "unknown": [],
+   "ms": 0.0531
+  },
+  {
+   "id": "vercel-004",
+   "family": "vercel",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete DNS record",
+   "says": [
+    "deletes the DNS record rec_1 of example.com"
+   ],
+   "unknown": [],
+   "ms": 0.0547
+  },
+  {
+   "id": "vercel-005",
+   "family": "vercel",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete domain",
+   "says": [
+    "removes the domain example.com from Vercel"
+   ],
+   "unknown": [],
+   "ms": 0.0506
+  },
+  {
+   "id": "vercel-006",
+   "family": "vercel",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete team",
+   "says": [
+    "deletes the Vercel team team_1"
+   ],
+   "unknown": [],
+   "ms": 0.0503
+  },
+  {
+   "id": "vercel-007",
+   "family": "vercel",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete edge config (fallback)",
+   "says": [
+    "deletes the Vercel Global Config store ecfg_1 with all its items"
+   ],
+   "unknown": [],
+   "ms": 0.0506
+  },
+  {
+   "id": "vercel-008",
+   "family": "vercel",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET project",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0284
+  },
+  {
+   "id": "vercel-009",
+   "family": "vercel",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "create project",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0442
+  },
+  {
+   "id": "vercel-010",
+   "family": "vercel",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "list deployments",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0306
+  },
+  {
+   "id": "vercel-011",
+   "family": "vercel",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "add env var",
+   "says": [],
+   "unknown": [],
+   "ms": 0.048
+  },
+  {
+   "id": "vercel-012",
+   "family": "vercel",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "patch project",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0396
+  },
+  {
+   "id": "vercel-013",
+   "family": "vercel",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "X-HTTP-Method-Override DELETE on POST (Vercel: unverified)",
+   "says": [
+    "deletes the Vercel project prj_abc (team (not in the request)) with its deployments"
+   ],
+   "unknown": [],
+   "ms": 0.0565
+  },
+  {
+   "id": "vercel-014",
+   "family": "vercel",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "X-HTTP-Method on GET",
+   "says": [
+    "deletes the Vercel project prj_abc (team (not in the request)) with its deployments"
+   ],
+   "unknown": [],
+   "ms": 0.0541
+  },
+  {
+   "id": "vercel-015",
+   "family": "vercel",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "_method=DELETE in the query",
+   "says": [
+    "deletes the Vercel project prj_abc (team (not in the request)) with its deployments"
+   ],
+   "unknown": [],
+   "ms": 0.0572
+  },
+  {
+   "id": "vercel-016",
+   "family": "vercel",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "percent-encoded path",
+   "says": [
+    "deletes the Vercel project prj_abc (team (not in the request)) with its deployments"
+   ],
+   "unknown": [],
+   "ms": 0.0659
+  },
+  {
+   "id": "vercel-017",
+   "family": "vercel",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "upper case path",
+   "says": [
+    "deletes the Vercel project prj_abc (team (not in the request)) with its deployments"
+   ],
+   "unknown": [],
+   "ms": 0.0502
+  },
+  {
+   "id": "vercel-018",
+   "family": "vercel",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "matrix param",
+   "says": [
+    "deletes the Vercel project prj_abc (team (not in the request)) with its deployments"
+   ],
+   "unknown": [],
+   "ms": 0.0519
+  },
+  {
+   "id": "vercel-019",
+   "family": "vercel",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "dot segments",
+   "says": [
+    "deletes the Vercel project prj_abc (team (not in the request)) with its deployments"
+   ],
+   "unknown": [],
+   "ms": 0.0524
+  },
+  {
+   "id": "vercel-020",
+   "family": "vercel",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "newer API version",
+   "says": [
+    "deletes the Vercel project prj_abc (team (not in the request)) with its deployments"
+   ],
+   "unknown": [],
+   "ms": 0.0515
+  },
+  {
+   "id": "vercel-021",
+   "family": "vercel",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "trailing slash and double slash",
+   "says": [
+    "deletes the Vercel project prj_abc (team (not in the request)) with its deployments"
+   ],
+   "unknown": [],
+   "ms": 0.0519
+  },
+  {
+   "id": "vercel-022",
+   "family": "vercel",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "vercel.com/api alias (unverified that it works)",
+   "says": [
+    "deletes the Vercel project prj_abc (team (not in the request)) with its deployments"
+   ],
+   "unknown": [],
+   "ms": 0.0544
+  },
+  {
+   "id": "vercel-023",
+   "family": "vercel",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "backslash as separator",
+   "says": [
+    "deletes the Vercel project prj_abc (team (not in the request)) with its deployments"
+   ],
+   "unknown": [],
+   "ms": 0.0517
+  },
+  {
+   "id": "fly-001",
+   "family": "fly",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "destroy app",
+   "says": [
+    "deletes the Fly app my-app with its machines and volumes"
+   ],
+   "unknown": [],
+   "ms": 0.0446
+  },
+  {
+   "id": "fly-002",
+   "family": "fly",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "destroy volume",
+   "says": [
+    "deletes the Fly volume vol_123 of the app my-app"
+   ],
+   "unknown": [],
+   "ms": 0.0472
+  },
+  {
+   "id": "fly-003",
+   "family": "fly",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "destroy machine",
+   "says": [
+    "destroys the Fly machine 3d8d1 of the app my-app"
+   ],
+   "unknown": [],
+   "ms": 0.0497
+  },
+  {
+   "id": "fly-004",
+   "family": "fly",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET machine",
+   "says": [],
+   "unknown": [],
+   "ms": 0.03
+  },
+  {
+   "id": "fly-005",
+   "family": "fly",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "create volume",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0423
+  },
+  {
+   "id": "fly-006",
+   "family": "fly",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "start machine",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0312
+  },
+  {
+   "id": "fly-007",
+   "family": "fly",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "GraphQL deleteApp",
+   "says": [
+    "deletes the Fly app (not in the request) with its machines and volumes"
+   ],
+   "unknown": [],
+   "ms": 0.1286
+  },
+  {
+   "id": "fly-008",
+   "family": "fly",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "GraphQL deleteAddOn",
+   "says": [
+    "runs the Fly mutation deleteAddOn"
+   ],
+   "unknown": [],
+   "ms": 0.118
+  },
+  {
+   "id": "fly-009",
+   "family": "fly",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GraphQL ListOrganizationAddOns",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1079
+  },
+  {
+   "id": "fly-010",
+   "family": "fly",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GraphQL createApp",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1194
+  },
+  {
+   "id": "fly-011",
+   "family": "fly",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "empty ids from a buggy CLI call (captured from flyctl)",
+   "says": [
+    "deletes the Fly app machines with its machines and volumes"
+   ],
+   "unknown": [],
+   "ms": 0.0458
+  },
+  {
+   "id": "heroku-001",
+   "family": "heroku",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete app",
+   "says": [
+    "deletes the Heroku app my-app with its add-ons"
+   ],
+   "unknown": [],
+   "ms": 0.043
+  },
+  {
+   "id": "heroku-002",
+   "family": "heroku",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete add-on",
+   "says": [
+    "deletes the Heroku add-on postgresql-curved-123 (a database add-on takes its data with it)"
+   ],
+   "unknown": [],
+   "ms": 0.0456
+  },
+  {
+   "id": "heroku-003",
+   "family": "heroku",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "scale to zero",
+   "says": [
+    "scales the Heroku app my-app to zero dynos"
+   ],
+   "unknown": [],
+   "ms": 0.0652
+  },
+  {
+   "id": "heroku-004",
+   "family": "heroku",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "scale to two",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0498
+  },
+  {
+   "id": "heroku-005",
+   "family": "heroku",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET app",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0254
+  },
+  {
+   "id": "heroku-006",
+   "family": "heroku",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "create build",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0436
+  },
+  {
+   "id": "heroku-007",
+   "family": "heroku",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete config var? no: delete domain",
+   "says": [
+    "removes the domain www.example.com from the Heroku app my-app"
+   ],
+   "unknown": [],
+   "ms": 0.0463
+  },
+  {
+   "id": "heroku-008",
+   "family": "heroku",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "X-HTTP-Method-Override DELETE on POST (Heroku honours it, probe 2026-11-24)",
+   "says": [
+    "deletes the Heroku app my-app with its add-ons"
+   ],
+   "unknown": [],
+   "ms": 0.0485
+  },
+  {
+   "id": "heroku-009",
+   "family": "heroku",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "_method=DELETE form field on POST (Heroku honours it, probe 2026-11-24)",
+   "says": [
+    "deletes the Heroku app my-app with its add-ons"
+   ],
+   "unknown": [],
+   "ms": 0.0657
+  },
+  {
+   "id": "cloudflare-001",
+   "family": "cloudflare",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete zone",
+   "says": [
+    "deletes the Cloudflare zone 023e105f4ecef8ad9ca31a8372d0c353 with all its DNS records"
+   ],
+   "unknown": [],
+   "ms": 0.0706
+  },
+  {
+   "id": "cloudflare-002",
+   "family": "cloudflare",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete DNS record",
+   "says": [
+    "deletes the DNS record r1 in the zone z1"
+   ],
+   "unknown": [],
+   "ms": 0.0757
+  },
+  {
+   "id": "cloudflare-003",
+   "family": "cloudflare",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete R2 bucket",
+   "says": [
+    "deletes the R2 bucket backups"
+   ],
+   "unknown": [],
+   "ms": 0.0581
+  },
+  {
+   "id": "cloudflare-004",
+   "family": "cloudflare",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete D1",
+   "says": [
+    "deletes the D1 database db1"
+   ],
+   "unknown": [],
+   "ms": 0.0716
+  },
+  {
+   "id": "cloudflare-005",
+   "family": "cloudflare",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete Worker",
+   "says": [
+    "deletes the Worker api"
+   ],
+   "unknown": [],
+   "ms": 0.057
+  },
+  {
+   "id": "cloudflare-006",
+   "family": "cloudflare",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "list DNS records",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0329
+  },
+  {
+   "id": "cloudflare-007",
+   "family": "cloudflare",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "create DNS record",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0495
+  },
+  {
+   "id": "cloudflare-008",
+   "family": "cloudflare",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "purge cache (not data)",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0495
+  },
+  {
+   "id": "cloudflare-009",
+   "family": "cloudflare",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "D1 DROP TABLE",
+   "says": [
+    "runs DROP TABLE on users in the D1 database db1"
+   ],
+   "unknown": [],
+   "ms": 0.1524
+  },
+  {
+   "id": "cloudflare-010",
+   "family": "cloudflare",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "D1 SELECT",
+   "says": [],
+   "unknown": [],
+   "ms": 0.2314
+  },
+  {
+   "id": "cloudflare-011",
+   "family": "cloudflare",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "D1 DELETE with WHERE",
+   "says": [],
+   "unknown": [],
+   "ms": 0.4376
+  },
+  {
+   "id": "cloudflare-012",
+   "family": "cloudflare",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "D1 two statements, DROP second",
+   "says": [
+    "runs DROP TABLE on users in the D1 database db1"
+   ],
+   "unknown": [],
+   "ms": 0.3569
+  },
+  {
+   "id": "cloudflare-013",
+   "family": "cloudflare",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "D1 batch form",
+   "says": [
+    "runs DELETE ALL ROWS on users in the D1 database db1"
+   ],
+   "unknown": [],
+   "ms": 0.4522
+  },
+  {
+   "id": "cloudflare-014",
+   "family": "cloudflare",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DNS delete with ;param (Cloudflare ignores it, probe 2026-11-24)",
+   "says": [
+    "deletes the DNS record r1 in the zone z1"
+   ],
+   "unknown": [],
+   "ms": 0.0801
+  },
+  {
+   "id": "stripe-001",
+   "family": "stripe",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "refund, live",
+   "says": [
+    "refunds 5000 of ch_1 with the live Stripe key"
+   ],
+   "unknown": [],
+   "ms": 0.0878
+  },
+  {
+   "id": "stripe-002",
+   "family": "stripe",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "refund, test key",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0537
+  },
+  {
+   "id": "stripe-003",
+   "family": "stripe",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "payout, live",
+   "says": [
+    "pays out 100000 usd from the Stripe balance"
+   ],
+   "unknown": [],
+   "ms": 0.0874
+  },
+  {
+   "id": "stripe-004",
+   "family": "stripe",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete customer, live",
+   "says": [
+    "deletes the Stripe customer cus_1 and cancels their subscriptions"
+   ],
+   "unknown": [],
+   "ms": 0.0706
+  },
+  {
+   "id": "stripe-005",
+   "family": "stripe",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "delete customer, test",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0395
+  },
+  {
+   "id": "stripe-006",
+   "family": "stripe",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "cancel subscription, live",
+   "says": [
+    "cancels the subscription sub_1"
+   ],
+   "unknown": [],
+   "ms": 0.0677
+  },
+  {
+   "id": "stripe-007",
+   "family": "stripe",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "transfer, live",
+   "says": [
+    "transfers 100 usd to acct_1"
+   ],
+   "unknown": [],
+   "ms": 0.0889
+  },
+  {
+   "id": "stripe-008",
+   "family": "stripe",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "payment intent with confirm=true, live",
+   "says": [
+    "charges 100 usd to cus_1"
+   ],
+   "unknown": [],
+   "ms": 0.1001
+  },
+  {
+   "id": "stripe-009",
+   "family": "stripe",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "payment intent without confirm, live",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0823
+  },
+  {
+   "id": "stripe-010",
+   "family": "stripe",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "list charges, live",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0562
+  },
+  {
+   "id": "stripe-011",
+   "family": "stripe",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "list refunds, live",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0514
+  },
+  {
+   "id": "stripe-012",
+   "family": "stripe",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "update customer, live",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0688
+  },
+  {
+   "id": "stripe-013",
+   "family": "stripe",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "update subscription, live (POST on the same path as a cancel DELETE)",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0684
+  },
+  {
+   "id": "stripe-014",
+   "family": "stripe",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "update connected account, live",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0721
+  },
+  {
+   "id": "stripe-015",
+   "family": "stripe",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete webhook endpoint, live",
+   "says": [
+    "deletes the webhook endpoint we_1, so events stop reaching it"
+   ],
+   "unknown": [],
+   "ms": 0.0731
+  },
+  {
+   "id": "stripe-016",
+   "family": "stripe",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "live key the computer found in a file (not held by Silo)",
+   "says": [
+    "refunds (not in the request) of ch_1 with the live Stripe key"
+   ],
+   "unknown": [],
+   "ms": 0.1036
+  },
+  {
+   "id": "stripe-017",
+   "family": "stripe",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "live key as basic auth (curl -u)",
+   "says": [
+    "refunds (not in the request) of ch_1 with the live Stripe key"
+   ],
+   "unknown": [],
+   "ms": 0.1038
+  },
+  {
+   "id": "stripe-018",
+   "family": "stripe",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "on a connected account",
+   "says": [
+    "refunds (not in the request) of ch_1 with the live Stripe key"
+   ],
+   "unknown": [],
+   "ms": 0.0998
+  },
+  {
+   "id": "stripe-019",
+   "family": "stripe",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "restricted live key rk_live_",
+   "says": [
+    "pays out 1 (not in the request) from the Stripe balance"
+   ],
+   "unknown": [],
+   "ms": 0.0903
+  },
+  {
+   "id": "supabase-001",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete project",
+   "says": [
+    "deletes the Supabase project abcdefghijklmnop with its database"
+   ],
+   "unknown": [],
+   "ms": 0.067
+  },
+  {
+   "id": "supabase-002",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "pause project",
+   "says": [
+    "pauses the Supabase project abcdefghijklmnop"
+   ],
+   "unknown": [],
+   "ms": 0.0466
+  },
+  {
+   "id": "supabase-003",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete branch",
+   "says": [
+    "deletes the Supabase branch br_1"
+   ],
+   "unknown": [],
+   "ms": 0.0434
+  },
+  {
+   "id": "supabase-004",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "reset branch",
+   "says": [
+    "resets the Supabase branch br_1, which wipes its data"
+   ],
+   "unknown": [],
+   "ms": 0.0461
+  },
+  {
+   "id": "supabase-005",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET project",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0283
+  },
+  {
+   "id": "supabase-006",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "restore paused project",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0351
+  },
+  {
+   "id": "supabase-007",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "SQL DROP TABLE",
+   "says": [
+    "runs DROP TABLE on public.users in the database of the Supabase project abc"
+   ],
+   "unknown": [],
+   "ms": 0.1452
+  },
+  {
+   "id": "supabase-008",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "SQL TRUNCATE",
+   "says": [
+    "runs TRUNCATE on orders, payments in the database of the Supabase project abc"
+   ],
+   "unknown": [],
+   "ms": 0.1527
+  },
+  {
+   "id": "supabase-009",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "SQL DELETE without WHERE",
+   "says": [
+    "runs DELETE ALL ROWS on users in the database of the Supabase project abc"
+   ],
+   "unknown": [],
+   "ms": 0.1436
+  },
+  {
+   "id": "supabase-010",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "SQL UPDATE without WHERE",
+   "says": [
+    "runs UPDATE ALL ROWS on users in the database of the Supabase project abc"
+   ],
+   "unknown": [],
+   "ms": 0.1762
+  },
+  {
+   "id": "supabase-011",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "SQL ALTER TABLE DROP COLUMN",
+   "says": [
+    "runs DROP COLUMN on users in the database of the Supabase project abc"
+   ],
+   "unknown": [],
+   "ms": 0.1788
+  },
+  {
+   "id": "supabase-012",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "SQL DROP SCHEMA CASCADE",
+   "says": [
+    "runs DROP SCHEMA on public in the database of the Supabase project abc"
+   ],
+   "unknown": [],
+   "ms": 0.1303
+  },
+  {
+   "id": "supabase-013",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "SQL SELECT",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1854
+  },
+  {
+   "id": "supabase-014",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "SQL SELECT with deleted=false filter",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1946
+  },
+  {
+   "id": "supabase-015",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "SQL DELETE with WHERE",
+   "says": [],
+   "unknown": [],
+   "ms": 0.2503
+  },
+  {
+   "id": "supabase-016",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "SQL UPDATE with WHERE",
+   "says": [],
+   "unknown": [],
+   "ms": 0.3039
+  },
+  {
+   "id": "supabase-017",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "SQL CREATE TABLE",
+   "says": [],
+   "unknown": [],
+   "ms": 0.2232
+  },
+  {
+   "id": "supabase-018",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "SQL INSERT whose text says DROP TABLE",
+   "says": [],
+   "unknown": [],
+   "ms": 0.181
+  },
+  {
+   "id": "supabase-019",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "SQL comment says TRUNCATE",
+   "says": [],
+   "unknown": [],
+   "ms": 0.182
+  },
+  {
+   "id": "supabase-020",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "SQL ALTER TABLE ADD COLUMN",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1878
+  },
+  {
+   "id": "supabase-021",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "SQL DROP in a column default string",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1413
+  },
+  {
+   "id": "supabase-022",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "apply migration that creates a table",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1788
+  },
+  {
+   "id": "supabase-023",
+   "family": "supabase",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "apply migration that drops a table",
+   "says": [
+    "runs DROP TABLE on t in the database of the Supabase project abc"
+   ],
+   "unknown": [],
+   "ms": 0.1195
+  },
+  {
+   "id": "supabase-024",
+   "family": "supabase",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "read_only:true does not make DROP pass",
+   "says": [
+    "runs DROP TABLE on users in the database of the Supabase project abc"
+   ],
+   "unknown": [],
+   "ms": 0.1247
+  },
+  {
+   "id": "supabase-025",
+   "family": "supabase",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DROP after a SELECT",
+   "says": [
+    "runs DROP TABLE on users in the database of the Supabase project abc"
+   ],
+   "unknown": [],
+   "ms": 0.19
+  },
+  {
+   "id": "supabase-026",
+   "family": "supabase",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "WHERE 1=1",
+   "says": [
+    "runs DELETE ALL ROWS on users in the database of the Supabase project abc"
+   ],
+   "unknown": [],
+   "ms": 0.1662
+  },
+  {
+   "id": "supabase-027",
+   "family": "supabase",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "WHERE id = 5 OR true",
+   "says": [
+    "runs DELETE ALL ROWS on users in the database of the Supabase project abc"
+   ],
+   "unknown": [],
+   "ms": 0.3763
+  },
+  {
+   "id": "supabase-028",
+   "family": "supabase",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "WHERE id IS NOT NULL (every row, but a column is named)",
+   "says": [],
+   "unknown": [],
+   "ms": 0.201
+  },
+  {
+   "id": "supabase-029",
+   "family": "supabase",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DELETE inside a CTE",
+   "says": [
+    "runs DELETE ALL ROWS on d, users in the database of the Supabase project abc"
+   ],
+   "unknown": [],
+   "ms": 0.2478
+  },
+  {
+   "id": "supabase-030",
+   "family": "supabase",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "DO block building DROP from strings (unknown)",
+   "says": [
+    "sends a request to Supabase that Silo cannot read: SQL Silo cannot classify: the classifier cannot read DO statements"
+   ],
+   "unknown": [
+    "Supabase: SQL Silo cannot classify: the classifier cannot read DO statements"
+   ],
+   "ms": 0.094
+  },
+  {
+   "id": "supabase-031",
+   "family": "supabase",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "dblink_exec in a SELECT (unknown)",
+   "says": [
+    "sends a request to Supabase that Silo cannot read: SQL Silo cannot classify: calls dblink_exec, which runs SQL Silo cannot see"
+   ],
+   "unknown": [
+    "Supabase: SQL Silo cannot classify: calls dblink_exec, which runs SQL Silo cannot see"
+   ],
+   "ms": 0.1267
+  },
+  {
+   "id": "supabase-032",
+   "family": "supabase",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "EXPLAIN ANALYZE runs the DELETE",
+   "says": [
+    "runs EXPLAIN ANALYZE on (not in the request) in the database of the Supabase project abc"
+   ],
+   "unknown": [],
+   "ms": 0.1538
+  },
+  {
+   "id": "supabase-033",
+   "family": "supabase",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "calls a function created earlier that drops tables",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1555
+  },
+  {
+   "id": "supabase-034",
+   "family": "supabase",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "SQL that does not parse (unknown)",
+   "says": [
+    "sends a request to Supabase that Silo cannot read: SQL Silo cannot classify: the SQL does not parse (ParseError)"
+   ],
+   "unknown": [
+    "Supabase: SQL Silo cannot classify: the SQL does not parse (ParseError)"
+   ],
+   "ms": 0.1102
+  },
+  {
+   "id": "supabase-data-001",
+   "family": "supabase-data",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "PostgREST DELETE without filter",
+   "says": [
+    "deletes every row of the table users (no filter in the request)"
+   ],
+   "unknown": [],
+   "ms": 0.0317
+  },
+  {
+   "id": "supabase-data-002",
+   "family": "supabase-data",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "PostgREST DELETE with filter",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0275
+  },
+  {
+   "id": "supabase-data-003",
+   "family": "supabase-data",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "PostgREST GET deleted=is.false",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0216
+  },
+  {
+   "id": "supabase-data-004",
+   "family": "supabase-data",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "PostgREST PATCH without filter",
+   "says": [
+    "overwrites every row of the table users (no filter in the request)"
+   ],
+   "unknown": [],
+   "ms": 0.0398
+  },
+  {
+   "id": "supabase-data-005",
+   "family": "supabase-data",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "PostgREST PATCH with filter",
+   "says": [],
+   "unknown": [],
+   "ms": 0.027
+  },
+  {
+   "id": "supabase-data-006",
+   "family": "supabase-data",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "Storage delete bucket",
+   "says": [
+    "deletes or empties the storage bucket avatars"
+   ],
+   "unknown": [],
+   "ms": 0.0322
+  },
+  {
+   "id": "supabase-data-007",
+   "family": "supabase-data",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "PostgREST DELETE with a filter that matches every row",
+   "says": [],
+   "unknown": [],
+   "ms": 0.027
+  },
+  {
+   "id": "supabase-data-008",
+   "family": "supabase-data",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "PostgREST DELETE without filter, select only",
+   "says": [
+    "deletes every row of the table users (no filter in the request)"
+   ],
+   "unknown": [],
+   "ms": 0.0346
+  },
+  {
+   "id": "neon-001",
+   "family": "neon",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete project",
+   "says": [
+    "deletes the Neon project polished-rain-123 with all its branches"
+   ],
+   "unknown": [],
+   "ms": 0.0359
+  },
+  {
+   "id": "neon-002",
+   "family": "neon",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete branch",
+   "says": [
+    "deletes the Neon branch br-main-1 of the project p1"
+   ],
+   "unknown": [],
+   "ms": 0.0387
+  },
+  {
+   "id": "neon-003",
+   "family": "neon",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete database",
+   "says": [
+    "deletes the database neondb on the Neon branch br1"
+   ],
+   "unknown": [],
+   "ms": 0.0398
+  },
+  {
+   "id": "neon-004",
+   "family": "neon",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "restore branch over itself",
+   "says": [
+    "overwrites the Neon branch br1 with an earlier state"
+   ],
+   "unknown": [],
+   "ms": 0.0503
+  },
+  {
+   "id": "neon-005",
+   "family": "neon",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "create branch",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0386
+  },
+  {
+   "id": "neon-006",
+   "family": "neon",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "list branches",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0233
+  },
+  {
+   "id": "neon-007",
+   "family": "neon",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete role (fallback)",
+   "says": [
+    "sends DELETE /api/v2/projects/p1/branches/br1/roles/app to Neon"
+   ],
+   "unknown": [],
+   "ms": 0.0387
+  },
+  {
+   "id": "neon-008",
+   "family": "neon",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "SQL over HTTP DROP",
+   "says": [
+    "runs DROP TABLE on users in the Neon database ep-cool-1.us-east-2.aws.neon.tech/neondb"
+   ],
+   "unknown": [],
+   "ms": 0.0953
+  },
+  {
+   "id": "neon-009",
+   "family": "neon",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "SQL over HTTP SELECT",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1589
+  },
+  {
+   "id": "neon-010",
+   "family": "neon",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "SQL over HTTP INSERT",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1305
+  },
+  {
+   "id": "neon-011",
+   "family": "neon",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "transaction with DROP second",
+   "says": [
+    "runs TRUNCATE on users in the Neon database ep-cool-1.us-east-2.aws.neon.tech/neondb"
+   ],
+   "unknown": [],
+   "ms": 0.1504
+  },
+  {
+   "id": "neon-012",
+   "family": "neon",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "older driver: endpoint host directly",
+   "says": [
+    "runs DROP TABLE on users in the Neon database ep-cool-1.us-east-2.aws.neon.tech/neondb"
+   ],
+   "unknown": [],
+   "ms": 0.0942
+  },
+  {
+   "id": "turso-001",
+   "family": "turso",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "pipeline DROP",
+   "says": [
+    "runs DROP TABLE on users in the Turso database mydb-acme.turso.io"
+   ],
+   "unknown": [],
+   "ms": 0.1009
+  },
+  {
+   "id": "turso-002",
+   "family": "turso",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "pipeline SELECT",
+   "says": [],
+   "unknown": [],
+   "ms": 0.157
+  },
+  {
+   "id": "turso-003",
+   "family": "turso",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete database via platform API",
+   "says": [
+    "deletes the Turso database mydb of acme"
+   ],
+   "unknown": [],
+   "ms": 0.0342
+  },
+  {
+   "id": "turso-004",
+   "family": "turso",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "list databases",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0203
+  },
+  {
+   "id": "turso-005",
+   "family": "turso",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "batch step deletes all rows",
+   "says": [
+    "runs DELETE ALL ROWS on users in the Turso database mydb-acme.turso.io"
+   ],
+   "unknown": [],
+   "ms": 0.1619
+  },
+  {
+   "id": "turso-006",
+   "family": "turso",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "sequence with several statements",
+   "says": [
+    "runs DROP TABLE on users in the Turso database mydb-acme.turso.io"
+   ],
+   "unknown": [],
+   "ms": 0.1425
+  },
+  {
+   "id": "turso-007",
+   "family": "turso",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "split, step 1: store_sql holds the DROP",
+   "says": [
+    "runs DROP TABLE on users in the Turso database mydb-acme.turso.io"
+   ],
+   "unknown": [],
+   "ms": 0.0957
+  },
+  {
+   "id": "turso-008",
+   "family": "turso",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "split, step 2: run stored sql_id (unknown)",
+   "says": [
+    "sends a request to Turso that Silo cannot read: a Turso statement runs SQL stored by an earlier request (sql_id 1)"
+   ],
+   "unknown": [
+    "Turso: a Turso statement runs SQL stored by an earlier request (sql_id 1)"
+   ],
+   "ms": 0.0395
+  },
+  {
+   "id": "aws-001",
+   "family": "aws",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DynamoDB DeleteTable",
+   "says": [
+    "calls AWS dynamodb DeleteTable on orders (gone)"
+   ],
+   "unknown": [],
+   "ms": 0.0573
+  },
+  {
+   "id": "aws-002",
+   "family": "aws",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "DynamoDB DescribeTable",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0532
+  },
+  {
+   "id": "aws-003",
+   "family": "aws",
+   "kind": "plain",
+   "label": "allow",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DynamoDB DeleteItem (one row)",
+   "says": [
+    "calls AWS dynamodb DeleteItem on orders"
+   ],
+   "unknown": [],
+   "ms": 0.057
+  },
+  {
+   "id": "aws-004",
+   "family": "aws",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "DynamoDB Scan with deleted=false filter",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0524
+  },
+  {
+   "id": "aws-005",
+   "family": "aws",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "RDS DeleteDBInstance",
+   "says": [
+    "calls AWS rds DeleteDBInstance on prod-db (gone)"
+   ],
+   "unknown": [],
+   "ms": 0.085
+  },
+  {
+   "id": "aws-006",
+   "family": "aws",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "RDS DescribeDBInstances",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0779
+  },
+  {
+   "id": "aws-007",
+   "family": "aws",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "RDS backups off",
+   "says": [
+    "turns off automated backups of the RDS instance prod-db, which deletes them"
+   ],
+   "unknown": [],
+   "ms": 0.0894
+  },
+  {
+   "id": "aws-008",
+   "family": "aws",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "RDS ModifyDBInstance instance class",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0811
+  },
+  {
+   "id": "aws-009",
+   "family": "aws",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "EC2 TerminateInstances",
+   "says": [
+    "calls AWS ec2 TerminateInstances on (not in the request) (gone)"
+   ],
+   "unknown": [],
+   "ms": 0.1264
+  },
+  {
+   "id": "aws-010",
+   "family": "aws",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "EC2 DescribeInstances",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1188
+  },
+  {
+   "id": "aws-011",
+   "family": "aws",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "S3 DeleteObject path style",
+   "says": [
+    "calls AWS s3 DeleteObject on prod-backups/db.dump (gone)"
+   ],
+   "unknown": [],
+   "ms": 0.0878
+  },
+  {
+   "id": "aws-012",
+   "family": "aws",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "S3 DeleteBucket virtual host",
+   "says": [
+    "calls AWS s3 DeleteBucket on prod-backups (outage)"
+   ],
+   "unknown": [],
+   "ms": 0.1045
+  },
+  {
+   "id": "aws-013",
+   "family": "aws",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "S3 GetObject",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0456
+  },
+  {
+   "id": "aws-014",
+   "family": "aws",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "S3 ListObjectsV2",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0477
+  },
+  {
+   "id": "aws-015",
+   "family": "aws",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "S3 PutObject",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0501
+  },
+  {
+   "id": "aws-016",
+   "family": "aws",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "S3 DeleteObjects",
+   "says": [
+    "calls AWS s3 DeleteObjects on prod-backups (gone)"
+   ],
+   "unknown": [],
+   "ms": 0.0646
+  },
+  {
+   "id": "aws-017",
+   "family": "aws",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "Lambda DeleteFunction",
+   "says": [
+    "calls AWS lambda DeleteFunction on 2015-03-31/functions/api (outage)"
+   ],
+   "unknown": [],
+   "ms": 0.056
+  },
+  {
+   "id": "aws-018",
+   "family": "aws",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "Lambda Invoke",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0408
+  },
+  {
+   "id": "aws-019",
+   "family": "aws",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "CloudFormation DeleteStack",
+   "says": [
+    "calls AWS cloudformation DeleteStack on prod (gone)"
+   ],
+   "unknown": [],
+   "ms": 0.0482
+  },
+  {
+   "id": "aws-020",
+   "family": "aws",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "STS GetCallerIdentity",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0358
+  },
+  {
+   "id": "aws-021",
+   "family": "aws",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "S3 DeleteObjectTagging look-alike? (catalogue holds it)",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0477
+  },
+  {
+   "id": "aws-022",
+   "family": "aws",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "S3 dualstack host",
+   "says": [
+    "calls AWS s3 DeleteObject on prod-backups/db.dump (gone)"
+   ],
+   "unknown": [],
+   "ms": 0.0931
+  },
+  {
+   "id": "aws-023",
+   "family": "aws",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DynamoDB FIPS host",
+   "says": [
+    "calls AWS dynamodb DeleteTable on orders (gone)"
+   ],
+   "unknown": [],
+   "ms": 0.0526
+  },
+  {
+   "id": "aws-024",
+   "family": "aws",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "EC2 Action in the query string on GET",
+   "says": [
+    "calls AWS ec2 TerminateInstances on (not in the request) (gone)"
+   ],
+   "unknown": [],
+   "ms": 0.12
+  },
+  {
+   "id": "aws-025",
+   "family": "aws",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "presigned DELETE URL",
+   "says": [
+    "calls AWS s3 DeleteObject on prod-backups/db.dump (gone)"
+   ],
+   "unknown": [],
+   "ms": 0.1035
+  },
+  {
+   "id": "aws-026",
+   "family": "aws",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "S3 lifecycle rule that expires everything later",
+   "says": [
+    "calls AWS s3 PutBucketLifecycleConfiguration on prod-backups (gone)"
+   ],
+   "unknown": [],
+   "ms": 0.0641
+  },
+  {
+   "id": "aws-027",
+   "family": "aws",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "S3 versioning suspended first",
+   "says": [
+    "suspends versioning on an S3 bucket, so later deletes cannot be undone"
+   ],
+   "unknown": [],
+   "ms": 0.063
+  },
+  {
+   "id": "aws-028",
+   "family": "aws",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DynamoDB BatchWriteItem DeleteRequest",
+   "says": [
+    "deletes items from DynamoDB tables (BatchWriteItem with DeleteRequest)"
+   ],
+   "unknown": [],
+   "ms": 0.0563
+  },
+  {
+   "id": "aws-029",
+   "family": "aws",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "gzip JSON body to DynamoDB",
+   "says": [
+    "calls AWS dynamodb DeleteTable on orders (gone)"
+   ],
+   "unknown": [],
+   "ms": 0.0595
+  },
+  {
+   "id": "aws-030",
+   "family": "aws",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "R2 through the S3 API",
+   "says": [
+    "calls AWS s3 DeleteObject on backups/db.dump (gone)"
+   ],
+   "unknown": [],
+   "ms": 0.0896
+  },
+  {
+   "id": "aws-031",
+   "family": "aws",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "SQS PurgeQueue via JSON protocol",
+   "says": [
+    "calls AWS sqs PurgeQueue on (not in the request)"
+   ],
+   "unknown": [],
+   "ms": 0.05
+  },
+  {
+   "id": "aws-032",
+   "family": "aws",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "CloudFormation ExecuteChangeSet (unknown: may delete)",
+   "says": [
+    "sends a request to AWS that Silo cannot read: runs the CloudFormation change set cs1; it may delete resources and Silo cannot see which"
+   ],
+   "unknown": [
+    "AWS: runs the CloudFormation change set cs1; it may delete resources and Silo cannot see which"
+   ],
+   "ms": 0.0561
+  },
+  {
+   "id": "mcp-001",
+   "family": "mcp",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "execute_sql DROP",
+   "says": [
+    "runs DROP TABLE on users in the Supabase project p1 (MCP tool execute_sql)"
+   ],
+   "unknown": [],
+   "ms": 0.1826
+  },
+  {
+   "id": "mcp-002",
+   "family": "mcp",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "execute_sql SELECT",
+   "says": [],
+   "unknown": [],
+   "ms": 0.2573
+  },
+  {
+   "id": "mcp-003",
+   "family": "mcp",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "apply_migration with TRUNCATE",
+   "says": [
+    "runs TRUNCATE on users in the Supabase project p1 (MCP tool apply_migration)"
+   ],
+   "unknown": [],
+   "ms": 0.1148
+  },
+  {
+   "id": "mcp-004",
+   "family": "mcp",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "apply_migration CREATE TABLE",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1548
+  },
+  {
+   "id": "mcp-005",
+   "family": "mcp",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "delete_branch",
+   "says": [
+    "calls the Supabase MCP tool delete_branch on b1"
+   ],
+   "unknown": [],
+   "ms": 0.0613
+  },
+  {
+   "id": "mcp-006",
+   "family": "mcp",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "pause_project",
+   "says": [
+    "calls the Supabase MCP tool pause_project on p1"
+   ],
+   "unknown": [],
+   "ms": 0.0582
+  },
+  {
+   "id": "mcp-007",
+   "family": "mcp",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "list_tables",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0503
+  },
+  {
+   "id": "mcp-008",
+   "family": "mcp",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "get_logs",
+   "says": [],
+   "unknown": [],
+   "ms": 0.049
+  },
+  {
+   "id": "mcp-009",
+   "family": "mcp",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "tools/list",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0377
+  },
+  {
+   "id": "mcp-010",
+   "family": "mcp",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "other server: delete_repository",
+   "says": [
+    "calls the MCP tool delete_repository on mcp.example.dev; its name says it removes something"
+   ],
+   "unknown": [],
+   "ms": 0.0438
+  },
+  {
+   "id": "mcp-011",
+   "family": "mcp",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "not covered",
+   "note": "other server: list_repositories",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0405
+  },
+  {
+   "id": "mcp-012",
+   "family": "mcp",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "not covered",
+   "note": "other server: create_issue saying delete",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0394
+  },
+  {
+   "id": "mcp-013",
+   "family": "mcp",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "batched JSON-RPC, delete second",
+   "says": [
+    "calls the Supabase MCP tool delete_branch on b1"
+   ],
+   "unknown": [],
+   "ms": 0.0589
+  },
+  {
+   "id": "mcp-014",
+   "family": "mcp",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "gzip MCP body",
+   "says": [
+    "runs DROP TABLE on users in the Supabase project p1 (MCP tool execute_sql)"
+   ],
+   "unknown": [],
+   "ms": 0.1813
+  },
+  {
+   "id": "mcp-015",
+   "family": "mcp",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "tool name in upper case",
+   "says": [
+    "calls the Supabase MCP tool DELETE_BRANCH on b1"
+   ],
+   "unknown": [],
+   "ms": 0.0609
+  },
+  {
+   "id": "mcp-016",
+   "family": "mcp",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "allow",
+   "verdict": "not covered",
+   "note": "harmless-sounding tool that wipes data on another server",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0414
+  },
+  {
+   "id": "mcp-017",
+   "family": "mcp",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "2026-07-28 headers match a harmless body",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0555
+  },
+  {
+   "id": "mcp-018",
+   "family": "mcp",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "Mcp-Name header says list_tables, body calls delete_branch",
+   "says": [
+    "calls an MCP tool on mcp.supabase.com whose Mcp-Method/Mcp-Name headers (tools/call list_tables) do not match the body (tools/call delete_branch); Silo decides on the body and holds the mismatch",
+    "calls the Supabase MCP tool delete_branch on b1"
+   ],
+   "unknown": [],
+   "ms": 0.0757
+  },
+  {
+   "id": "mcp-019",
+   "family": "mcp",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "header/body mismatch on another server, harmless body",
+   "says": [
+    "calls an MCP tool on mcp.example.dev whose Mcp-Method/Mcp-Name headers (tools/call delete_repository) do not match the body (tools/call list_repositories); Silo decides on the body and holds the mismatch"
+   ],
+   "unknown": [],
+   "ms": 0.0514
+  },
+  {
+   "id": "railway-061",
+   "family": "railway",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "environmentPatchCommit deletes a volume (railway CLI path)",
+   "says": [
+    "applies a patch to the Railway environment env_1 that deletes volumes.vol_9"
+   ],
+   "unknown": [],
+   "ms": 0.1251
+  },
+  {
+   "id": "railway-062",
+   "family": "railway",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "environmentPatchCommit changes a variable only",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1164
+  },
+  {
+   "id": "railway-063",
+   "family": "railway",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "environmentPatchCommit with isDeleted false",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1148
+  },
+  {
+   "id": "railway-064",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "environmentPatchCommit patch sent as a JSON string, aliased",
+   "says": [
+    "applies a patch to the Railway environment env_1 that deletes buckets.b_1"
+   ],
+   "unknown": [],
+   "ms": 0.127
+  },
+  {
+   "id": "railway-065",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "environmentStageChanges stages a service delete",
+   "says": [
+    "stages a change to the Railway environment env_1 that deletes services.svc_1"
+   ],
+   "unknown": [],
+   "ms": 0.1225
+  },
+  {
+   "id": "railway-066",
+   "family": "railway",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "environmentPatchCommitStaged: content not in the request, held always",
+   "says": [
+    "commits the changes staged earlier in the Railway environment env_1; the request does not show what they delete"
+   ],
+   "unknown": [],
+   "ms": 0.0892
+  },
+  {
+   "id": "github-023",
+   "family": "github",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "GraphQL updateRefs to the zero commit deletes",
+   "says": [
+    "deletes refs of the repository R (updateRefs to the zero commit)"
+   ],
+   "unknown": [],
+   "ms": 0.1422
+  },
+  {
+   "id": "heroku-010",
+   "family": "heroku",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "dyno restart is a DELETE that removes nothing",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0388
+  },
+  {
+   "id": "heroku-011",
+   "family": "heroku",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "one dyno restart",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0392
+  },
+  {
+   "id": "vercel-024",
+   "family": "vercel",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "Global Config items deleted with PATCH",
+   "says": [
+    "deletes items of the Vercel Global Config store ecfg_1"
+   ],
+   "unknown": [],
+   "ms": 0.0542
+  },
+  {
+   "id": "vercel-025",
+   "family": "vercel",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "Global Config items upserted with PATCH",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0461
+  },
+  {
+   "id": "cloudflare-015",
+   "family": "cloudflare",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "wrangler delete: workers/services",
+   "says": [
+    "deletes the Worker my-worker (wrangler delete)"
+   ],
+   "unknown": [],
+   "ms": 0.0495
+  },
+  {
+   "id": "cloudflare-016",
+   "family": "cloudflare",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "wrangler kv bulk delete: DELETE .../bulk",
+   "says": [
+    "deletes keys from the Workers KV namespace ns1"
+   ],
+   "unknown": [],
+   "ms": 0.057
+  },
+  {
+   "id": "cloudflare-017",
+   "family": "cloudflare",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "KV bulk get",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0454
+  },
+  {
+   "id": "gmail-001",
+   "family": "gmail",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "batchModify adds TRASH (OpenClaw shape)",
+   "says": [
+    "moves 3 messages of me to the Trash (kept 30 days)"
+   ],
+   "unknown": [],
+   "ms": 0.0659
+  },
+  {
+   "id": "gmail-002",
+   "family": "gmail",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "batchModify marks read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0504
+  },
+  {
+   "id": "gmail-003",
+   "family": "gmail",
+   "kind": "plain",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "batchDelete",
+   "says": [
+    "deletes 2 messages of me for good (they skip the Trash)"
+   ],
+   "unknown": [],
+   "ms": 0.055
+  },
+  {
+   "id": "gmail-004",
+   "family": "gmail",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "list messages in Trash",
+   "says": [],
+   "unknown": [],
+   "ms": 0.023
+  },
+  {
+   "id": "gmail-005",
+   "family": "gmail",
+   "kind": "plain",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "send a message (not in scope of this detector)",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0406
+  },
+  {
+   "id": "gmail-006",
+   "family": "gmail",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "unknown",
+   "note": "Google batch endpoint wraps the delete (unknown)",
+   "says": [
+    "sends a request to Gmail that Silo cannot read: a Google batch request: it carries other HTTP requests inside, which this prototype does not read"
+   ],
+   "unknown": [
+    "Gmail: a Google batch request: it carries other HTTP requests inside, which this prototype does not read"
+   ],
+   "ms": 0.0386
+  },
+  {
+   "id": "gmail-007",
+   "family": "gmail",
+   "kind": "evasion",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "www.googleapis.com alias",
+   "says": [
+    "deletes 1 messages of me for good (they skip the Trash)"
+   ],
+   "unknown": [],
+   "ms": 0.0548
+  },
+  {
+   "id": "capture-aws-001",
+   "family": "capture-aws",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0524
+  },
+  {
+   "id": "capture-aws-002",
+   "family": "capture-aws",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DELETE from a CLI delete command",
+   "says": [
+    "calls AWS s3 DeleteObject on silo-test-bucket/backups/db-2026-11-24.dump (gone)"
+   ],
+   "unknown": [],
+   "ms": 0.1007
+  },
+  {
+   "id": "capture-aws-003",
+   "family": "capture-aws",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DELETE from a CLI delete command",
+   "says": [
+    "calls AWS s3 DeleteObject on silo-test-bucket/backups/db-2026-11-23.dump (gone)"
+   ],
+   "unknown": [],
+   "ms": 0.1008
+  },
+  {
+   "id": "capture-aws-004",
+   "family": "capture-aws",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DELETE from a CLI delete command",
+   "says": [
+    "calls AWS s3 DeleteBucket on silo-test-bucket (outage)"
+   ],
+   "unknown": [],
+   "ms": 0.1089
+  },
+  {
+   "id": "capture-aws-005",
+   "family": "capture-aws",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "AWS DeleteDBInstance",
+   "says": [
+    "calls AWS rds DeleteDBInstance on prod-db (gone)"
+   ],
+   "unknown": [],
+   "ms": 0.0859
+  },
+  {
+   "id": "capture-aws-006",
+   "family": "capture-aws",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "AWS DeleteTable",
+   "says": [
+    "calls AWS dynamodb DeleteTable on orders (gone)"
+   ],
+   "unknown": [],
+   "ms": 0.0588
+  },
+  {
+   "id": "capture-fly-007",
+   "family": "capture-fly",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0268
+  },
+  {
+   "id": "capture-fly-008",
+   "family": "capture-fly",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0262
+  },
+  {
+   "id": "capture-fly-009",
+   "family": "capture-fly",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "graphql organization",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1694
+  },
+  {
+   "id": "capture-fly-010",
+   "family": "capture-fly",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DELETE from a CLI delete command",
+   "says": [
+    "deletes the Fly app my-app with its machines and volumes"
+   ],
+   "unknown": [],
+   "ms": 0.0395
+  },
+  {
+   "id": "capture-fly-011",
+   "family": "capture-fly",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DELETE from a CLI delete command",
+   "says": [
+    "deletes the Fly volume vol_123 of the app my-app"
+   ],
+   "unknown": [],
+   "ms": 0.0429
+  },
+  {
+   "id": "capture-fly-012",
+   "family": "capture-fly",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0268
+  },
+  {
+   "id": "capture-fly-013",
+   "family": "capture-fly",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DELETE from a CLI delete command",
+   "says": [
+    "deletes the Fly app machines with its machines and volumes"
+   ],
+   "unknown": [],
+   "ms": 0.0419
+  },
+  {
+   "id": "capture-fly-014",
+   "family": "capture-fly",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DELETE from a CLI delete command",
+   "says": [
+    "destroys the Fly machine 3d8d1 of the app my-app"
+   ],
+   "unknown": [],
+   "ms": 0.0443
+  },
+  {
+   "id": "capture-fly-015",
+   "family": "capture-fly",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0266
+  },
+  {
+   "id": "capture-gh-016",
+   "family": "capture-gh",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DELETE from a CLI delete command",
+   "says": [
+    "deletes the GitHub repository o/r"
+   ],
+   "unknown": [],
+   "ms": 0.0447
+  },
+  {
+   "id": "capture-gh-017",
+   "family": "capture-gh",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DELETE from a CLI delete command",
+   "says": [
+    "deletes heads/feature of o/r"
+   ],
+   "unknown": [],
+   "ms": 0.0488
+  },
+  {
+   "id": "capture-git-018",
+   "family": "capture-git",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0218
+  },
+  {
+   "id": "capture-git-019",
+   "family": "capture-git",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "git push",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0337
+  },
+  {
+   "id": "capture-git-020",
+   "family": "capture-git",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "git push deleting a ref",
+   "says": [
+    "deletes refs/heads/feature of o/r (git push)"
+   ],
+   "unknown": [],
+   "ms": 0.0414
+  },
+  {
+   "id": "capture-git-021",
+   "family": "capture-git",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "git push",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0292
+  },
+  {
+   "id": "capture-git-022",
+   "family": "capture-git",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "git push",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0345
+  },
+  {
+   "id": "capture-git-023",
+   "family": "capture-git",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "git push deleting a ref",
+   "says": [
+    "deletes refs/heads/feature of o/r (git push)"
+   ],
+   "unknown": [],
+   "ms": 0.0419
+  },
+  {
+   "id": "capture-git-024",
+   "family": "capture-git",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "git push",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0331
+  },
+  {
+   "id": "capture-heroku-025",
+   "family": "capture-heroku",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0245
+  },
+  {
+   "id": "capture-heroku-026",
+   "family": "capture-heroku",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DELETE from a CLI delete command",
+   "says": [
+    "deletes the Heroku app my-app with its add-ons"
+   ],
+   "unknown": [],
+   "ms": 0.0404
+  },
+  {
+   "id": "capture-neon-027",
+   "family": "capture-neon",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DELETE from a CLI delete command",
+   "says": [
+    "deletes the Neon project proj-123 with all its branches"
+   ],
+   "unknown": [],
+   "ms": 0.0482
+  },
+  {
+   "id": "capture-neon-028",
+   "family": "capture-neon",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0306
+  },
+  {
+   "id": "capture-neon-029",
+   "family": "capture-neon",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.027
+  },
+  {
+   "id": "capture-neon-030",
+   "family": "capture-neon",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0298
+  },
+  {
+   "id": "capture-neon-031",
+   "family": "capture-neon",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DELETE from a CLI delete command",
+   "says": [
+    "deletes the Neon branch br-main-123 of the project proj-123"
+   ],
+   "unknown": [],
+   "ms": 0.0468
+  },
+  {
+   "id": "capture-railway-032",
+   "family": "capture-railway",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "graphql projectToken",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1175
+  },
+  {
+   "id": "capture-railway-033",
+   "family": "capture-railway",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "graphql cliEventTrack",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1207
+  },
+  {
+   "id": "capture-railway-034",
+   "family": "capture-railway",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "graphql project",
+   "says": [],
+   "unknown": [],
+   "ms": 0.2215
+  },
+  {
+   "id": "capture-railway-035",
+   "family": "capture-railway",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "graphql environment",
+   "says": [],
+   "unknown": [],
+   "ms": 0.5023
+  },
+  {
+   "id": "capture-railway-036",
+   "family": "capture-railway",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "graphql cliEventTrack",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1053
+  },
+  {
+   "id": "capture-railway-037",
+   "family": "capture-railway",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "mutation volumeDelete",
+   "says": [
+    "deletes the Railway volume vol-1, with the backups stored on it"
+   ],
+   "unknown": [],
+   "ms": 0.1023
+  },
+  {
+   "id": "capture-railway-038",
+   "family": "capture-railway",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "graphql cliEventTrack",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1033
+  },
+  {
+   "id": "capture-railway-039",
+   "family": "capture-railway",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "graphql deployments",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1392
+  },
+  {
+   "id": "capture-railway-040",
+   "family": "capture-railway",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "graphql cliEventTrack",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1032
+  },
+  {
+   "id": "capture-railway-041",
+   "family": "capture-railway",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "mutation environmentDelete",
+   "says": [
+    "deletes the Railway environment e2 and every service and volume in it"
+   ],
+   "unknown": [],
+   "ms": 0.1096
+  },
+  {
+   "id": "capture-railway-042",
+   "family": "capture-railway",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "graphql cliEventTrack",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1038
+  },
+  {
+   "id": "capture-railway-043",
+   "family": "capture-railway",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "graphql cliEventTrack",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1088
+  },
+  {
+   "id": "capture-railway-044",
+   "family": "capture-railway",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "graphql cliEventTrack",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1276
+  },
+  {
+   "id": "capture-railway-045",
+   "family": "capture-railway",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "graphql cliEventTrack",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1376
+  },
+  {
+   "id": "capture-railway-046",
+   "family": "capture-railway",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "graphql cliEventTrack",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1465
+  },
+  {
+   "id": "capture-railway-047",
+   "family": "capture-railway",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "graphql cliEventTrack",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1284
+  },
+  {
+   "id": "capture-railway-048",
+   "family": "capture-railway",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "graphql cliEventTrack",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1018
+  },
+  {
+   "id": "capture-railway-049",
+   "family": "capture-railway",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "mutation deploymentRemove",
+   "says": [
+    "runs the Railway mutation deploymentRemove, whose name says it removes or stops something"
+   ],
+   "unknown": [],
+   "ms": 0.1048
+  },
+  {
+   "id": "capture-railway-050",
+   "family": "capture-railway",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "graphql cliEventTrack",
+   "says": [],
+   "unknown": [],
+   "ms": 0.1027
+  },
+  {
+   "id": "capture-stripe-051",
+   "family": "capture-stripe",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DELETE from a CLI delete command",
+   "says": [
+    "deletes the Stripe customer cus_123 and cancels their subscriptions"
+   ],
+   "unknown": [],
+   "ms": 0.0473
+  },
+  {
+   "id": "capture-stripe-052",
+   "family": "capture-stripe",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "Stripe refund (key mode unknown in the capture)",
+   "says": [
+    "refunds (not in the request) of ch_123 with the live Stripe key"
+   ],
+   "unknown": [],
+   "ms": 0.0529
+  },
+  {
+   "id": "capture-supabase-053",
+   "family": "capture-supabase",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DELETE from a CLI delete command",
+   "says": [
+    "deletes the Supabase project abcdefghijklmnopqrst with its database"
+   ],
+   "unknown": [],
+   "ms": 0.0398
+  },
+  {
+   "id": "capture-supabase-054",
+   "family": "capture-supabase",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.024
+  },
+  {
+   "id": "capture-vercel-055",
+   "family": "capture-vercel",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0275
+  },
+  {
+   "id": "capture-vercel-056",
+   "family": "capture-vercel",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0268
+  },
+  {
+   "id": "capture-vercel-057",
+   "family": "capture-vercel",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0269
+  },
+  {
+   "id": "capture-vercel-058",
+   "family": "capture-vercel",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DELETE from a CLI delete command",
+   "says": [
+    "deletes the Vercel project prj_1 (team (not in the request)) with its deployments"
+   ],
+   "unknown": [],
+   "ms": 0.0489
+  },
+  {
+   "id": "capture-vercel-059",
+   "family": "capture-vercel",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0272
+  },
+  {
+   "id": "capture-vercel-060",
+   "family": "capture-vercel",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0339
+  },
+  {
+   "id": "capture-vercel-061",
+   "family": "capture-vercel",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0269
+  },
+  {
+   "id": "capture-vercel-062",
+   "family": "capture-vercel",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DELETE from a CLI delete command",
+   "says": [
+    "deletes the environment variable env_1 of the Vercel project prj_1"
+   ],
+   "unknown": [],
+   "ms": 0.0502
+  },
+  {
+   "id": "capture-vercel-063",
+   "family": "capture-vercel",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0268
+  },
+  {
+   "id": "capture-vercel-064",
+   "family": "capture-vercel",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DELETE from a CLI delete command",
+   "says": [
+    "deletes the Vercel project my-app (team (not in the request)) with its deployments"
+   ],
+   "unknown": [],
+   "ms": 0.049
+  },
+  {
+   "id": "capture-wrangler-065",
+   "family": "capture-wrangler",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0355
+  },
+  {
+   "id": "capture-wrangler-066",
+   "family": "capture-wrangler",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DELETE from a CLI delete command",
+   "says": [
+    "deletes the D1 database 11111111-2222-3333-4444-555555555555"
+   ],
+   "unknown": [],
+   "ms": 0.05
+  },
+  {
+   "id": "capture-wrangler-067",
+   "family": "capture-wrangler",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DELETE from a CLI delete command",
+   "says": [
+    "deletes the R2 bucket mybucket"
+   ],
+   "unknown": [],
+   "ms": 0.0517
+  },
+  {
+   "id": "capture-wrangler-068",
+   "family": "capture-wrangler",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0333
+  },
+  {
+   "id": "capture-wrangler-069",
+   "family": "capture-wrangler",
+   "kind": "capture",
+   "label": "hold",
+   "got": "hold",
+   "verdict": "destructive",
+   "note": "DELETE from a CLI delete command",
+   "says": [
+    "deletes the Worker my-worker (wrangler delete)"
+   ],
+   "unknown": [],
+   "ms": 0.0529
+  },
+  {
+   "id": "capture-wrangler-070",
+   "family": "capture-wrangler",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0343
+  },
+  {
+   "id": "capture-wrangler-071",
+   "family": "capture-wrangler",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0292
+  },
+  {
+   "id": "capture-wrangler-072",
+   "family": "capture-wrangler",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0287
+  },
+  {
+   "id": "capture-wrangler-073",
+   "family": "capture-wrangler",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0309
+  },
+  {
+   "id": "capture-wrangler-074",
+   "family": "capture-wrangler",
+   "kind": "capture",
+   "label": "allow",
+   "got": "allow",
+   "verdict": "harmless",
+   "note": "GET from a CLI read",
+   "says": [],
+   "unknown": [],
+   "ms": 0.0308
+  }
+ ]
+}

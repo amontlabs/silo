@@ -1,0 +1,4 @@
+$ HEROKU_API_KEY=test-token-123 -- heroku apps:destroy -a my-app --confirm my-app
+Destroying my-app (including all add-ons)... !
+    Error: Request timed out
+--- exit=1 seconds=60.710797502

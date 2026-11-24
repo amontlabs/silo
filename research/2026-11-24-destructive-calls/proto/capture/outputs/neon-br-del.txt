@@ -1,0 +1,10 @@
+$ NEON_API_KEY=test-token-123 -- neonctl branches delete br-main --project-id proj-123 --output json
+{
+  "id": "br-main-123",
+  "project_id": "proj-123",
+  "name": "br-main",
+  "current_state": "ready",
+  "created_at": "2026-01-01T00:00:00Z",
+  "updated_at": "2026-01-01T00:00:00Z"
+}
+--- exit=0 seconds=.976070464
