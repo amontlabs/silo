@@ -73,18 +73,14 @@ What this changes for a denied tool call, read against the cases of the answer:
   "bypass or interfere with capabilities, restrictions, or guardrails" and OpenAI's "Interfere with
   or disrupt our Services". A denial removes a capability on the user's own computer at the user's
   request, and bypasses none of the vendor's guardrails; that reading is mine, not the vendor's.
-- **Silo's boundary on a Claude subscription.** This is the clause I would bring to polarzero
-  first, since it is new since the 19 November reading. Silo's boundary carries a Claude Code
-  subscription's requests for the user, unchanged, from a computer the user owns, and names the
-  real client. That is not reselling and misrepresents nothing; whether Anthropic counts it as an
-  authorized proxy, the text does not say. It applies to every Claude subscription through Silo,
-  not only to denied calls, and it weighs most on any request Silo would send itself.
+- **Silo's boundary on a Claude subscription.** The Usage Policy's bullet on proxies bears on
+  every Claude subscription through Silo, not only on denied calls; it is weighed in
+  `anthropic-reads-intermediate`, where that question already lives. It weighs most on a request
+  Silo would send itself.
 - **Codex with a ChatGPT sign-in.** If the Sign in with ChatGPT Terms apply, a computer of the
   user's that Silo runs fits "a remote runtime only that user controls" only while one user owns
   it. A computer shared by a team, with one person's sign-in, is the case they forbid.
 
-What I would put in this entry's place, for polarzero: the subscription clause is polarzero's to
-weigh before Silo carries Claude subscription traffic at all, denied calls or not. Until then, an
-API key is the way the terms read here leave clear: the Consumer Terms exempt it from the rule on
-automated access, and the Usage Policy's bullet names consumer subscriptions. Not read: Anthropic's
-Service Specific Terms, and Codex's own pages.
+Nothing read forbids withholding a tool call in so many words, for either vendor. So I would keep
+the entry's way: the clauses above go to polarzero with this note, and denied tool calls wait on
+polarzero's reading of them. Not read: Anthropic's Service Specific Terms, and Codex's own pages.
