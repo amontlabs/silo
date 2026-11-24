@@ -9,7 +9,7 @@ Nothing here ran on a Mac. What could be tried on Linux was tried, and is said s
 appears. Everything else is marked as found in a source, or as a test for the Mac test kit.
 
 The plan changes in the same pull request are notes and new entries with no verdict. They are
-listed at the end.
+listed under "Where this meets the plan".
 
 ## In short
 
