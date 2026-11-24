@@ -306,6 +306,15 @@ What this changes for Silo:
   disabled. Commands will receive unmasked credentials." Claude Code's
   masking too exists only inside its sandbox. Silo's boundary is outside the computer, so it holds
   with every check off and for every program.
+- **Tried: Claude Code's sandbox with every check off.** Claude Code 2.1.331 on Linux, its sandbox
+  on, `GITHUB_TOKEN` and a file set to `deny`, run with `--dangerously-skip-permissions`, as
+  polarzero's first build runs it. The fake model ran one command twice. In the sandbox it got
+  `token=[]` and "Permission denied". The second time it asked for `dangerouslyDisableSandbox:
+  true`, and with no question asked the command ran outside and printed the real token and the
+  file. Its own instructions to the model say to retry this way after a failure that looks like
+  the sandbox's. With `allowUnsandboxedCommands: false` the second command stayed in the sandbox
+  and got nothing. So the vendor's protection holds with every check off only when that one
+  setting is off too, and it is on by default; Silo's holds whatever the program is told.
 - **A stand-in shaped like the real token** is worth taking: some tools check a token's prefix or
   length before they send it. The answer above does not say what a placeholder looks like.
 - **Two proxies in a row.** Codex with its proxy on, inside Silo, ends TLS itself and reaches the
