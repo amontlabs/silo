@@ -1,0 +1,471 @@
+{
+ "353": {
+  "railway": {
+   "allow_n": 110,
+   "tn": 95,
+   "hold_n": 79,
+   "tp": 43,
+   "fn": 36,
+   "either_n": 55,
+   "either_held": 19,
+   "deploy_n": 23,
+   "deploy_held": 4,
+   "fp": 15
+  },
+  "fly-gql": {
+   "either_n": 15,
+   "either_held": 6,
+   "allow_n": 21,
+   "tn": 20,
+   "hold_n": 20,
+   "fn": 8,
+   "deploy_n": 7,
+   "deploy_held": 0,
+   "tp": 12,
+   "fp": 1
+  },
+  "fly": {
+   "allow_n": 20,
+   "tn": 19,
+   "hold_n": 21,
+   "tp": 13,
+   "deploy_n": 2,
+   "deploy_held": 0,
+   "fn": 8,
+   "either_n": 13,
+   "either_held": 1,
+   "fp": 1
+  },
+  "vercel": {
+   "either_n": 92,
+   "either_held": 29,
+   "hold_n": 85,
+   "tp": 39,
+   "allow_n": 102,
+   "tn": 99,
+   "fn": 46,
+   "deploy_n": 10,
+   "deploy_held": 0,
+   "fp": 3
+  },
+  "supabase": {
+   "either_n": 25,
+   "either_held": 2,
+   "hold_n": 44,
+   "tp": 18,
+   "fn": 26,
+   "deploy_n": 5,
+   "deploy_held": 0,
+   "allow_n": 24,
+   "tn": 21,
+   "fp": 3
+  },
+  "cloudflare": {
+   "hold_n": 92,
+   "tp": 51,
+   "either_n": 94,
+   "either_held": 16,
+   "allow_n": 107,
+   "tn": 99,
+   "fn": 41,
+   "deploy_n": 19,
+   "deploy_held": 0,
+   "fp": 8
+  },
+  "total": {
+   "allow_n": 384,
+   "tn": 353,
+   "hold_n": 341,
+   "tp": 176,
+   "fn": 165,
+   "either_n": 294,
+   "either_held": 73,
+   "deploy_n": 66,
+   "deploy_held": 4,
+   "fp": 31
+  }
+ },
+ "383": {
+  "railway": {
+   "allow_n": 110,
+   "tn": 110,
+   "hold_n": 79,
+   "tp": 79,
+   "either_n": 55,
+   "either_held": 18,
+   "deploy_n": 23,
+   "deploy_held": 3
+  },
+  "fly-gql": {
+   "either_n": 15,
+   "either_held": 6,
+   "allow_n": 21,
+   "tn": 21,
+   "hold_n": 20,
+   "tp": 20,
+   "deploy_n": 7,
+   "deploy_held": 0
+  },
+  "fly": {
+   "allow_n": 20,
+   "tn": 20,
+   "hold_n": 21,
+   "tp": 21,
+   "deploy_n": 2,
+   "deploy_held": 0,
+   "either_n": 13,
+   "either_held": 1
+  },
+  "vercel": {
+   "either_n": 92,
+   "either_held": 29,
+   "hold_n": 85,
+   "tp": 85,
+   "allow_n": 102,
+   "tn": 102,
+   "deploy_n": 10,
+   "deploy_held": 0
+  },
+  "supabase": {
+   "either_n": 25,
+   "either_held": 2,
+   "hold_n": 44,
+   "tp": 44,
+   "deploy_n": 5,
+   "deploy_held": 0,
+   "allow_n": 24,
+   "tn": 24
+  },
+  "cloudflare": {
+   "hold_n": 92,
+   "tp": 92,
+   "either_n": 94,
+   "either_held": 16,
+   "allow_n": 107,
+   "tn": 107,
+   "deploy_n": 19,
+   "deploy_held": 0
+  },
+  "total": {
+   "allow_n": 384,
+   "tn": 384,
+   "hold_n": 341,
+   "tp": 341,
+   "either_n": 294,
+   "either_held": 72,
+   "deploy_n": 66,
+   "deploy_held": 3
+  }
+ },
+ "383blind": {
+  "railway": {
+   "allow_n": 110,
+   "tn": 110,
+   "hold_n": 79,
+   "tp": 79,
+   "either_n": 55,
+   "either_held": 18,
+   "deploy_n": 23,
+   "deploy_held": 3
+  },
+  "fly-gql": {
+   "either_n": 15,
+   "either_held": 6,
+   "allow_n": 21,
+   "tn": 21,
+   "hold_n": 20,
+   "tp": 20,
+   "deploy_n": 7,
+   "deploy_held": 0
+  },
+  "fly": {
+   "allow_n": 20,
+   "tn": 20,
+   "hold_n": 21,
+   "tp": 21,
+   "deploy_n": 2,
+   "deploy_held": 0,
+   "either_n": 13,
+   "either_held": 1
+  },
+  "vercel": {
+   "either_n": 92,
+   "either_held": 29,
+   "hold_n": 85,
+   "tp": 85,
+   "allow_n": 102,
+   "tn": 102,
+   "deploy_n": 10,
+   "deploy_held": 0
+  },
+  "supabase": {
+   "either_n": 25,
+   "either_held": 2,
+   "hold_n": 44,
+   "tp": 44,
+   "deploy_n": 5,
+   "deploy_held": 0,
+   "allow_n": 24,
+   "tn": 24
+  },
+  "cloudflare": {
+   "hold_n": 92,
+   "tp": 92,
+   "either_n": 94,
+   "either_held": 16,
+   "allow_n": 107,
+   "tn": 107,
+   "deploy_n": 19,
+   "deploy_held": 0
+  },
+  "total": {
+   "allow_n": 384,
+   "tn": 384,
+   "hold_n": 341,
+   "tp": 341,
+   "either_n": 294,
+   "either_held": 72,
+   "deploy_n": 66,
+   "deploy_held": 3
+  }
+ },
+ "fallback": {
+  "railway": {
+   "allow_n": 110,
+   "tn": 97,
+   "hold_n": 79,
+   "tp": 51,
+   "either_n": 55,
+   "either_held": 23,
+   "fn": 28,
+   "deploy_n": 23,
+   "deploy_held": 2,
+   "fp": 13
+  },
+  "fly-gql": {
+   "either_n": 15,
+   "either_held": 6,
+   "allow_n": 21,
+   "tn": 20,
+   "hold_n": 20,
+   "fn": 6,
+   "deploy_n": 7,
+   "deploy_held": 0,
+   "tp": 14,
+   "fp": 1
+  },
+  "fly": {
+   "allow_n": 20,
+   "tn": 20,
+   "hold_n": 21,
+   "tp": 17,
+   "deploy_n": 2,
+   "deploy_held": 0,
+   "either_n": 13,
+   "either_held": 0,
+   "fn": 4
+  },
+  "vercel": {
+   "either_n": 92,
+   "either_held": 35,
+   "hold_n": 85,
+   "tp": 62,
+   "allow_n": 102,
+   "tn": 95,
+   "fn": 23,
+   "deploy_n": 10,
+   "deploy_held": 1,
+   "fp": 7
+  },
+  "supabase": {
+   "either_n": 25,
+   "either_held": 3,
+   "hold_n": 44,
+   "tp": 22,
+   "fn": 22,
+   "deploy_n": 5,
+   "deploy_held": 0,
+   "allow_n": 24,
+   "tn": 18,
+   "fp": 6
+  },
+  "cloudflare": {
+   "hold_n": 92,
+   "tp": 64,
+   "either_n": 94,
+   "either_held": 20,
+   "allow_n": 107,
+   "tn": 100,
+   "fn": 28,
+   "deploy_n": 19,
+   "deploy_held": 2,
+   "fp": 7
+  },
+  "total": {
+   "allow_n": 384,
+   "tn": 350,
+   "hold_n": 341,
+   "tp": 230,
+   "either_n": 294,
+   "either_held": 87,
+   "fn": 111,
+   "deploy_n": 66,
+   "deploy_held": 5,
+   "fp": 34
+  }
+ },
+ "383+fb": {
+  "railway": {
+   "allow_n": 110,
+   "tn": 106,
+   "hold_n": 79,
+   "tp": 79,
+   "either_n": 55,
+   "either_held": 26,
+   "deploy_n": 23,
+   "deploy_held": 3,
+   "fp": 4
+  },
+  "fly-gql": {
+   "either_n": 15,
+   "either_held": 7,
+   "allow_n": 21,
+   "tn": 21,
+   "hold_n": 20,
+   "tp": 20,
+   "deploy_n": 7,
+   "deploy_held": 0
+  },
+  "fly": {
+   "allow_n": 20,
+   "tn": 20,
+   "hold_n": 21,
+   "tp": 21,
+   "deploy_n": 2,
+   "deploy_held": 0,
+   "either_n": 13,
+   "either_held": 1
+  },
+  "vercel": {
+   "either_n": 92,
+   "either_held": 35,
+   "hold_n": 85,
+   "tp": 85,
+   "allow_n": 102,
+   "tn": 97,
+   "deploy_n": 10,
+   "deploy_held": 1,
+   "fp": 5
+  },
+  "supabase": {
+   "either_n": 25,
+   "either_held": 3,
+   "hold_n": 44,
+   "tp": 44,
+   "deploy_n": 5,
+   "deploy_held": 0,
+   "allow_n": 24,
+   "tn": 21,
+   "fp": 3
+  },
+  "cloudflare": {
+   "hold_n": 92,
+   "tp": 92,
+   "either_n": 94,
+   "either_held": 20,
+   "allow_n": 107,
+   "tn": 105,
+   "deploy_n": 19,
+   "deploy_held": 2,
+   "fp": 2
+  },
+  "total": {
+   "allow_n": 384,
+   "tn": 370,
+   "hold_n": 341,
+   "tp": 341,
+   "either_n": 294,
+   "either_held": 92,
+   "deploy_n": 66,
+   "deploy_held": 6,
+   "fp": 14
+  }
+ },
+ "383blind+fb": {
+  "railway": {
+   "allow_n": 110,
+   "tn": 106,
+   "hold_n": 79,
+   "tp": 79,
+   "either_n": 55,
+   "either_held": 26,
+   "deploy_n": 23,
+   "deploy_held": 3,
+   "fp": 4
+  },
+  "fly-gql": {
+   "either_n": 15,
+   "either_held": 7,
+   "allow_n": 21,
+   "tn": 21,
+   "hold_n": 20,
+   "tp": 20,
+   "deploy_n": 7,
+   "deploy_held": 0
+  },
+  "fly": {
+   "allow_n": 20,
+   "tn": 20,
+   "hold_n": 21,
+   "tp": 21,
+   "deploy_n": 2,
+   "deploy_held": 0,
+   "either_n": 13,
+   "either_held": 1
+  },
+  "vercel": {
+   "either_n": 92,
+   "either_held": 35,
+   "hold_n": 85,
+   "tp": 85,
+   "allow_n": 102,
+   "tn": 97,
+   "deploy_n": 10,
+   "deploy_held": 1,
+   "fp": 5
+  },
+  "supabase": {
+   "either_n": 25,
+   "either_held": 3,
+   "hold_n": 44,
+   "tp": 44,
+   "deploy_n": 5,
+   "deploy_held": 0,
+   "allow_n": 24,
+   "tn": 21,
+   "fp": 3
+  },
+  "cloudflare": {
+   "hold_n": 92,
+   "tp": 92,
+   "either_n": 94,
+   "either_held": 20,
+   "allow_n": 107,
+   "tn": 105,
+   "deploy_n": 19,
+   "deploy_held": 2,
+   "fp": 2
+  },
+  "total": {
+   "allow_n": 384,
+   "tn": 370,
+   "hold_n": 341,
+   "tp": 341,
+   "either_n": 294,
+   "either_held": 92,
+   "deploy_n": 66,
+   "deploy_held": 6,
+   "fp": 14
+  }
+ }
+}

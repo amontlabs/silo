@@ -1,0 +1,5528 @@
+[
+{
+"provider": "github",
+"kind": "rest",
+"name": "agent-automations/create-repo-automation",
+"method": "POST",
+"host": "api.github.com",
+"path": "/agents/repos/{owner}/{repo}/automations",
+"summary": "Create an automation for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "agent-automations/edit-repo-automation",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/agents/repos/{owner}/{repo}/automations/{automation_id}",
+"summary": "Update an automation"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "agent-automations/delete-repo-automation",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/agents/repos/{owner}/{repo}/automations/{automation_id}",
+"summary": "Delete an automation"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "agent-automations/create-repo-automation-task",
+"method": "POST",
+"host": "api.github.com",
+"path": "/agents/repos/{owner}/{repo}/automations/{automation_id}/tasks",
+"summary": "Run an automation"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "agent-merge/put-agent-merge-enrollment",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/agents/repos/{owner}/{repo}/pulls/{pull_number}/agent-merge",
+"summary": "Update Agent Merge configuration for a pull request"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "agent-merge/delete-agent-merge-enrollment",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/agents/repos/{owner}/{repo}/pulls/{pull_number}/agent-merge",
+"summary": "Disable Agent Merge for a pull request"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "agent-tasks/create-task-in-repo",
+"method": "POST",
+"host": "api.github.com",
+"path": "/agents/repos/{owner}/{repo}/tasks",
+"summary": "Start a task"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "apps/create-from-manifest",
+"method": "POST",
+"host": "api.github.com",
+"path": "/app-manifests/{code}/conversions",
+"summary": "Create a GitHub App from a manifest"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "apps/update-webhook-config-for-app",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/app/hook/config",
+"summary": "Update a webhook configuration for an app"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "apps/redeliver-webhook-delivery",
+"method": "POST",
+"host": "api.github.com",
+"path": "/app/hook/deliveries/{delivery_id}/attempts",
+"summary": "Redeliver a delivery for an app webhook"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "apps/delete-installation",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/app/installations/{installation_id}",
+"summary": "Delete an installation for the authenticated app"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "apps/create-installation-access-token",
+"method": "POST",
+"host": "api.github.com",
+"path": "/app/installations/{installation_id}/access_tokens",
+"summary": "Create an installation access token for an app"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "apps/suspend-installation",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/app/installations/{installation_id}/suspended",
+"summary": "Suspend an app installation"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "apps/unsuspend-installation",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/app/installations/{installation_id}/suspended",
+"summary": "Unsuspend an app installation"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "apps/delete-authorization",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/applications/{client_id}/grant",
+"summary": "Delete an app authorization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "apps/check-token",
+"method": "POST",
+"host": "api.github.com",
+"path": "/applications/{client_id}/token",
+"summary": "Check a token"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "apps/reset-token",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/applications/{client_id}/token",
+"summary": "Reset a token"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "apps/delete-token",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/applications/{client_id}/token",
+"summary": "Delete an app token"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "apps/scope-token",
+"method": "POST",
+"host": "api.github.com",
+"path": "/applications/{client_id}/token/scoped",
+"summary": "Create a scoped access token"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "credentials/revoke",
+"method": "POST",
+"host": "api.github.com",
+"path": "/credentials/revoke",
+"summary": "Revoke a list of credentials"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-actions-cache-retention-limit-for-enterprise",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/enterprises/{enterprise}/actions/cache/retention-limit",
+"summary": "Set GitHub Actions cache retention limit for an enterprise"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-actions-cache-storage-limit-for-enterprise",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/enterprises/{enterprise}/actions/cache/storage-limit",
+"summary": "Set GitHub Actions cache storage limit for an enterprise"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "oidc/create-oidc-custom-property-inclusion-for-enterprise",
+"method": "POST",
+"host": "api.github.com",
+"path": "/enterprises/{enterprise}/actions/oidc/customization/properties/repo",
+"summary": "Create an OIDC custom property inclusion for an enterprise"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "oidc/delete-oidc-custom-property-inclusion-for-enterprise",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/enterprises/{enterprise}/actions/oidc/customization/properties/repo/{custom_property_name}",
+"summary": "Delete an OIDC custom property inclusion for an enterprise"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "code-security/create-configuration-for-enterprise",
+"method": "POST",
+"host": "api.github.com",
+"path": "/enterprises/{enterprise}/code-security/configurations",
+"summary": "Create a code security configuration for an enterprise"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "code-security/update-enterprise-configuration",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/enterprises/{enterprise}/code-security/configurations/{configuration_id}",
+"summary": "Update a custom code security configuration for an enterprise"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "code-security/delete-configuration-for-enterprise",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/enterprises/{enterprise}/code-security/configurations/{configuration_id}",
+"summary": "Delete a code security configuration for an enterprise"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "code-security/attach-enterprise-configuration",
+"method": "POST",
+"host": "api.github.com",
+"path": "/enterprises/{enterprise}/code-security/configurations/{configuration_id}/attach",
+"summary": "Attach an enterprise configuration to repositories"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "code-security/set-configuration-as-default-for-enterprise",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/enterprises/{enterprise}/code-security/configurations/{configuration_id}/defaults",
+"summary": "Set a code security configuration as a default for an enterprise"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot/set-enterprise-code-review-policy",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/enterprises/{enterprise}/copilot/policies/code-review",
+"summary": "Set the Copilot code review policy for an enterprise"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot/set-enterprise-coding-agent-policy",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/enterprises/{enterprise}/copilot/policies/coding_agent",
+"summary": "Set the coding agent policy for an enterprise"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot/add-organizations-to-enterprise-coding-agent-policy",
+"method": "POST",
+"host": "api.github.com",
+"path": "/enterprises/{enterprise}/copilot/policies/coding_agent/organizations",
+"summary": "Add organizations to the enterprise coding agent policy"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot/remove-organizations-from-enterprise-coding-agent-policy",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/enterprises/{enterprise}/copilot/policies/coding_agent/organizations",
+"summary": "Remove organizations from the enterprise coding agent policy"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "dependabot/update-repository-access-for-enterprise",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/enterprises/{enterprise}/dependabot/repository-access",
+"summary": "Updates Dependabot's repository access list for an enterprise"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "dependabot/set-repository-access-default-level-for-enterprise",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/enterprises/{enterprise}/dependabot/repository-access/default-level",
+"summary": "Set the default repository access level for Dependabot in an enterprise"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "gists/create",
+"method": "POST",
+"host": "api.github.com",
+"path": "/gists",
+"summary": "Create a gist"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "gists/update",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/gists/{gist_id}",
+"summary": "Update a gist"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "gists/delete",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/gists/{gist_id}",
+"summary": "Delete a gist"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "gists/create-comment",
+"method": "POST",
+"host": "api.github.com",
+"path": "/gists/{gist_id}/comments",
+"summary": "Create a gist comment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "gists/update-comment",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/gists/{gist_id}/comments/{comment_id}",
+"summary": "Update a gist comment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "gists/delete-comment",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/gists/{gist_id}/comments/{comment_id}",
+"summary": "Delete a gist comment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "gists/fork",
+"method": "POST",
+"host": "api.github.com",
+"path": "/gists/{gist_id}/forks",
+"summary": "Fork a gist"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "gists/star",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/gists/{gist_id}/star",
+"summary": "Star a gist"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "gists/unstar",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/gists/{gist_id}/star",
+"summary": "Unstar a gist"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "apps/revoke-installation-access-token",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/installation/token",
+"summary": "Revoke an installation access token"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "markdown/render",
+"method": "POST",
+"host": "api.github.com",
+"path": "/markdown",
+"summary": "Render a Markdown document"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "markdown/render-raw",
+"method": "POST",
+"host": "api.github.com",
+"path": "/markdown/raw",
+"summary": "Render a Markdown document in raw mode"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "activity/mark-notifications-as-read",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/notifications",
+"summary": "Mark notifications as read"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "activity/mark-thread-as-read",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/notifications/threads/{thread_id}",
+"summary": "Mark a thread as read"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "activity/mark-thread-as-done",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/notifications/threads/{thread_id}",
+"summary": "Mark a thread as done"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "activity/set-thread-subscription",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/notifications/threads/{thread_id}/subscription",
+"summary": "Set a thread subscription"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "activity/delete-thread-subscription",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/notifications/threads/{thread_id}/subscription",
+"summary": "Delete a thread subscription"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-actions-cache-retention-limit-for-organization",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/organizations/{org}/actions/cache/retention-limit",
+"summary": "Set GitHub Actions cache retention limit for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-actions-cache-storage-limit-for-organization",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/organizations/{org}/actions/cache/storage-limit",
+"summary": "Set GitHub Actions cache storage limit for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "billing/create-organization-budget",
+"method": "POST",
+"host": "api.github.com",
+"path": "/organizations/{org}/settings/billing/budgets",
+"summary": "Create a budget for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "billing/update-budget-org",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/organizations/{org}/settings/billing/budgets/{budget_id}",
+"summary": "Update a budget for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "billing/delete-budget-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/organizations/{org}/settings/billing/budgets/{budget_id}",
+"summary": "Delete a budget for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/update",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}",
+"summary": "Update an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/delete",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}",
+"summary": "Delete an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/create-hosted-runner-for-org",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/hosted-runners",
+"summary": "Create a GitHub-hosted runner for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/delete-custom-image-from-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/hosted-runners/images/custom/{image_definition_id}",
+"summary": "Delete a custom image from the organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/delete-custom-image-version-from-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/hosted-runners/images/custom/{image_definition_id}/versions/{version}",
+"summary": "Delete an image version of custom image from the organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/update-hosted-runner-for-org",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/hosted-runners/{hosted_runner_id}",
+"summary": "Update a GitHub-hosted runner for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/delete-hosted-runner-for-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/hosted-runners/{hosted_runner_id}",
+"summary": "Delete a GitHub-hosted runner for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "oidc/create-oidc-custom-property-inclusion-for-org",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/oidc/customization/properties/repo",
+"summary": "Create an OIDC custom property inclusion for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "oidc/delete-oidc-custom-property-inclusion-for-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/oidc/customization/properties/repo/{custom_property_name}",
+"summary": "Delete an OIDC custom property inclusion for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "oidc/update-oidc-custom-sub-template-for-org",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/oidc/customization/sub",
+"summary": "Set the customization template for an OIDC subject claim for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-github-actions-permissions-organization",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/permissions",
+"summary": "Set GitHub Actions permissions for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-artifact-and-log-retention-settings-organization",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/permissions/artifact-and-log-retention",
+"summary": "Set artifact and log retention settings for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-fork-pr-contributor-approval-permissions-organization",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/permissions/fork-pr-contributor-approval",
+"summary": "Set fork PR contributor approval permissions for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-private-repo-fork-pr-workflows-settings-organization",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/permissions/fork-pr-workflows-private-repos",
+"summary": "Set private repo fork PR workflow settings for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-selected-repositories-enabled-github-actions-organization",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/permissions/repositories",
+"summary": "Set selected repositories enabled for GitHub Actions in an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/enable-selected-repository-github-actions-organization",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/permissions/repositories/{repository_id}",
+"summary": "Enable a selected repository for GitHub Actions in an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/disable-selected-repository-github-actions-organization",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/permissions/repositories/{repository_id}",
+"summary": "Disable a selected repository for GitHub Actions in an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-allowed-actions-organization",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/permissions/selected-actions",
+"summary": "Set allowed actions and reusable workflows for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-self-hosted-runners-permissions-organization",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/permissions/self-hosted-runners",
+"summary": "Set self-hosted runners settings for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-selected-repositories-self-hosted-runners-organization",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/permissions/self-hosted-runners/repositories",
+"summary": "Set repositories allowed to use self-hosted runners in an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/enable-selected-repository-self-hosted-runners-organization",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/permissions/self-hosted-runners/repositories/{repository_id}",
+"summary": "Add a repository to the list of repositories allowed to use self-hosted runners in an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/disable-selected-repository-self-hosted-runners-organization",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/permissions/self-hosted-runners/repositories/{repository_id}",
+"summary": "Remove a repository from the list of repositories allowed to use self-hosted runners in an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-github-actions-default-workflow-permissions-organization",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/permissions/workflow",
+"summary": "Set default workflow permissions for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/create-org-actions-policy",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/policies",
+"summary": "Create an organization Actions policy"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/update-org-actions-policy",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/policies/{policy_id}",
+"summary": "Update an organization Actions policy"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/delete-org-actions-policy",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/policies/{policy_id}",
+"summary": "Delete an organization Actions policy"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/create-self-hosted-runner-group-for-org",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/runner-groups",
+"summary": "Create a self-hosted runner group for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/update-self-hosted-runner-group-for-org",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/runner-groups/{runner_group_id}",
+"summary": "Update a self-hosted runner group for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/delete-self-hosted-runner-group-from-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/runner-groups/{runner_group_id}",
+"summary": "Delete a self-hosted runner group from an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-repo-access-to-self-hosted-runner-group-in-org",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/runner-groups/{runner_group_id}/repositories",
+"summary": "Set repository access for a self-hosted runner group in an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/add-repo-access-to-self-hosted-runner-group-in-org",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/runner-groups/{runner_group_id}/repositories/{repository_id}",
+"summary": "Add repository access to a self-hosted runner group in an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/remove-repo-access-to-self-hosted-runner-group-in-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/runner-groups/{runner_group_id}/repositories/{repository_id}",
+"summary": "Remove repository access to a self-hosted runner group in an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-self-hosted-runners-in-group-for-org",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/runner-groups/{runner_group_id}/runners",
+"summary": "Set self-hosted runners in a group for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/add-self-hosted-runner-to-group-for-org",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/runner-groups/{runner_group_id}/runners/{runner_id}",
+"summary": "Add a self-hosted runner to a group for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/remove-self-hosted-runner-from-group-for-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/runner-groups/{runner_group_id}/runners/{runner_id}",
+"summary": "Remove a self-hosted runner from a group for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/generate-runner-jitconfig-for-org",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/runners/generate-jitconfig",
+"summary": "Create configuration for a just-in-time runner for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/create-registration-token-for-org",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/runners/registration-token",
+"summary": "Create a registration token for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/create-remove-token-for-org",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/runners/remove-token",
+"summary": "Create a remove token for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/delete-self-hosted-runner-from-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/runners/{runner_id}",
+"summary": "Delete a self-hosted runner from an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/add-custom-labels-to-self-hosted-runner-for-org",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/runners/{runner_id}/labels",
+"summary": "Add custom labels to a self-hosted runner for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-custom-labels-for-self-hosted-runner-for-org",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/runners/{runner_id}/labels",
+"summary": "Set custom labels for a self-hosted runner for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/remove-all-custom-labels-from-self-hosted-runner-for-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/runners/{runner_id}/labels",
+"summary": "Remove all custom labels from a self-hosted runner for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/remove-custom-label-from-self-hosted-runner-for-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/runners/{runner_id}/labels/{name}",
+"summary": "Remove a custom label from a self-hosted runner for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/create-or-update-org-secret",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/secrets/{secret_name}",
+"summary": "Create or update an organization secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/delete-org-secret",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/secrets/{secret_name}",
+"summary": "Delete an organization secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-selected-repos-for-org-secret",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/secrets/{secret_name}/repositories",
+"summary": "Set selected repositories for an organization secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/add-selected-repo-to-org-secret",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/secrets/{secret_name}/repositories/{repository_id}",
+"summary": "Add selected repository to an organization secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/remove-selected-repo-from-org-secret",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/secrets/{secret_name}/repositories/{repository_id}",
+"summary": "Remove selected repository from an organization secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/create-org-variable",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/variables",
+"summary": "Create an organization variable"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/update-org-variable",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/variables/{name}",
+"summary": "Update an organization variable"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/delete-org-variable",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/variables/{name}",
+"summary": "Delete an organization variable"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-selected-repos-for-org-variable",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/variables/{name}/repositories",
+"summary": "Set selected repositories for an organization variable"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/add-selected-repo-to-org-variable",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/variables/{name}/repositories/{repository_id}",
+"summary": "Add selected repository to an organization variable"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/remove-selected-repo-from-org-variable",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/actions/variables/{name}/repositories/{repository_id}",
+"summary": "Remove selected repository from an organization variable"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "agents/create-or-update-org-secret",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/agents/secrets/{secret_name}",
+"summary": "Create or update an organization secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "agents/delete-org-secret",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/agents/secrets/{secret_name}",
+"summary": "Delete an organization secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "agents/set-selected-repos-for-org-secret",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/agents/secrets/{secret_name}/repositories",
+"summary": "Set selected repositories for an organization secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "agents/add-selected-repo-to-org-secret",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/agents/secrets/{secret_name}/repositories/{repository_id}",
+"summary": "Add selected repository to an organization secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "agents/remove-selected-repo-from-org-secret",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/agents/secrets/{secret_name}/repositories/{repository_id}",
+"summary": "Remove selected repository from an organization secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "agents/create-org-variable",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/agents/variables",
+"summary": "Create an organization variable"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "agents/update-org-variable",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/agents/variables/{name}",
+"summary": "Update an organization variable"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "agents/delete-org-variable",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/agents/variables/{name}",
+"summary": "Delete an organization variable"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "agents/set-selected-repos-for-org-variable",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/agents/variables/{name}/repositories",
+"summary": "Set selected repositories for an organization variable"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "agents/add-selected-repo-to-org-variable",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/agents/variables/{name}/repositories/{repository_id}",
+"summary": "Add selected repository to an organization variable"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "agents/remove-selected-repo-from-org-variable",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/agents/variables/{name}/repositories/{repository_id}",
+"summary": "Remove selected repository from an organization variable"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/create-artifact-deployment-record",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/artifacts/metadata/deployment-record",
+"summary": "Create an artifact deployment record"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/set-cluster-deployment-records",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/artifacts/metadata/deployment-record/cluster/{cluster}",
+"summary": "Set cluster deployment records"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/create-cluster-deployment-records-job",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/artifacts/metadata/deployment-record/cluster/{cluster}/jobs",
+"summary": "Create a cluster deployment records job"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/create-artifact-storage-record",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/artifacts/metadata/storage-record",
+"summary": "Create artifact metadata storage record"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/list-attestations-bulk",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/attestations/bulk-list",
+"summary": "List attestations by bulk subject digests"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/delete-attestations-bulk",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/attestations/delete-request",
+"summary": "Delete attestations in bulk"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/delete-attestations-by-subject-digest",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/attestations/digest/{subject_digest}",
+"summary": "Delete attestations by subject digest"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/delete-attestations-by-id",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/attestations/{attestation_id}",
+"summary": "Delete attestations by ID"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/block-user",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/blocks/{username}",
+"summary": "Block a user from an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/unblock-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/blocks/{username}",
+"summary": "Unblock a user from an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "campaigns/create-campaign",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/campaigns",
+"summary": "Create a campaign for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "campaigns/update-campaign",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/campaigns/{campaign_number}",
+"summary": "Update a campaign"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "campaigns/delete-campaign",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/campaigns/{campaign_number}",
+"summary": "Delete a campaign for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "code-scanning/update-ai-scan-enablement-for-org",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/code-scanning/ai-scan",
+"summary": "Update the AI Scan setting for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "code-security/create-configuration",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/code-security/configurations",
+"summary": "Create a code security configuration"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "code-security/detach-configuration",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/code-security/configurations/detach",
+"summary": "Detach configurations from repositories"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "code-security/update-configuration",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/code-security/configurations/{configuration_id}",
+"summary": "Update a code security configuration"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "code-security/delete-configuration",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/code-security/configurations/{configuration_id}",
+"summary": "Delete a code security configuration"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "code-security/attach-configuration",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/code-security/configurations/{configuration_id}/attach",
+"summary": "Attach a configuration to repositories"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "code-security/set-configuration-as-default",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/code-security/configurations/{configuration_id}/defaults",
+"summary": "Set a code security configuration as a default for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/set-codespaces-access",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/codespaces/access",
+"summary": "Manage access control for organization codespaces"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/set-codespaces-access-users",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/codespaces/access/selected_users",
+"summary": "Add users to Codespaces access for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/delete-codespaces-access-users",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/codespaces/access/selected_users",
+"summary": "Remove users from Codespaces access for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/create-or-update-org-secret",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/codespaces/secrets/{secret_name}",
+"summary": "Create or update an organization secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/delete-org-secret",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/codespaces/secrets/{secret_name}",
+"summary": "Delete an organization secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/set-selected-repos-for-org-secret",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/codespaces/secrets/{secret_name}/repositories",
+"summary": "Set selected repositories for an organization secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/add-selected-repo-to-org-secret",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/codespaces/secrets/{secret_name}/repositories/{repository_id}",
+"summary": "Add selected repository to an organization secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/remove-selected-repo-from-org-secret",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/codespaces/secrets/{secret_name}/repositories/{repository_id}",
+"summary": "Remove selected repository from an organization secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot-spaces/create-for-org",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/copilot-spaces",
+"summary": "Create an organization Copilot Space"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot-spaces/update-for-org",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/copilot-spaces/{space_number}",
+"summary": "Set an organization Copilot Space"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot-spaces/delete-for-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/copilot-spaces/{space_number}",
+"summary": "Delete an organization Copilot Space"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot-spaces/add-collaborator-for-org",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/copilot-spaces/{space_number}/collaborators",
+"summary": "Add a collaborator to an organization Copilot Space"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot-spaces/update-collaborator-for-org",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/copilot-spaces/{space_number}/collaborators/{actor_type}/{actor_identifier}",
+"summary": "Set a collaborator role for an organization Copilot Space"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot-spaces/remove-collaborator-for-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/copilot-spaces/{space_number}/collaborators/{actor_type}/{actor_identifier}",
+"summary": "Remove a collaborator from an organization Copilot Space"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot-spaces/create-resource-for-org",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/copilot-spaces/{space_number}/resources",
+"summary": "Create a resource for an organization Copilot Space"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot-spaces/update-resource-for-org",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/copilot-spaces/{space_number}/resources/{space_resource_id}",
+"summary": "Set a resource for an organization Copilot Space"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot-spaces/delete-resource-for-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/copilot-spaces/{space_number}/resources/{space_resource_id}",
+"summary": "Delete a resource from an organization Copilot Space"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot/add-copilot-seats-for-teams",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/copilot/billing/selected_teams",
+"summary": "Add teams to the Copilot subscription for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot/cancel-copilot-seat-assignment-for-teams",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/copilot/billing/selected_teams",
+"summary": "Remove teams from the Copilot subscription for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot/add-copilot-seats-for-users",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/copilot/billing/selected_users",
+"summary": "Add users to the Copilot subscription for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot/cancel-copilot-seat-assignment-for-users",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/copilot/billing/selected_users",
+"summary": "Remove users from the Copilot subscription for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot/set-organization-code-review-runner",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/copilot/code-review/runner",
+"summary": "Set the Copilot code review runner configuration for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot/update-organization-code-review-settings",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/copilot/code-review/settings",
+"summary": "Update Copilot code review settings for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot/set-copilot-coding-agent-permissions-organization",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/copilot/coding-agent/permissions",
+"summary": "Set Copilot cloud agent permissions for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot/set-copilot-coding-agent-selected-repositories-for-organization",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/copilot/coding-agent/permissions/repositories",
+"summary": "Set selected repositories for Copilot cloud agent in an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot/enable-copilot-coding-agent-for-repository-in-organization",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/copilot/coding-agent/permissions/repositories/{repository_id}",
+"summary": "Enable a repository for Copilot cloud agent in an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot/disable-copilot-coding-agent-for-repository-in-organization",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/copilot/coding-agent/permissions/repositories/{repository_id}",
+"summary": "Disable a repository for Copilot cloud agent in an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot/set-copilot-content-exclusion-for-organization",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/copilot/content_exclusion",
+"summary": "Set Copilot content exclusion rules for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot/set-organization-code-review-policy",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/copilot/policies/code-review",
+"summary": "Set the Copilot code review policy for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "dependabot/update-repository-access-for-org",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/dependabot/repository-access",
+"summary": "Updates Dependabot's repository access list for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "dependabot/set-repository-access-default-level",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/dependabot/repository-access/default-level",
+"summary": "Set the default repository access level for Dependabot"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "dependabot/create-or-update-org-secret",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/dependabot/secrets/{secret_name}",
+"summary": "Create or update an organization secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "dependabot/delete-org-secret",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/dependabot/secrets/{secret_name}",
+"summary": "Delete an organization secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "dependabot/set-selected-repos-for-org-secret",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/dependabot/secrets/{secret_name}/repositories",
+"summary": "Set selected repositories for an organization secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "dependabot/add-selected-repo-to-org-secret",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/dependabot/secrets/{secret_name}/repositories/{repository_id}",
+"summary": "Add selected repository to an organization secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "dependabot/remove-selected-repo-from-org-secret",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/dependabot/secrets/{secret_name}/repositories/{repository_id}",
+"summary": "Remove selected repository from an organization secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/create-webhook",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/hooks",
+"summary": "Create an organization webhook"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/update-webhook",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/hooks/{hook_id}",
+"summary": "Update an organization webhook"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/delete-webhook",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/hooks/{hook_id}",
+"summary": "Delete an organization webhook"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/update-webhook-config-for-org",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/hooks/{hook_id}/config",
+"summary": "Update a webhook configuration for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/redeliver-webhook-delivery",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/hooks/{hook_id}/deliveries/{delivery_id}/attempts",
+"summary": "Redeliver a delivery for an organization webhook"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/ping-webhook",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/hooks/{hook_id}/pings",
+"summary": "Ping an organization webhook"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "interactions/set-restrictions-for-org",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/interaction-limits",
+"summary": "Set interaction restrictions for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "interactions/remove-restrictions-for-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/interaction-limits",
+"summary": "Remove interaction restrictions for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "interactions/update-pull-request-creation-cap-for-org",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/interaction-limits/pulls/creation-cap",
+"summary": "Update pull request creation cap for an org"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/create-invitation",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/invitations",
+"summary": "Create an organization invitation"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/cancel-invitation",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/invitations/{invitation_id}",
+"summary": "Cancel an organization invitation"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/create-issue-field",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/issue-fields",
+"summary": "Create issue field for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/update-issue-field",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/issue-fields/{issue_field_id}",
+"summary": "Update issue field for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/delete-issue-field",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/issue-fields/{issue_field_id}",
+"summary": "Delete issue field for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/create-issue-type",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/issue-types",
+"summary": "Create issue type for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/update-issue-type",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/issue-types/{issue_type_id}",
+"summary": "Update issue type for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/delete-issue-type",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/issue-types/{issue_type_id}",
+"summary": "Delete issue type for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/remove-member",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/members/{username}",
+"summary": "Remove an organization member"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/delete-from-organization",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/members/{username}/codespaces/{codespace_name}",
+"summary": "Delete a codespace from the organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/stop-in-organization",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/members/{username}/codespaces/{codespace_name}/stop",
+"summary": "Stop a codespace for an organization user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/set-membership-for-user",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/memberships/{username}",
+"summary": "Set organization membership for a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/remove-membership-for-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/memberships/{username}",
+"summary": "Remove organization membership for a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "migrations/start-for-org",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/migrations",
+"summary": "Start an organization migration"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "migrations/delete-archive-for-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/migrations/{migration_id}/archive",
+"summary": "Delete an organization migration archive"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "migrations/unlock-repo-for-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/migrations/{migration_id}/repos/{repo_name}/lock",
+"summary": "Unlock an organization repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/revoke-all-org-roles-team",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/organization-roles/teams/{team_slug}",
+"summary": "Remove all organization roles for a team"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/assign-team-to-org-role",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/organization-roles/teams/{team_slug}/{role_id}",
+"summary": "Assign an organization role to a team"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/revoke-org-role-team",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/organization-roles/teams/{team_slug}/{role_id}",
+"summary": "Remove an organization role from a team"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/revoke-all-org-roles-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/organization-roles/users/{username}",
+"summary": "Remove all organization roles for a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/assign-user-to-org-role",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/organization-roles/users/{username}/{role_id}",
+"summary": "Assign an organization role to a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/revoke-org-role-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/organization-roles/users/{username}/{role_id}",
+"summary": "Remove an organization role from a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/convert-member-to-outside-collaborator",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/outside_collaborators/{username}",
+"summary": "Convert an organization member to outside collaborator"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/remove-outside-collaborator",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/outside_collaborators/{username}",
+"summary": "Remove outside collaborator from an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "packages/delete-package-for-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/packages/{package_type}/{package_name}",
+"summary": "Delete a package for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "packages/restore-package-for-org",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/packages/{package_type}/{package_name}/restore",
+"summary": "Restore a package for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "packages/delete-package-version-for-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/packages/{package_type}/{package_name}/versions/{package_version_id}",
+"summary": "Delete package version for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "packages/restore-package-version-for-org",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/packages/{package_type}/{package_name}/versions/{package_version_id}/restore",
+"summary": "Restore package version for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/review-pat-grant-requests-in-bulk",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/personal-access-token-requests",
+"summary": "Review requests to access organization resources with fine-grained personal access tokens"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/review-pat-grant-request",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/personal-access-token-requests/{pat_request_id}",
+"summary": "Review a request to access organization resources with a fine-grained personal access token"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/update-pat-accesses",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/personal-access-tokens",
+"summary": "Update the access to organization resources via fine-grained personal access tokens"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/update-pat-access",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/personal-access-tokens/{pat_id}",
+"summary": "Update the access a fine-grained personal access token has to organization resources"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "private-registries/create-org-private-registry",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/private-registries",
+"summary": "Create a private registry for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "private-registries/update-org-private-registry",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/private-registries/{secret_name}",
+"summary": "Update a private registry for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "private-registries/delete-org-private-registry",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/private-registries/{secret_name}",
+"summary": "Delete a private registry for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "projects/create-draft-item-for-org",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/projectsV2/{project_number}/drafts",
+"summary": "Create draft item for organization owned project"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "projects/add-field-for-org",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/projectsV2/{project_number}/fields",
+"summary": "Add a field to an organization-owned project."
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "projects/add-item-for-org",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/projectsV2/{project_number}/items",
+"summary": "Add item to organization owned project"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "projects/update-item-for-org",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/projectsV2/{project_number}/items/{item_id}",
+"summary": "Update project item for organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "projects/delete-item-for-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/projectsV2/{project_number}/items/{item_id}",
+"summary": "Delete project item for organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "projects/create-view-for-org",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/projectsV2/{project_number}/views",
+"summary": "Create a view for an organization-owned project"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/external-properties-for-repos-register-organization-app-installation",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/properties/installations",
+"summary": "Register an app installation for external custom properties"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/external-properties-for-repos-create-or-update-organization-values",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/properties/installations/values",
+"summary": "Create or update external custom property values for organization repositories"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/external-properties-for-repos-create-or-update-values-for-organization-property",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/properties/installations/values/{property_name}",
+"summary": "Create or update external custom property values for a property across organization repositories"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/external-properties-for-repos-delete-organization-values",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/properties/installations/values/{property_name}",
+"summary": "Remove all external custom property values for a property across all organization repositories"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/custom-properties-for-repos-create-or-update-organization-definitions",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/properties/schema",
+"summary": "Create or update custom properties for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/custom-properties-for-repos-create-or-update-organization-definition",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/properties/schema/{custom_property_name}",
+"summary": "Create or update a custom property for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/custom-properties-for-repos-delete-organization-definition",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/properties/schema/{custom_property_name}",
+"summary": "Remove a custom property for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/custom-properties-for-repos-create-or-update-organization-values",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/properties/values",
+"summary": "Create or update custom property values for organization repositories"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/set-public-membership-for-authenticated-user",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/public_members/{username}",
+"summary": "Set public organization membership for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/remove-public-membership-for-authenticated-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/public_members/{username}",
+"summary": "Remove public organization membership for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-in-org",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/repos",
+"summary": "Create an organization repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-org-ruleset",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/rulesets",
+"summary": "Create an organization repository ruleset"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/update-org-ruleset",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/rulesets/{ruleset_id}",
+"summary": "Update an organization repository ruleset"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/delete-org-ruleset",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/rulesets/{ruleset_id}",
+"summary": "Delete an organization repository ruleset"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "secret-scanning/bulk-create-org-custom-patterns",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/secret-scanning/custom-patterns",
+"summary": "Bulk create organization custom patterns"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "secret-scanning/bulk-delete-org-custom-patterns",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/secret-scanning/custom-patterns",
+"summary": "Bulk delete organization custom patterns"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "secret-scanning/update-org-custom-pattern",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/secret-scanning/custom-patterns/{pattern_id}",
+"summary": "Update an organization custom pattern"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "secret-scanning/update-org-pattern-configs",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/secret-scanning/pattern-configurations",
+"summary": "Update organization pattern configurations"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/add-security-manager-team",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/security-managers/teams/{team_slug}",
+"summary": "Add a security manager team"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/remove-security-manager-team",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/security-managers/teams/{team_slug}",
+"summary": "Remove a security manager team"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/set-immutable-releases-settings",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/settings/immutable-releases",
+"summary": "Set immutable releases settings for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/set-immutable-releases-settings-repositories",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/settings/immutable-releases/repositories",
+"summary": "Set selected repositories for immutable releases enforcement"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/enable-selected-repository-immutable-releases-organization",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/settings/immutable-releases/repositories/{repository_id}",
+"summary": "Enable a selected repository for immutable releases in an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/disable-selected-repository-immutable-releases-organization",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/settings/immutable-releases/repositories/{repository_id}",
+"summary": "Disable a selected repository for immutable releases in an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "hosted-compute/create-network-configuration-for-org",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/settings/network-configurations",
+"summary": "Create a hosted compute network configuration for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "hosted-compute/update-network-configuration-for-org",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/settings/network-configurations/{network_configuration_id}",
+"summary": "Update a hosted compute network configuration for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "hosted-compute/delete-network-configuration-from-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/settings/network-configurations/{network_configuration_id}",
+"summary": "Delete a hosted compute network configuration from an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "teams/create",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/teams",
+"summary": "Create a team"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "teams/update-in-org",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/orgs/{org}/teams/{team_slug}",
+"summary": "Update a team"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "teams/delete-in-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/teams/{team_slug}",
+"summary": "Delete a team"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot/set-copilot-team-customizations",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/teams/{team_slug}/copilot/customizations",
+"summary": "Set Copilot customizations for a team"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot/delete-copilot-team-customizations",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/teams/{team_slug}/copilot/customizations",
+"summary": "Delete Copilot customizations for a team"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "teams/add-or-update-membership-for-user-in-org",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/teams/{team_slug}/memberships/{username}",
+"summary": "Add or update team membership for a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "teams/remove-membership-for-user-in-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/teams/{team_slug}/memberships/{username}",
+"summary": "Remove team membership for a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "teams/add-or-update-repo-permissions-in-org",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/orgs/{org}/teams/{team_slug}/repos/{owner}/{repo}",
+"summary": "Add or update team repository permissions"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "teams/remove-repo-in-org",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/orgs/{org}/teams/{team_slug}/repos/{owner}/{repo}",
+"summary": "Remove a repository from a team"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/enable-or-disable-security-product-on-all-org-repos",
+"method": "POST",
+"host": "api.github.com",
+"path": "/orgs/{org}/{security_product}/{enablement}",
+"summary": "Enable or disable a security feature for an organization"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/update",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}",
+"summary": "Update a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/delete",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}",
+"summary": "Delete a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/delete-artifact",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/artifacts/{artifact_id}",
+"summary": "Delete an artifact"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-actions-cache-retention-limit-for-repository",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/cache/retention-limit",
+"summary": "Set GitHub Actions cache retention limit for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-actions-cache-storage-limit-for-repository",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/cache/storage-limit",
+"summary": "Set GitHub Actions cache storage limit for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/delete-actions-cache-by-key",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/caches",
+"summary": "Delete GitHub Actions caches for a repository (using a cache key)"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/delete-actions-cache-by-id",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/caches/{cache_id}",
+"summary": "Delete a GitHub Actions cache for a repository (using a cache ID)"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/re-run-job-for-workflow-run",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/jobs/{job_id}/rerun",
+"summary": "Re-run a job from a workflow run"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-custom-oidc-sub-claim-for-repo",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/oidc/customization/sub",
+"summary": "Set the customization template for an OIDC subject claim for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-github-actions-permissions-repository",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/permissions",
+"summary": "Set GitHub Actions permissions for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-workflow-access-to-repository",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/permissions/access",
+"summary": "Set the level of access for workflows outside of the repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-artifact-and-log-retention-settings-repository",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/permissions/artifact-and-log-retention",
+"summary": "Set artifact and log retention settings for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-fork-pr-contributor-approval-permissions-repository",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/permissions/fork-pr-contributor-approval",
+"summary": "Set fork PR contributor approval permissions for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-private-repo-fork-pr-workflows-settings-repository",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/permissions/fork-pr-workflows-private-repos",
+"summary": "Set private repo fork PR workflow settings for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-allowed-actions-repository",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/permissions/selected-actions",
+"summary": "Set allowed actions and reusable workflows for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-github-actions-default-workflow-permissions-repository",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/permissions/workflow",
+"summary": "Set default workflow permissions for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/create-repo-actions-policy",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/policies",
+"summary": "Create a repository Actions policy"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/update-repo-actions-policy",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/policies/{policy_id}",
+"summary": "Update a repository Actions policy"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/delete-repo-actions-policy",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/policies/{policy_id}",
+"summary": "Delete a repository Actions policy"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/generate-runner-jitconfig-for-repo",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/runners/generate-jitconfig",
+"summary": "Create configuration for a just-in-time runner for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/create-registration-token-for-repo",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/runners/registration-token",
+"summary": "Create a registration token for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/create-remove-token-for-repo",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/runners/remove-token",
+"summary": "Create a remove token for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/delete-self-hosted-runner-from-repo",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/runners/{runner_id}",
+"summary": "Delete a self-hosted runner from a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/add-custom-labels-to-self-hosted-runner-for-repo",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/runners/{runner_id}/labels",
+"summary": "Add custom labels to a self-hosted runner for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/set-custom-labels-for-self-hosted-runner-for-repo",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/runners/{runner_id}/labels",
+"summary": "Set custom labels for a self-hosted runner for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/remove-all-custom-labels-from-self-hosted-runner-for-repo",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/runners/{runner_id}/labels",
+"summary": "Remove all custom labels from a self-hosted runner for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/remove-custom-label-from-self-hosted-runner-for-repo",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/runners/{runner_id}/labels/{name}",
+"summary": "Remove a custom label from a self-hosted runner for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/delete-workflow-run",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/runs/{run_id}",
+"summary": "Delete a workflow run"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/approve-workflow-run",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/runs/{run_id}/approve",
+"summary": "Approve a workflow run for a fork pull request"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/cancel-workflow-run",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/runs/{run_id}/cancel",
+"summary": "Cancel a workflow run"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/review-custom-gates-for-run",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/runs/{run_id}/deployment_protection_rule",
+"summary": "Review custom deployment protection rules for a workflow run"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/force-cancel-workflow-run",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/runs/{run_id}/force-cancel",
+"summary": "Force cancel a workflow run"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/delete-workflow-run-logs",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/runs/{run_id}/logs",
+"summary": "Delete workflow run logs"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/review-pending-deployments-for-run",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/runs/{run_id}/pending_deployments",
+"summary": "Review pending deployments for a workflow run"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/re-run-workflow",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/runs/{run_id}/rerun",
+"summary": "Re-run a workflow"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/re-run-workflow-failed-jobs",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/runs/{run_id}/rerun-failed-jobs",
+"summary": "Re-run failed jobs from a workflow run"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/create-or-update-repo-secret",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/secrets/{secret_name}",
+"summary": "Create or update a repository secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/delete-repo-secret",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/secrets/{secret_name}",
+"summary": "Delete a repository secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/create-repo-variable",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/variables",
+"summary": "Create a repository variable"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/update-repo-variable",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/variables/{name}",
+"summary": "Update a repository variable"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/delete-repo-variable",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/variables/{name}",
+"summary": "Delete a repository variable"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/disable-workflow",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/workflows/{workflow_id}/disable",
+"summary": "Disable a workflow"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/create-workflow-dispatch",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches",
+"summary": "Create a workflow dispatch event"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/enable-workflow",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/actions/workflows/{workflow_id}/enable",
+"summary": "Enable a workflow"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "agents/create-or-update-repo-secret",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/agents/secrets/{secret_name}",
+"summary": "Create or update a repository secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "agents/delete-repo-secret",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/agents/secrets/{secret_name}",
+"summary": "Delete a repository secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "agents/create-repo-variable",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/agents/variables",
+"summary": "Create a repository variable"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "agents/update-repo-variable",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/agents/variables/{name}",
+"summary": "Update a repository variable"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "agents/delete-repo-variable",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/agents/variables/{name}",
+"summary": "Delete a repository variable"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-attestation",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/attestations",
+"summary": "Create an attestation"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-autolink",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/autolinks",
+"summary": "Create an autolink reference for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/delete-autolink",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/autolinks/{autolink_id}",
+"summary": "Delete an autolink reference from a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/enable-automated-security-fixes",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/automated-security-fixes",
+"summary": "Enable Dependabot security updates"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/disable-automated-security-fixes",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/automated-security-fixes",
+"summary": "Disable Dependabot security updates"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/update-branch-protection",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection",
+"summary": "Update branch protection"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/delete-branch-protection",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection",
+"summary": "Delete branch protection"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/set-admin-branch-protection",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection/enforce_admins",
+"summary": "Set admin branch protection"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/delete-admin-branch-protection",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection/enforce_admins",
+"summary": "Delete admin branch protection"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/update-pull-request-review-protection",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection/required_pull_request_reviews",
+"summary": "Update pull request review protection"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/delete-pull-request-review-protection",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection/required_pull_request_reviews",
+"summary": "Delete pull request review protection"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-commit-signature-protection",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection/required_signatures",
+"summary": "Create commit signature protection"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/delete-commit-signature-protection",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection/required_signatures",
+"summary": "Delete commit signature protection"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/update-status-check-protection",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks",
+"summary": "Update status check protection"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/remove-status-check-protection",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks",
+"summary": "Remove status check protection"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/add-status-check-contexts",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks/contexts",
+"summary": "Add status check contexts"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/set-status-check-contexts",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks/contexts",
+"summary": "Set status check contexts"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/remove-status-check-contexts",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks/contexts",
+"summary": "Remove status check contexts"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/delete-access-restrictions",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection/restrictions",
+"summary": "Delete access restrictions"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/add-app-access-restrictions",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection/restrictions/apps",
+"summary": "Add app access restrictions"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/set-app-access-restrictions",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection/restrictions/apps",
+"summary": "Set app access restrictions"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/remove-app-access-restrictions",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection/restrictions/apps",
+"summary": "Remove app access restrictions"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/add-team-access-restrictions",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection/restrictions/teams",
+"summary": "Add team access restrictions"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/set-team-access-restrictions",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection/restrictions/teams",
+"summary": "Set team access restrictions"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/remove-team-access-restrictions",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection/restrictions/teams",
+"summary": "Remove team access restrictions"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/add-user-access-restrictions",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection/restrictions/users",
+"summary": "Add user access restrictions"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/set-user-access-restrictions",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection/restrictions/users",
+"summary": "Set user access restrictions"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/remove-user-access-restrictions",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/protection/restrictions/users",
+"summary": "Remove user access restrictions"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/rename-branch",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/branches/{branch}/rename",
+"summary": "Rename a branch"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "checks/create",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/check-runs",
+"summary": "Create a check run"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "checks/update",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/check-runs/{check_run_id}",
+"summary": "Update a check run"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "checks/rerequest-run",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/check-runs/{check_run_id}/rerequest",
+"summary": "Rerequest a check run"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "checks/create-suite",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/check-suites",
+"summary": "Create a check suite"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "checks/set-suites-preferences",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/check-suites/preferences",
+"summary": "Update repository preferences for check suites"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "checks/rerequest-suite",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/check-suites/{check_suite_id}/rerequest",
+"summary": "Rerequest a check suite"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "code-quality/update-setup",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/code-quality/setup",
+"summary": "Update a code quality setup configuration"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "code-scanning/update-ai-scan-enablement",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/code-scanning/ai-scan",
+"summary": "Update AI Scan enablement for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "code-scanning/update-alert",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/code-scanning/alerts/{alert_number}",
+"summary": "Update a code scanning alert"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "code-scanning/create-autofix",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/code-scanning/alerts/{alert_number}/autofix",
+"summary": "Create an autofix for a code scanning alert"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "code-scanning/commit-autofix",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/code-scanning/alerts/{alert_number}/autofix/commits",
+"summary": "Commit an autofix for a code scanning alert"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "code-scanning/delete-analysis",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/code-scanning/analyses/{analysis_id}",
+"summary": "Delete a code scanning analysis from a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "code-scanning/delete-codeql-database",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/code-scanning/codeql/databases/{language}",
+"summary": "Delete a CodeQL database"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "code-scanning/create-variant-analysis",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/code-scanning/codeql/variant-analyses",
+"summary": "Create a CodeQL variant analysis"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "code-scanning/update-default-setup",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/code-scanning/default-setup",
+"summary": "Update a code scanning default setup configuration"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "code-scanning/upload-sarif",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/code-scanning/sarifs",
+"summary": "Upload an analysis as SARIF data"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/create-with-repo-for-authenticated-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/codespaces",
+"summary": "Create a codespace in a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/create-or-update-repo-secret",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/codespaces/secrets/{secret_name}",
+"summary": "Create or update a repository secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/delete-repo-secret",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/codespaces/secrets/{secret_name}",
+"summary": "Delete a repository secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/add-collaborator",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/collaborators/{username}",
+"summary": "Add a repository collaborator"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/remove-collaborator",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/collaborators/{username}",
+"summary": "Remove a repository collaborator"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/update-commit-comment",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/comments/{comment_id}",
+"summary": "Update a commit comment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/delete-commit-comment",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/comments/{comment_id}",
+"summary": "Delete a commit comment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "reactions/create-for-commit-comment",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/comments/{comment_id}/reactions",
+"summary": "Create reaction for a commit comment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "reactions/delete-for-commit-comment",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/comments/{comment_id}/reactions/{reaction_id}",
+"summary": "Delete a commit comment reaction"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-commit-comment",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/commits/{commit_sha}/comments",
+"summary": "Create a commit comment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-or-update-file-contents",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/contents/{path}",
+"summary": "Create or update file contents"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/delete-file",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/contents/{path}",
+"summary": "Delete a file"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot/update-repository-code-review-settings",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/copilot/code-review/settings",
+"summary": "Update Copilot code review settings for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "dependabot/update-alert",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/dependabot/alerts/{alert_number}",
+"summary": "Update a Dependabot alert"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "dependabot/set-repository-runner-settings",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/dependabot/runner-settings",
+"summary": "Set repository Dependabot runner settings"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "dependabot/create-or-update-repo-secret",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/dependabot/secrets/{secret_name}",
+"summary": "Create or update a repository secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "dependabot/delete-repo-secret",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/dependabot/secrets/{secret_name}",
+"summary": "Delete a repository secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "dependency-graph/create-repository-snapshot",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/dependency-graph/snapshots",
+"summary": "Create a snapshot of dependencies for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-deployment",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/deployments",
+"summary": "Create a deployment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/delete-deployment",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/deployments/{deployment_id}",
+"summary": "Delete a deployment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-deployment-status",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/deployments/{deployment_id}/statuses",
+"summary": "Create a deployment status"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-dispatch-event",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/dispatches",
+"summary": "Create a repository dispatch event"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-or-update-environment",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/environments/{environment_name}",
+"summary": "Create or update an environment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/delete-an-environment",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/environments/{environment_name}",
+"summary": "Delete an environment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-deployment-branch-policy",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies",
+"summary": "Create a deployment branch policy"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/update-deployment-branch-policy",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies/{branch_policy_id}",
+"summary": "Update a deployment branch policy"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/delete-deployment-branch-policy",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies/{branch_policy_id}",
+"summary": "Delete a deployment branch policy"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-deployment-protection-rule",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/environments/{environment_name}/deployment_protection_rules",
+"summary": "Create a custom deployment protection rule on an environment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/disable-deployment-protection-rule",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/environments/{environment_name}/deployment_protection_rules/{protection_rule_id}",
+"summary": "Disable a custom protection rule for an environment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/create-or-update-environment-secret",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/environments/{environment_name}/secrets/{secret_name}",
+"summary": "Create or update an environment secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/delete-environment-secret",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/environments/{environment_name}/secrets/{secret_name}",
+"summary": "Delete an environment secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/create-environment-variable",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/environments/{environment_name}/variables",
+"summary": "Create an environment variable"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/update-environment-variable",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/environments/{environment_name}/variables/{name}",
+"summary": "Update an environment variable"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "actions/delete-environment-variable",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/environments/{environment_name}/variables/{name}",
+"summary": "Delete an environment variable"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-fork",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/forks",
+"summary": "Create a fork"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "git/create-blob",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/git/blobs",
+"summary": "Create a blob"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "git/create-commit",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/git/commits",
+"summary": "Create a commit"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "git/create-ref",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/git/refs",
+"summary": "Create a reference"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "git/update-ref",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/git/refs/{ref}",
+"summary": "Update a reference"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "git/delete-ref",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/git/refs/{ref}",
+"summary": "Delete a reference"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "git/create-tag",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/git/tags",
+"summary": "Create a tag object"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "git/create-tree",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/git/trees",
+"summary": "Create a tree"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-webhook",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/hooks",
+"summary": "Create a repository webhook"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/update-webhook",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/hooks/{hook_id}",
+"summary": "Update a repository webhook"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/delete-webhook",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/hooks/{hook_id}",
+"summary": "Delete a repository webhook"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/update-webhook-config-for-repo",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/hooks/{hook_id}/config",
+"summary": "Update a webhook configuration for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/redeliver-webhook-delivery",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/hooks/{hook_id}/deliveries/{delivery_id}/attempts",
+"summary": "Redeliver a delivery for a repository webhook"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/ping-webhook",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/hooks/{hook_id}/pings",
+"summary": "Ping a repository webhook"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/test-push-webhook",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/hooks/{hook_id}/tests",
+"summary": "Test the push repository webhook"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/enable-immutable-releases",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/immutable-releases",
+"summary": "Enable immutable releases"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/disable-immutable-releases",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/immutable-releases",
+"summary": "Disable immutable releases"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "migrations/start-import",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/import",
+"summary": "Start an import"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "migrations/update-import",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/import",
+"summary": "Update an import"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "migrations/cancel-import",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/import",
+"summary": "Cancel an import"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "migrations/map-commit-author",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/import/authors/{author_id}",
+"summary": "Map a commit author"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "migrations/set-lfs-preference",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/import/lfs",
+"summary": "Update Git LFS preference"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "interactions/set-restrictions-for-repo",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/interaction-limits",
+"summary": "Set interaction restrictions for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "interactions/remove-restrictions-for-repo",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/interaction-limits",
+"summary": "Remove interaction restrictions for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "interactions/set-pull-request-bypass-list-for-repo",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/interaction-limits/pulls/bypass-list",
+"summary": "Add users to the pull request creation cap bypass list for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "interactions/remove-pull-request-bypass-list-for-repo",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/interaction-limits/pulls/bypass-list",
+"summary": "Remove users from the pull request creation cap bypass list for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "interactions/update-pull-request-creation-cap-for-repo",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/interaction-limits/pulls/creation-cap",
+"summary": "Update pull request creation cap for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/update-invitation",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/invitations/{invitation_id}",
+"summary": "Update a repository invitation"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/delete-invitation",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/invitations/{invitation_id}",
+"summary": "Delete a repository invitation"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/create",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues",
+"summary": "Create an issue"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/update-comment",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/comments/{comment_id}",
+"summary": "Update an issue comment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/delete-comment",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/comments/{comment_id}",
+"summary": "Delete an issue comment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/pin-comment",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/comments/{comment_id}/pin",
+"summary": "Pin an issue comment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/unpin-comment",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/comments/{comment_id}/pin",
+"summary": "Unpin an issue comment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "reactions/create-for-issue-comment",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/comments/{comment_id}/reactions",
+"summary": "Create reaction for an issue comment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "reactions/delete-for-issue-comment",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/comments/{comment_id}/reactions/{reaction_id}",
+"summary": "Delete an issue comment reaction"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/update",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}",
+"summary": "Update an issue"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/create-issue-artifact",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/artifacts",
+"summary": "Create an issue artifact"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/update-issue-artifact",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/artifacts/{artifact_number}",
+"summary": "Update an issue artifact"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/delete-issue-artifact",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/artifacts/{artifact_number}",
+"summary": "Delete an issue artifact"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/add-assignees",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/assignees",
+"summary": "Add assignees to an issue"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/remove-assignees",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/assignees",
+"summary": "Remove assignees from an issue"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/create-comment",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/comments",
+"summary": "Create an issue comment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/add-blocked-by-dependency",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by",
+"summary": "Add a dependency an issue is blocked by"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/remove-dependency-blocked-by",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by/{issue_id}",
+"summary": "Remove dependency an issue is blocked by"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/add-issue-field-values",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/issue-field-values",
+"summary": "Add issue field values to an issue"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/set-issue-field-values",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/issue-field-values",
+"summary": "Set issue field values for an issue"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/delete-issue-field-value",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/issue-field-values/{issue_field_id}",
+"summary": "Delete an issue field value from an issue"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/add-labels",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/labels",
+"summary": "Add labels to an issue"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/set-labels",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/labels",
+"summary": "Set labels for an issue"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/remove-all-labels",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/labels",
+"summary": "Remove all labels from an issue"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/remove-label",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/labels/{name}",
+"summary": "Remove a label from an issue"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/lock",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/lock",
+"summary": "Lock an issue"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/unlock",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/lock",
+"summary": "Unlock an issue"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "reactions/create-for-issue",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/reactions",
+"summary": "Create reaction for an issue"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "reactions/delete-for-issue",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/reactions/{reaction_id}",
+"summary": "Delete an issue reaction"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/add-relates-to",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/relates_to",
+"summary": "Add a related issue"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/remove-relates-to",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/relates_to/{issue_id}",
+"summary": "Remove a related issue"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/remove-sub-issue",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/sub_issue",
+"summary": "Remove sub-issue"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/add-sub-issue",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/sub_issues",
+"summary": "Add sub-issue"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/reprioritize-sub-issue",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/sub_issues/priority",
+"summary": "Reprioritize sub-issue"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/approve-suggestion",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/suggestions/{suggestion_id}/approve",
+"summary": "Approve an issue suggestion"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/dismiss-suggestion",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/issues/{issue_number}/suggestions/{suggestion_id}/dismiss",
+"summary": "Dismiss an issue suggestion"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-deploy-key",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/keys",
+"summary": "Create a deploy key"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/delete-deploy-key",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/keys/{key_id}",
+"summary": "Delete a deploy key"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/create-label",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/labels",
+"summary": "Create a label"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/update-label",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/labels/{name}",
+"summary": "Update a label"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/delete-label",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/labels/{name}",
+"summary": "Delete a label"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/merge-upstream",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/merge-upstream",
+"summary": "Sync a fork branch with the upstream repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/merge",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/merges",
+"summary": "Merge a branch"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/create-milestone",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/milestones",
+"summary": "Create a milestone"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/update-milestone",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/milestones/{milestone_number}",
+"summary": "Update a milestone"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "issues/delete-milestone",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/milestones/{milestone_number}",
+"summary": "Delete a milestone"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "activity/mark-repo-notifications-as-read",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/notifications",
+"summary": "Mark repository notifications as read"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-pages-site",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pages",
+"summary": "Create a GitHub Pages site"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/update-information-about-pages-site",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pages",
+"summary": "Update information about a GitHub Pages site"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/delete-pages-site",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pages",
+"summary": "Delete a GitHub Pages site"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/request-pages-build",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pages/builds",
+"summary": "Request a GitHub Pages build"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-pages-deployment",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pages/deployments",
+"summary": "Create a GitHub Pages deployment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/cancel-pages-deployment",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pages/deployments/{pages_deployment_id}/cancel",
+"summary": "Cancel a GitHub Pages deployment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/enable-private-vulnerability-reporting",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/private-vulnerability-reporting",
+"summary": "Enable private vulnerability reporting for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/disable-private-vulnerability-reporting",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/private-vulnerability-reporting",
+"summary": "Disable private vulnerability reporting for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/custom-properties-for-repos-create-or-update-repository-values",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/properties/values",
+"summary": "Create or update custom property values for a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "pulls/create",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pulls",
+"summary": "Create a pull request"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "pulls/update-review-comment",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pulls/comments/{comment_id}",
+"summary": "Update a review comment for a pull request"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "pulls/delete-review-comment",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pulls/comments/{comment_id}",
+"summary": "Delete a review comment for a pull request"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "reactions/create-for-pull-request-review-comment",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions",
+"summary": "Create reaction for a pull request review comment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "reactions/delete-for-pull-request-comment",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions/{reaction_id}",
+"summary": "Delete a pull request comment reaction"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "pulls/update",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pulls/{pull_number}",
+"summary": "Update a pull request"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/create-with-pr-for-authenticated-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pulls/{pull_number}/codespaces",
+"summary": "Create a codespace from a pull request"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "pulls/create-review-comment",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pulls/{pull_number}/comments",
+"summary": "Create a review comment for a pull request"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "pulls/create-reply-for-review-comment",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies",
+"summary": "Create a reply for a review comment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "pulls/request-copilot-code-review",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pulls/{pull_number}/copilot-code-review",
+"summary": "Request a Copilot code review for a pull request"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "pulls/merge",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pulls/{pull_number}/merge",
+"summary": "Merge a pull request"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "pulls/merge-async",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pulls/{pull_number}/merge-async",
+"summary": "Merge a pull request asynchronously"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "pulls/request-reviewers",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers",
+"summary": "Request reviewers for a pull request"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "pulls/remove-requested-reviewers",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers",
+"summary": "Remove requested reviewers from a pull request"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "pulls/rerequest-reviewers",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers/rerequest",
+"summary": "Rerequest reviewers for a pull request"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "pulls/create-review",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pulls/{pull_number}/reviews",
+"summary": "Create a review for a pull request"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "pulls/update-review",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}",
+"summary": "Update a review for a pull request"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "pulls/delete-pending-review",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}",
+"summary": "Delete a pending review for a pull request"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "pulls/dismiss-review",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/dismissals",
+"summary": "Dismiss a review for a pull request"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "pulls/submit-review",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/events",
+"summary": "Submit a review for a pull request"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "pulls/update-branch",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/pulls/{pull_number}/update-branch",
+"summary": "Update a pull request branch"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-release",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/releases",
+"summary": "Create a release"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/update-release-asset",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/releases/assets/{asset_id}",
+"summary": "Update a release asset"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/delete-release-asset",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/releases/assets/{asset_id}",
+"summary": "Delete a release asset"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/generate-release-notes",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/releases/generate-notes",
+"summary": "Generate release notes content for a release"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/update-release",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/releases/{release_id}",
+"summary": "Update a release"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/delete-release",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/releases/{release_id}",
+"summary": "Delete a release"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/upload-release-asset",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/releases/{release_id}/assets",
+"summary": "Upload a release asset"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "reactions/create-for-release",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/releases/{release_id}/reactions",
+"summary": "Create reaction for a release"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "reactions/delete-for-release",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/releases/{release_id}/reactions/{reaction_id}",
+"summary": "Delete a release reaction"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-repo-ruleset",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/rulesets",
+"summary": "Create a repository ruleset"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/update-repo-ruleset",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/rulesets/{ruleset_id}",
+"summary": "Update a repository ruleset"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/delete-repo-ruleset",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/rulesets/{ruleset_id}",
+"summary": "Delete a repository ruleset"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "secret-scanning/update-alert",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/secret-scanning/alerts/{alert_number}",
+"summary": "Update a secret scanning alert"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "secret-scanning/bulk-create-repo-custom-patterns",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/secret-scanning/custom-patterns",
+"summary": "Bulk create repository custom patterns"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "secret-scanning/bulk-delete-repo-custom-patterns",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/secret-scanning/custom-patterns",
+"summary": "Bulk delete repository custom patterns"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "secret-scanning/update-repo-custom-pattern",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/secret-scanning/custom-patterns/{pattern_id}",
+"summary": "Update a repository custom pattern"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "secret-scanning/create-push-protection-bypass",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/secret-scanning/push-protection-bypasses",
+"summary": "Create a push protection bypass"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "security-advisories/create-repository-advisory",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/security-advisories",
+"summary": "Create a repository security advisory"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "security-advisories/create-private-vulnerability-report",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/security-advisories/reports",
+"summary": "Privately report a security vulnerability"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "security-advisories/update-repository-advisory",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/security-advisories/{ghsa_id}",
+"summary": "Update a repository security advisory"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "security-advisories/create-repository-advisory-comment",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/security-advisories/{ghsa_id}/comments",
+"summary": "Create a repository advisory comment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "security-advisories/update-repository-advisory-comment",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/security-advisories/{ghsa_id}/comments/{comment_id}",
+"summary": "Update a repository advisory comment"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "security-advisories/create-repository-advisory-cve-request",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/security-advisories/{ghsa_id}/cve",
+"summary": "Request a CVE for a repository security advisory"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "security-advisories/create-fork",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/security-advisories/{ghsa_id}/forks",
+"summary": "Create a temporary private fork"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "pull-request-stacks/create",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/stacks",
+"summary": "Create a pull request stack"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "pull-request-stacks/add",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/stacks/{stack_number}/add",
+"summary": "Add pull requests to a pull request stack"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "pull-request-stacks/unstack",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/stacks/{stack_number}/unstack",
+"summary": "Remove pull requests from a pull request stack"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-commit-status",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/statuses/{sha}",
+"summary": "Create a commit status"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "activity/set-repo-subscription",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/subscription",
+"summary": "Set a repository subscription"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "activity/delete-repo-subscription",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/subscription",
+"summary": "Delete a repository subscription"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/replace-all-topics",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/topics",
+"summary": "Replace all repository topics"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/transfer",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/transfer",
+"summary": "Transfer a repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/enable-vulnerability-alerts",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/vulnerability-alerts",
+"summary": "Enable vulnerability alerts"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/disable-vulnerability-alerts",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/repos/{owner}/{repo}/vulnerability-alerts",
+"summary": "Disable vulnerability alerts"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-using-template",
+"method": "POST",
+"host": "api.github.com",
+"path": "/repos/{template_owner}/{template_repo}/generate",
+"summary": "Create a repository using a template"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "teams/update-legacy",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/teams/{team_id}",
+"summary": "Update a team (Legacy)"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "teams/delete-legacy",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/teams/{team_id}",
+"summary": "Delete a team (Legacy)"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "teams/add-member-legacy",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/teams/{team_id}/members/{username}",
+"summary": "Add team member (Legacy)"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "teams/remove-member-legacy",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/teams/{team_id}/members/{username}",
+"summary": "Remove team member (Legacy)"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "teams/add-or-update-membership-for-user-legacy",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/teams/{team_id}/memberships/{username}",
+"summary": "Add or update team membership for a user (Legacy)"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "teams/remove-membership-for-user-legacy",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/teams/{team_id}/memberships/{username}",
+"summary": "Remove team membership for a user (Legacy)"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "teams/add-or-update-repo-permissions-legacy",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/teams/{team_id}/repos/{owner}/{repo}",
+"summary": "Add or update team repository permissions (Legacy)"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "teams/remove-repo-legacy",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/teams/{team_id}/repos/{owner}/{repo}",
+"summary": "Remove a repository from a team (Legacy)"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/update-authenticated",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/user",
+"summary": "Update the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/block",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/user/blocks/{username}",
+"summary": "Block a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/unblock",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/user/blocks/{username}",
+"summary": "Unblock a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/create-for-authenticated-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/user/codespaces",
+"summary": "Create a codespace for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/create-or-update-secret-for-authenticated-user",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/user/codespaces/secrets/{secret_name}",
+"summary": "Create or update a secret for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/delete-secret-for-authenticated-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/user/codespaces/secrets/{secret_name}",
+"summary": "Delete a secret for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/set-repositories-for-secret-for-authenticated-user",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/user/codespaces/secrets/{secret_name}/repositories",
+"summary": "Set selected repositories for a user secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/add-repository-for-secret-for-authenticated-user",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/user/codespaces/secrets/{secret_name}/repositories/{repository_id}",
+"summary": "Add a selected repository to a user secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/remove-repository-for-secret-for-authenticated-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/user/codespaces/secrets/{secret_name}/repositories/{repository_id}",
+"summary": "Remove a selected repository from a user secret"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/update-for-authenticated-user",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/user/codespaces/{codespace_name}",
+"summary": "Update a codespace for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/delete-for-authenticated-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/user/codespaces/{codespace_name}",
+"summary": "Delete a codespace for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/export-for-authenticated-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/user/codespaces/{codespace_name}/exports",
+"summary": "Export a codespace for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/publish-for-authenticated-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/user/codespaces/{codespace_name}/publish",
+"summary": "Create a repository from an unpublished codespace"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/start-for-authenticated-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/user/codespaces/{codespace_name}/start",
+"summary": "Start a codespace for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "codespaces/stop-for-authenticated-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/user/codespaces/{codespace_name}/stop",
+"summary": "Stop a codespace for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/set-primary-email-visibility-for-authenticated-user",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/user/email/visibility",
+"summary": "Set primary email visibility for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/add-email-for-authenticated-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/user/emails",
+"summary": "Add an email address for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/delete-email-for-authenticated-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/user/emails",
+"summary": "Delete an email address for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/follow",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/user/following/{username}",
+"summary": "Follow a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/unfollow",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/user/following/{username}",
+"summary": "Unfollow a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/create-gpg-key-for-authenticated-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/user/gpg_keys",
+"summary": "Create a GPG key for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/delete-gpg-key-for-authenticated-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/user/gpg_keys/{gpg_key_id}",
+"summary": "Delete a GPG key for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "apps/add-repo-to-installation-for-authenticated-user",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/user/installations/{installation_id}/repositories/{repository_id}",
+"summary": "Add a repository to an app installation"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "apps/remove-repo-from-installation-for-authenticated-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/user/installations/{installation_id}/repositories/{repository_id}",
+"summary": "Remove a repository from an app installation"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "interactions/set-restrictions-for-authenticated-user",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/user/interaction-limits",
+"summary": "Set interaction restrictions for your public repositories"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "interactions/remove-restrictions-for-authenticated-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/user/interaction-limits",
+"summary": "Remove interaction restrictions from your public repositories"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/create-issue-field-for-authenticated-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/user/issue-fields",
+"summary": "Create an issue field"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/update-issue-field-for-authenticated-user",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/user/issue-fields/{issue_field_id}",
+"summary": "Update an issue field"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/delete-issue-field-for-authenticated-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/user/issue-fields/{issue_field_id}",
+"summary": "Delete an issue field"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/create-issue-type-for-authenticated-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/user/issue-types",
+"summary": "Create an issue type"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/update-issue-type-for-authenticated-user",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/user/issue-types/{issue_type_id}",
+"summary": "Update an issue type"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/delete-issue-type-for-authenticated-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/user/issue-types/{issue_type_id}",
+"summary": "Delete an issue type"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/create-public-ssh-key-for-authenticated-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/user/keys",
+"summary": "Create a public SSH key for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/delete-public-ssh-key-for-authenticated-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/user/keys/{key_id}",
+"summary": "Delete a public SSH key for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "orgs/update-membership-for-authenticated-user",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/user/memberships/orgs/{org}",
+"summary": "Update an organization membership for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "migrations/start-for-authenticated-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/user/migrations",
+"summary": "Start a user migration"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "migrations/delete-archive-for-authenticated-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/user/migrations/{migration_id}/archive",
+"summary": "Delete a user migration archive"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "migrations/unlock-repo-for-authenticated-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/user/migrations/{migration_id}/repos/{repo_name}/lock",
+"summary": "Unlock a user repository"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "packages/delete-package-for-authenticated-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/user/packages/{package_type}/{package_name}",
+"summary": "Delete a package for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "packages/restore-package-for-authenticated-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/user/packages/{package_type}/{package_name}/restore",
+"summary": "Restore a package for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "packages/delete-package-version-for-authenticated-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/user/packages/{package_type}/{package_name}/versions/{package_version_id}",
+"summary": "Delete a package version for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "packages/restore-package-version-for-authenticated-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/user/packages/{package_type}/{package_name}/versions/{package_version_id}/restore",
+"summary": "Restore a package version for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/create-for-authenticated-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/user/repos",
+"summary": "Create a repository for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/accept-invitation-for-authenticated-user",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/user/repository_invitations/{invitation_id}",
+"summary": "Accept a repository invitation"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "repos/decline-invitation-for-authenticated-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/user/repository_invitations/{invitation_id}",
+"summary": "Decline a repository invitation"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/add-social-account-for-authenticated-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/user/social_accounts",
+"summary": "Add social accounts for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/delete-social-account-for-authenticated-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/user/social_accounts",
+"summary": "Delete social accounts for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/create-ssh-signing-key-for-authenticated-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/user/ssh_signing_keys",
+"summary": "Create a SSH signing key for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/delete-ssh-signing-key-for-authenticated-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/user/ssh_signing_keys/{ssh_signing_key_id}",
+"summary": "Delete an SSH signing key for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "activity/star-repo-for-authenticated-user",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/user/starred/{owner}/{repo}",
+"summary": "Star a repository for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "activity/unstar-repo-for-authenticated-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/user/starred/{owner}/{repo}",
+"summary": "Unstar a repository for the authenticated user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "projects/create-draft-item-for-authenticated-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/user/{user_id}/projectsV2/{project_number}/drafts",
+"summary": "Create draft item for user owned project"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "projects/create-view-for-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/users/{user_id}/projectsV2/{project_number}/views",
+"summary": "Create a view for a user-owned project"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/list-attestations-bulk",
+"method": "POST",
+"host": "api.github.com",
+"path": "/users/{username}/attestations/bulk-list",
+"summary": "List attestations by bulk subject digests"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/delete-attestations-bulk",
+"method": "POST",
+"host": "api.github.com",
+"path": "/users/{username}/attestations/delete-request",
+"summary": "Delete attestations in bulk"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/delete-attestations-by-subject-digest",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/users/{username}/attestations/digest/{subject_digest}",
+"summary": "Delete attestations by subject digest"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "users/delete-attestations-by-id",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/users/{username}/attestations/{attestation_id}",
+"summary": "Delete attestations by ID"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot-spaces/create-for-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/users/{username}/copilot-spaces",
+"summary": "Create a Copilot Space for a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot-spaces/update-for-user",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/users/{username}/copilot-spaces/{space_number}",
+"summary": "Set a Copilot Space for a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot-spaces/delete-for-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/users/{username}/copilot-spaces/{space_number}",
+"summary": "Delete a Copilot Space for a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot-spaces/add-collaborator-for-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/users/{username}/copilot-spaces/{space_number}/collaborators",
+"summary": "Add a collaborator to a Copilot Space for a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot-spaces/update-collaborator-for-user",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/users/{username}/copilot-spaces/{space_number}/collaborators/{actor_type}/{actor_identifier}",
+"summary": "Set a collaborator role for a Copilot Space for a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot-spaces/remove-collaborator-for-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/users/{username}/copilot-spaces/{space_number}/collaborators/{actor_type}/{actor_identifier}",
+"summary": "Remove a collaborator from a Copilot Space for a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot-spaces/create-resource-for-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/users/{username}/copilot-spaces/{space_number}/resources",
+"summary": "Create a resource for a Copilot Space for a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot-spaces/update-resource-for-user",
+"method": "PUT",
+"host": "api.github.com",
+"path": "/users/{username}/copilot-spaces/{space_number}/resources/{space_resource_id}",
+"summary": "Set a resource for a Copilot Space for a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "copilot-spaces/delete-resource-for-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/users/{username}/copilot-spaces/{space_number}/resources/{space_resource_id}",
+"summary": "Delete a resource from a Copilot Space for a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "packages/delete-package-for-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/users/{username}/packages/{package_type}/{package_name}",
+"summary": "Delete a package for a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "packages/restore-package-for-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/users/{username}/packages/{package_type}/{package_name}/restore",
+"summary": "Restore a package for a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "packages/delete-package-version-for-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/users/{username}/packages/{package_type}/{package_name}/versions/{package_version_id}",
+"summary": "Delete package version for a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "packages/restore-package-version-for-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/users/{username}/packages/{package_type}/{package_name}/versions/{package_version_id}/restore",
+"summary": "Restore package version for a user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "projects/add-field-for-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/users/{username}/projectsV2/{project_number}/fields",
+"summary": "Add field to user owned project"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "projects/add-item-for-user",
+"method": "POST",
+"host": "api.github.com",
+"path": "/users/{username}/projectsV2/{project_number}/items",
+"summary": "Add item to user owned project"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "projects/update-item-for-user",
+"method": "PATCH",
+"host": "api.github.com",
+"path": "/users/{username}/projectsV2/{project_number}/items/{item_id}",
+"summary": "Update project item for user"
+},
+{
+"provider": "github",
+"kind": "rest",
+"name": "projects/delete-item-for-user",
+"method": "DELETE",
+"host": "api.github.com",
+"path": "/users/{username}/projectsV2/{project_number}/items/{item_id}",
+"summary": "Delete project item for user"
+}
+]
