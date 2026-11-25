@@ -375,6 +375,7 @@
         "provider-sees-silos-connection",
         "reading-each-agent-program",
         "subscription-and-key-alike",
+        "claude-key-or-plan",
         "google-sign-in-unread",
         "silos-own-model-calls",
         "hooks-for-tool-calls",

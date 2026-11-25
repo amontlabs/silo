@@ -1,0 +1,8 @@
+{
+  "asks": "When Silo may not read a Claude plan's traffic, how does the boundary know which computers' Anthropic traffic it may read?",
+  "answer": "Each computer is set for Claude with an API key or with a plan, and the boundary acts on it when a connection to api.anthropic.com opens, before any byte of a request. In a computer set for an API key, Anthropic traffic is read, and a request that carries a plan's sign-in is not forwarded: Silo answers it with Anthropic's own error shape and a sentence that names the setting, and keeps only the fact that it refused. In a computer set for a plan, the connection is passed on as it came, its encryption included, so Silo never sees the sign-in or the conversation, and the record holds the connection's host, sizes and timing, as `program-that-cannot-be-read` says. While Silo may read a plan's traffic, as `anthropic-reads-intermediate` answers, a computer set for a plan is read like one set for an API key. A fork or a copy takes the setting of the computer it comes from. Main's is asked when Claude Code is first set up in it. Changing the setting closes the computer's open connections to Anthropic, so the next one follows it. A budget cannot be set on a computer whose Claude traffic passes unread, and the app says why. Only Anthropic needs the setting: other providers' plans and API keys use different hosts, as `subscription-and-key-alike` lists.",
+  "needs": [
+    "anthropic-reads-intermediate",
+    "subscription-and-key-alike"
+  ]
+}

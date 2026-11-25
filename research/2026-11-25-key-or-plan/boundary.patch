@@ -1,0 +1,248 @@
+
+--- a/build.zig	2026-11-25 11:20:36.569297612 +0000
++++ b/build.zig	2026-11-25 11:23:38.153713330 +0000
+@@ -12,7 +12,7 @@
+     b.installArtifact(exe);
+ 
+     const test_step = b.step("test", "Run the unit tests");
+-    inline for (.{ "src/stream.zig", "src/usage.zig", "src/prices.zig", "src/budget.zig", "src/spend.zig", "src/outside.zig" }) |f| {
++    inline for (.{ "src/stream.zig", "src/usage.zig", "src/prices.zig", "src/budget.zig", "src/spend.zig", "src/outside.zig", "src/keyplan.zig" }) |f| {
+         const tm = b.createModule(.{ .root_source_file = b.path(f), .target = target, .optimize = optimize, .link_libc = true });
+         tm.linkSystemLibrary("z", .{});
+         const t = b.addTest(.{ .root_module = tm });
+
+--- a/src/keyplan.zig	1970-01-01 00:00:00.000000000 +0000
++++ b/src/keyplan.zig	2026-11-25 11:23:25.661596650 +0000
+@@ -0,0 +1,172 @@
++//! "Key or plan" for one computer: how Claude signs in there decides whether the boundary may
++//! read api.anthropic.com at all. A plan and an API key share that host, so the boundary cannot
++//! tell them apart before it ends TLS. The choice is the computer's, made before the connection.
++//!
++//!   "read"  (absent) today's answer: every Anthropic connection is read, whatever it carries.
++//!   "key"   read; a request that carries a plan's sign-in is refused and never leaves.
++//!   "plan"  not read: the connection is passed through as bytes, TLS and all, from the
++//!           program's ClientHello on. Silo never sees the sign-in or the conversation.
++const std = @import("std");
++const posix = std.posix;
++
++pub const Mode = enum { read, key, plan };
++
++pub fn modeOf(s: []const u8) Mode {
++    if (std.mem.eql(u8, s, "key")) return .key;
++    if (std.mem.eql(u8, s, "plan")) return .plan;
++    return .read;
++}
++
++/// The kind of sign-in a request to api.anthropic.com carries, from its head alone.
++/// Claude Code sends an API key in `x-api-key`, and a plan's sign-in (an OAuth token, from the
++/// login flow, `claude setup-token` or CLAUDE_CODE_OAUTH_TOKEN) as `Authorization: Bearer`.
++pub const SignIn = enum { key, plan, none };
++
++pub fn signInOf(head: []const u8) SignIn {
++    var it = std.mem.splitSequence(u8, head, "\r\n");
++    _ = it.next();
++    var key = false;
++    while (it.next()) |line| {
++        const colon = std.mem.indexOfScalar(u8, line, ':') orelse continue;
++        const name = std.mem.trim(u8, line[0..colon], " ");
++        // Any bearer counts as a plan: in a computer set for a key, only `x-api-key` leaves.
++        if (std.ascii.eqlIgnoreCase(name, "authorization")) return .plan;
++        if (std.ascii.eqlIgnoreCase(name, "x-api-key")) key = true;
++    }
++    return if (key) .key else .none;
++}
++
++/// The server name of a TLS ClientHello, read from bytes peeked off the socket, or null when the
++/// bytes are not a whole ClientHello with one.
++pub fn sniOf(b: []const u8) ?[]const u8 {
++    // record header: type 22, version, length
++    if (b.len < 5 or b[0] != 22) return null;
++    const rec_len = (@as(usize, b[3]) << 8) | b[4];
++    if (b.len < 5 + rec_len) return null;
++    var p: usize = 5;
++    if (b[p] != 1) return null; // ClientHello
++    p += 4 + 2 + 32; // handshake header, version, random
++    if (p >= b.len) return null;
++    p += 1 + b[p]; // session id
++    if (p + 2 > b.len) return null;
++    p += 2 + ((@as(usize, b[p]) << 8) | b[p + 1]); // cipher suites
++    if (p >= b.len) return null;
++    p += 1 + b[p]; // compression methods
++    if (p + 2 > b.len) return null;
++    const ext_end = p + 2 + ((@as(usize, b[p]) << 8) | b[p + 1]);
++    p += 2;
++    if (ext_end > b.len) return null;
++    while (p + 4 <= ext_end) {
++        const typ = (@as(usize, b[p]) << 8) | b[p + 1];
++        const len = (@as(usize, b[p + 2]) << 8) | b[p + 3];
++        p += 4;
++        if (p + len > ext_end) return null;
++        if (typ == 0 and len >= 5) {
++            // server_name list: list length, type 0 (host_name), name length, name
++            const n = (@as(usize, b[p + 3]) << 8) | b[p + 4];
++            if (b[p + 2] != 0 or p + 5 + n > p + len) return null;
++            return b[p + 5 .. p + 5 + n];
++        }
++        p += len;
++    }
++    return null;
++}
++
++/// Peeks the program's ClientHello without taking it off the socket, so that the same bytes can
++/// go either to Silo's own TLS server or, untouched, to the provider.
++pub fn peekSni(fd: posix.fd_t, buf: []u8) ?[]const u8 {
++    var tries: usize = 0;
++    var last: usize = 0;
++    while (tries < 200) : (tries += 1) {
++        const n = posix.recv(fd, buf, posix.MSG.PEEK) catch return null;
++        if (n == 0) return null;
++        if (sniOf(buf[0..n])) |s| return s;
++        if (n == buf.len) return null;
++        if (n == last) std.Thread.sleep(5 * std.time.ns_per_ms);
++        last = n;
++    }
++    return null;
++}
++
++/// Copies bytes both ways until either side closes. Returns the bytes sent up and down.
++pub fn splice(a: posix.fd_t, b: posix.fd_t) struct { up: u64, down: u64 } {
++    var fds = [_]posix.pollfd{
++        .{ .fd = a, .events = posix.POLL.IN, .revents = 0 },
++        .{ .fd = b, .events = posix.POLL.IN, .revents = 0 },
++    };
++    var up: u64 = 0;
++    var down: u64 = 0;
++    var buf: [65536]u8 = undefined;
++    outer: while (true) {
++        _ = posix.poll(&fds, -1) catch break;
++        inline for (.{ 0, 1 }) |i| {
++            if (fds[i].revents & (posix.POLL.IN | posix.POLL.HUP | posix.POLL.ERR) != 0) {
++                const n = posix.read(fds[i].fd, &buf) catch break :outer;
++                if (n == 0) break :outer;
++                const to = fds[1 - i].fd;
++                var off: usize = 0;
++                while (off < n) off += posix.write(to, buf[off..n]) catch break :outer;
++                if (i == 0) up += n else down += n;
++            }
++        }
++    }
++    return .{ .up = up, .down = down };
++}
++
++test "sign-in kinds" {
++    try std.testing.expectEqual(SignIn.key, signInOf("POST /v1/messages HTTP/1.1\r\nx-api-key: sk-ant-api03-x\r\n\r\n"));
++    try std.testing.expectEqual(SignIn.plan, signInOf("POST /v1/messages HTTP/1.1\r\nAuthorization: Bearer sk-ant-oat01-x\r\n\r\n"));
++    try std.testing.expectEqual(SignIn.plan, signInOf("POST /v1/messages HTTP/1.1\r\nx-api-key: k\r\nauthorization: Bearer other\r\n\r\n"));
++    try std.testing.expectEqual(SignIn.none, signInOf("GET / HTTP/1.1\r\nHost: api.anthropic.com\r\n\r\n"));
++}
++
++test "sni of a ClientHello" {
++    // A minimal ClientHello for api.anthropic.com, as OpenSSL builds it, cut to what matters.
++    const name = "api.anthropic.com";
++    var hello: [128]u8 = undefined;
++    var p: usize = 0;
++    const body_start = 5;
++    hello[0] = 22;
++    hello[1] = 3;
++    hello[2] = 1;
++    p = body_start;
++    hello[p] = 1;
++    p += 4; // handshake type + 3-byte length (unchecked)
++    hello[p] = 3;
++    hello[p + 1] = 3;
++    p += 2;
++    @memset(hello[p .. p + 32], 0);
++    p += 32;
++    hello[p] = 0; // no session id
++    p += 1;
++    hello[p] = 0;
++    hello[p + 1] = 2;
++    hello[p + 2] = 0x13;
++    hello[p + 3] = 0x01;
++    p += 4;
++    hello[p] = 1;
++    hello[p + 1] = 0;
++    p += 2;
++    const ext_len = 4 + 5 + name.len;
++    hello[p] = 0;
++    hello[p + 1] = @intCast(ext_len);
++    p += 2;
++    hello[p] = 0;
++    hello[p + 1] = 0; // server_name
++    hello[p + 2] = 0;
++    hello[p + 3] = @intCast(5 + name.len);
++    hello[p + 4] = 0;
++    hello[p + 5] = @intCast(3 + name.len);
++    hello[p + 6] = 0;
++    hello[p + 7] = 0;
++    hello[p + 8] = @intCast(name.len);
++    p += 9;
++    @memcpy(hello[p .. p + name.len], name);
++    p += name.len;
++    const rec_len = p - 5;
++    hello[3] = @intCast(rec_len >> 8);
++    hello[4] = @intCast(rec_len & 0xff);
++    try std.testing.expectEqualStrings(name, sniOf(hello[0..p]).?);
++    try std.testing.expect(sniOf(hello[0 .. p - 1]) == null);
++    try std.testing.expect(sniOf("GET / HTTP/1.1\r\n") == null);
++}
+
+--- a/src/main.zig	2026-11-25 11:20:36.569590603 +0000
++++ b/src/main.zig	2026-11-25 11:23:38.153492917 +0000
+@@ -16,6 +16,7 @@
+ const prices = @import("prices.zig");
+ const budget = @import("budget.zig");
+ const spend = @import("spend.zig");
++const keyplan = @import("keyplan.zig");
+ const outside = @import("outside.zig");
+ const c = @cImport({
+     @cInclude("openssl/ssl.h");
+@@ -1431,6 +1432,22 @@
+ fn handleInner(fd: posix.fd_t, id: u32) !void {
+     noDelay(fd);
+     const comp = computerOf(fd);
++    // A computer set for a plan: its Anthropic connections pass as bytes, never opened.
++    if (comp) |k| if (keyplan.modeOf(state.?.cfg.computers[k].anthropic) == .plan) {
++        var peek: [4096]u8 = undefined;
++        if (keyplan.peekSni(fd, &peek)) |sni_raw| if (std.mem.eql(u8, sni_raw, "api.anthropic.com")) {
++            const t0 = now_ms();
++            const addr = try std.net.Address.parseIp4(cfg.upstream_ip, cfg.upstream_port);
++            const up_stream = try std.net.tcpConnectToAddress(addr);
++            defer up_stream.close();
++            defer posix.close(fd);
++            noDelay(up_stream.handle);
++            record("\"conn\":{d},\"kind\":\"open\",\"sni\":\"api.anthropic.com\",\"computer\":{f},\"read\":false,\"why\":\"set-for-a-plan\"", .{ id, j(state.?.cfg.computers[k].name) });
++            const n = keyplan.splice(fd, up_stream.handle);
++            record("\"conn\":{d},\"kind\":\"connection\",\"sni\":\"api.anthropic.com\",\"computer\":{f},\"read\":false,\"up\":{d},\"down\":{d},\"ms\":{d:.0}", .{ id, j(state.?.cfg.computers[k].name), n.up, n.down, now_ms() - t0 });
++            return;
++        };
++    };
+     const ssl = c.SSL_new(server_ctx) orelse return sslErr("SSL_new");
+     _ = c.SSL_set_fd(ssl, fd);
+     if (c.SSL_accept(ssl) != 1) {
+@@ -1495,6 +1512,13 @@
+         const path = parts.next() orelse "";
+         if (state) |st| if (comp) |k| {
+             const fmt = if (provider) |p| spend.formatOf(p, method, path) else null;
++            // A computer set for an API key: a plan's sign-in does not leave, and nothing of it
++            // is kept beyond the fact.
++            if (provider == .anthropic and keyplan.modeOf(st.cfg.computers[k].anthropic) == .key and keyplan.signInOf(req.raw) == .plan) {
++                record("\"conn\":{d},\"kind\":\"refused\",\"why\":\"plan-in-a-computer-set-for-a-key\",\"line\":{f}", .{ id, j(req.first) });
++                try writeRefusal(client, .anthropic, "Silo: this computer is set for Claude with an API key, and Claude Code is signed in with a plan here. Sign in with an API key (ANTHROPIC_API_KEY), or set this computer for a plan, whose traffic Silo does not read.");
++                continue;
++            }
+             // A credential this computer was not given does not leave a host Silo reads.
+             if (st.cfg.deny_unknown_credentials and provider != null) if (spend.credentialOf(req.raw, path)) |cv| {
+                 var known = false;
+
+--- a/src/spend.zig	2026-11-25 11:20:36.569590603 +0000
++++ b/src/spend.zig	2026-11-25 11:23:38.152755924 +0000
+@@ -24,6 +24,8 @@
+     fork_of: ?[]const u8 = null,
+     credentials: []Credential = &.{},
+     limits: budget.Limits = .{},
++    /// How Claude signs in here: "key", "plan", or "read" (absent: read whatever it carries).
++    anthropic: []const u8 = "read",
+ };
+ 
+ pub const Person = struct { name: []const u8, limits: budget.Limits = .{} };

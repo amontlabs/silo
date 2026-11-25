@@ -1,0 +1,7 @@
+{"policy": "finish", "prices": "prices.json", "deny_unknown_credentials": false,
+ "computers": [
+  {"name": "key-signed-key",   "address": "127.0.0.2", "anthropic": "key"},
+  {"name": "key-signed-plan",  "address": "127.0.0.4", "anthropic": "key"},
+  {"name": "plan-signed-plan", "address": "127.0.0.5", "anthropic": "plan"},
+  {"name": "plan-signed-key",  "address": "127.0.0.6", "anthropic": "plan"},
+  {"name": "read-signed-plan", "address": "127.0.0.8"}]}
