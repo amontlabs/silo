@@ -1,0 +1,8 @@
+{
+  "asks": "When a Google sign-in's traffic passes unread, what does Silo count of the plan?",
+  "answer": "The model requests Gemini CLI reports about itself. When Silo sets up Gemini CLI on a computer, it points the program's OpenTelemetry export at Silo through the computer's network, with prompts left out of it. Each model request the program reports is kept as told by that program: its model, its token counts and its status. The app shows the count per model and per day, marked as Gemini CLI's report and never added to what Silo read. When the program reports Google's daily limit reached, the app says so with the delay Google gave. A precaution budget in requests can deny the computer's next connections to Google's Code Assist host when the report reaches it, never a rule. Silo shows no figure of the account's remainder, and a computer whose report stops while its connections go on is shown as such.",
+  "needs": [
+    "program-that-cannot-be-read",
+    "subscription-and-key-alike"
+  ]
+}
