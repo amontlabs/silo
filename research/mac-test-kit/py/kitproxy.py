@@ -10,7 +10,8 @@ what it did (dialled, denied, or failed). It is the only thing that looks a name
 - with --allow-public, any other host is looked up here and dialled only when every address it
   has is public (never the Mac's network, its loopback, link-local or cloud metadata);
 - every other host is denied without being looked up, so a denied name never reaches a resolver.
---map HOST=ADDR answers HOST with ADDR without a lookup (the Linux analogues' stand-in origin).
+--map GLOB=ADDR answers a host matching GLOB with ADDR without a lookup (the Linux analogues' stand-in
+origin, test 44's previews).
 Nothing is read past the request line and headers: TLS stays end to end.
 """
 import argparse
@@ -40,10 +41,11 @@ def public(addr):
 def decide(host, port, a):
     """(addresses to dial, reason); no addresses means denied."""
     h = host.strip("[]").lower()
-    mapped = dict(m.lower().split("=", 1) for m in a.map)
+    mapped = [m.lower().split("=", 1) for m in a.map]
     for g in a.allow:
-        if h in mapped and fnmatch.fnmatch(h, g.lower()):
-            return [mapped[h]], "allowed, mapped"
+        for pat, addr in mapped:
+            if fnmatch.fnmatch(h, pat) and fnmatch.fnmatch(h, g.lower()):
+                return [addr], "allowed, mapped"
         if fnmatch.fnmatch(h, g.lower()):
             try:
                 return [i[4][0] for i in socket.getaddrinfo(h, port, type=socket.SOCK_STREAM)], "allowed"
