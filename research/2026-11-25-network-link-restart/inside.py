@@ -69,10 +69,8 @@ def main():
                     break
                 got += b
             r = "whole" if got.endswith(b"done\n") else "cut (%d bytes)" % len(got)
-        except socket.timeout:
-            r = "still waiting at the cap"
         except OSError as e:
-            r = "error: %s" % e.strerror
+            r = "still waiting at the cap" if e.errno is None else "error: %s" % e.strerror
         w(out, {"result": r, "t_start": round(t0, 3), "keepalive": ka})
     elif cmd == "stream":
         host, port, n, out = a[0], int(a[1]), int(a[2]), a[3]
@@ -91,10 +89,8 @@ def main():
                 if c > events:
                     events, last = c, time.time()
             r = "whole" if events == n else "ended after %d of %d events" % (events, n)
-        except socket.timeout:
-            r = "still waiting at the cap (60 s silent) after %d of %d events" % (events, n)
-        except OSError as e:
-            r = "error after %d of %d events: %s" % (events, n, e.strerror)
+        except OSError as e:  # socket.timeout has no errno; ETIMEDOUT (keep-alive) has one
+            r = ("still waiting at the cap (60 s silent) after %d of %d events" % (events, n)) if e.errno is None else ("error after %d of %d events: %s" % (events, n, e.strerror))
         w(out, {"result": r, "events": events, "t_last_event": last and round(last, 3), "t_start": round(t0, 3)})
     elif cmd == "send":
         host, port, secs, out = a[0], int(a[1]), float(a[2]), a[3]
@@ -109,10 +105,8 @@ def main():
                 time.sleep(0.1)
             s.shutdown(socket.SHUT_WR)
             r = "whole" if s.recv(100) else "no answer"
-        except socket.timeout:
-            r = "still waiting at the cap (60 s) after %d KB" % sent
-        except OSError as e:
-            r = "error after %d KB: %s" % (sent, e.strerror)
+        except OSError as e:  # socket.timeout has no errno; ETIMEDOUT (keep-alive) has one
+            r = ("still waiting at the cap (60 s) after %d KB" % sent) if e.errno is None else ("error after %d KB: %s" % (sent, e.strerror))
         w(out, {"result": r, "kb": sent, "t_start": round(t0, 3)})
     elif cmd == "echo":
         port, out = int(a[0]), a[1]
@@ -134,10 +128,8 @@ def main():
                         break
                     n += 1
                     c.sendall(b)
-            except socket.timeout:
-                r = "still waiting at the cap (60 s)"
-            except OSError as e:
-                r = "error: %s" % e.strerror
+            except OSError as e:  # socket.timeout has no errno; ETIMEDOUT (keep-alive) has one
+                r = ("still waiting at the cap (60 s)") if e.errno is None else ("error: %s" % e.strerror)
             with open(out, "a") as f:
                 f.write(json.dumps({"result": r, "reads": n, "t_start": round(t0, 3), "t_end": round(time.time(), 3)}) + "\n")
         while True:

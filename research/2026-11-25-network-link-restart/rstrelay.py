@@ -6,7 +6,8 @@ once and connect again, instead of waiting on a connection whose other half died
 
     rstrelay.py DOWNFD UPPATH BINDPATH [--no-reset]
 
-Like relay.c: SIGUSR1 means "a new gvproxy is up, connect again". One JSON line per event on
+Like relay.c: SIGUSR1 means "a new gvproxy is up, connect again", and it never connects again on its
+own (a second "VFKT" cuts the computer off). One JSON line per event on
 stdout. Python, so it is the stand-in for the logic, not for the speed.
 """
 import json
@@ -97,9 +98,10 @@ def main():
     while not connect_up():
         time.sleep(0.05)
     while True:
-        if state["want"] or state["up"] is None:
+        if state["want"]:
             state["want"] = False
             if not connect_up():
+                state["want"] = True
                 time.sleep(0.05)
         socks = [down] + ([state["up"]] if state["up"] is not None else [])
         try:

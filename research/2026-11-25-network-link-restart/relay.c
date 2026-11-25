@@ -1,8 +1,11 @@
 /* relay DOWNFD UPPATH BINDPATH: a helper's link as a relay. DOWNFD is the helper's end of the
  * socketpair whose other end the computer's network card holds; the relay binds BINDPATH,
- * connects to gvproxy's socket UPPATH, says "VFKT" and moves every frame between the two. On
- * SIGUSR1 (the helper started a new gvproxy) or when a send to gvproxy fails, it connects again
- * and says "VFKT" again. Frames that arrive while gvproxy is away are dropped and counted. */
+ * connects to gvproxy's socket UPPATH, says "VFKT" and moves every frame between the two. Only on
+ * SIGUSR1 (the helper started a new gvproxy) does it connect again and say "VFKT" again: never on
+ * its own after a failed send, because a second "VFKT" reaching a gvproxy that already has its
+ * peer is read as a frame shorter than an Ethernet header, and gvproxy then stops reading that
+ * computer for good while it keeps running (shown by short-frame.py). Frames that arrive while
+ * gvproxy is away are dropped and counted. */
 #include <errno.h>
 #include <poll.h>
 #include <signal.h>
@@ -37,24 +40,24 @@ int main(int argc, char **argv) {
   if (argc != 4) { fprintf(stderr, "usage: relay DOWNFD UPPATH BINDPATH\n"); return 2; }
   int down = atoi(argv[1]);
   signal(SIGUSR1, on_usr1);
-  int up = -1; unsigned long dropped = 0, reconnects = 0;
+  int up = -1, first = 1; unsigned long dropped = 0, reconnects = 0;
   static char buf[65600];
   for (;;) {
-    if (want_reconnect || up < 0) {
-      want_reconnect = 0;
+    if (want_reconnect || first) {
+      want_reconnect = 0; first = 0;
       if (up >= 0) close(up);
       up = connect_up(argv[2], argv[3]);
       if (up >= 0) { reconnects++; printf("{\"t\":%.3f,\"event\":\"connected\",\"n\":%lu,\"dropped\":%lu}\n", now(), reconnects, dropped); fflush(stdout); }
     }
     struct pollfd p[2] = { { down, POLLIN, 0 }, { up, POLLIN, 0 } };
-    int r = poll(p, up >= 0 ? 2 : 1, up >= 0 ? -1 : 100);
+    int r = poll(p, up >= 0 ? 2 : 1, -1);
     if (r < 0) continue; /* EINTR from SIGUSR1 */
     if (p[0].revents & POLLIN) {
       ssize_t n = recv(down, buf, sizeof buf, 0);
       if (n > 0) {
         if (up < 0 || send(up, buf, (size_t)n, 0) < 0) {
           dropped++;
-          if (up >= 0 && (errno == ECONNREFUSED || errno == ENOENT || errno == ENOTCONN)) { close(up); up = -1; }
+          if (up >= 0 && (errno == ECONNREFUSED || errno == ENOENT || errno == ENOTCONN)) { close(up); up = -1; } /* wait for SIGUSR1 */
         }
       }
     }
