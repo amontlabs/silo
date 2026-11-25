@@ -1,0 +1,29 @@
+api.anthropic.com                    /v1/messages                                  -> HTTP/1.1 200 OK
+api.anthropic.com                    /v1/messages                                  -> HTTP/1.1 200 OK
+api.anthropic.com                    /v1/messages                                  -> HTTP/1.1 200 OK
+api.anthropic.com                    https://api.anthropic.com/v1/messages         -> HTTP/1.1 200 OK
+api.anthropic.com                    //v1/messages                                 -> HTTP/1.1 200 OK
+api.anthropic.com                    /v1//messages                                 -> HTTP/1.1 200 OK
+api.anthropic.com                    /v1/./messages                                -> HTTP/1.1 200 OK
+api.anthropic.com                    /v1/x/../messages                             -> HTTP/1.1 200 OK
+api.anthropic.com                    /%761/messages                                -> HTTP/1.1 200 OK
+api.openai.com                       //v1/responses                                -> HTTP/1.1 400 Bad Request
+api.openai.com                       /v1/./responses                               -> HTTP/1.1 400 Bad Request
+generativelanguage.googleapis.com    /v1beta/models/gemini-3.1-pro-preview:generateContent/ -> HTTP/1.1 200 OK
+
+upstream served 10 model calls (240 dollars at its counts) under a $50 budget
+boundary record kinds: {'listening': 1, 'open': 12, 'request': 10, 'call': 3, 'ledgers': 3, 'reply': 10, 'alert': 1, 'reached': 1, 'refused': 2}
+bare-LF TE  : ['HTTP/1.1 404 Not Found', '{"type":"message","id":"msg_1","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1000000,"output_tokens":1000000}}']
+obs-fold CL : ['HTTP/1.1 404 Not Found', '{"type":"message","id":"msg_1","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1000000,"output_tokens":1000000}}']
+space colon : ['HTTP/1.1 400 Bad Request: invalid header name']
+CL with _   : ['HTTP/1.1 400 Bad Request']
+upstream served 2 model calls; boundary counted 0
+  upstream: POST /v1/nonexistent ['chunked'] -1
+  upstream: POST /v1/messages None 87
+  upstream: GET /v1/models None 0
+  upstream: POST /v1/nonexistent None 0
+  upstream: POST /v1/messages None 87
+  upstream: GET /v1/models None 0
+boundary at rest: 7 MiB peak
+zstd body of 64 KiB decoding to 2048 MiB: answer b'HTTP/1.1 200 OK'; boundary peak 5407 MiB
+boundary still running: True

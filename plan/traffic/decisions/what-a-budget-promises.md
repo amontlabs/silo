@@ -204,3 +204,14 @@ model Silo has no price for. The answer is left as it is for polarzero to choose
 An agent's part, 25 November 2026, written while merging #390 and #392 to #396 onto #391 (`research/2026-11-25-integration-2/`).
 
 The answer says a call to a model Silo has no price for does not leave while a budget covers it (from #373 and #374). #396 measured a third option: count it at twice the dearest price of the same provider and tier. A budget still held, and a new model did not stop every budgeted computer on the day it was released. Recommended: #396's option, with `where-prices-come-from` deciding where the table comes from.
+
+## A hostile test of `budget-stops-what-it-meters`
+
+Agent, 25 November 2026, from `research/2026-11-25-untrusted-parsers/` (#401). On #385's boundary,
+a computer with a $50 budget had 10 model calls served, $240 at the host's counts, and 3 counted.
+The other seven were sent to `/v1/messages` spelled as Anthropic's host also answers it
+(`//v1/messages`, `/v1/./messages`, absolute form, and three more), and two calls went inside the
+body of a request the boundary does not count, framed with a bare LF or a folded header line that
+the hosts read and the boundary does not. A patch there makes the boundary read requests strictly
+and refuse the rest with a 400; with it, the same test gives 3 served, 3 counted. The property
+holds only if the boundary reads every request exactly as the host will.

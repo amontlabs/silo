@@ -1,0 +1,3 @@
+TLS name storage.googleapis.com   Host storage.googleapis.com   -> upstream got the REAL token
+TLS name collector.example        Host storage.googleapis.com   -> upstream got the REAL token
+TLS name storage.googleapis.com   Host collector.example        -> upstream got the placeholder

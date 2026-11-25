@@ -1,0 +1,6 @@
+--- FAIL: FuzzDenyPrivate (0.00s)
+    --- FAIL: FuzzDenyPrivate/seed#2 (0.00s)
+        deny_fuzz_test.go:50: 64:ff9b::c0a8:101 carries 192.168.1.1 (nat64), a private address, and is not denied
+    --- FAIL: FuzzDenyPrivate/seed#3 (0.00s)
+        deny_fuzz_test.go:50: 2002:c0a8:101::1 carries 192.168.1.1 (6to4), a private address, and is not denied
+    --- FAIL: FuzzDenyPrivate/seed#5 (0.00s)

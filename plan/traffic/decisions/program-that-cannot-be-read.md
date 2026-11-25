@@ -145,3 +145,12 @@ count while a budget covers the computer, inside a host Silo reads. The options 
 
 Not checked: which programs leave `include_usage` unset. Aider, Cline and OpenCode, which #369
 found can be switched to any OpenAI-compatible host, should be captured before this is ruled.
+
+## Traffic Silo reads, and reads wrongly
+
+Agent, 25 November 2026, from `research/2026-11-25-untrusted-parsers/` (#401). "Nothing goes to
+such a host unread" holds only if Silo's reading is the host's. On #385's boundary it is not:
+`/v1//messages` is no model route to the boundary and is one to Anthropic's host, and a header
+after a bare LF is part of the line before it to the boundary and a header of its own to the host.
+Both carried model calls the boundary never counted. A request the boundary cannot read exactly as
+the host will is traffic Silo cannot read, and is refused like it.
