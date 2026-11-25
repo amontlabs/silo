@@ -1,0 +1,7 @@
+{
+  "asks": "How does main's clock stay right when the Mac sleeps?",
+  "answer": "The helper keeps main's clock on the Mac's. When the Mac wakes, the helper sets main's clock at once, over its own way into main. Every minute it also compares the two clocks, and sets main's when they are more than a second apart. Each time it sets the clock, the record says so, with how far main was off. The boundary also dates the certificates it signs a day back, so HTTPS works in main before the clock is set.",
+  "needs": [
+    "mac-kept-awake"
+  ]
+}
