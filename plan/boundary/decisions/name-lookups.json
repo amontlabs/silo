@@ -1,0 +1,7 @@
+{
+  "asks": "How does a computer find the address of a host?",
+  "answer": "Silo answers every name lookup a computer makes, whatever server the lookup was sent to, and each lookup is a fact in the record. In a limited computer, Silo answers only for the hosts on the list, and never asks any other server about a name that is not on it. A connection goes only to an address Silo gave for a listed host, and the name in its handshake must be that host. Silo's answers never carry the keys that let a program hide that name. In a closed computer, no lookup is answered. In an open one, every lookup is answered and recorded.",
+  "needs": [
+    "network-modes"
+  ]
+}

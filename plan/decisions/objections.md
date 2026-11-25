@@ -33,3 +33,16 @@ Proposed in the design record:
 
 The answer of this decision is worded by whoever wrote the plan: the design record has only the
 table.
+
+## Checked against the market, 24 November 2026
+
+An agent's part. Agents read about 70 products for agents from their own pages. Two answers were
+reworded to stay true:
+
+- "Sandbox products already exist." The old answer said they do not take you back. Several
+  restore or fork a machine, and one takes disk checkpoints on its own. None found records what
+  happened inside from outside the machine, and none found enforces a budget on model spend for any
+  agent program. The answer now says that they do not stop what the agent spends.
+- "The built-in sandbox of my agent program is enough." A public case of March 2026 backs the
+  answer: an agent got past a deny rule on `npx` by calling it through `/proc/self/root`, and when
+  the sandbox stopped that, it asked for approval to run outside the sandbox.

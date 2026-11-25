@@ -35,4 +35,9 @@ Proposed: "Several cloud products checkpoint and fork virtual machines for agent
 for agents" does not set Silo apart. The record does, together with going back and macOS
 computers on your own Mac." The market was checked lightly on 16 November 2026, not surveyed.
 
+An agent's part, 24 November 2026. A survey of about 70 products changes the last part of that
+sentence. Local apps now give agents macOS virtual machines with checkpoints, so neither sets Silo
+apart. Proposed in its place: "The record does, together with budgets enforced at the boundary and
+checkpoints taken on their own."
+
 "Approval" here is the approval prompts of agent programs, not anything of Silo's.

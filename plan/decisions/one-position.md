@@ -22,6 +22,10 @@ The design record gives this with no mark, and this comparison:
 
 | | A boundary the agent cannot touch | An account of what happened |
 |---|---|---|
-| Sandboxes and virtual machines for agents | yes | no |
+| Sandboxes and virtual machines for agents | yes | of the network at most |
 | Agent programs | no: their rules live inside, next to the agent | of themselves only |
 | Silo | yes | of everything in the computer, under any agent program |
+
+An agent's part, 24 November 2026: the cell for sandboxes was "no". Some of them now log the
+network decisions at their proxy, or the model requests with their tokens, so the cell says "of the
+network at most". None found records the processes and file changes of the machine.
