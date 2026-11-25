@@ -33,9 +33,9 @@ decision main-on-macos-first
 
 decision network-stack
   asks: What carries main's network in the first build?
-  source: plan, open; #370 assumes Apple's NAT until a patched gvproxy passes test 07; #373 needs a stack from main's first start; #363 seals gvproxy with a 64-line patch
+  source: plan, open; #370 assumes Apple's NAT until a patched gvproxy passes test 07; #373 needs a stack from main's first start; #363 seals gvproxy with a 64-line patch, which #380 grows into Silo's gvproxy (-sealed, -closed)
   tests: 07 35 36
-  option sealed-gvproxy: gvproxy with #363's -sealed patch: nothing of the Mac, its loopback or its network is reached from inside
+  option sealed-gvproxy: Silo's gvproxy (#363's seal, grown in #380) with -sealed: nothing of the Mac, its loopback or its network is reached from inside, and -closed shuts every way out
   option configured-gvproxy: gvproxy as released, configured as research 04 says (API token, no map to the Mac's 127.0.0.1); the Mac's network stays reachable
   option nat-first: Apple's NAT until a stack passes; main's network has no boundary and reaches your network (#370)
   option own-stack: Silo's own stack, written before main runs

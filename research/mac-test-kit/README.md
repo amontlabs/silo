@@ -80,9 +80,9 @@ Eleven tests touch something else, and each asks first and undoes it when it end
   asks for sudo to use it.
 - **07** runs a stand-in server on all your Mac's addresses for the length of the test, as a
   control. macOS's firewall may ask whether to allow it.
-- **35** builds gvproxy with #363's patch (`net/gvproxy-sealed.patch`) from its source at
-  v0.9.0, with Go 1.26.0 downloaded into `~/SiloKit` unless that Go is installed, and runs test
-  07's stand-in server as a control.
+- **35** builds Silo's gvproxy (#380's patch, `net/gvproxy-silo.patch`, which grows #363's) from
+  gvisor-tap-vsock's source at commit 197eea05, with Go 1.26.0 downloaded into `~/SiloKit` unless
+  that Go is installed, and runs test 07's stand-in server as a control.
 - **36** runs a small server on all your Mac's addresses for the length of the test, since that is
   what the computer's connections reach. macOS's firewall may ask whether to allow it.
 - **08** adds one `Include` line to the top of `~/.ssh/config`, so Claude desktop and the Codex
@@ -139,7 +139,7 @@ read every result against RESULTS.md.
 | `swift/` | `silovm`, the VM helper on Apple's Virtualization framework. Its commands are in [swift/README.md](swift/README.md) |
 | `c/` | Probes built by `./kit build`: clone and fsync benchmarks, block maps, socket peers, an SSH proxy, a sleep meter (`powerwatch`) |
 | `py/` | Analysis, the stand-in servers, and a read-only APFS reader in `py/apfs/` (`apfscontent.py` reads files' contents, compressed ones included) |
-| `net/` | #363's patch to gvproxy, which test 35 builds |
+| `net/` | #380's patch to gvproxy (-sealed, -closed), which test 35 builds |
 | `guest/` | Scripts copied into a test computer (perl and sh: macOS has no python3 until the Command Line Tools are installed there) |
 | `linux/` | `./kit selftest` and the fakes and Linux analogues it runs |
 
@@ -156,9 +156,14 @@ confirm:
   socket that no longer exists). Through a relay that connects again and says who it is, the
   network came back 3 s after gvproxy did. Test 36 measures this on the Mac; if it holds, the
   helper owns each computer's network link and gvproxy never receives it directly.
-- **#363's sealed gvproxy holds in the analogue**: root in the namespace reached nothing of the
-  host, and still reached the internet and Silo's SSH forward. Gvproxy as released in its place is
-  caught. Test 35 asks the same of a macOS computer.
+- **Silo's gvproxy (#380) holds in the analogue, sealed and closed, with one gap**: root in the
+  namespace reached nothing of the host by TCP or ping, and still the internet and Silo's SSH
+  forward; closed, nothing went out and names were refused. Gvproxy as released in its place is
+  caught. The gap: `-sealed` refuses private address ranges, so a local network on other addresses
+  (this machine's router is on 192.0.2.0/24; some offices and universities use public ones) is
+  still reached, by ping here. Sealed, a made-up name still reaches the host's resolver. Into the
+  computer through Silo's forward: 0.88 Gbit/s at MTU 1500, 4.1 at MTU 65520. Test 35 asks the
+  same of a macOS computer.
 - **A corrupted LZVN or LZFSE block decodes to wrong bytes without an error**: neither format
   carries a checksum, and only zlib's catches it. A reader of main's disk from outside therefore
   checks what it reads against something (the size, or a hash Silo keeps), never only that it

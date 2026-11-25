@@ -566,21 +566,21 @@ Signed in with their plans in a macOS computer and left to work for a whole nigh
 | `credential-leaked` | A sign-in value of the computer (~/.claude/.credentials.json, the keychain item, ~/.codex/auth.json) or a secret the boundary saw in a request was found in a file this run wrote; the facts name the files. Do not pack or share these results until those files are deleted. The stand-in's redaction failed, and Silo's boundary must pass the same search before step 6 is done. |
 | `inconclusive` | Neither program was signed in, the computer's requests never reached the boundary, no model call went through it, or the control did not run; the sentence says which. |
 
-## 35. #363's sealed gvproxy with a macOS computer: what root inside reaches
+## 35. Silo's gvproxy (#363's seal, grown in #380) with a macOS computer: what root inside reaches, sealed and closed
 
-With #363's 64-line patch (-sealed), does gvproxy give a macOS computer what it needs (a lease, DNS, the internet, Silo's own SSH forward) while nothing inside, root included, reaches the Mac (its loopback, its own addresses, gvproxy's API, the engine's socket) or the Mac's local network?
+With #380's patch at gvisor-tap-vsock 197eea05, started with -sealed, does gvproxy give a macOS computer what it needs (a lease, DNS, the internet, Silo's own SSH forward) while nothing inside, root included, reaches the Mac (its loopback, its own addresses, gvproxy's API, the engine's socket) or the Mac's local network, by TCP or by ping? Started with -closed, does nothing go out at all (no connection, no ping, no name asked of a resolver) while Silo's SSH forward still gets in? How fast is traffic into the computer over the datagram socket, at MTU 1500 and 65520?
 
-- Decides: network-stack (the sealed gvproxy as main's stack: #363's recommendation, #370's condition for a closed network and for "never your Mac, your local network"), main-on-macos-first (option A's stack)
-- **Blocks: option A of the first build (#373): main is on Silo's network stack from its first start, and #363 recommends the sealed gvproxy as that stack until Silo writes its own.**
-- Tier: `vm`. Step: needed for step 2 of the first build. Time: about 30 minutes, plus building gvproxy once (Go 1.26, about 65 MB, and gvproxy's modules). Needs: the base computer of test 00, git (the Command Line Tools), a 65 MB download of Go unless Go 1.26.0 is installed, no sudo on the Mac.
+- Decides: network-stack (the sealed gvproxy as main's stack: #363's recommendation, #380's patch, #370's condition for a closed network and for "never your Mac, your local network"), main-on-macos-first (option A's stack)
+- **Blocks: option A of the first build (#373): main is on Silo's network stack from its first start, and #363 and #380 recommend the sealed gvproxy as that stack until Silo writes its own.**
+- Tier: `vm`. Step: needed for step 2 of the first build. Time: about 40 minutes, plus building gvproxy once (Go 1.26, about 65 MB, and gvproxy's modules). Needs: the base computer of test 00, git (the Command Line Tools), a 65 MB download of Go unless Go 1.26.0 is installed, no sudo on the Mac.
 - Script: [`tests/35-sealed-gvproxy.sh`](tests/35-sealed-gvproxy.sh)
 
 | Outcome | What it means |
 |---|---|
-| `sealed-holds` | The computer got its lease, DNS, the internet and Silo's SSH forward, and root inside reached nothing of the Mac or its network: no loopback through 192.168.127.254, no port of the gateway but DNS, no API, no service on the Mac's own address, no device on the Mac's network. network-stack: the sealed gvproxy can carry main from its first start (option A), and the first run can say "never your Mac, your local network" (#370 finding 3) without Apple's NAT. |
-| `sealed-leaks` | Root inside reached something of the Mac or its local network (named in the sentence): the patch misses a path on macOS; the sealed gvproxy cannot carry main until it is fixed, and the facts say what to add. |
-| `sealed-breaks` | The sealed build gave no lease, no DNS, no internet or no SSH forward, while the same computer has them on gvproxy as released (test 07): the patch refuses something the computer needs; the sentence says what. |
-| `inconclusive` | The sealed gvproxy did not build, or the computer did not start on it; the sentence says why. |
+| `sealed-holds` | Sealed, the computer got its lease, DNS, the internet and Silo's SSH forward, and root inside reached nothing of the Mac or its network: no loopback through 192.168.127.254, no port of the gateway but DNS, no API, no service or ping on the Mac's own address, no device on the Mac's network. Closed, nothing went out and SSH still got in. network-stack: the sealed gvproxy can carry main from its first start (option A), the first run can say "never your Mac, your local network" (#370 finding 3) without Apple's NAT, and the closed network #370 says Apple's NAT cannot give exists. Names still reach the Mac's resolver when sealed (the facts say so): a closed computer, or the boundary (#380), is what stops a name carrying data out. |
+| `sealed-leaks` | Root inside reached something of the Mac or its local network when sealed, or anything outside when closed (named in the sentence): the patch misses a path on macOS; the sealed gvproxy cannot carry main until it is fixed, and the facts say what to add. |
+| `sealed-breaks` | The sealed build gave no lease, no DNS, no internet or no SSH forward, or the closed one no SSH forward, while the same computer has them on gvproxy as released (test 07): the patch refuses something the computer needs; the sentence says what. |
+| `inconclusive` | Silo's gvproxy did not build, or the computer did not start on it; the sentence says why. |
 
 ## 36. What a computer's connections meet on gvproxy and on Apple's NAT, and a restart of the stack
 

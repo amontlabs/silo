@@ -10,7 +10,7 @@ test leaves possible (`./kit verdicts`). Written by `./kit doc` from
 What is main in the first build: a macOS computer behind Silo's stack from its first start, a macOS computer on Apple's NAT first, or a Linux computer?
 
 - Source: plan, open; #373 weighs options A, B and C of the first build and recommends A, with B as the fallback if the Mac kit fails on provisioning or gvproxy
-- Tests: 00 (Download macOS and install the base computer), 01 (Provisioning with the Mac's own login name), 13 (Ten fresh computers, and one with a new identity), 07 (gvproxy with a macOS computer, against Apple's NAT), 35 (#363's sealed gvproxy with a macOS computer: what root inside reaches)
+- Tests: 00 (Download macOS and install the base computer), 01 (Provisioning with the Mac's own login name), 13 (Ten fresh computers, and one with a new identity), 07 (gvproxy with a macOS computer, against Apple's NAT), 35 (Silo's gvproxy (#363's seal, grown in #380) with a macOS computer: what root inside reaches, sealed and closed)
 
 | Option | Means |
 |---|---|
@@ -30,12 +30,12 @@ What is main in the first build: a macOS computer behind Silo's stack from its f
 
 What carries main's network in the first build?
 
-- Source: plan, open; #370 assumes Apple's NAT until a patched gvproxy passes test 07; #373 needs a stack from main's first start; #363 seals gvproxy with a 64-line patch
-- Tests: 07 (gvproxy with a macOS computer, against Apple's NAT), 35 (#363's sealed gvproxy with a macOS computer: what root inside reaches), 36 (What a computer's connections meet on gvproxy and on Apple's NAT, and a restart of the stack)
+- Source: plan, open; #370 assumes Apple's NAT until a patched gvproxy passes test 07; #373 needs a stack from main's first start; #363 seals gvproxy with a 64-line patch, which #380 grows into Silo's gvproxy (-sealed, -closed)
+- Tests: 07 (gvproxy with a macOS computer, against Apple's NAT), 35 (Silo's gvproxy (#363's seal, grown in #380) with a macOS computer: what root inside reaches, sealed and closed), 36 (What a computer's connections meet on gvproxy and on Apple's NAT, and a restart of the stack)
 
 | Option | Means |
 |---|---|
-| `sealed-gvproxy` | gvproxy with #363's -sealed patch: nothing of the Mac, its loopback or its network is reached from inside |
+| `sealed-gvproxy` | Silo's gvproxy (#363's seal, grown in #380) with -sealed: nothing of the Mac, its loopback or its network is reached from inside, and -closed shuts every way out |
 | `configured-gvproxy` | gvproxy as released, configured as research 04 says (API token, no map to the Mac's 127.0.0.1); the Mac's network stays reachable |
 | `nat-first` | Apple's NAT until a stack passes; main's network has no boundary and reaches your network (#370) |
 | `own-stack` | Silo's own stack, written before main runs |
@@ -504,7 +504,7 @@ Measured, not chosen: the verdict is the measures of the tests above.
 Can a night of Claude Code and Codex on their plans be read whole through the boundary, in a macOS main?
 
 - Source: plan, open (a feature); #373 makes it part of the first build
-- Tests: 34 (A night of Claude Code and Codex through a boundary that reads them, against an hour without it), 21 (Do Claude Code and Codex trust the computer's keychain authorities), 35 (#363's sealed gvproxy with a macOS computer: what root inside reaches)
+- Tests: 34 (A night of Claude Code and Codex through a boundary that reads them, against an hour without it), 21 (Do Claude Code and Codex trust the computer's keychain authorities), 35 (Silo's gvproxy (#363's seal, grown in #380) with a macOS computer: what root inside reaches, sealed and closed)
 
 Measured, not chosen: the verdict is the measures of the tests above.
 
