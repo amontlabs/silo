@@ -1,0 +1,39 @@
+PASS  c1 anthropic call with its placeholder: 200, host saw ['real:anthropic@api.anthropic.com']
+PASS  c1 openai stream with its placeholder: 200, host saw ['real:openai@api.openai.com']
+PASS  c1 gemini key in the query: 200, host saw ['real:gemini@generativelanguage.googleapis.com']
+PASS  c1 google metadata token is a placeholder: 200 'ya29.silo-placeholder-c1'
+PASS  c1 google storage with the metadata placeholder: 200, host saw ['real:gcp@storage.googleapis.com']
+PASS  c1 azure metadata token is a JWT placeholder: 200 'xMDI0NDQ4MDB9.silo-placeholder-signature'
+PASS  c1 azure with the metadata placeholder: 200, host saw ['real:azure@management.azure.com']
+PASS  c1 a placeholder to another allowed host: 400, host saw []: '{"error":{"message":"Silo: this request carries the placeholder of anthropic, which may not go to storage.goog'
+PASS  c1 a real key pasted in the computer: 400, host saw []: '{"type":"error","error":{"type":"invalid_request_error","message":"Silo: this computer was not given'
+PASS  c1 another computer's placeholder: 400, host saw []
+PASS  c1 a host not allowed: 000 rc=56 in 0.01s: 'curl: (56) CONNECT tunnel failed, response 403'
+PASS  c1 github.com passed through, host's own certificate: rc=0 '{"ok": true, "host": "github.com"}' ''
+PASS  c1 ssh to github.com:22: b'HTTP/1.1 200 Connection established' b'SSH-2.0-standin\r\necho:SSH-2.0-client\r\n' 
+PASS  c1 TLS names another host than the connection: rc=1 ssl.SSLError: [SSL: TLSV1_UNRECOGNIZED_NAME] tlsv1 unrecognized name (_ssl.c:1035)
+PASS  c1 a client asking for HTTP/2 gets HTTP/1.1: http_version=1.1 rc=0
+PASS  c2 anthropic call with its placeholder: 200, host saw ['real:anthropic@api.anthropic.com']
+PASS  c2 openai stream with its placeholder: 200, host saw ['real:openai@api.openai.com']
+PASS  c2 gemini key in the query: 200, host saw ['real:gemini@generativelanguage.googleapis.com']
+FAIL  c2 google metadata token is a placeholder: 000 "curl: (7) Failed to connect to 169.254.169.254 port 80 after 0 ms: Couldn't conn"
+FAIL  c2 azure metadata token is a JWT placeholder: 000 "curl: (7) Failed to connect to 169.254.169.254 port 80 after 0 ms: Couldn't conn"
+PASS  c2 a placeholder to another allowed host: 400, host saw []: '{"error":{"message":"Silo: this request carries the placeholder of anthropic, which may not go to storage.goog'
+PASS  c2 a real key pasted in the computer: 400, host saw []: '{"type":"error","error":{"type":"invalid_request_error","message":"Silo: this computer was not given'
+PASS  c2 another computer's placeholder: 400, host saw []
+PASS  c2 a host not allowed: 000 rc=6 in 0.01s: 'curl: (6) Could not resolve host: evil.example'
+PASS  c2 github.com passed through, host's own certificate: rc=0 '{"ok": true, "host": "github.com"}' ''
+PASS  c2 ssh to github.com:22: b'SSH-2.0-standin\r\necho:SSH-2.0-client\r\n' 
+PASS  c2 TLS names another host than the connection: rc=1 ssl.SSLError: [SSL: TLSV1_UNRECOGNIZED_NAME] tlsv1 unrecognized name (_ssl.c:1035)
+PASS  c2 a client asking for HTTP/2 gets HTTP/1.1: http_version=1.1 rc=0
+PASS  c1 plain http to an allowed host: 403 'Silo: Silo carries plain HTTP only to the metadata server; use https.'
+PASS  c1 CONNECT to an address, not a name: b'HTTP/1.1 403 Forbidden'
+PASS  c1 garbage instead of CONNECT: b'HTTP/1.1 403 Forbidden'
+PASS  c2 lookups: an unknown name gets no answer: x7f3a.exfil.example no answer; api.anthropic.com 198.18.0.1; metadata.google.internal 169.254.169.254
+PASS  c2 an address no lookup gave, with an allowed name in TLS: b'HTTP/1.1 200 OK' 
+PASS  c2 a private address on the local network: got b''
+PASS  broken PROXY header on the hand-off socket: closed with "ConnectionResetError(104, 'Connection reset by peer')"
+PASS  c1 a connection that sends nothing: closed after 10.0s: b'HTTP/1.1 403 Forbidden'
+certificates made: 5, ms each: [0.48, 0.5, 0.51, 0.54, 0.85]
+PASS  no real value in the record, the trace or any computer's files: []
+35/37 cases pass

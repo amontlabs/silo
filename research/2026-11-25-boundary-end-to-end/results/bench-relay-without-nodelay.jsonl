@@ -1,0 +1,9 @@
+{"how": "c1", "measure": "connect", "p50": 0.59, "p90": 0.98, "p99": 1.85, "n": 200}
+{"how": "c1", "measure": "tls", "p50": 1.11, "p90": 1.48, "p99": 2.25, "n": 200}
+{"how": "c1", "measure": "request, new connection", "p50": 51.86, "p90": 55.88, "p99": 56.18, "n": 200}
+{"how": "c1", "measure": "request, kept-alive", "p50": 43.96, "p90": 44.08, "p99": 46.56, "n": 200}
+{"how": "c1", "measure": "model call, kept-alive", "p50": 88.27, "p90": 131.61, "p99": 132.06, "n": 100}
+{"how": "c1", "measure": "first byte of a stream, new connection", "p50": 43.44, "p90": 47.59, "p99": 51.25, "n": 100}
+{"how": "c1", "measure": "32 at once, new connections", "calls_per_s": 268.4, "errors": 0, "p50": 109.69, "p90": 155.3, "p99": 199.28, "n": 640}
+{"how": "c1", "measure": "download, host pass", "mbit_s": 13808.0, "bytes": 209715200}
+{"how": "c1", "measure": "download, host read", "mbit_s": 3497.0, "bytes": 209715200}

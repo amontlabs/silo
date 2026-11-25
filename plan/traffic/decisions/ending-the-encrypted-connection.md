@@ -187,3 +187,16 @@ critical; each certificate Silo makes has an ECDSA P-256 key, the host in
 `subjectAltName`, and the Authority Key Identifier and Subject Key Identifier extensions, and a
 test connects Python 3.13, Node, curl and Go to it, since each refuses a different omission. The
 script is in the project files, `research/2026-11-24-trust-libraries/mint`.
+
+## Notes
+
+An agent's part, 25 November 2026 (`research/2026-11-25-boundary-end-to-end`). Reading any host a
+secret goes to needs a certificate per name. The boundary made each on first use, in under 1.5 ms,
+and kept it. Python 3.13 refuses a certificate without an authority key identifier, which OpenSSL
+adds only when asked. Each certificate starts a day back, so a computer whose clock fell behind
+takes it, and Silo's authority must start in the past too: one made at setup was refused by a
+computer 2 h behind.
+
+The boundary of #347 and #374 offers only HTTP/1.1. curl and Node fall back. A gRPC client
+cannot, so #379's swap inside HTTP/2 headers has nowhere to run until the boundary speaks HTTP/2
+on the hosts it reads that serve gRPC.

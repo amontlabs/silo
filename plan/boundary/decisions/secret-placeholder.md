@@ -541,3 +541,16 @@ is now proposed in `signing-keys-re-signed`: the computer holds a placeholder ke
 kind, and the boundary signs each request again with the real key. A prototype did this on Linux
 for App Store Connect, the key every Mac and iOS developer's release tools use. Codex's network
 proxy ships the same thing for AWS request signatures. Details: `research/2026-11-24-mac-and-ios-developers/README.md`.
+
+An agent's part, 25 November 2026 (`research/2026-11-25-boundary-end-to-end`). One boundary swapped
+placeholders for two computers, one reaching it by a proxy inside (#378's `CONNECT`) and one by
+gvproxy's hand-off (#380). The swap worked the same on both, and Claude Code ran a task on each
+holding only its placeholder. The answer's sentence "No proxy is configured inside" conflicts with
+#378, which configures one, and the swap does not need it. Proposed in its place: "The real value
+is swapped in by the boundary, whichever way the computer's requests reach it."
+
+The same run needed one placeholder per secret and per computer. #377 gives every computer the same
+one, `placeholder-not-a-key`. With that, Silo cannot tell which computer's placeholder arrived, and
+#374's check that a key was given to this computer passes any computer's. The placeholder must also
+keep the shape programs read: Claude Code tells a key (`sk-ant-api03-…`) from a sign-in
+(`sk-ant-oat01-…`) by it, and Azure's tokens must be JWTs.

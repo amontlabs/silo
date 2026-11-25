@@ -51,3 +51,18 @@ the buffer is full. In force, Silo changes nothing in traffic without recording 
 the buffer is full, and a rule denies a tool call: the denial goes ahead and only a gap is recorded.
 The audit proposes that this entry says "except where Silo changes traffic: there the change is
 recorded or it is not made." The answer says so.
+
+## Notes
+
+An agent's part, 25 November 2026 (`research/2026-11-25-boundary-end-to-end`). The boundary was
+run as a source of #386's record, with room for 40 decisions, and the recorder was stopped. The
+next 20 requests passed at full speed. A download allowed before the stop finished all 200 MB. Each
+request after that waited for room. When the recorder came back, every line was written once and
+the chain held. Lookups made while the recorder was down filled their buffer, and the record shows
+one gap of 40 lines.
+
+The answer lets a request wait until the program gives up. Here a request waited 3 s and was then
+refused with "this request needs a decision Silo cannot record now". Without a limit, the program
+sees nothing until its own timeout, and Claude Code retried for about three minutes in #378's test.
+For polarzero: a limit after which Silo refuses with its sentence, so the program can say why it
+stopped.
