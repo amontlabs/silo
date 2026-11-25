@@ -134,3 +134,14 @@ check is for. Built and measured: the boundary keeps when each conversation's ca
 used, how much of its input the cache held, and its lifetime (5 minutes, or 1 hour when the reply
 wrote a 1-hour cache), and prices that part as a write again once the lifetime has passed. Every
 call of the run was then priced at or above its bill, and no more than the dearest price.
+
+## The same rule over several Macs (25 November 2026, by an agent)
+
+`research/2026-11-25-team-ledger/` ran this decision's rule on each Mac of a simulated team, with
+the budget shared through a ledger, leases or gossip. The simulator gives #374's numbers on one
+Mac ($3, 8 subagents: 50% over counting visible output, 35% counting output by time). Over a team
+of five under $15, the calls under way at the limit are a smaller share of the budget: at most 27%
+over counting visible output, 15% counting output by time, and from 0.4% over to 2.2% under
+holding each call's typical output, through a ledger or leases. Twelve members under $36: at most 13% over counting output by time.
+Where the count is kept (one boundary, a ledger 150 ms away, leases) moved these by a point or
+two at most.

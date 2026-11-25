@@ -676,6 +676,7 @@
         "managed-and-shown",
         "team-rule-sets",
         "team-budget",
+        "pooled-budget-ledger",
         "spend-the-team-sees",
         "team-spend",
         "receipt-on-a-pull-request",
