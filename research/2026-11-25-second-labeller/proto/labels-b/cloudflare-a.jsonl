@@ -1,0 +1,156 @@
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}", "label": "hold:gone", "named": false, "why": "whole account and all resources deleted"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}", "label": "either", "named": false, "why": "settings can be harmless or security-relevant"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/cfd_tunnel", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id}", "label": "hold:outage", "named": false, "why": "routes through tunnel stop"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id}", "label": "either", "named": false, "why": "new secret can break connectors"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id}/configurations", "label": "hold:outage", "named": false, "why": "ingress rules wiped, traffic stops"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id}/configurations", "label": "either", "named": false, "why": "ingress rules may break or expose"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id}/connections", "label": "allow", "named": false, "why": "stale connections cleanup"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id}/management", "label": "allow", "named": true, "why": "new management token issued"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/containers/applications", "label": "deploy", "named": false, "why": "runs container image"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/containers/applications/{application_id}", "label": "hold:outage", "named": false, "why": "containers stop, image remains"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/containers/applications/{application_id}", "label": "either", "named": false, "why": "image/instances change unseen"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/containers/applications/{application_id}/rollouts", "label": "deploy", "named": false, "why": "rollout ships new version"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/containers/image-preparations", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/containers/registries", "label": "allow", "named": false, "why": "registry credentials stored"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/containers/registries/{domain}", "label": "allow", "named": false, "why": "re-addable registry config"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/containers/registries/{domain}/credentials", "label": "allow", "named": true, "why": "new registry JWT credential"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/d1/database", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/d1/database/{database_id}", "label": "hold:recoverable", "named": false, "why": "undelete endpoint restores database"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/d1/database/{database_id}", "label": "allow", "named": false, "why": "read replication setting"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/d1/database/{database_id}", "label": "allow", "named": false, "why": "read replication setting"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/d1/database/{database_id}/export", "label": "allow", "named": false, "why": "export is a read"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/d1/database/{database_id}/import #1", "label": "allow", "named": false, "why": "init only returns upload URL"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/d1/database/{database_id}/query #1", "label": "hold:recoverable", "named": false, "why": "Time Travel restore within window"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/d1/database/{database_id}/query #2", "label": "allow", "named": false, "why": "read query"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/d1/database/{database_id}/raw #1", "label": "hold:recoverable", "named": false, "why": "Time Travel restore within window"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/d1/database/{database_id}/raw #2", "label": "allow", "named": false, "why": "read query"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/d1/database/{database_id}/time_travel/restore", "label": "hold:recoverable", "named": false, "why": "overwrites recent writes; undo bookmark returned"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/d1/database/{database_id}/undelete", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/d1/insights/settings", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/hyperdrive/configs", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/hyperdrive/configs/{hyperdrive_id}", "label": "hold:outage", "named": false, "why": "bound workers lose database access"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/hyperdrive/configs/{hyperdrive_id}", "label": "either", "named": false, "why": "origin change may break"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/hyperdrive/configs/{hyperdrive_id}", "label": "either", "named": false, "why": "origin change may break"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/hyperdrive/configs/{hyperdrive_id}/restart", "label": "allow", "named": false, "why": "brief restart"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/hyperdrive/integrationsOperations/planetScale/createDatabaseSignature", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/members", "label": "allow", "named": true, "why": "new member invited"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/members/{member_id}", "label": "allow", "named": false, "why": "member can be reinvited"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/members/{member_id}", "label": "either", "named": true, "why": "roles may widen or narrow"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/pages/projects", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/pages/projects/{project_name}", "label": "hold:gone", "named": false, "why": "project and deployments deleted"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/pages/projects/{project_name}", "label": "either", "named": false, "why": "build/env config may break"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/pages/projects/{project_name}/deployments", "label": "deploy", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/pages/projects/{project_name}/deployments/{deployment_id}", "label": "hold:gone", "named": false, "why": "old deployment cannot be restored"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/pages/projects/{project_name}/deployments/{deployment_id}/retry", "label": "deploy", "named": false, "why": "rebuilds and ships deployment"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/pages/projects/{project_name}/deployments/{deployment_id}/rollback", "label": "deploy", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/pages/projects/{project_name}/deployments/{deployment_id}/tails", "label": "allow", "named": false, "why": "log tail to caller"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/pages/projects/{project_name}/deployments/{deployment_id}/tails/{tail_id}", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/pages/projects/{project_name}/domains", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/pages/projects/{project_name}/domains/{domain_name}", "label": "hold:outage", "named": false, "why": "domain stops serving site"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/pages/projects/{project_name}/domains/{domain_name}", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/pages/projects/{project_name}/purge_build_cache", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/pages/projects/{project_name}/source", "label": "allow", "named": false, "why": "builds stop, site keeps serving"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/pages/projects/{project_name}/source", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/queues/{queue_id}", "label": "hold:gone", "named": false, "why": "queue and its messages lost"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/queues/{queue_id}", "label": "either", "named": false, "why": "settings may pause delivery"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/queues/{queue_id}", "label": "either", "named": false, "why": "settings may pause delivery"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues/{queue_id}/consumers", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/queues/{queue_id}/consumers/{consumer_id}", "label": "hold:outage", "named": false, "why": "messages stop being processed"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/queues/{queue_id}/consumers/{consumer_id}", "label": "either", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/ack", "label": "allow", "named": false, "why": "normal consumer acknowledgement"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/batch", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/extend", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/peek", "label": "allow", "named": false, "why": "read"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/preview", "label": "allow", "named": false, "why": "read"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/preview/ack", "label": "hold:gone", "named": false, "why": "messages deleted for good"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/pull", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/purge", "label": "hold:gone", "named": false, "why": "messages deleted for good"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues/{queue_id}/purge", "label": "hold:gone", "named": false, "why": "all messages deleted"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/r2/buckets", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}", "label": "hold:outage", "named": false, "why": "bucket empty; bindings and config break"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}", "label": "allow", "named": false, "why": "default storage class"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/cors", "label": "hold:outage", "named": false, "why": "browser cross-origin access breaks"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/cors", "label": "either", "named": false, "why": "policy may break or widen"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/custom_domains", "label": "hold:exposed", "named": false, "why": "serves bucket publicly on domain"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/custom_domains/{domain}", "label": "hold:outage", "named": false, "why": "domain stops serving bucket"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/domains/custom", "label": "hold:exposed", "named": false, "why": "serves bucket publicly on domain"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/domains/custom/{domain}", "label": "hold:outage", "named": false, "why": "domain stops serving bucket"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/domains/custom/{domain}", "label": "either", "named": false, "why": "may disable domain or not"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/domains/managed #1", "label": "hold:exposed", "named": false, "why": "bucket public on r2.dev"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/domains/managed #2", "label": "hold:outage", "named": false, "why": "r2.dev URL stops serving"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/jobs", "label": "either", "named": false, "why": "job kind unknown"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/lifecycle", "label": "either", "named": false, "why": "rules may expire all objects"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/local-uploads", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/lock", "label": "hold:gone", "named": false, "why": "removes retention protection against deletion"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/lock", "label": "either", "named": false, "why": "replaces existing lock rules"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/objects", "label": "hold:gone", "named": false, "why": "no versioning in R2"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/objects/{object_key}", "label": "hold:gone", "named": false, "why": "no versioning in R2"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/objects/{object_key}", "label": "either", "named": false, "why": "may overwrite existing object"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/sippy", "label": "hold:outage", "named": false, "why": "unmigrated objects stop resolving"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/sippy", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/r2/temp-access-credentials", "label": "allow", "named": true, "why": "new temporary access credentials"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/secrets_store/stores", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/secrets_store/stores/{store_id}", "label": "hold:gone", "named": false, "why": "store and secrets deleted"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/secrets_store/stores/{store_id}/secrets", "label": "hold:gone", "named": false, "why": "secret values lost"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/secrets_store/stores/{store_id}/secrets", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/secrets_store/stores/{store_id}/secrets/{secret_id}", "label": "hold:gone", "named": false, "why": "secret value lost"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/secrets_store/stores/{store_id}/secrets/{secret_id}", "label": "either", "named": false, "why": "may change value or scopes"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/secrets_store/stores/{store_id}/secrets/{secret_id}/duplicate", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/storage/kv/namespaces", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}", "label": "hold:gone", "named": false, "why": "all keys deleted"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/bulk", "label": "hold:gone", "named": false, "why": "keys deleted"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/bulk", "label": "either", "named": false, "why": "may overwrite existing keys"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/bulk/delete", "label": "hold:gone", "named": false, "why": "keys deleted"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/bulk/get", "label": "allow", "named": false, "why": "read"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/values/{key_name}", "label": "hold:gone", "named": false, "why": "key deleted"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/values/{key_name}", "label": "either", "named": false, "why": "may overwrite existing value"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/tokens", "label": "allow", "named": true, "why": "new API token"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/tokens/{token_id}", "label": "hold:outage", "named": false, "why": "whatever uses token breaks"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/tokens/{token_id}", "label": "either", "named": true, "why": "policies or IP list may widen"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/tokens/{token_id}/value", "label": "hold:outage", "named": true, "why": "old value revoked, new issued"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/indexes", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/vectorize/indexes/{index_name}", "label": "hold:gone", "named": false, "why": "index and vectors deleted"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/vectorize/indexes/{index_name}", "label": "either", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/indexes/{index_name}/delete-by-ids", "label": "hold:gone", "named": false, "why": "vectors deleted"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/indexes/{index_name}/get-by-ids", "label": "allow", "named": false, "why": "read"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/indexes/{index_name}/insert", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/indexes/{index_name}/query", "label": "allow", "named": false, "why": "read"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/indexes/{index_name}/upsert", "label": "either", "named": false, "why": "may overwrite existing vectors"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/v2/indexes", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}", "label": "hold:gone", "named": false, "why": "index and vectors deleted"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}/delete_by_ids", "label": "hold:gone", "named": false, "why": "vectors deleted"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}/get_by_ids", "label": "allow", "named": false, "why": "read"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}/insert", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}/metadata_index/create", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}/metadata_index/delete", "label": "hold:outage", "named": false, "why": "filtered queries break until rebuilt"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}/query", "label": "allow", "named": false, "why": "read"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}/upsert", "label": "either", "named": false, "why": "may overwrite existing vectors"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/account-settings", "label": "either", "named": false, "why": "usage model affects billing"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/assets/upload", "label": "allow", "named": false, "why": "staged, not deployed"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/dispatch/namespaces", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}", "label": "hold:gone", "named": false, "why": "all scripts in namespace deleted"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}", "label": "either", "named": false, "why": "trusted workers / name"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}", "label": "either", "named": false, "why": "trusted workers / name"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts", "label": "hold:gone", "named": false, "why": "customer scripts deleted"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}", "label": "hold:gone", "named": false, "why": "script code deleted"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}", "label": "deploy", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/assets-upload-session", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/content", "label": "deploy", "named": false, "why": ""}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/secrets", "label": "deploy", "named": false, "why": "secret change ships new version"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/secrets-bulk", "label": "deploy", "named": false, "why": "secret change ships new version"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/secrets/{secret_name}", "label": "hold:gone", "named": false, "why": "secret value lost"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/settings", "label": "deploy", "named": false, "why": "bindings/config shipped to script"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/tags", "label": "allow", "named": false, "why": "tags only"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/tags/{tag}", "label": "allow", "named": false, "why": "tags only"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/tags/{tag}", "label": "allow", "named": false, "why": "tags only"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/tags/{tag}", "label": "allow", "named": false, "why": "tags only"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/domains", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/domains/{domain_id}", "label": "hold:outage", "named": false, "why": "domain stops serving worker"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/durable_objects/namespaces/{id}/query/v2", "label": "either", "named": false, "why": "query may read or write"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/destinations", "label": "allow", "named": true, "why": "logs sent to outside URL"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/observability/destinations/{slug}", "label": "allow", "named": false, "why": "stops export; recreate easily"}

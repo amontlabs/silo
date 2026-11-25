@@ -1,0 +1,267 @@
+{"id": "railway accessGroupCreate", "label": "allow", "named": false, "why": ""}
+{"id": "railway accessGroupDelete", "label": "allow", "named": false, "why": ""}
+{"id": "railway accessGroupMemberAdd", "label": "allow", "named": true, "why": ""}
+{"id": "railway accessGroupMemberRemove", "label": "allow", "named": false, "why": ""}
+{"id": "railway accessGroupProjectAttach", "label": "allow", "named": true, "why": "group members gain project access"}
+{"id": "railway accessGroupProjectDetach", "label": "allow", "named": false, "why": ""}
+{"id": "railway accessGroupUpdate", "label": "allow", "named": true, "why": "role change can raise access"}
+{"id": "railway agentUsageLimitSet", "label": "either", "named": false, "why": "limit may be raised or lowered"}
+{"id": "railway apiTokenCreate", "label": "allow", "named": true, "why": "new API token"}
+{"id": "railway apiTokenDelete", "label": "hold:outage", "named": false, "why": "callers using token stop working"}
+{"id": "railway baseEnvironmentOverride", "label": "allow", "named": false, "why": "base for future PR environments"}
+{"id": "railway botScopeBindingRemove", "label": "allow", "named": false, "why": ""}
+{"id": "railway bucketCreate", "label": "allow", "named": false, "why": ""}
+{"id": "railway bucketCredentialsReset", "label": "hold:outage", "named": false, "why": "old credentials stop working"}
+{"id": "railway bucketUpdate", "label": "allow", "named": false, "why": "bucket name only"}
+{"id": "railway cancelPitrHaWorkflow", "label": "allow", "named": false, "why": ""}
+{"id": "railway canvasViewMerge", "label": "allow", "named": false, "why": "canvas layout only"}
+{"id": "railway clearPitrHaWorkflowProgress", "label": "allow", "named": false, "why": ""}
+{"id": "railway clearanceTokenCreate", "label": "allow", "named": true, "why": "new access token"}
+{"id": "railway clearanceTokenRevoke", "label": "hold:outage", "named": false, "why": "token holders lose access"}
+{"id": "railway cliAuthEventTrack", "label": "allow", "named": false, "why": ""}
+{"id": "railway cliEventTrack", "label": "allow", "named": false, "why": ""}
+{"id": "railway cloudAgentArchive", "label": "allow", "named": false, "why": "unarchive exists"}
+{"id": "railway cloudAgentCheckpointCreate", "label": "allow", "named": false, "why": ""}
+{"id": "railway cloudAgentCheckpointDelete", "label": "hold:gone", "named": false, "why": "disk checkpoint destroyed"}
+{"id": "railway cloudAgentCreate", "label": "allow", "named": false, "why": ""}
+{"id": "railway cloudAgentDelete", "label": "hold:gone", "named": false, "why": "agent disk destroyed"}
+{"id": "railway cloudAgentDeploy", "label": "deploy", "named": false, "why": ""}
+{"id": "railway cloudAgentFeedbackCreate", "label": "allow", "named": false, "why": ""}
+{"id": "railway cloudAgentFork", "label": "allow", "named": false, "why": ""}
+{"id": "railway cloudAgentHarnessToken", "label": "allow", "named": true, "why": "mints token"}
+{"id": "railway cloudAgentMarkSeen", "label": "allow", "named": false, "why": ""}
+{"id": "railway cloudAgentSessionRename", "label": "allow", "named": false, "why": ""}
+{"id": "railway cloudAgentSleep", "label": "hold:outage", "named": false, "why": "running processes killed until woken"}
+{"id": "railway cloudAgentStateReport", "label": "allow", "named": false, "why": ""}
+{"id": "railway cloudAgentTaskCancel", "label": "allow", "named": false, "why": ""}
+{"id": "railway cloudAgentTaskDispatch", "label": "allow", "named": false, "why": ""}
+{"id": "railway cloudAgentTaskRecover", "label": "allow", "named": false, "why": ""}
+{"id": "railway cloudAgentTaskRespond", "label": "allow", "named": false, "why": ""}
+{"id": "railway cloudAgentUnarchive", "label": "allow", "named": false, "why": ""}
+{"id": "railway cloudAgentWake", "label": "allow", "named": false, "why": ""}
+{"id": "railway customDomainCreate", "label": "hold:exposed", "named": false, "why": "public domain attached to service"}
+{"id": "railway customDomainDelete", "label": "hold:outage", "named": false, "why": "domain detached"}
+{"id": "railway customDomainIssueCertificate", "label": "allow", "named": false, "why": ""}
+{"id": "railway customDomainUpdate", "label": "either", "named": false, "why": "wrong port breaks routing"}
+{"id": "railway customerCreateFreePlanSubscription", "label": "allow", "named": false, "why": ""}
+{"id": "railway customerTogglePayoutsToCredits", "label": "hold:money", "named": false, "why": "redirects payouts into credits"}
+{"id": "railway databasePasswordReset", "label": "hold:outage", "named": false, "why": "old DB credentials stop working"}
+{"id": "railway deploymentApprove", "label": "deploy", "named": false, "why": ""}
+{"id": "railway deploymentCancel", "label": "allow", "named": false, "why": ""}
+{"id": "railway deploymentInstanceExecutionCreate", "label": "allow", "named": false, "why": "runs existing cron job"}
+{"id": "railway deploymentRedeploy", "label": "deploy", "named": false, "why": ""}
+{"id": "railway deploymentRemove", "label": "hold:outage", "named": false, "why": "running deployment removed"}
+{"id": "railway deploymentRestart", "label": "allow", "named": false, "why": "brief restart, recovers alone"}
+{"id": "railway deploymentRollback", "label": "deploy", "named": false, "why": ""}
+{"id": "railway deploymentStop", "label": "hold:outage", "named": false, "why": ""}
+{"id": "railway deploymentTriggerCreate", "label": "allow", "named": false, "why": ""}
+{"id": "railway deploymentTriggerDelete", "label": "allow", "named": false, "why": "auto-deploys stop, nothing running stops"}
+{"id": "railway deploymentTriggerUpdate", "label": "either", "named": false, "why": "branch/repo change alters deploys"}
+{"id": "railway devNewLandingTargetClear", "label": "allow", "named": false, "why": ""}
+{"id": "railway devNewLandingTargetSet", "label": "allow", "named": false, "why": ""}
+{"id": "railway disablePitrForHaCluster", "label": "hold:gone", "named": false, "why": "backup protection off"}
+{"id": "railway disableServiceCdn", "label": "allow", "named": false, "why": "site still served without CDN"}
+{"id": "railway dockerComposeImport", "label": "deploy", "named": false, "why": "creates and runs services"}
+{"id": "railway egressGatewayAssociationCreate", "label": "allow", "named": false, "why": ""}
+{"id": "railway egressGatewayAssociationsClear", "label": "hold:outage", "named": false, "why": "static IPs lost, allow-lists break"}
+{"id": "railway egressGatewayHAMigrationPreview", "label": "allow", "named": false, "why": ""}
+{"id": "railway egressGatewayRollbackFromHA", "label": "either", "named": false, "why": "egress IP changes"}
+{"id": "railway egressGatewayUpgradeToHA", "label": "either", "named": false, "why": "IPs change, may cost"}
+{"id": "railway emailChangeConfirm", "label": "allow", "named": true, "why": "new email controls account"}
+{"id": "railway emailChangeInitiate", "label": "allow", "named": false, "why": ""}
+{"id": "railway enablePitrForHaCluster", "label": "allow", "named": false, "why": ""}
+{"id": "railway enableServiceCdn", "label": "allow", "named": false, "why": ""}
+{"id": "railway environmentApplyChangeSet", "label": "either", "named": false, "why": "arbitrary changeset"}
+{"id": "railway environmentClearanceDefaultUpdate", "label": "either", "named": false, "why": "can turn authentication off"}
+{"id": "railway environmentConfigPlanCommentUpsert", "label": "allow", "named": false, "why": ""}
+{"id": "railway environmentCreate", "label": "allow", "named": false, "why": ""}
+{"id": "railway environmentDelete", "label": "hold:gone", "named": false, "why": "environment volumes destroyed"}
+{"id": "railway environmentIacPartialRelease", "label": "allow", "named": false, "why": ""}
+{"id": "railway environmentIacPartialTransfer", "label": "allow", "named": false, "why": ""}
+{"id": "railway environmentPatchCommit #1", "label": "hold:gone", "named": false, "why": "volume deleted"}
+{"id": "railway environmentPatchCommit #2", "label": "deploy", "named": false, "why": "variable change deployed"}
+{"id": "railway environmentPatchCommitStaged", "label": "deploy", "named": false, "why": "commits staged config"}
+{"id": "railway environmentPatchDismissFailure", "label": "allow", "named": false, "why": ""}
+{"id": "railway environmentPatchRestage", "label": "allow", "named": false, "why": ""}
+{"id": "railway environmentPreviewChangeSet", "label": "allow", "named": false, "why": ""}
+{"id": "railway environmentRename", "label": "allow", "named": false, "why": ""}
+{"id": "railway environmentStageChanges #1", "label": "allow", "named": false, "why": "staged only, not applied"}
+{"id": "railway environmentStageChanges #2", "label": "allow", "named": false, "why": "staged only"}
+{"id": "railway environmentTriggersDeploy", "label": "deploy", "named": false, "why": ""}
+{"id": "railway environmentUnskipService", "label": "deploy", "named": false, "why": ""}
+{"id": "railway fairUseAgree", "label": "allow", "named": false, "why": ""}
+{"id": "railway featureFlagAdd", "label": "allow", "named": false, "why": ""}
+{"id": "railway featureFlagRemove", "label": "allow", "named": false, "why": ""}
+{"id": "railway generateShellToken", "label": "allow", "named": true, "why": "shell access token"}
+{"id": "railway githubRepoDeploy", "label": "deploy", "named": false, "why": ""}
+{"id": "railway githubRepoUpdate", "label": "deploy", "named": false, "why": "updates repo from template"}
+{"id": "railway inviteCodeUse", "label": "allow", "named": false, "why": ""}
+{"id": "railway jobApplicationCreate", "label": "allow", "named": false, "why": ""}
+{"id": "railway loginSessionAuth", "label": "allow", "named": true, "why": "authorizes CLI login session"}
+{"id": "railway loginSessionCancel", "label": "allow", "named": false, "why": ""}
+{"id": "railway loginSessionConsume", "label": "allow", "named": true, "why": "returns new token"}
+{"id": "railway loginSessionCreate", "label": "allow", "named": false, "why": ""}
+{"id": "railway loginSessionVerify", "label": "allow", "named": false, "why": ""}
+{"id": "railway notificationDeliveriesMarkAsRead", "label": "allow", "named": false, "why": ""}
+{"id": "railway notificationRuleCreate", "label": "allow", "named": true, "why": "may send alerts to outside URL"}
+{"id": "railway notificationRuleDelete", "label": "allow", "named": false, "why": ""}
+{"id": "railway notificationRuleUpdate", "label": "allow", "named": true, "why": "may redirect alerts elsewhere"}
+{"id": "railway observabilityDashboardCreate", "label": "allow", "named": false, "why": ""}
+{"id": "railway observabilityDashboardReset", "label": "allow", "named": false, "why": ""}
+{"id": "railway observabilityDashboardUpdate", "label": "allow", "named": false, "why": ""}
+{"id": "railway passkeyDelete", "label": "allow", "named": false, "why": ""}
+{"id": "railway preferencesUpdate", "label": "allow", "named": false, "why": ""}
+{"id": "railway privateNetworkEndpointRename", "label": "hold:outage", "named": false, "why": "internal DNS name callers break"}
+{"id": "railway projectClaim", "label": "allow", "named": false, "why": ""}
+{"id": "railway projectClearanceDefaultUpdate", "label": "either", "named": false, "why": "future envs may lose auth"}
+{"id": "railway projectCreate", "label": "allow", "named": false, "why": ""}
+{"id": "railway projectDelete", "label": "hold:gone", "named": false, "why": "immediate project deletion"}
+{"id": "railway projectFavoriteSet", "label": "allow", "named": false, "why": ""}
+{"id": "railway projectFeatureFlagAdd", "label": "allow", "named": false, "why": ""}
+{"id": "railway projectFeatureFlagRemove", "label": "allow", "named": false, "why": ""}
+{"id": "railway projectInvitationAccept", "label": "allow", "named": false, "why": ""}
+{"id": "railway projectInvitationCreate", "label": "allow", "named": true, "why": ""}
+{"id": "railway projectInvitationDelete", "label": "allow", "named": false, "why": ""}
+{"id": "railway projectInvitationResend", "label": "allow", "named": false, "why": ""}
+{"id": "railway projectInviteCodeCreate", "label": "allow", "named": true, "why": "invite link"}
+{"id": "railway projectLeave", "label": "allow", "named": false, "why": ""}
+{"id": "railway projectMemberAdd", "label": "allow", "named": true, "why": ""}
+{"id": "railway projectMemberRemove", "label": "allow", "named": false, "why": ""}
+{"id": "railway projectMemberUpdate", "label": "allow", "named": true, "why": "role may be raised"}
+{"id": "railway projectScheduleDelete", "label": "hold:recoverable", "named": false, "why": "48-hour grace period"}
+{"id": "railway projectScheduleDeleteCancel", "label": "allow", "named": false, "why": ""}
+{"id": "railway projectScheduleDeleteForce", "label": "hold:gone", "named": false, "why": "skips grace period"}
+{"id": "railway projectTokenCreate", "label": "allow", "named": true, "why": ""}
+{"id": "railway projectTokenDelete", "label": "hold:outage", "named": false, "why": "token users stop working"}
+{"id": "railway projectTransfer", "label": "allow", "named": true, "why": "other workspace gains project"}
+{"id": "railway projectTransferConfirm", "label": "allow", "named": true, "why": "ownership moves"}
+{"id": "railway projectTransferInitiate", "label": "allow", "named": true, "why": "transfer to another party"}
+{"id": "railway projectTransferToTeam", "label": "allow", "named": true, "why": "team gains project"}
+{"id": "railway projectUpdate #1", "label": "hold:exposed", "named": false, "why": "project made public"}
+{"id": "railway projectUpdate #2", "label": "allow", "named": false, "why": ""}
+{"id": "railway providerAuthRemove", "label": "allow", "named": false, "why": "running services unaffected"}
+{"id": "railway purgeServiceCache", "label": "allow", "named": false, "why": ""}
+{"id": "railway railwayDomainDnsRecordCreate", "label": "allow", "named": false, "why": ""}
+{"id": "railway railwayDomainDnsRecordDelete", "label": "hold:gone", "named": false, "why": "DNS record destroyed"}
+{"id": "railway railwayDomainDnsRecordUpdate", "label": "either", "named": false, "why": "record change may break resolution"}
+{"id": "railway railwayDomainEmailForwardingRemoveAll", "label": "hold:gone", "named": false, "why": "all forwarding rules and records removed"}
+{"id": "railway railwayDomainEmailForwardingRuleCreate", "label": "allow", "named": true, "why": "mail forwarded to external inbox"}
+{"id": "railway railwayDomainEmailForwardingRuleDelete", "label": "hold:outage", "named": false, "why": "mail to address stops"}
+{"id": "railway railwayDomainEmailForwardingRuleSendTest", "label": "allow", "named": false, "why": ""}
+{"id": "railway railwayDomainEmailForwardingRuleUpdate", "label": "allow", "named": true, "why": "mail redirected elsewhere"}
+{"id": "railway railwayDomainNameserversSet", "label": "hold:outage", "named": false, "why": "domain stops resolving via Railway"}
+{"id": "railway railwayDomainUpdate", "label": "either", "named": false, "why": "settings unknown"}
+{"id": "railway recoveryCodeGenerate", "label": "allow", "named": true, "why": "new recovery codes returned"}
+{"id": "railway recoveryCodeValidate", "label": "allow", "named": false, "why": ""}
+{"id": "railway referralInfoUpdate", "label": "allow", "named": false, "why": ""}
+{"id": "railway sandboxCheckpointCreate", "label": "allow", "named": false, "why": ""}
+{"id": "railway sandboxCheckpointDelete", "label": "hold:gone", "named": false, "why": ""}
+{"id": "railway sandboxCheckpointRename", "label": "allow", "named": false, "why": ""}
+{"id": "railway sandboxCreate", "label": "allow", "named": false, "why": ""}
+{"id": "railway sandboxDestroy", "label": "hold:gone", "named": false, "why": "sandbox disk destroyed"}
+{"id": "railway sandboxExec", "label": "allow", "named": false, "why": "inside disposable sandbox"}
+{"id": "railway sandboxHeartbeat", "label": "allow", "named": false, "why": ""}
+{"id": "railway sandboxTemplateBuild", "label": "allow", "named": false, "why": ""}
+{"id": "railway serviceConnect", "label": "deploy", "named": false, "why": "connects source and builds"}
+{"id": "railway serviceCreate", "label": "allow", "named": false, "why": ""}
+{"id": "railway serviceDelete", "label": "hold:gone", "named": false, "why": "service and its data deleted"}
+{"id": "railway serviceDisconnect", "label": "allow", "named": false, "why": "running deployment stays"}
+{"id": "railway serviceDomainCreate", "label": "hold:exposed", "named": false, "why": "service gets public URL"}
+{"id": "railway serviceDomainDelete", "label": "hold:outage", "named": false, "why": "domain detached"}
+{"id": "railway serviceDomainUpdate", "label": "either", "named": false, "why": "domain change may break URL"}
+{"id": "railway serviceDuplicate", "label": "allow", "named": false, "why": ""}
+{"id": "railway serviceFeatureFlagAdd", "label": "allow", "named": false, "why": ""}
+{"id": "railway serviceFeatureFlagRemove", "label": "allow", "named": false, "why": ""}
+{"id": "railway serviceInstanceAutoDeployUpdate", "label": "allow", "named": false, "why": ""}
+{"id": "railway serviceInstanceAutoUpdateScheduleUpdate", "label": "allow", "named": false, "why": ""}
+{"id": "railway serviceInstanceAutoUpdateSnooze", "label": "allow", "named": false, "why": ""}
+{"id": "railway serviceInstanceAutoUpdateSnoozeClear", "label": "allow", "named": false, "why": ""}
+{"id": "railway serviceInstanceClearanceUpdate", "label": "either", "named": false, "why": "can turn authentication off"}
+{"id": "railway serviceInstanceDeploy", "label": "deploy", "named": false, "why": ""}
+{"id": "railway serviceInstanceDeployV2", "label": "deploy", "named": false, "why": ""}
+{"id": "railway serviceInstanceLimitsUpdate", "label": "either", "named": false, "why": "raise costs or lower breaks"}
+{"id": "railway serviceInstanceRedeploy", "label": "deploy", "named": false, "why": ""}
+{"id": "railway serviceInstanceUpdate #1", "label": "hold:outage", "named": false, "why": "scaled to zero"}
+{"id": "railway serviceInstanceUpdate #2", "label": "allow", "named": false, "why": "healthcheck path setting"}
+{"id": "railway serviceInstanceVulnRemediationDismiss", "label": "allow", "named": false, "why": ""}
+{"id": "railway serviceInstanceVulnRemediationPatchNow", "label": "deploy", "named": false, "why": ""}
+{"id": "railway serviceRemoveUpstreamUrl", "label": "allow", "named": false, "why": ""}
+{"id": "railway serviceTakedownAcknowledge", "label": "allow", "named": false, "why": ""}
+{"id": "railway serviceUpdate", "label": "allow", "named": false, "why": "name or icon"}
+{"id": "railway sessionDelete", "label": "allow", "named": false, "why": ""}
+{"id": "railway setServiceUnderAttackMode", "label": "either", "named": false, "why": "challenge may block API clients"}
+{"id": "railway setupAgentEventTrack", "label": "allow", "named": false, "why": ""}
+{"id": "railway sharedVariableConfigure", "label": "either", "named": false, "why": ""}
+{"id": "railway signalCreate", "label": "allow", "named": false, "why": ""}
+{"id": "railway signalDefaultSet", "label": "deploy", "named": false, "why": "flag default changes production"}
+{"id": "railway signalDelete", "label": "hold:gone", "named": false, "why": "signal and audit log deleted"}
+{"id": "railway signalReplace", "label": "hold:gone", "named": false, "why": "clears all rules"}
+{"id": "railway signalRollback", "label": "deploy", "named": false, "why": "restores previous flag config"}
+{"id": "railway signalRuleSet", "label": "deploy", "named": false, "why": "flag rule changes behaviour"}
+{"id": "railway signalRuleUnset", "label": "deploy", "named": false, "why": "flag rule changes behaviour"}
+{"id": "railway sshPublicKeyCreate", "label": "allow", "named": true, "why": "SSH key added"}
+{"id": "railway sshPublicKeyDelete", "label": "allow", "named": false, "why": ""}
+{"id": "railway sshSignupApprove", "label": "allow", "named": true, "why": "SSH key registered"}
+{"id": "railway tcpProxyCreate", "label": "hold:exposed", "named": false, "why": "service port opened publicly"}
+{"id": "railway tcpProxyDelete", "label": "hold:outage", "named": false, "why": "TCP access removed"}
+{"id": "railway templateClone", "label": "allow", "named": false, "why": ""}
+{"id": "railway templateDelete", "label": "hold:gone", "named": false, "why": ""}
+{"id": "railway templateDeploy", "label": "deploy", "named": false, "why": ""}
+{"id": "railway templateDeployV2", "label": "deploy", "named": false, "why": ""}
+{"id": "railway templateGenerate", "label": "allow", "named": false, "why": ""}
+{"id": "railway templatePublish", "label": "hold:exposed", "named": false, "why": "template made public"}
+{"id": "railway templateRevert", "label": "either", "named": false, "why": "removes HA variables"}
+{"id": "railway templateServiceSourceEject", "label": "allow", "named": false, "why": ""}
+{"id": "railway templateUnpublish", "label": "allow", "named": false, "why": ""}
+{"id": "railway templateVolumeUpdate", "label": "allow", "named": false, "why": ""}
+{"id": "railway trustedDomainCreate", "label": "allow", "named": true, "why": "domain emails auto-join"}
+{"id": "railway trustedDomainDelete", "label": "allow", "named": false, "why": ""}
+{"id": "railway trustedDomainRetriggerVerification", "label": "allow", "named": false, "why": ""}
+{"id": "railway trustedDomainUpdate", "label": "allow", "named": true, "why": "joining policy may widen"}
+{"id": "railway twoFactorInfoCreate", "label": "allow", "named": false, "why": ""}
+{"id": "railway twoFactorInfoDelete", "label": "allow", "named": false, "why": "2FA removed, owner can re-add"}
+{"id": "railway twoFactorInfoSecret", "label": "allow", "named": false, "why": ""}
+{"id": "railway twoFactorInfoValidate", "label": "allow", "named": false, "why": ""}
+{"id": "railway updateServiceEdgeConfig", "label": "either", "named": false, "why": "caching may serve private responses"}
+{"id": "railway updateServiceEdgeRules", "label": "either", "named": false, "why": "rules can block all traffic"}
+{"id": "railway upsertSlackChannel", "label": "allow", "named": true, "why": "shared Slack channel"}
+{"id": "railway usageLimitRemove", "label": "hold:money", "named": false, "why": "spend cap removed"}
+{"id": "railway usageLimitSet", "label": "either", "named": false, "why": "limit may be raised or lowered"}
+{"id": "railway userBetaLeave", "label": "allow", "named": false, "why": ""}
+{"id": "railway userDelete", "label": "hold:gone", "named": false, "why": "account deleted"}
+{"id": "railway userDiscordDisconnect", "label": "allow", "named": false, "why": ""}
+{"id": "railway userFlagsRemove", "label": "allow", "named": false, "why": ""}
+{"id": "railway userFlagsSet", "label": "allow", "named": false, "why": ""}
+{"id": "railway userProfileUpdate", "label": "allow", "named": false, "why": ""}
+{"id": "railway userTermsUpdate", "label": "allow", "named": false, "why": ""}
+{"id": "railway variableCollectionUpsert #1", "label": "hold:gone", "named": false, "why": "replace drops other variables"}
+{"id": "railway variableCollectionUpsert #2", "label": "deploy", "named": false, "why": "variable set, redeploys"}
+{"id": "railway variableDelete", "label": "hold:gone", "named": false, "why": "secret value lost"}
+{"id": "railway variableUpsert", "label": "either", "named": false, "why": "may overwrite a secret"}
+{"id": "railway volumeCreate", "label": "allow", "named": false, "why": ""}
+{"id": "railway volumeDelete", "label": "hold:gone", "named": false, "why": ""}
+{"id": "railway volumeInstanceBackupCreate", "label": "allow", "named": false, "why": ""}
+{"id": "railway volumeInstanceBackupDelete", "label": "hold:gone", "named": false, "why": ""}
+{"id": "railway volumeInstanceBackupLock", "label": "allow", "named": false, "why": ""}
+{"id": "railway volumeInstanceBackupRestore", "label": "hold:gone", "named": false, "why": "current volume data overwritten"}
+{"id": "railway volumeInstanceBackupScheduleUpdate", "label": "either", "named": false, "why": "can disable backups"}
+{"id": "railway volumeInstancePITRRestore", "label": "allow", "named": false, "why": "creates new service"}
+{"id": "railway volumeInstanceUpdate", "label": "either", "named": false, "why": "mount or size change"}
+{"id": "railway volumeUpdate", "label": "allow", "named": false, "why": "name only"}
+{"id": "railway webhookTest", "label": "allow", "named": true, "why": "stored headers sent to any URL"}
+{"id": "railway workspaceApiTokenDelete", "label": "hold:outage", "named": false, "why": "token users stop working"}
+{"id": "railway workspaceDelete", "label": "hold:gone", "named": false, "why": ""}
+{"id": "railway workspaceInviteCodeCreate", "label": "allow", "named": true, "why": "invite code"}
+{"id": "railway workspaceInviteCodeUse", "label": "allow", "named": false, "why": ""}
+{"id": "railway workspaceLeave", "label": "allow", "named": false, "why": ""}
+{"id": "railway workspacePermissionChange", "label": "allow", "named": true, "why": "permissions may be raised"}
+{"id": "railway workspacePolicyDeploySourceAllowlistAdd", "label": "allow", "named": true, "why": "new deploy source allowed"}
+{"id": "railway workspacePolicyDeploySourceAllowlistRemove", "label": "allow", "named": false, "why": ""}
+{"id": "railway workspacePolicyItemUpdate", "label": "either", "named": false, "why": "can disable a policy"}
+{"id": "railway workspaceSetRestrictProjectVisibilityToGroups", "label": "either", "named": true, "why": "can widen project visibility"}
+{"id": "railway workspaceTwoFactorEnforcementUpdate", "label": "either", "named": false, "why": "can disable 2FA enforcement"}
+{"id": "railway workspaceUpdate", "label": "allow", "named": false, "why": ""}
+{"id": "railway workspaceUpsertSlackChannel", "label": "allow", "named": true, "why": "shared Slack channel"}
+{"id": "railway workspaceUserInvite", "label": "allow", "named": true, "why": ""}
+{"id": "railway workspaceUserRemove", "label": "allow", "named": false, "why": ""}
+{"id": "railway xAgentProjectClaim", "label": "allow", "named": false, "why": ""}
