@@ -53,7 +53,7 @@ whoever builds it.
 
 ## A hostile test of `budget-stops-what-it-meters`
 
-Agent, 25 November 2026, from `research/2026-11-25-untrusted-parsers/` (#387). On #385's boundary,
+Agent, 25 November 2026, from `research/2026-11-25-untrusted-parsers/` (#401). On #385's boundary,
 a computer with a $50 budget had 10 model calls served, $240 at the host's counts, and 3 counted.
 The other seven were sent to `/v1/messages` spelled as Anthropic's host also answers it
 (`//v1/messages`, `/v1/./messages`, absolute form, and three more), and two calls went inside the

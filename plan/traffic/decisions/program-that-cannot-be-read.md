@@ -20,7 +20,7 @@ a new provider covers every program that uses it, where a reader of files covers
 
 ## Traffic Silo reads, and reads wrongly
 
-Agent, 25 November 2026, from `research/2026-11-25-untrusted-parsers/` (#387). "Nothing goes to
+Agent, 25 November 2026, from `research/2026-11-25-untrusted-parsers/` (#401). "Nothing goes to
 such a host unread" holds only if Silo's reading is the host's. On #385's boundary it is not:
 `/v1//messages` is no model route to the boundary and is one to Anthropic's host, and a header
 after a bare LF is part of the line before it to the boundary and a header of its own to the host.

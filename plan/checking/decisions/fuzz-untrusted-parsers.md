@@ -19,7 +19,7 @@ whoever builds it.
 
 ## The drafts' parsers, fuzzed and compared
 
-Agent, 25 November 2026, from `research/2026-11-25-untrusted-parsers/` (#387's folder). Fourteen
+Agent, 25 November 2026, from `research/2026-11-25-untrusted-parsers/` (#401's folder). Fourteen
 parsers of eight drafts were fuzzed, coverage-guided, and each reader of a format another program
 also reads was compared with that program.
 
