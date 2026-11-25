@@ -2,8 +2,8 @@
 
 For polarzero, 25 November 2026, by an agent. This branch is `main` (`1b8f191`) with every open
 draft pull request merged into it, in the order #364 proposes, with #370 to #374 added after.
-`plan check` passed after each merge. Nothing here is new research: the only text written on this
-branch is this page, one folder rename and one note.
+`plan check` passed after each merge. Nothing here is new research: the only changes made on this
+branch are this page, one folder rename, one note and one section removed.
 
 Two ways to use it:
 
@@ -60,6 +60,14 @@ own simulator up to a maximum. #364 proposed keeping #361's with #360's record a
 branch, #361's entry is unchanged, and #360's record and its two facts (Claude Code reuses a running
 simulator; a reported issue where it ignores the requested one) are a dated note at the end of
 `plan/recipes/decisions/simulators-for-parallel-agents.md`. The answer was not edited.
+
+## A comparison moved out of the public plan
+
+#347 adds a section "What other sandboxes do with a secret" to the notes of `secret-placeholder`.
+It compares Silo with other products and ends on why one would pick Silo. polarzero's rule keeps
+that out of this repository, so this branch removes the section, and the text is kept in the
+private research repository. #347's own branch still has it; merging #347 by itself needs the same
+removal.
 
 ## What changed since #364 was written
 
