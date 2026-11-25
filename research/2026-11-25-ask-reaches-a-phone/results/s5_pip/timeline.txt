@@ -1,0 +1,25 @@
+   -0.68  mac    listening          {"port": 31021, "holds": {"git": 600, "aws": 50, "pip": 12, "default": 90}, "gather": 2.0}
+    0.00  agent  command.start      {"run": "/tmp/claude-0/bv/bin/pip download --no-cache-dir -d /tmp/claude-0/pipdl --index-url http://{B}/simple/ leftpad-silo-test"}
+    0.30  mac    ask.opened         {"ask": "ask_1", "computer": "main", "ends": 1795617679.8371494}
+    0.30  mac    request.held       {"ask": "ask_1", "line": 1, "desc": "GET 127.0.0.1:31021/simple/pip/"}
+    0.30  mac    ask.version        {"ask": "ask_1", "version": 1, "lines": ["GET 127.0.0.1:31021/simple/pip/"], "list_hash": "9d984e84754d07b0912da06954d5b0a6", "ends": 1795617679.8371494}
+    2.33  mac    ask.forwarded      {"ask": "ask_1", "version": 1, "size": 325}
+    2.34  phone  shown              {"ask": "ask_1", "version": 1, "lines": ["GET 127.0.0.1:31021/simple/pip/"], "sent": 1795615881.8653626, "in_transit": 0.012}
+    5.30  mac    hold.ended         {"ask": "ask_1", "line": 1, "how": "client closed"}
+    5.32  mac    request.held       {"ask": "ask_1", "line": 2, "desc": "GET 127.0.0.1:31021/simple/leftpad-silo-test/"}
+    5.32  mac    ask.version        {"ask": "ask_1", "version": 2, "lines": ["GET 127.0.0.1:31021/simple/pip/", "GET 127.0.0.1:31021/simple/leftpad-silo-test/"], "list_hash": "387ef8801be2bbd64469cda0699f9e57", "ends": 1795617679.8371494}
+    7.36  mac    ask.forwarded      {"ask": "ask_1", "version": 2, "size": 373}
+    7.36  phone  shown              {"ask": "ask_1", "version": 2, "lines": ["GET 127.0.0.1:31021/simple/pip/", "GET 127.0.0.1:31021/simple/leftpad-silo-test/"], "sent": 1795615886.8939214, "in_transit": 0.003}
+   17.33  mac    hold.ended         {"ask": "ask_1", "line": 2, "how": "limit"}
+   17.33  mac    request.refused    {"ask": "ask_1", "line": 2, "why": "held, not answered"}
+   17.40  agent  command.end        {"exit": 1, "run": "/tmp/claude-0/bv/bin/pip download --no-cache-dir -d /tmp/claude-0/pipdl --index-url http://{B}/simple/ leftpad-silo-test"}
+   42.34  phone  answered           {"ask": "ask_1", "version": 2, "verdict": "yes", "lines": 2}
+   42.34  mac    answer.received    {"ask": "ask_1", "version": 2, "verdict": "yes"}
+   42.34  mac    ask.answered       {"ask": "ask_1", "version": 2, "verdict": "yes", "lines": 2, "issued": 1795615921.877925, "via": "phone"}
+   70.00  agent  command.start      {"run": "/tmp/claude-0/bv/bin/pip download --no-cache-dir -d /tmp/claude-0/pipdl --index-url http://{B}/simple/ leftpad-silo-test"}
+   70.32  mac    request.passed     {"ask": "ask_1", "line": 1, "why": "late yes, spent once"}
+   70.32  mac    request.forwarded  {"ask": "ask_1", "line": 1, "status": 200}
+   70.34  mac    request.passed     {"ask": "ask_1", "line": 2, "why": "late yes, spent once"}
+   70.34  mac    ask.closed         {"ask": "ask_1", "why": "answered and done"}
+   70.34  mac    request.forwarded  {"ask": "ask_1", "line": 2, "status": 200}
+   70.40  agent  command.end        {"exit": 1, "run": "/tmp/claude-0/bv/bin/pip download --no-cache-dir -d /tmp/claude-0/pipdl --index-url http://{B}/simple/ leftpad-silo-test"}

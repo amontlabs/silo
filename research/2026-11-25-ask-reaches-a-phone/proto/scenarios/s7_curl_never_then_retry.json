@@ -1,0 +1,6 @@
+{"holds": {"default": 30}, "policy": {"never": true}, "ask_life": 75,
+ "commands": [{"at": 0, "run": "curl -s -d amount=4000 http://{B}/v1/charges"},
+              {"at": 40, "run": "curl -s -d amount=4000 http://{B}/v1/charges"},
+              {"at": 41, "run": "curl -s -d amount=990000 http://{B}/v1/charges"},
+              {"at": 80, "run": "curl -s -m 5 -d amount=4000 http://{B}/v1/charges"}],
+ "after": 2}

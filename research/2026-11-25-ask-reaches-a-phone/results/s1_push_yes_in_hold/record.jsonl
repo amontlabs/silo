@@ -1,0 +1,9 @@
+{"t": 1795615878.8716, "kind": "listening", "port": 20952, "holds": {"git": 600, "aws": 50, "pip": 12, "default": 90}, "gather": 2.0}
+{"t": 1795615879.6573, "kind": "ask.opened", "ask": "ask_1", "computer": "main", "ends": 1795617679.6572914}
+{"t": 1795615879.6574, "kind": "request.held", "ask": "ask_1", "line": 1, "desc": "push main to 127.0.0.1:20952/repo.git (51935bb)"}
+{"t": 1795615879.6574, "kind": "ask.version", "ask": "ask_1", "version": 1, "lines": ["push main to 127.0.0.1:20952/repo.git (51935bb)"], "list_hash": "2cdc2c17cca1584801ebd5961ad75d8b", "ends": 1795617679.6572914}
+{"t": 1795615881.6901, "kind": "ask.forwarded", "ask": "ask_1", "version": 1, "size": 341}
+{"t": 1795615889.698, "kind": "answer.received", "ask": "ask_1", "version": 1, "verdict": "yes"}
+{"t": 1795615889.6981, "kind": "ask.answered", "ask": "ask_1", "version": 1, "verdict": "yes", "lines": 1, "issued": 1795615889.694992, "via": "phone"}
+{"t": 1795615889.6981, "kind": "ask.closed", "ask": "ask_1", "why": "answered and done"}
+{"t": 1795615889.718, "kind": "request.forwarded", "ask": "ask_1", "line": 1, "status": 200}

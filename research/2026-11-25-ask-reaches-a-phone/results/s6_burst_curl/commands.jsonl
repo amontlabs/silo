@@ -1,0 +1,6 @@
+{"at": 0, "run": "curl -s -X DELETE http://{B}/v1/webhooks/1", "start": 0.0, "end": 13.04, "exit": 0, "out": "{\"id\":\"ch_1\",\"status\":\"succeeded\"}\n"}
+{"at": 0.3, "run": "curl -s -X DELETE http://{B}/v1/webhooks/2", "start": 0.3, "end": 13.04, "exit": 0, "out": "{\"id\":\"ch_1\",\"status\":\"succeeded\"}\n"}
+{"at": 0.6, "run": "curl -s -X DELETE http://{B}/v1/webhooks/3", "start": 0.6, "end": 13.04, "exit": 0, "out": "{\"id\":\"ch_1\",\"status\":\"succeeded\"}\n"}
+{"at": 1.0, "run": "curl -s -X DELETE http://{B}/v1/webhooks/4", "start": 1.0, "end": 13.04, "exit": 0, "out": "{\"id\":\"ch_1\",\"status\":\"succeeded\"}\n"}
+{"at": 6.0, "run": "curl -s -X DELETE http://{B}/v1/webhooks/5", "start": 6.0, "end": 13.04, "exit": 0, "out": "{\"id\":\"ch_1\",\"status\":\"succeeded\"}\n"}
+{"at": 11.0, "run": "curl -s -X DELETE http://{B}/v1/webhooks/6", "start": 11.0, "end": 13.04, "exit": 0, "out": "{\"id\":\"ch_1\",\"status\":\"succeeded\"}\n"}

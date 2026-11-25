@@ -49,3 +49,23 @@ can end without you, not only the two polarzero named.
 - "For any reason" is wider than polarzero's two cases.
 - The record's own line, Proposed, which this sentence would replace: "The request is then denied,
   with an error the agent program can read."
+
+## The late yes, end to end with a phone (25 November 2026)
+
+An agent's part, 25 November 2026. A prototype ran the whole path (`research/2026-11-25-ask-reaches-a-phone/`): a request held at the
+boundary, the ask sent to a phone through a relay, the phone's yes back to the Mac. The late yes
+worked with every client tried. A `git push` held 60 seconds and refused in Git's own terms passed
+at once when sent again after a yes at 90 seconds, with no second ask. A boto3 upload resent after
+its own 60 seconds joined the open ask and passed once on the yes. Codex and Claude Code, driven by
+a scripted model, did the same.
+
+How long the ask stays open matters more on the phone than how long the hold lasts. In a model of
+a person answering on a phone, an ask open 30 minutes, as #355 proposed, is answered in time for
+84 to 94% of asks while the person is away and awake, and for 25% of asks over an evening and a
+night. An ask open until answered, as this entry says, is answered by the next morning for 96%.
+That supports this entry's "until you answer it or set it aside": the yes is bound to one exact
+request and spent once.
+
+Claude Code 2.1.332 blocks a model's `sleep 50; git push`, and asks it to use its Monitor tool
+instead. A retry sent at once joins the open ask and waits there, so the late yes does not depend
+on the agent waiting well.

@@ -51,3 +51,12 @@ ask shows a request that waits. Not recommended yet; it is written here so it ca
   nothing that ties the copies together. `research/2026-11-24-destructive-calls/details/cli-capture.md`.
 - Traces, the policies simulated and the text of the first two asks of the destroy:
   `research/2026-11-24-destructive-calls/details/bursts.md`.
+
+## A burst seen on the phone (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-ask-reaches-a-phone/`. Six deletes sent within 11 seconds made one ask in
+six versions. Waiting 2 seconds for quiet, the phone was sent three of them, and the yes covered
+exactly the version it showed; a line held after that version went to the next ask, as this entry
+says. `pip download` put its own version check (`/simple/pip/`) in the same ask as the package it
+was asked for: an ask can list requests nobody thinks of, so the line should say which program
+sent it.

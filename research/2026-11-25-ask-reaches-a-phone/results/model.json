@@ -1,0 +1,132 @@
+{
+ "model": {
+  "contexts": {
+   "at the Mac, or phone in hand": {
+    "median": 7,
+    "spread": [
+     0.4,
+     0.8
+    ]
+   },
+   "away, awake, phone nearby": {
+    "median": 369,
+    "spread": [
+     1.0,
+     1.6
+    ]
+   },
+   "busy or Do Not Disturb": {
+    "median": 1800,
+    "spread": [
+     0.8,
+     1.2
+    ]
+   }
+  },
+  "delivery": {
+   "median": 0.8,
+   "spread": 0.55,
+   "tail_share": 0.01,
+   "tail": [
+    60,
+    300
+   ]
+  },
+  "gather_s": 2.0,
+  "holds_s": {
+   "pip (gives up at 15 s)": 12,
+   "aws, boto3, Railway CLI (60 s)": 50,
+   "unknown client (90 s)": 90,
+   "git push, terraform, model reply kept alive": 600
+  }
+ },
+ "results": {
+  "at the Mac, or phone in hand (narrow spread)": {
+   "median_s": 10.0,
+   "p90_s": 14.9,
+   "answered within hold: pip (gives up at 15 s)": 0.731,
+   "answered within hold: aws, boto3, Railway CLI (60 s)": 0.99,
+   "answered within hold: unknown client (90 s)": 0.991,
+   "answered within hold: git push, terraform, model reply kept alive": 1.0,
+   "answered within ask life 30 min (#355)": 1.0,
+   "answered within ask life 8 h (a night)": 1.0
+  },
+  "at the Mac, or phone in hand (wide spread)": {
+   "median_s": 10.0,
+   "p90_s": 23.5,
+   "answered within hold: pip (gives up at 15 s)": 0.62,
+   "answered within hold: aws, boto3, Railway CLI (60 s)": 0.981,
+   "answered within hold: unknown client (90 s)": 0.99,
+   "answered within hold: git push, terraform, model reply kept alive": 1.0,
+   "answered within ask life 30 min (#355)": 1.0,
+   "answered within ask life 8 h (a night)": 1.0
+  },
+  "away, awake, phone nearby (narrow spread)": {
+   "median_s": 374.6,
+   "p90_s": 1333.7,
+   "answered within hold: pip (gives up at 15 s)": 0.0,
+   "answered within hold: aws, boto3, Railway CLI (60 s)": 0.02,
+   "answered within hold: unknown client (90 s)": 0.074,
+   "answered within hold: git push, terraform, model reply kept alive": 0.683,
+   "answered within ask life 30 min (#355)": 0.943,
+   "answered within ask life 8 h (a night)": 1.0
+  },
+  "away, awake, phone nearby (wide spread)": {
+   "median_s": 371.9,
+   "p90_s": 2853.8,
+   "answered within hold: pip (gives up at 15 s)": 0.01,
+   "answered within hold: aws, boto3, Railway CLI (60 s)": 0.098,
+   "answered within hold: unknown client (90 s)": 0.182,
+   "answered within hold: git push, terraform, model reply kept alive": 0.618,
+   "answered within ask life 30 min (#355)": 0.839,
+   "answered within ask life 8 h (a night)": 0.997
+  },
+  "busy or Do Not Disturb (narrow spread)": {
+   "median_s": 1798.4,
+   "p90_s": 5006.2,
+   "answered within hold: pip (gives up at 15 s)": 0.0,
+   "answered within hold: aws, boto3, Railway CLI (60 s)": 0.0,
+   "answered within hold: unknown client (90 s)": 0.0,
+   "answered within hold: git push, terraform, model reply kept alive": 0.083,
+   "answered within ask life 30 min (#355)": 0.5,
+   "answered within ask life 8 h (a night)": 1.0
+  },
+  "busy or Do Not Disturb (wide spread)": {
+   "median_s": 1799.7,
+   "p90_s": 8345.5,
+   "answered within hold: pip (gives up at 15 s)": 0.0,
+   "answered within hold: aws, boto3, Railway CLI (60 s)": 0.001,
+   "answered within hold: unknown client (90 s)": 0.006,
+   "answered within hold: git push, terraform, model reply kept alive": 0.178,
+   "answered within ask life 30 min (#355)": 0.5,
+   "answered within ask life 8 h (a night)": 0.99
+  },
+  "asleep": {
+   "median_s": 14776.8,
+   "p90_s": 26311.9,
+   "answered within hold: pip (gives up at 15 s)": 0.0,
+   "answered within hold: aws, boto3, Railway CLI (60 s)": 0.0,
+   "answered within hold: unknown client (90 s)": 0.0,
+   "answered within hold: git push, terraform, model reply kept alive": 0.009,
+   "answered within ask life 30 min (#355)": 0.049,
+   "answered within ask life 8 h (a night)": 0.986
+  },
+  "an evening then a night (3 h away, 8 h asleep)": {
+   "median_s": 10614.5,
+   "p90_s": 26402.8,
+   "answered within hold: pip (gives up at 15 s)": 0.003,
+   "answered within hold: aws, boto3, Railway CLI (60 s)": 0.027,
+   "answered within hold: unknown client (90 s)": 0.049,
+   "answered within hold: git push, terraform, model reply kept alive": 0.171,
+   "answered within ask life 30 min (#355)": 0.254,
+   "answered within ask life 8 h (a night)": 0.961
+  }
+ },
+ "asks_from_405": {
+  "held per 100 documented writes, rules as merged": 43.3,
+  "share of asks that are wrong holds, as merged": 0.342,
+  "held per 100, revocations passing": 35.5,
+  "share of asks that are wrong holds, revocations passing": 0.197,
+  "missed (should be held, pass)": 27
+ }
+}

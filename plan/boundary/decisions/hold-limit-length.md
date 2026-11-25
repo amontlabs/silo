@@ -154,3 +154,12 @@ program tried waited 300 s, and Codex 420 s, then took the reply.
 So the 90 seconds are not bounded by the programs' waits on a model reply, as long as the boundary
 sends the headers and a keep-alive while it holds. They are bounded by what the person waits for,
 and by the command timeouts named above.
+
+## What the phone changes (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-ask-reaches-a-phone/`. With the person away and awake, a model of the
+time to answer on a phone gives these shares of asks answered while the request still waits: 0 to
+1% for pip's 12 seconds, 2 to 10% for 50 seconds, 7 to 18% for 90 seconds, 62 to 68% for 10
+minutes. Away from the Mac, the length chosen here decides little; the late yes of `hold-sentence`
+serves most answers. The lengths per client stand: they keep Silo's words reaching a program that
+still listens.

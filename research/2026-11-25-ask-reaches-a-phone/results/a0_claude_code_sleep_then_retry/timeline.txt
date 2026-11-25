@@ -1,0 +1,10 @@
+   -0.90  mac    listening          {"port": 36395, "holds": {"git": 60, "aws": 50, "pip": 12, "default": 90}, "gather": 2.0}
+    0.00  agent  command.start      {"run": "sed 's#BOUNDARY#{B}#g' {P}/agents/cc_late.json > /tmp/claude-0/-home-user/56cb5b83-c27d-5ecb-ae7c-5c4957f3a75c/scratchpad/agents/cc_late.json && KILL_AFTER=400 bash /home/user/silo/research/2026-11-24-gap-fixes/
+    1.43  mac    ask.opened         {"ask": "ask_1", "computer": "main", "ends": 1795618074.3618965}
+    1.43  mac    request.held       {"ask": "ask_1", "line": 1, "desc": "push main to 127.0.0.1:36395/repo.git (76c8cf0)"}
+    1.43  mac    ask.version        {"ask": "ask_1", "version": 1, "lines": ["push main to 127.0.0.1:36395/repo.git (76c8cf0)"], "list_hash": "5e8dd0b8ae171940e636dbd6325f1cca", "ends": 1795618074.3618965}
+    3.47  mac    ask.forwarded      {"ask": "ask_1", "version": 1, "size": 341}
+    3.48  phone  shown              {"ask": "ask_1", "version": 1, "lines": ["push main to 127.0.0.1:36395/repo.git (76c8cf0)"], "sent": 1795616276.4030242, "in_transit": 0.0113}
+   61.50  mac    hold.ended         {"ask": "ask_1", "line": 1, "how": "limit"}
+   61.50  mac    request.refused    {"ask": "ask_1", "line": 1, "why": "held, not answered"}
+   61.63  agent  command.end        {"exit": 0, "run": "sed 's#BOUNDARY#{B}#g' {P}/agents/cc_late.json > /tmp/claude-0/-home-user/56cb5b83-c27d-5ecb-ae7c-5c4957f3a75c/scratchpad/agents/cc_late.json && KILL_AFTER=400 bash /home/user/silo/research/2026-11-24

@@ -1,0 +1,5 @@
+{"holds": {"git": 60}, "policy": {"delay": 88, "verdict": "yes", "only": ["ask_1"]},
+ "commands": [{"at": 0, "run": "git push http://{B}/repo.git main"},
+              {"at": 120, "run": "git push http://{B}/repo.git main"},
+              {"at": 140, "run": "echo two > f && git commit -qam two && git push http://{B}/repo.git main"}],
+ "after": 8}
