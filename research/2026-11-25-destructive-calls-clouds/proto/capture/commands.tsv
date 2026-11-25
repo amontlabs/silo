@@ -42,12 +42,12 @@ aws-ddb-pitr-off	aws	hold:gone	aws dynamodb update-continuous-backups --table-na
 aws-ddb-partiql-delete	aws	hold:gone	aws dynamodb execute-statement --statement "DELETE FROM t1 WHERE id='1'"
 aws-lambda-delete	aws	hold:outage	aws lambda delete-function --function-name f1
 aws-lambda-url-public	aws	hold:exposed	aws lambda create-function-url-config --function-name f1 --auth-type NONE
-aws-lambda-update-code	aws	deploy	aws lambda update-function-code --function-name f1 --zip-file fileb:///etc/hostname
+aws-lambda-update-code	aws	deploy	aws lambda update-function-code --function-name f1 --zip-file fileb:///opt/clis/work-aws/f.zip
 aws-lambda-concurrency-zero	aws	hold:outage	aws lambda put-function-concurrency --function-name f1 --reserved-concurrent-executions 0
 aws-iam-delete-user	aws	hold:outage	aws iam delete-user --user-name u1
 aws-iam-create-key	aws	hold:exposed	aws iam create-access-key --user-name u1
 aws-iam-attach-admin	aws	hold:exposed	aws iam attach-user-policy --user-name u1 --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
-aws-iam-deactivate-key	aws	hold:outage	aws iam update-access-key --user-name u1 --access-key-id key-1 --status Inactive
+aws-iam-deactivate-key	aws	hold:outage	aws iam update-access-key --user-name u1 --access-key-id madeupkeyidnumber1 --status Inactive
 aws-iam-list-users	aws	allow	aws iam list-users
 aws-secrets-delete-force	aws	hold:gone	aws secretsmanager delete-secret --secret-id s1 --force-delete-without-recovery
 aws-secrets-delete	aws	hold:recoverable	aws secretsmanager delete-secret --secret-id s1 --recovery-window-in-days 7
