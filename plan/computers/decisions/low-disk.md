@@ -38,3 +38,17 @@ for a clone reads 0. An open-source tool that keeps APFS clones counts what they
 and blocks instead. So the second level must not count on space freed by removing checkpoints in
 the same minute, and Disk should say when a local snapshot holds freed space
 (`tmutil listlocalsnapshots /`).
+
+## Checkpoints under their limit (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-checkpoint-retention/`. The answer of
+`thinning-checkpoints` as #376 writes it sets a limit on checkpoints as a share of the free space.
+When the Mac fills with other files, that limit shrinks and thinning removes the oldest
+checkpoints: in the simulation, a 40 GiB download on a 512 GB Mac removed one day of checkpoints.
+This entry recommends against Silo removing what it kept on its own when the disk runs low, so the
+two entries need one reading. Recommended: thinning by its limit is a rule on facts that runs long
+before this entry's first level and keeps agents working; this entry covers what thinning may not
+free, which is the live disks, the bin, and the checkpoints the limit never removes (the save before
+a restore, one an open alert points to, one not yet compared, and those taken by hand). In 30
+simulated nights with that limit, free space never fell under 50 GiB, so neither level of this
+entry was reached; without a limit, the free space ran out within days at 2 GiB written an hour.
