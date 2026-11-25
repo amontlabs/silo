@@ -57,3 +57,10 @@ A proposal: the boundary connects upstream with the ClientHello of the program i
 from the connection the program opened, so that the provider sees what it would see without Silo.
 Whether that is worth a second TLS library is the owner's to weigh, against the risk this entry
 watches for. A plainly different fingerprint is also what any company's inspecting proxy shows.
+
+## A computer set for a plan shows Claude Code's own connection (25 November 2026)
+
+An agent's part, from `research/2026-11-25-key-or-plan/`. Under `claude-key-or-plan`, a computer
+set for a plan has its connections to api.anthropic.com passed on from the program's own TLS
+handshake, so Anthropic sees Claude Code's fingerprint there, not Silo's. Only computers whose
+Anthropic traffic Silo reads show Silo's.

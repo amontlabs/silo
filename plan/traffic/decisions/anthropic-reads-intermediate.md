@@ -44,3 +44,19 @@ The fallback the answer gives, reading Anthropic traffic only where Silo holds a
 clear of the clause: the Consumer Terms exempt API keys from their rule on automated access, and
 the Commercial Terms that govern a key say nothing of proxies.
 
+
+## The fallback has nothing to go by under option A (25 November 2026)
+
+An agent's part, from `research/2026-11-25-key-or-plan/`. The answer's fallback reads Anthropic
+traffic "only in computers whose API key it holds as a secret". Option A of #373 leaves
+`secrets-held-outside` out of the first build, so in that build Silo holds no key and the fallback
+names no computer. `claude-key-or-plan` is the replacement: each computer is set for Claude with an
+API key or with a plan, and one set for a plan passes Anthropic traffic on unread. It was built
+into #374's boundary and run with real Claude Code. If polarzero takes it, the fallback sentence of
+this answer would read:
+
+> If Anthropic answers that this intermediates, Silo reads Anthropic traffic only in computers set
+> for Claude with an API key, as `claude-key-or-plan` says.
+
+That edit is not made here, since #373's `decisions.md` proposes its own edit to the same answer;
+both fit in one text.

@@ -31,3 +31,9 @@ One need would have to go. This feature needs `secrets-held-outside`, which need
 `open-limited-or-closed` and with it the rule engine. Reading traffic does not need a secret held
 outside: a subscription's sign-in stays in the program (`logins`), and an API key the program keeps
 in main is read like any other request. Holding that key outside would come in the second build.
+
+## Under option A, it needs the key-or-plan setting (25 November 2026)
+
+An agent's part. With `secrets-held-outside` cut from its needs, as option A of #373 does, this
+feature has no way left to keep a Claude plan unread if Anthropic says no. `claude-key-or-plan` is
+that way; if polarzero takes both, this feature should need it.
