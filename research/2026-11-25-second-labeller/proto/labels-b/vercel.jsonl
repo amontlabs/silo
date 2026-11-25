@@ -1,0 +1,289 @@
+{"id": "vercel PUT /ai-gateway/budgets", "label": "either", "named": false, "why": "can raise or lower spend cap"}
+{"id": "vercel DELETE /ai-gateway/budgets", "label": "hold:money", "named": false, "why": "removes spend cap"}
+{"id": "vercel PUT /ai-gateway/budgets/defaults", "label": "either", "named": false, "why": "can raise or lower spend cap"}
+{"id": "vercel DELETE /ai-gateway/budgets/defaults", "label": "hold:money", "named": false, "why": "removes default spend cap"}
+{"id": "vercel POST /ai-gateway/byok-credentials", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /ai-gateway/byok-credentials/{credentialId}", "label": "either", "named": false, "why": ""}
+{"id": "vercel DELETE /ai-gateway/byok-credentials/{credentialId}", "label": "hold:outage", "named": false, "why": "gateway calls lose provider key"}
+{"id": "vercel POST /ai-gateway/rules", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /ai-gateway/rules", "label": "either", "named": false, "why": ""}
+{"id": "vercel DELETE /ai-gateway/rules", "label": "either", "named": false, "why": "depends on what rule did"}
+{"id": "vercel POST /ai-gateway/virtual-model-configs", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /ai-gateway/virtual-model-configs", "label": "either", "named": false, "why": ""}
+{"id": "vercel DELETE /ai-gateway/virtual-model-configs", "label": "hold:outage", "named": false, "why": "callers of virtual model fail"}
+{"id": "vercel PATCH /ai-gateway/virtual-model-configs/{vmcSlug}", "label": "either", "named": false, "why": ""}
+{"id": "vercel DELETE /ai-gateway/virtual-model-configs/{vmcSlug}", "label": "hold:outage", "named": false, "why": "callers of virtual model fail"}
+{"id": "vercel PATCH /aliases/{id}/protection-bypass", "label": "allow", "named": true, "why": "shareable link bypasses deployment protection"}
+{"id": "vercel POST /api-keys", "label": "allow", "named": true, "why": "new API key"}
+{"id": "vercel PATCH /api-keys/{apiKeyID}/quota", "label": "either", "named": false, "why": "key budget can be raised"}
+{"id": "vercel PUT /domains/{domain}/records", "label": "either", "named": false, "why": "may replace all DNS records"}
+{"id": "vercel PUT /projects/transfer-request/{code}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /projects/{idOrName}/transfer-request", "label": "allow", "named": true, "why": "code lets another team take project"}
+{"id": "vercel POST /speed-insights/toggle", "label": "either", "named": false, "why": "enabling is billed"}
+{"id": "vercel POST /storage/stores/blob", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /storage/stores/blob/{id}", "label": "hold:gone", "named": false, "why": "blob objects deleted"}
+{"id": "vercel POST /v1/access-groups", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/access-groups/{accessGroupIdOrName}/projects", "label": "allow", "named": true, "why": "group members gain project access"}
+{"id": "vercel PATCH /v1/access-groups/{accessGroupIdOrName}/projects/{projectId}", "label": "either", "named": true, "why": "role may be raised"}
+{"id": "vercel DELETE /v1/access-groups/{accessGroupIdOrName}/projects/{projectId}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/access-groups/{idOrName}", "label": "either", "named": false, "why": "may add or remove members"}
+{"id": "vercel DELETE /v1/access-groups/{idOrName}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/billing/buy", "label": "hold:money", "named": false, "why": ""}
+{"id": "vercel PUT /v1/bulk-redirects", "label": "allow", "named": false, "why": "staged only"}
+{"id": "vercel DELETE /v1/bulk-redirects", "label": "allow", "named": false, "why": "staged change"}
+{"id": "vercel PATCH /v1/bulk-redirects", "label": "allow", "named": false, "why": "staged change"}
+{"id": "vercel POST /v1/bulk-redirects/restore", "label": "allow", "named": false, "why": "discards staged changes"}
+{"id": "vercel POST /v1/bulk-redirects/versions", "label": "deploy", "named": false, "why": "promotes redirects version"}
+{"id": "vercel POST /v1/connect/authorize/{connector}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/connect/connectors", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v1/connect/connectors/{connector}", "label": "hold:outage", "named": false, "why": "projects lose connector"}
+{"id": "vercel POST /v1/connect/connectors/{connector}/managed/eject", "label": "either", "named": false, "why": ""}
+{"id": "vercel POST /v1/connect/connectors/{connector}/projects/{projectId}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v1/connect/connectors/{connector}/projects/{projectId}", "label": "hold:outage", "named": false, "why": ""}
+{"id": "vercel DELETE /v1/connect/connectors/{connector}/projects/{projectId}/environments/{environment}", "label": "hold:outage", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/connect/connectors/{connector}/trigger-destinations", "label": "either", "named": false, "why": ""}
+{"id": "vercel POST /v1/connect/networks", "label": "hold:money", "named": false, "why": "Secure Compute is paid"}
+{"id": "vercel DELETE /v1/connect/networks/{networkId}", "label": "hold:outage", "named": false, "why": "projects lose private network"}
+{"id": "vercel PATCH /v1/connect/networks/{networkId}", "label": "either", "named": false, "why": ""}
+{"id": "vercel POST /v1/connect/token/{connector}", "label": "allow", "named": true, "why": "new token"}
+{"id": "vercel POST /v1/deployments/{deploymentId}/checks", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/deployments/{deploymentId}/checks/{checkId}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/deployments/{deploymentId}/checks/{checkId}/rerequest", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/deployments/{deploymentId}/integrations/{integrationConfigurationId}/resources/{resourceId}/actions/{action}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/domains/records/{recordId}", "label": "either", "named": false, "why": "record value can break resolution"}
+{"id": "vercel POST /v1/drains", "label": "allow", "named": true, "why": "logs sent to outside URL"}
+{"id": "vercel POST /v1/drains/test", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v1/drains/{id}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/drains/{id}", "label": "either", "named": false, "why": "may change drain URL"}
+{"id": "vercel DELETE /v1/drives/{nameOrId}", "label": "hold:gone", "named": false, "why": ""}
+{"id": "vercel POST /v1/drives/{name}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/drives/{name}/fork", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/edge-cache/dangerously-delete-by-src-images", "label": "allow", "named": false, "why": "cache regenerates from source"}
+{"id": "vercel POST /v1/edge-cache/dangerously-delete-by-tags", "label": "allow", "named": false, "why": "cache regenerates from source"}
+{"id": "vercel POST /v1/edge-cache/invalidate-by-src-images", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/edge-cache/invalidate-by-tags", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/env", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/env", "label": "either", "named": false, "why": ""}
+{"id": "vercel DELETE /v1/env", "label": "hold:gone", "named": false, "why": "secret values lost"}
+{"id": "vercel PATCH /v1/env/{id}/unlink/{projectId}", "label": "hold:outage", "named": false, "why": "project loses variable"}
+{"id": "vercel POST /v1/global-config", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PUT /v1/global-config/{edgeConfigId}", "label": "allow", "named": false, "why": "renames slug"}
+{"id": "vercel DELETE /v1/global-config/{edgeConfigId}", "label": "hold:gone", "named": false, "why": ""}
+{"id": "vercel POST /v1/global-config/{edgeConfigId}/backups/{edgeConfigBackupVersionId}/restore", "label": "deploy", "named": false, "why": "rolls live config back"}
+{"id": "vercel PATCH /v1/global-config/{edgeConfigId}/items #1", "label": "hold:recoverable", "named": false, "why": "Edge Config backups restorable"}
+{"id": "vercel PATCH /v1/global-config/{edgeConfigId}/items #2", "label": "deploy", "named": false, "why": "changes live flag value"}
+{"id": "vercel POST /v1/global-config/{edgeConfigId}/schema", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v1/global-config/{edgeConfigId}/schema", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/global-config/{edgeConfigId}/token", "label": "allow", "named": true, "why": "new read token"}
+{"id": "vercel DELETE /v1/global-config/{edgeConfigId}/tokens", "label": "hold:outage", "named": false, "why": "readers using tokens fail"}
+{"id": "vercel PATCH /v1/installations/{integrationConfigurationId}", "label": "either", "named": false, "why": ""}
+{"id": "vercel POST /v1/installations/{integrationConfigurationId}/billing", "label": "hold:money", "named": false, "why": "bills the customer"}
+{"id": "vercel POST /v1/installations/{integrationConfigurationId}/billing/balance", "label": "hold:money", "named": false, "why": "affects customer billing"}
+{"id": "vercel POST /v1/installations/{integrationConfigurationId}/billing/finalize", "label": "hold:money", "named": false, "why": "final billing of installation"}
+{"id": "vercel POST /v1/installations/{integrationConfigurationId}/billing/invoices", "label": "hold:money", "named": false, "why": "bills the customer"}
+{"id": "vercel POST /v1/installations/{integrationConfigurationId}/billing/invoices/{invoiceId}/actions", "label": "hold:money", "named": false, "why": "refunds or charges invoice"}
+{"id": "vercel POST /v1/installations/{integrationConfigurationId}/credentials/revoke", "label": "hold:outage", "named": false, "why": "credential stops working"}
+{"id": "vercel POST /v1/installations/{integrationConfigurationId}/credentials/rotate", "label": "hold:outage", "named": false, "why": "old credential invalidated"}
+{"id": "vercel POST /v1/installations/{integrationConfigurationId}/events", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PUT /v1/installations/{integrationConfigurationId}/products/{integrationProductIdOrSlug}/resources/{resourceId}/secrets", "label": "either", "named": false, "why": "overwrites secrets"}
+{"id": "vercel DELETE /v1/installations/{integrationConfigurationId}/resources/{resourceId}", "label": "hold:gone", "named": false, "why": ""}
+{"id": "vercel PUT /v1/installations/{integrationConfigurationId}/resources/{resourceId}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/installations/{integrationConfigurationId}/resources/{resourceId}", "label": "either", "named": false, "why": ""}
+{"id": "vercel PUT /v1/installations/{integrationConfigurationId}/resources/{resourceId}/experimentation/global-config", "label": "either", "named": false, "why": "overwrites config data"}
+{"id": "vercel POST /v1/installations/{integrationConfigurationId}/resources/{resourceId}/experimentation/items", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/installations/{integrationConfigurationId}/resources/{resourceId}/experimentation/items/{itemId}", "label": "either", "named": false, "why": ""}
+{"id": "vercel DELETE /v1/installations/{integrationConfigurationId}/resources/{resourceId}/experimentation/items/{itemId}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PUT /v1/installations/{integrationConfigurationId}/resources/{resourceId}/secrets", "label": "either", "named": false, "why": "overwrites secrets"}
+{"id": "vercel DELETE /v1/integrations/configuration/{id}", "label": "hold:gone", "named": false, "why": "uninstall removes resources"}
+{"id": "vercel POST /v1/integrations/installations/{integrationConfigurationId}/resources/{resourceId}/connections", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v1/integrations/log-drains/{id}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/integrations/sso/token", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/kms/issuers", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/kms/issuers/{issuerId}", "label": "either", "named": false, "why": ""}
+{"id": "vercel DELETE /v1/kms/issuers/{issuerId}", "label": "hold:gone", "named": false, "why": "keys destroyed"}
+{"id": "vercel POST /v1/kms/issuers/{issuerId}/keys", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/kms/issuers/{issuerId}/keys/{keyId}/activate", "label": "either", "named": false, "why": "verifiers may not trust key"}
+{"id": "vercel POST /v1/kms/issuers/{issuerId}/keys/{keyId}/revoke", "label": "hold:outage", "named": false, "why": "signed tokens stop verifying"}
+{"id": "vercel POST /v1/kms/issuers/{issuerId}/policies", "label": "allow", "named": true, "why": "lets subject get signatures"}
+{"id": "vercel PATCH /v1/kms/issuers/{issuerId}/policies/{kind}/{policyKey}", "label": "either", "named": false, "why": ""}
+{"id": "vercel DELETE /v1/kms/issuers/{issuerId}/policies/{kind}/{policyKey}", "label": "hold:outage", "named": false, "why": ""}
+{"id": "vercel POST /v1/kms/issuers/{issuerId}/sign/message", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/kms/issuers/{issuerId}/sign/token", "label": "allow", "named": true, "why": "mints a signed token"}
+{"id": "vercel POST /v1/log-drains", "label": "allow", "named": true, "why": "logs sent to outside URL"}
+{"id": "vercel DELETE /v1/log-drains/{id}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/microfrontends/group", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/networking/privatelink/endpoints", "label": "hold:money", "named": false, "why": "PrivateLink is billed"}
+{"id": "vercel DELETE /v1/networking/privatelink/endpoints/{endpointId}", "label": "hold:outage", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/networking/privatelink/endpoints/{endpointId}", "label": "either", "named": false, "why": ""}
+{"id": "vercel PUT /v1/observability/manage/configuration/projects/{projectIdOrName}", "label": "hold:money", "named": false, "why": "re-enables paid Observability Plus"}
+{"id": "vercel POST /v1/organizations", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/organizations/{organizationId}", "label": "either", "named": false, "why": ""}
+{"id": "vercel PUT /v1/organizations/{organizationId}/dsync/groups/{groupId}", "label": "allow", "named": true, "why": "directory group gets roles"}
+{"id": "vercel DELETE /v1/organizations/{organizationId}/dsync/groups/{groupId}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/organizations/{organizationId}/teams", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v1/organizations/{organizationId}/teams/{targetTeamId}", "label": "hold:gone", "named": false, "why": "team removed"}
+{"id": "vercel PUT /v1/organizations/{organizationId}/teams/{targetTeamId}/dsync", "label": "either", "named": false, "why": ""}
+{"id": "vercel POST /v1/projects/traces/session", "label": "allow", "named": true, "why": "new session token"}
+{"id": "vercel POST /v1/projects/{idOrName}/avatar", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v1/projects/{idOrName}/avatar", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PUT /v1/projects/{idOrName}/daemons/{daemonName}/instances", "label": "either", "named": false, "why": "zero stops, more costs"}
+{"id": "vercel POST /v1/projects/{idOrName}/daemons/{daemonName}/instances/{instanceId}/restart", "label": "allow", "named": false, "why": "brief restart"}
+{"id": "vercel POST /v1/projects/{idOrName}/domains/{domain}/move", "label": "hold:outage", "named": false, "why": "domain leaves serving project"}
+{"id": "vercel DELETE /v1/projects/{idOrName}/env", "label": "hold:gone", "named": false, "why": "secret values lost"}
+{"id": "vercel POST /v1/projects/{idOrName}/members", "label": "allow", "named": true, "why": ""}
+{"id": "vercel DELETE /v1/projects/{idOrName}/members/{uid}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/projects/{idOrName}/protection-bypass", "label": "allow", "named": true, "why": "secret bypasses deployment protection"}
+{"id": "vercel POST /v1/projects/{idOrName}/rolling-release/approve-stage", "label": "deploy", "named": false, "why": ""}
+{"id": "vercel POST /v1/projects/{idOrName}/rolling-release/complete", "label": "deploy", "named": false, "why": ""}
+{"id": "vercel DELETE /v1/projects/{idOrName}/rolling-release/config", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/projects/{idOrName}/rolling-release/config", "label": "either", "named": false, "why": ""}
+{"id": "vercel POST /v1/projects/{idOrName}/rolling-release/start", "label": "deploy", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/projects/{idOrName}/shared-connect-links", "label": "hold:money", "named": false, "why": "Static IPs are paid"}
+{"id": "vercel POST /v1/projects/{idOrName}/token", "label": "allow", "named": true, "why": "new token"}
+{"id": "vercel PUT /v1/projects/{projectIdOrName}/feature-flags/connections", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v1/projects/{projectIdOrName}/feature-flags/connections/{consumerProjectId}", "label": "hold:outage", "named": false, "why": "consumer loses flags"}
+{"id": "vercel PUT /v1/projects/{projectIdOrName}/feature-flags/flags", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/projects/{projectIdOrName}/feature-flags/flags/{flagIdOrSlug}", "label": "either", "named": false, "why": "can change live behaviour"}
+{"id": "vercel DELETE /v1/projects/{projectIdOrName}/feature-flags/flags/{flagIdOrSlug}", "label": "hold:gone", "named": false, "why": "flag config destroyed"}
+{"id": "vercel POST /v1/projects/{projectIdOrName}/feature-flags/labels/lookup", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/projects/{projectIdOrName}/feature-flags/overrides/sign", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PUT /v1/projects/{projectIdOrName}/feature-flags/sdk-keys", "label": "allow", "named": true, "why": "new SDK key"}
+{"id": "vercel DELETE /v1/projects/{projectIdOrName}/feature-flags/sdk-keys/{hashKey}", "label": "hold:outage", "named": false, "why": "SDK clients fail"}
+{"id": "vercel PUT /v1/projects/{projectIdOrName}/feature-flags/segments", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v1/projects/{projectIdOrName}/feature-flags/segments/{segmentIdOrSlug}", "label": "hold:gone", "named": false, "why": "segment rules destroyed"}
+{"id": "vercel PATCH /v1/projects/{projectIdOrName}/feature-flags/segments/{segmentIdOrSlug}", "label": "either", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/projects/{projectIdOrName}/feature-flags/settings", "label": "either", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/projects/{projectId}/microfrontends", "label": "either", "named": false, "why": ""}
+{"id": "vercel POST /v1/projects/{projectId}/pause", "label": "hold:outage", "named": false, "why": "project stops serving"}
+{"id": "vercel POST /v1/projects/{projectId}/rollback/{deploymentId}", "label": "deploy", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/projects/{projectId}/rollback/{deploymentId}/update-description", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PUT /v1/projects/{projectId}/routes", "label": "allow", "named": false, "why": "staged only"}
+{"id": "vercel POST /v1/projects/{projectId}/routes", "label": "allow", "named": false, "why": "staged until promoted"}
+{"id": "vercel DELETE /v1/projects/{projectId}/routes", "label": "allow", "named": false, "why": "staged until promoted"}
+{"id": "vercel POST /v1/projects/{projectId}/routes/generate", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/projects/{projectId}/routes/versions", "label": "deploy", "named": false, "why": "promotes routing version"}
+{"id": "vercel PATCH /v1/projects/{projectId}/routes/{routeId}", "label": "allow", "named": false, "why": "staged until promoted"}
+{"id": "vercel POST /v1/projects/{projectId}/unpause", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/registrar/domains/availability", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/registrar/domains/buy", "label": "hold:money", "named": false, "why": ""}
+{"id": "vercel POST /v1/registrar/domains/price", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/registrar/domains/search", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/registrar/domains/{domain}/auto-renew", "label": "either", "named": false, "why": "on commits money, off risks expiry"}
+{"id": "vercel POST /v1/registrar/domains/{domain}/buy", "label": "hold:money", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/registrar/domains/{domain}/nameservers", "label": "hold:outage", "named": false, "why": "site may stop resolving"}
+{"id": "vercel POST /v1/registrar/domains/{domain}/renew", "label": "hold:money", "named": false, "why": ""}
+{"id": "vercel POST /v1/registrar/domains/{domain}/transfer", "label": "hold:money", "named": false, "why": ""}
+{"id": "vercel POST /v1/security/attack-mode", "label": "either", "named": false, "why": "challenge can block API clients"}
+{"id": "vercel POST /v1/security/firewall/bypass", "label": "allow", "named": true, "why": "firewall bypass"}
+{"id": "vercel DELETE /v1/security/firewall/bypass", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/security/firewall/bypass/rules", "label": "allow", "named": true, "why": "firewall bypass"}
+{"id": "vercel PUT /v1/security/firewall/bypass/rules", "label": "either", "named": true, "why": "bypass may widen"}
+{"id": "vercel DELETE /v1/security/firewall/bypass/rules", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PUT /v1/security/firewall/config", "label": "either", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/security/firewall/config", "label": "either", "named": false, "why": ""}
+{"id": "vercel POST /v1/security/firewall/config/generate-rule", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v1/security/firewall/config/{configVersion}", "label": "allow", "named": false, "why": "drops a config version"}
+{"id": "vercel POST /v1/security/firewall/config/{configVersion}/activate", "label": "deploy", "named": false, "why": "activates firewall config version"}
+{"id": "vercel POST /v1/storage/stores/integration/direct", "label": "either", "named": false, "why": "plan may be paid"}
+{"id": "vercel POST /v1/teams", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v1/teams/{teamId}", "label": "hold:gone", "named": false, "why": ""}
+{"id": "vercel POST /v1/teams/{teamId}/dsync-roles", "label": "either", "named": true, "why": "maps groups to roles"}
+{"id": "vercel DELETE /v1/teams/{teamId}/invites/{inviteId}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/teams/{teamId}/members/teams/join", "label": "allow", "named": true, "why": "caller joins team"}
+{"id": "vercel PATCH /v1/teams/{teamId}/members/{uid}", "label": "either", "named": true, "why": "role may be raised"}
+{"id": "vercel DELETE /v1/teams/{teamId}/members/{uid}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/teams/{teamId}/microfrontends/{groupId}", "label": "either", "named": false, "why": ""}
+{"id": "vercel DELETE /v1/teams/{teamId}/microfrontends/{groupId}", "label": "hold:outage", "named": false, "why": "microfrontends stop routing"}
+{"id": "vercel POST /v1/teams/{teamId}/request", "label": "allow", "named": false, "why": "request only"}
+{"id": "vercel DELETE /v1/user", "label": "hold:gone", "named": false, "why": ""}
+{"id": "vercel POST /v1/vcr/repository", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v1/vcr/repository/{idOrName}", "label": "hold:gone", "named": false, "why": ""}
+{"id": "vercel DELETE /v1/vcr/repository/{idOrName}/images/{imageId}", "label": "hold:gone", "named": false, "why": ""}
+{"id": "vercel POST /v1/vcr/repository/{idOrName}/permissions", "label": "allow", "named": true, "why": ""}
+{"id": "vercel DELETE /v1/vcr/repository/{idOrName}/permissions", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v1/vcr/repository/{idOrName}/permissions/all", "label": "hold:outage", "named": false, "why": "pulls fail"}
+{"id": "vercel POST /v1/vercel-ci/invocations/{invocationId}/attempts/{attempt}/retry", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v1/vercel-ci/repository-settings", "label": "either", "named": false, "why": ""}
+{"id": "vercel POST /v1/vercel-ci/task-analyses", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/vercel-ci/task-analyses/{analysisId}/pull-request", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v1/webhooks", "label": "allow", "named": true, "why": "events sent to outside URL"}
+{"id": "vercel DELETE /v1/webhooks/{id}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v10/projects/{idOrName}/domains", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v10/projects/{idOrName}/env", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v10/projects/{projectId}/promote/{deploymentId}", "label": "deploy", "named": false, "why": ""}
+{"id": "vercel POST /v11/projects", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v12/deployments/{id}/cancel", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v13/deployments", "label": "deploy", "named": false, "why": ""}
+{"id": "vercel DELETE /v13/deployments/{id}", "label": "hold:gone", "named": false, "why": "deployment cannot be restored"}
+{"id": "vercel DELETE /v2/aliases/{aliasId}", "label": "hold:outage", "named": false, "why": "URL stops serving"}
+{"id": "vercel PATCH /v2/connect/connectors/{connector}", "label": "either", "named": false, "why": ""}
+{"id": "vercel POST /v2/deployments/{deploymentId}/check-runs", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v2/deployments/{deploymentId}/check-runs/{checkRunId}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v2/deployments/{id}/aliases", "label": "deploy", "named": false, "why": "points domain at deployment"}
+{"id": "vercel POST /v2/domains/{domain}/records", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v2/domains/{domain}/records/{recordId}", "label": "hold:gone", "named": false, "why": "record value lost"}
+{"id": "vercel POST /v2/files", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v2/integrations/log-drains", "label": "allow", "named": true, "why": "logs sent to outside URL"}
+{"id": "vercel POST /v2/observability/query", "label": "allow", "named": false, "why": "read"}
+{"id": "vercel POST /v2/projects/{projectIdOrName}/checks", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v2/projects/{projectIdOrName}/checks/{checkId}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v2/projects/{projectIdOrName}/checks/{checkId}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v2/sandboxes", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v2/sandboxes/drives/{nameOrId}", "label": "hold:gone", "named": false, "why": ""}
+{"id": "vercel POST /v2/sandboxes/drives/{name}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v2/sandboxes/drives/{name}/fork", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v2/sandboxes/sessions/{sessionId}/cmd", "label": "allow", "named": false, "why": "runs in disposable sandbox"}
+{"id": "vercel POST /v2/sandboxes/sessions/{sessionId}/cmd/{cmdId}/kill", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v2/sandboxes/sessions/{sessionId}/cmd/{cmdId}/stdin", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v2/sandboxes/sessions/{sessionId}/extend-timeout", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v2/sandboxes/sessions/{sessionId}/fs/mkdir", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v2/sandboxes/sessions/{sessionId}/fs/read", "label": "allow", "named": false, "why": "read"}
+{"id": "vercel POST /v2/sandboxes/sessions/{sessionId}/fs/write", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v2/sandboxes/sessions/{sessionId}/network-policy", "label": "either", "named": false, "why": "egress policy may widen"}
+{"id": "vercel POST /v2/sandboxes/sessions/{sessionId}/snapshot", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v2/sandboxes/sessions/{sessionId}/stop", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v2/sandboxes/snapshots/{snapshotId}", "label": "hold:gone", "named": false, "why": ""}
+{"id": "vercel PATCH /v2/sandboxes/{name}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v2/sandboxes/{name}", "label": "hold:gone", "named": false, "why": ""}
+{"id": "vercel POST /v2/sandboxes/{name}/fork", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v2/teams/{teamId}", "label": "either", "named": false, "why": ""}
+{"id": "vercel POST /v2/teams/{teamId}/members", "label": "allow", "named": true, "why": ""}
+{"id": "vercel POST /v2/{teamSlug}/{projectSlug}/{repositoryName}/blobs/uploads/", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v2/{teamSlug}/{projectSlug}/{repositoryName}/blobs/uploads/{uuid}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v2/{teamSlug}/{projectSlug}/{repositoryName}/blobs/uploads/{uuid}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PUT /v2/{teamSlug}/{projectSlug}/{repositoryName}/blobs/uploads/{uuid}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v2/{teamSlug}/{projectSlug}/{repositoryName}/blobs/{digest}", "label": "hold:gone", "named": false, "why": ""}
+{"id": "vercel PUT /v2/{teamSlug}/{projectSlug}/{repositoryName}/manifests/{reference}", "label": "either", "named": false, "why": "may overwrite a live tag"}
+{"id": "vercel DELETE /v2/{teamSlug}/{projectSlug}/{repositoryName}/manifests/{reference}", "label": "hold:gone", "named": false, "why": ""}
+{"id": "vercel PATCH /v3/domains/{domain}", "label": "either", "named": true, "why": "may move domain to another team"}
+{"id": "vercel POST /v3/sandboxes", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v3/sandboxes/sessions/{sessionId}/snapshot", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v3/sandboxes/{name}/fork", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v3/user/tokens", "label": "allow", "named": true, "why": "new auth token"}
+{"id": "vercel DELETE /v3/user/tokens/{tokenId}", "label": "hold:outage", "named": false, "why": "users of token fail"}
+{"id": "vercel POST /v4/sandboxes", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v6/domains/{domain}", "label": "hold:gone", "named": false, "why": "domain and records removed"}
+{"id": "vercel POST /v7/domains", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v8/artifacts", "label": "allow", "named": false, "why": "read"}
+{"id": "vercel DELETE /v8/artifacts", "label": "allow", "named": false, "why": "cache rebuilds"}
+{"id": "vercel POST /v8/artifacts/events", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PUT /v8/artifacts/{hash}", "label": "allow", "named": false, "why": ""}
+{"id": "vercel POST /v8/certs", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PUT /v8/certs", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v8/certs/{id}", "label": "hold:outage", "named": false, "why": "HTTPS breaks for domain"}
+{"id": "vercel POST /v9/domains/{domain}/claim", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v9/projects/{idOrName} #1", "label": "hold:exposed", "named": false, "why": "removes Vercel Authentication"}
+{"id": "vercel PATCH /v9/projects/{idOrName} #2", "label": "hold:exposed", "named": false, "why": "removes preview password"}
+{"id": "vercel PATCH /v9/projects/{idOrName} #3", "label": "hold:exposed", "named": false, "why": "source made public"}
+{"id": "vercel PATCH /v9/projects/{idOrName} #4", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v9/projects/{idOrName} #5", "label": "allow", "named": false, "why": "used on next build"}
+{"id": "vercel DELETE /v9/projects/{idOrName}", "label": "hold:gone", "named": false, "why": ""}
+{"id": "vercel POST /v9/projects/{idOrName}/custom-environments", "label": "allow", "named": false, "why": ""}
+{"id": "vercel PATCH /v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}", "label": "either", "named": false, "why": ""}
+{"id": "vercel DELETE /v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}", "label": "hold:gone", "named": false, "why": "its variables removed"}
+{"id": "vercel PATCH /v9/projects/{idOrName}/domains/{domain}", "label": "either", "named": false, "why": ""}
+{"id": "vercel DELETE /v9/projects/{idOrName}/domains/{domain}", "label": "hold:outage", "named": false, "why": "domain stops serving"}
+{"id": "vercel POST /v9/projects/{idOrName}/domains/{domain}/verify", "label": "allow", "named": false, "why": ""}
+{"id": "vercel DELETE /v9/projects/{idOrName}/env/{id}", "label": "hold:gone", "named": false, "why": "secret value lost"}
+{"id": "vercel PATCH /v9/projects/{idOrName}/env/{id}", "label": "either", "named": false, "why": ""}
+{"id": "vercel POST /web/insights/toggle", "label": "either", "named": false, "why": "enabling is billed"}

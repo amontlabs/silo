@@ -1,0 +1,523 @@
+{
+ "n": 1085,
+ "exact": 0.6608294930875576,
+ "kappa_exact": 0.5425077742054498,
+ "coarse": 0.6820276497695853,
+ "kappa_coarse": 0.536982634606845,
+ "held_or_not": 0.8387096774193549,
+ "kappa_held_or_not": 0.601418624324852,
+ "confusion": [
+  [
+   "either -> allow",
+   120
+  ],
+  [
+   "hold:exposed -> allow",
+   63
+  ],
+  [
+   "hold:exposed -> either",
+   26
+  ],
+  [
+   "deploy -> allow",
+   21
+  ],
+  [
+   "hold:outage -> allow",
+   17
+  ],
+  [
+   "either -> deploy",
+   15
+  ],
+  [
+   "either -> hold:outage",
+   13
+  ],
+  [
+   "either -> hold:gone",
+   11
+  ],
+  [
+   "hold:outage -> either",
+   11
+  ],
+  [
+   "allow -> hold:money",
+   9
+  ],
+  [
+   "either -> hold:money",
+   8
+  ],
+  [
+   "hold:outage -> hold:gone",
+   7
+  ],
+  [
+   "allow -> either",
+   7
+  ],
+  [
+   "hold:gone -> hold:recoverable",
+   6
+  ],
+  [
+   "hold:gone -> hold:outage",
+   5
+  ],
+  [
+   "allow -> deploy",
+   5
+  ],
+  [
+   "either -> hold:exposed",
+   3
+  ],
+  [
+   "hold:gone -> either",
+   3
+  ],
+  [
+   "hold:money -> either",
+   3
+  ],
+  [
+   "allow -> hold:outage",
+   2
+  ],
+  [
+   "deploy -> either",
+   2
+  ],
+  [
+   "hold:recoverable -> hold:gone",
+   2
+  ],
+  [
+   "allow -> hold:exposed",
+   2
+  ],
+  [
+   "hold:gone -> deploy",
+   2
+  ],
+  [
+   "hold:exposed -> hold:gone",
+   1
+  ],
+  [
+   "hold:exposed -> hold:recoverable",
+   1
+  ],
+  [
+   "allow -> hold:gone",
+   1
+  ],
+  [
+   "hold:outage -> hold:exposed",
+   1
+  ],
+  [
+   "hold:gone -> allow",
+   1
+  ]
+ ],
+ "counts_a": [
+  [
+   "allow",
+   384
+  ],
+  [
+   "either",
+   294
+  ],
+  [
+   "hold:outage",
+   120
+  ],
+  [
+   "hold:gone",
+   103
+  ],
+  [
+   "hold:exposed",
+   102
+  ],
+  [
+   "deploy",
+   66
+  ],
+  [
+   "hold:money",
+   13
+  ],
+  [
+   "hold:recoverable",
+   3
+  ]
+ ],
+ "counts_b": [
+  [
+   "allow",
+   580
+  ],
+  [
+   "either",
+   176
+  ],
+  [
+   "hold:gone",
+   108
+  ],
+  [
+   "hold:outage",
+   104
+  ],
+  [
+   "deploy",
+   65
+  ],
+  [
+   "hold:money",
+   27
+  ],
+  [
+   "hold:exposed",
+   17
+  ],
+  [
+   "hold:recoverable",
+   8
+  ]
+ ],
+ "named_b": 108,
+ "exposed_a_named_b": 74,
+ "exposed_a_exposed_b": 11,
+ "a_vs_settled": 0.6764976958525346,
+ "b_vs_settled": 0.9834101382488479,
+ "counts_s": [
+  [
+   "allow",
+   575
+  ],
+  [
+   "either",
+   180
+  ],
+  [
+   "hold:gone",
+   107
+  ],
+  [
+   "hold:outage",
+   103
+  ],
+  [
+   "deploy",
+   63
+  ],
+  [
+   "hold:money",
+   27
+  ],
+  [
+   "hold:exposed",
+   21
+  ],
+  [
+   "hold:recoverable",
+   9
+  ]
+ ],
+ "rules_under_a": {
+  "#353": {
+   "allow_n": 384,
+   "allow_held": 31,
+   "hold_n": 341,
+   "hold_held": 176,
+   "either_n": 294,
+   "either_held": 73,
+   "deploy_n": 66,
+   "deploy_held": 4
+  },
+  "blind": {
+   "allow_n": 384,
+   "allow_held": 0,
+   "hold_n": 341,
+   "hold_held": 341,
+   "either_n": 294,
+   "either_held": 72,
+   "deploy_n": 66,
+   "deploy_held": 3
+  },
+  "tuned": {
+   "allow_n": 384,
+   "allow_held": 0,
+   "hold_n": 341,
+   "hold_held": 341,
+   "either_n": 294,
+   "either_held": 72,
+   "deploy_n": 66,
+   "deploy_held": 3
+  }
+ },
+ "rules_under_b": {
+  "#353": {
+   "allow_n": 580,
+   "allow_held": 97,
+   "either_n": 176,
+   "either_held": 2,
+   "hold_n": 264,
+   "hold_held": 181,
+   "deploy_n": 65,
+   "deploy_held": 4
+  },
+  "blind": {
+   "allow_n": 580,
+   "allow_held": 130,
+   "either_n": 176,
+   "either_held": 45,
+   "hold_n": 264,
+   "hold_held": 236,
+   "deploy_n": 65,
+   "deploy_held": 5
+  },
+  "tuned": {
+   "allow_n": 580,
+   "allow_held": 130,
+   "either_n": 176,
+   "either_held": 45,
+   "hold_n": 264,
+   "hold_held": 236,
+   "deploy_n": 65,
+   "deploy_held": 5
+  }
+ },
+ "rules_under_s": {
+  "#353": {
+   "allow_n": 575,
+   "allow_held": 95,
+   "either_n": 180,
+   "either_held": 3,
+   "hold_n": 267,
+   "hold_held": 182,
+   "deploy_n": 63,
+   "deploy_held": 4
+  },
+  "blind": {
+   "allow_n": 575,
+   "allow_held": 125,
+   "either_n": 180,
+   "either_held": 46,
+   "hold_n": 267,
+   "hold_held": 240,
+   "deploy_n": 63,
+   "deploy_held": 5
+  },
+  "tuned": {
+   "allow_n": 575,
+   "allow_held": 125,
+   "either_n": 180,
+   "either_held": 46,
+   "hold_n": 267,
+   "hold_held": 240,
+   "deploy_n": 63,
+   "deploy_held": 5
+  }
+ },
+ "rules_under_s_proposed": {
+  "#353": {
+   "allow_n": 489,
+   "allow_held": 91,
+   "hold_n": 353,
+   "hold_held": 186,
+   "either_n": 180,
+   "either_held": 3,
+   "deploy_n": 63,
+   "deploy_held": 4
+  },
+  "blind": {
+   "allow_n": 489,
+   "allow_held": 66,
+   "hold_n": 353,
+   "hold_held": 299,
+   "either_n": 180,
+   "either_held": 46,
+   "deploy_n": 63,
+   "deploy_held": 5
+  },
+  "tuned": {
+   "allow_n": 489,
+   "allow_held": 66,
+   "hold_n": 353,
+   "hold_held": 299,
+   "either_n": 180,
+   "either_held": 46,
+   "deploy_n": 63,
+   "deploy_held": 5
+  }
+ },
+ "counts_s_proposed": [
+  [
+   "allow",
+   489
+  ],
+  [
+   "either",
+   180
+  ],
+  [
+   "hold:gone",
+   107
+  ],
+  [
+   "hold:exposed",
+   107
+  ],
+  [
+   "hold:outage",
+   103
+  ],
+  [
+   "deploy",
+   63
+  ],
+  [
+   "hold:money",
+   27
+  ],
+  [
+   "hold:recoverable",
+   9
+  ]
+ ],
+ "a_vs_settled_proposed": 0.7207373271889401,
+ "b_vs_settled_proposed": 0.904147465437788,
+ "held_differs": 175,
+ "held_differs_kinds": [
+  [
+   "hold:exposed -> allow",
+   63
+  ],
+  [
+   "hold:exposed -> either",
+   26
+  ],
+  [
+   "hold:outage -> allow",
+   17
+  ],
+  [
+   "either -> hold:outage",
+   13
+  ],
+  [
+   "either -> hold:gone",
+   11
+  ],
+  [
+   "hold:outage -> either",
+   11
+  ],
+  [
+   "allow -> hold:money",
+   9
+  ],
+  [
+   "either -> hold:money",
+   8
+  ],
+  [
+   "either -> hold:exposed",
+   3
+  ],
+  [
+   "hold:gone -> either",
+   3
+  ],
+  [
+   "hold:money -> either",
+   3
+  ],
+  [
+   "allow -> hold:outage",
+   2
+  ],
+  [
+   "allow -> hold:exposed",
+   2
+  ],
+  [
+   "hold:gone -> deploy",
+   2
+  ],
+  [
+   "allow -> hold:gone",
+   1
+  ],
+  [
+   "hold:gone -> allow",
+   1
+  ]
+ ],
+ "held_differs_a_vs_s": [
+  [
+   "hold:exposed -> allow",
+   59
+  ],
+  [
+   "hold:exposed -> either",
+   27
+  ],
+  [
+   "hold:outage -> allow",
+   17
+  ],
+  [
+   "either -> hold:outage",
+   13
+  ],
+  [
+   "either -> hold:gone",
+   11
+  ],
+  [
+   "hold:outage -> either",
+   11
+  ],
+  [
+   "allow -> hold:money",
+   9
+  ],
+  [
+   "either -> hold:money",
+   8
+  ],
+  [
+   "either -> hold:exposed",
+   3
+  ],
+  [
+   "hold:gone -> either",
+   3
+  ],
+  [
+   "hold:money -> either",
+   3
+  ],
+  [
+   "allow -> hold:outage",
+   2
+  ],
+  [
+   "allow -> hold:exposed",
+   2
+  ],
+  [
+   "hold:gone -> deploy",
+   2
+  ]
+ ]
+}
