@@ -103,7 +103,7 @@ Where B needs an answer other than #370's or #373's. Every other entry is as #37
 
 > Option B (Linux main) specified like #370, with a KVM test kit and second opinions on 26
 > decisions; a running ext4 disk must have its journal replayed to be read (measured), and B's
-> Linux computer is work A needs later, so the first build can start the same either way (#3xx).
+> Linux computer is work A needs later, so the first build can start the same either way (#381).
 
 ## For polarzero to rule
 
