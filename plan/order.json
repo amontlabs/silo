@@ -369,6 +369,7 @@
         "adapters-follow-providers",
         "adapters-follow-formats",
         "program-that-cannot-be-read",
+        "program-reports-its-own-spend",
         "vendor-runs-the-model-calls",
         "what-silo-changes-in-traffic",
         "tools-the-provider-runs",

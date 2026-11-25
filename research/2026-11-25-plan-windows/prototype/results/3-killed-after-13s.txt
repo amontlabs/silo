@@ -1,0 +1,6 @@
+calls served 29, api_request events 27, events matching a served call exactly 27
+tokens served   (in, out, cache read, cache write) (0, 8700, 450400, 24507)
+tokens reported (in, out, cache read, cache write) (0, 8100, 410187, 23917)
+cost reported in events $0.435373, in the cost metric $0.423081
+models asked ['claude-opus-5-5'] answered ['claude-opus-5-5'] in events ['claude-opus-5-5']
+window figures in any event or metric: False

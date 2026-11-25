@@ -1,0 +1,7 @@
+telemetry switched off in the program's own environment
+calls served 7, api_request events 0, events matching a served call exactly 0
+tokens served   (in, out, cache read, cache write) (0, 1050, 74177, 17251)
+tokens reported (in, out, cache read, cache write) (0, 0, 0, 0)
+cost reported in events $0.000000, in the cost metric $0.000000
+models asked ['claude-opus-5-5'] answered ['claude-opus-5', 'claude-opus-5-5'] in events []
+window figures in any event or metric: False

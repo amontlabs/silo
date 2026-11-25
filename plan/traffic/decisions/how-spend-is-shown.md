@@ -75,3 +75,21 @@ An agent's part, 25 November 2026, from `research/2026-11-25-model-prices`.
   discount you write in your own prices file. Whether the app shows that discounted figure, or the
   list price as this entry proposes, is still open. Showing the list price keeps conversations
   comparable between people. Showing the discounted one keeps a budget in the dollars you pay.
+
+## A plan's share, provider by provider (25 November 2026)
+
+An agent's part, from `research/2026-11-25-plan-windows`. What the app can show for one computer
+on a plan, by what Silo sees:
+
+- Anthropic, traffic read: the account's figures from every reply; the computer's own share only
+  as #355's estimate.
+- Anthropic, traffic passed unread (#393's `claude-key-or-plan`): no figure at all. Dollars only if
+  Claude Code reports them, as `program-reports-its-own-spend` asks.
+- OpenAI, ChatGPT sign-in: the account's figures from every reply. A figure per conversation exists
+  only behind a separate call with the user's sign-in (`thread_usage/query_v2`).
+- Google, Google sign-in: the plan counts model requests per day, so the computer's own share is a
+  count Silo makes itself, exactly. The account's remainder is in what Gemini CLI fetches every 30
+  seconds or more.
+
+So "18 percent used" in the example is the account's, and a computer's share can be shown as a
+fact only for Google.
