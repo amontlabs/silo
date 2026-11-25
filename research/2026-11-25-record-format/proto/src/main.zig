@@ -14,7 +14,9 @@
 //!                                              what an acknowledgement costs: <lines> lines of
 //!                                              <bytes>, a flush every <per_flush>, a new blob every
 //!                                              <blob_every> lines (0: none); prints one JSON line.
-//!                                              SILOREC_FLUSH=full|barrier|fsync picks the Mac flush
+//!                                              SILOREC_FLUSH=full|barrier|fsync picks the Mac flush;
+//!                                              SILOREC_ACKS=1 prints "<last line> acked" after each
+//!                                              flush (the Mac kit's power-cut test, 41)
 const std = @import("std");
 const format = @import("format.zig");
 const verify = @import("verify.zig");
@@ -232,6 +234,7 @@ fn bench(gpa: std.mem.Allocator, path: []const u8, lines: usize, per_flush: usiz
     defer flushes.deinit(gpa);
     var blobs: std.ArrayList(u64) = .empty;
     defer blobs.deinit(gpa);
+    const acks = std.posix.getenv("SILOREC_ACKS") != null;
     var timer = try std.time.Timer.start();
     const t0 = timer.read();
     for (0..lines) |i| {
@@ -251,6 +254,10 @@ fn bench(gpa: std.mem.Allocator, path: []const u8, lines: usize, per_flush: usiz
             const s0 = timer.read();
             try w.flush();
             try flushes.append(gpa, timer.read() - s0);
+            if (acks) {
+                var nb: [32]u8 = undefined;
+                _ = std.posix.write(std.posix.STDOUT_FILENO, std.fmt.bufPrint(&nb, "{d} acked\n", .{i + 1}) catch unreachable) catch {};
+            }
         }
     }
     const total = timer.read() - t0;

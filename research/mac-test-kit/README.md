@@ -38,9 +38,9 @@ cd research/mac-test-kit
 ./kit run all            # everything, in the kit's order
 ./kit run quick          # 03 05 06 20: about 40 minutes, no VM, no sudo, no download
 ./kit run 00             # downloads macOS 27 (about 18 GB) and installs the base computer: about an hour
-./kit run vm             # 01 04 07 10 11 14 21 23 24 26 27 32 33 35 36 38 39: about 10 hours, unattended after the first questions
+./kit run vm             # 01 04 07 10 11 14 21 23 24 26 27 32 33 35 36 38 39 41: about 11 hours, unattended after the first questions
 ./kit run guided         # 02 08 09 19 22 28 29 30 37: you at the keyboard for sign-ins, app checks and a sleep
-./kit run long           # 12 13 15 16 17 18 25 31 34: hours; 16 and 34 are meant for a night; 31 downloads Zig (51 MB)
+./kit run long           # 12 13 15 16 17 18 25 31 34 40: hours; 16 and 34 are meant for a night; 31, 40 and 41 download Zig (51 MB)
 ./kit verdicts           # one verdict per open decision, from every run so far (the newest outcome of each test)
 ./kit pack               # one .tar.gz of the last run, to hand back to an agent
 ```
