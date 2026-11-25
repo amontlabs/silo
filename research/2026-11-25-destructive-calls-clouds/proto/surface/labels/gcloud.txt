@@ -1,0 +1,1370 @@
+# Google Cloud (16 APIs, the versions gcloud 570.0.0 calls), labelled by hand on 2026-11-25.
+# Key: method id. A default by the method's name (label_gcloud.py), every method read and corrected.
+compute.addresses.delete hold:outage 
+compute.addresses.insert allow 
+compute.addresses.move either 
+compute.addresses.setLabels allow labels
+compute.addresses.testIamPermissions allow reads
+compute.advice.calendarMode allow reads
+compute.autoscalers.delete hold:outage 
+compute.autoscalers.insert allow 
+compute.autoscalers.patch either changes a setting
+compute.autoscalers.testIamPermissions allow reads
+compute.autoscalers.update either changes a setting
+compute.backendBuckets.addSignedUrlKey hold:exposed 
+compute.backendBuckets.delete hold:outage 
+compute.backendBuckets.deleteSignedUrlKey hold:outage 
+compute.backendBuckets.insert allow 
+compute.backendBuckets.patch either changes a setting
+compute.backendBuckets.setEdgeSecurityPolicy either 
+compute.backendBuckets.setIamPolicy cond 
+compute.backendBuckets.testIamPermissions allow reads
+compute.backendBuckets.update either changes a setting
+compute.backendServices.addSignedUrlKey hold:exposed 
+compute.backendServices.delete hold:outage 
+compute.backendServices.deleteSignedUrlKey hold:outage 
+compute.backendServices.getHealth allow reads
+compute.backendServices.insert allow 
+compute.backendServices.patch either changes a setting
+compute.backendServices.setEdgeSecurityPolicy either 
+compute.backendServices.setIamPolicy cond 
+compute.backendServices.setSecurityPolicy either 
+compute.backendServices.testIamPermissions allow reads
+compute.backendServices.update either changes a setting
+compute.crossSiteNetworks.delete hold:outage 
+compute.crossSiteNetworks.insert allow 
+compute.crossSiteNetworks.patch either changes a setting
+compute.disks.addResourcePolicies allow 
+compute.disks.bulkInsert allow 
+compute.disks.bulkSetLabels allow labels
+compute.disks.createSnapshot allow 
+compute.disks.delete hold:gone 
+compute.disks.insert allow 
+compute.disks.removeResourcePolicies either may stop scheduled snapshots
+compute.disks.resize allow only larger
+compute.disks.setIamPolicy cond 
+compute.disks.setLabels allow labels
+compute.disks.startAsyncReplication allow 
+compute.disks.stopAsyncReplication hold:outage 
+compute.disks.stopGroupAsyncReplication hold:outage 
+compute.disks.testIamPermissions allow reads
+compute.disks.update either changes a setting
+compute.disks.updateKmsKey either 
+compute.externalVpnGateways.delete hold:outage 
+compute.externalVpnGateways.insert allow 
+compute.externalVpnGateways.setLabels allow labels
+compute.externalVpnGateways.testIamPermissions allow reads
+compute.firewallPolicies.addAssociation allow 
+compute.firewallPolicies.addRule either 
+compute.firewallPolicies.cloneRules allow 
+compute.firewallPolicies.delete hold:outage 
+compute.firewallPolicies.insert allow 
+compute.firewallPolicies.move either changes a setting
+compute.firewallPolicies.patch either changes a setting
+compute.firewallPolicies.patchRule either changes a setting
+compute.firewallPolicies.removeAssociation hold:exposed its rules stop applying
+compute.firewallPolicies.removeRule either 
+compute.firewallPolicies.setIamPolicy cond 
+compute.firewallPolicies.testIamPermissions allow reads
+compute.firewalls.delete either a deny rule removed opens; an allow rule removed closes
+compute.firewalls.insert cond 
+compute.firewalls.patch cond 
+compute.firewalls.testIamPermissions allow reads
+compute.firewalls.update cond 
+compute.forwardingRules.delete hold:outage 
+compute.forwardingRules.insert allow 
+compute.forwardingRules.patch either changes a setting
+compute.forwardingRules.setLabels allow labels
+compute.forwardingRules.setTarget either changes a setting
+compute.futureReservations.cancel allow 
+compute.futureReservations.delete allow 
+compute.futureReservations.insert hold:money 
+compute.futureReservations.update either changes a setting
+compute.globalAddresses.delete hold:outage 
+compute.globalAddresses.insert allow 
+compute.globalAddresses.move either 
+compute.globalAddresses.setLabels allow labels
+compute.globalAddresses.testIamPermissions allow reads
+compute.globalForwardingRules.delete hold:outage 
+compute.globalForwardingRules.insert allow 
+compute.globalForwardingRules.patch either changes a setting
+compute.globalForwardingRules.setLabels allow labels
+compute.globalForwardingRules.setTarget either changes a setting
+compute.globalNetworkEndpointGroups.attachNetworkEndpoints allow 
+compute.globalNetworkEndpointGroups.delete hold:outage 
+compute.globalNetworkEndpointGroups.detachNetworkEndpoints hold:outage 
+compute.globalNetworkEndpointGroups.insert allow 
+compute.globalNetworkEndpointGroups.listNetworkEndpoints allow 
+compute.globalOperations.delete allow 
+compute.globalOperations.wait allow reads
+compute.globalOrganizationOperations.delete allow 
+compute.globalPublicDelegatedPrefixes.delete hold:outage 
+compute.globalPublicDelegatedPrefixes.insert allow 
+compute.globalPublicDelegatedPrefixes.patch either changes a setting
+compute.globalVmExtensionPolicies.delete hold:outage 
+compute.globalVmExtensionPolicies.insert allow 
+compute.globalVmExtensionPolicies.update either changes a setting
+compute.healthChecks.delete hold:outage 
+compute.healthChecks.insert allow 
+compute.healthChecks.patch either changes a setting
+compute.healthChecks.testIamPermissions allow reads
+compute.healthChecks.update either changes a setting
+compute.httpHealthChecks.delete hold:outage 
+compute.httpHealthChecks.insert allow 
+compute.httpHealthChecks.patch either changes a setting
+compute.httpHealthChecks.testIamPermissions allow reads
+compute.httpHealthChecks.update either changes a setting
+compute.httpsHealthChecks.delete hold:outage 
+compute.httpsHealthChecks.insert allow 
+compute.httpsHealthChecks.patch either changes a setting
+compute.httpsHealthChecks.testIamPermissions allow reads
+compute.httpsHealthChecks.update either changes a setting
+compute.images.delete hold:gone 
+compute.images.deprecate either 
+compute.images.insert allow 
+compute.images.patch either changes a setting
+compute.images.setIamPolicy cond 
+compute.images.setLabels allow labels
+compute.images.testIamPermissions allow reads
+compute.instanceGroupManagerResizeRequests.cancel allow 
+compute.instanceGroupManagerResizeRequests.delete allow 
+compute.instanceGroupManagerResizeRequests.insert allow 
+compute.instanceGroupManagers.abandonInstances either 
+compute.instanceGroupManagers.applyUpdatesToInstances deploy 
+compute.instanceGroupManagers.createInstances allow 
+compute.instanceGroupManagers.delete hold:gone its instances go
+compute.instanceGroupManagers.deleteInstances hold:gone 
+compute.instanceGroupManagers.deletePerInstanceConfigs either 
+compute.instanceGroupManagers.insert allow 
+compute.instanceGroupManagers.listManagedInstances allow 
+compute.instanceGroupManagers.listPerInstanceConfigs allow 
+compute.instanceGroupManagers.patch either changes a setting
+compute.instanceGroupManagers.patchPerInstanceConfigs either changes a setting
+compute.instanceGroupManagers.recreateInstances hold:outage recreated from the template; local data goes
+compute.instanceGroupManagers.resize cond 
+compute.instanceGroupManagers.resumeInstances allow 
+compute.instanceGroupManagers.setInstanceTemplate deploy 
+compute.instanceGroupManagers.setTargetPools either changes a setting
+compute.instanceGroupManagers.startInstances allow 
+compute.instanceGroupManagers.stopInstances hold:outage 
+compute.instanceGroupManagers.suspendInstances hold:outage 
+compute.instanceGroupManagers.updatePerInstanceConfigs either changes a setting
+compute.instanceGroups.addInstances allow 
+compute.instanceGroups.delete hold:outage 
+compute.instanceGroups.insert allow 
+compute.instanceGroups.listInstances allow 
+compute.instanceGroups.removeInstances hold:outage 
+compute.instanceGroups.setNamedPorts either changes a setting
+compute.instanceGroups.testIamPermissions allow reads
+compute.instanceSettings.patch either 
+compute.instanceTemplates.delete allow running instances stay
+compute.instanceTemplates.insert allow 
+compute.instanceTemplates.setIamPolicy cond 
+compute.instanceTemplates.testIamPermissions allow reads
+compute.instances.addAccessConfig hold:exposed gives the instance an external IP
+compute.instances.addNetworkInterface allow 
+compute.instances.addResourcePolicies allow 
+compute.instances.attachDisk allow 
+compute.instances.bulkInsert allow 
+compute.instances.delete hold:gone boot and data disks with auto-delete go with it
+compute.instances.deleteAccessConfig hold:outage its external IP goes
+compute.instances.deleteNetworkInterface hold:outage 
+compute.instances.detachDisk hold:outage 
+compute.instances.insert allow 
+compute.instances.performMaintenance either 
+compute.instances.removeResourcePolicies either 
+compute.instances.reportHostAsFaulty either 
+compute.instances.reset hold:outage a hard reset
+compute.instances.resume allow 
+compute.instances.sendDiagnosticInterrupt hold:outage 
+compute.instances.setDeletionProtection cond 
+compute.instances.setDiskAutoDelete either 
+compute.instances.setIamPolicy cond 
+compute.instances.setLabels allow labels
+compute.instances.setMachineResources either 
+compute.instances.setMachineType either 
+compute.instances.setMetadata cond 
+compute.instances.setMinCpuPlatform allow 
+compute.instances.setName either 
+compute.instances.setScheduling either 
+compute.instances.setSecurityPolicy either 
+compute.instances.setServiceAccount hold:exposed changes what the instance may do
+compute.instances.setShieldedInstanceIntegrityPolicy allow 
+compute.instances.setTags allow labels
+compute.instances.simulateMaintenanceEvent either 
+compute.instances.start allow 
+compute.instances.startWithEncryptionKey allow 
+compute.instances.stop hold:outage 
+compute.instances.suspend hold:outage 
+compute.instances.testIamPermissions allow reads
+compute.instances.update either changes a setting
+compute.instances.updateAccessConfig either 
+compute.instances.updateDisplayDevice allow 
+compute.instances.updateNetworkInterface either 
+compute.instances.updateShieldedInstanceConfig either 
+compute.instantSnapshotGroups.delete hold:gone 
+compute.instantSnapshotGroups.insert allow 
+compute.instantSnapshotGroups.setIamPolicy cond 
+compute.instantSnapshotGroups.testIamPermissions allow reads
+compute.instantSnapshots.delete hold:gone 
+compute.instantSnapshots.insert allow 
+compute.instantSnapshots.setIamPolicy cond 
+compute.instantSnapshots.setLabels allow labels
+compute.instantSnapshots.testIamPermissions allow reads
+compute.interconnectAttachmentGroups.delete hold:outage 
+compute.interconnectAttachmentGroups.insert allow 
+compute.interconnectAttachmentGroups.patch either changes a setting
+compute.interconnectAttachmentGroups.setIamPolicy cond 
+compute.interconnectAttachmentGroups.testIamPermissions allow reads
+compute.interconnectAttachments.delete hold:outage 
+compute.interconnectAttachments.insert allow 
+compute.interconnectAttachments.patch either changes a setting
+compute.interconnectAttachments.setLabels allow labels
+compute.interconnectGroups.createMembers allow 
+compute.interconnectGroups.delete hold:outage 
+compute.interconnectGroups.insert allow 
+compute.interconnectGroups.patch either changes a setting
+compute.interconnectGroups.setIamPolicy cond 
+compute.interconnectGroups.testIamPermissions allow reads
+compute.interconnects.delete hold:outage 
+compute.interconnects.insert allow 
+compute.interconnects.patch either changes a setting
+compute.interconnects.setLabels allow labels
+compute.licenseCodes.setIamPolicy cond 
+compute.licenseCodes.testIamPermissions allow reads
+compute.licenses.delete hold:outage 
+compute.licenses.insert allow 
+compute.licenses.setIamPolicy cond 
+compute.licenses.testIamPermissions allow reads
+compute.licenses.update either changes a setting
+compute.machineImages.delete hold:gone 
+compute.machineImages.insert allow 
+compute.machineImages.setIamPolicy cond 
+compute.machineImages.setLabels allow labels
+compute.machineImages.testIamPermissions allow reads
+compute.networkAttachments.delete hold:outage 
+compute.networkAttachments.insert allow 
+compute.networkAttachments.patch either changes a setting
+compute.networkAttachments.setIamPolicy cond 
+compute.networkAttachments.testIamPermissions allow reads
+compute.networkEdgeSecurityServices.delete hold:outage 
+compute.networkEdgeSecurityServices.insert allow 
+compute.networkEdgeSecurityServices.patch either changes a setting
+compute.networkEndpointGroups.attachNetworkEndpoints allow 
+compute.networkEndpointGroups.delete hold:outage 
+compute.networkEndpointGroups.detachNetworkEndpoints hold:outage 
+compute.networkEndpointGroups.insert allow 
+compute.networkEndpointGroups.listNetworkEndpoints allow 
+compute.networkEndpointGroups.testIamPermissions allow reads
+compute.networkFirewallPolicies.addAssociation allow 
+compute.networkFirewallPolicies.addPacketMirroringRule allow 
+compute.networkFirewallPolicies.addRule either 
+compute.networkFirewallPolicies.cloneRules allow 
+compute.networkFirewallPolicies.delete hold:outage 
+compute.networkFirewallPolicies.insert allow 
+compute.networkFirewallPolicies.patch either changes a setting
+compute.networkFirewallPolicies.patchPacketMirroringRule either changes a setting
+compute.networkFirewallPolicies.patchRule either changes a setting
+compute.networkFirewallPolicies.removeAssociation hold:exposed 
+compute.networkFirewallPolicies.removePacketMirroringRule hold:outage 
+compute.networkFirewallPolicies.removeRule either 
+compute.networkFirewallPolicies.setIamPolicy cond 
+compute.networkFirewallPolicies.testIamPermissions allow reads
+compute.networks.addPeering hold:exposed 
+compute.networks.cancelRequestRemovePeering allow 
+compute.networks.delete hold:outage 
+compute.networks.insert allow 
+compute.networks.patch either changes a setting
+compute.networks.removePeering hold:outage 
+compute.networks.requestRemovePeering hold:outage 
+compute.networks.switchToCustomMode either 
+compute.networks.updatePeering either changes a setting
+compute.nodeGroups.addNodes allow 
+compute.nodeGroups.delete hold:outage 
+compute.nodeGroups.deleteNodes hold:outage 
+compute.nodeGroups.insert allow 
+compute.nodeGroups.listNodes allow 
+compute.nodeGroups.patch either changes a setting
+compute.nodeGroups.performMaintenance allow 
+compute.nodeGroups.setIamPolicy cond 
+compute.nodeGroups.setNodeTemplate either changes a setting
+compute.nodeGroups.simulateMaintenanceEvent either 
+compute.nodeGroups.testIamPermissions allow reads
+compute.nodeTemplates.delete allow 
+compute.nodeTemplates.insert allow 
+compute.nodeTemplates.setIamPolicy cond 
+compute.nodeTemplates.testIamPermissions allow reads
+compute.organizationSecurityPolicies.addAssociation allow 
+compute.organizationSecurityPolicies.addRule allow 
+compute.organizationSecurityPolicies.copyRules allow 
+compute.organizationSecurityPolicies.delete hold:outage 
+compute.organizationSecurityPolicies.insert allow 
+compute.organizationSecurityPolicies.move either changes a setting
+compute.organizationSecurityPolicies.patch either changes a setting
+compute.organizationSecurityPolicies.patchRule either changes a setting
+compute.organizationSecurityPolicies.removeAssociation hold:exposed 
+compute.organizationSecurityPolicies.removeRule either 
+compute.packetMirrorings.delete hold:outage 
+compute.packetMirrorings.insert allow 
+compute.packetMirrorings.patch either changes a setting
+compute.packetMirrorings.testIamPermissions allow reads
+compute.previewFeatures.update either 
+compute.projects.disableXpnHost hold:outage 
+compute.projects.disableXpnResource hold:outage 
+compute.projects.enableXpnHost hold:exposed 
+compute.projects.enableXpnResource hold:exposed 
+compute.projects.listXpnHosts allow 
+compute.projects.moveDisk either 
+compute.projects.moveInstance either 
+compute.projects.setCloudArmorTier hold:money 
+compute.projects.setCommonInstanceMetadata cond 
+compute.projects.setDefaultNetworkTier either 
+compute.projects.setUsageExportBucket either 
+compute.publicAdvertisedPrefixes.announce allow 
+compute.publicAdvertisedPrefixes.delete hold:outage 
+compute.publicAdvertisedPrefixes.insert allow 
+compute.publicAdvertisedPrefixes.patch either changes a setting
+compute.publicAdvertisedPrefixes.withdraw hold:outage 
+compute.publicDelegatedPrefixes.announce allow 
+compute.publicDelegatedPrefixes.delete hold:outage 
+compute.publicDelegatedPrefixes.insert allow 
+compute.publicDelegatedPrefixes.patch either changes a setting
+compute.publicDelegatedPrefixes.withdraw hold:outage 
+compute.regionAutoscalers.delete hold:outage 
+compute.regionAutoscalers.insert allow 
+compute.regionAutoscalers.patch either changes a setting
+compute.regionAutoscalers.testIamPermissions allow reads
+compute.regionAutoscalers.update either changes a setting
+compute.regionBackendBuckets.delete hold:outage 
+compute.regionBackendBuckets.insert allow 
+compute.regionBackendBuckets.patch either changes a setting
+compute.regionBackendBuckets.setIamPolicy cond 
+compute.regionBackendBuckets.testIamPermissions allow reads
+compute.regionBackendServices.delete hold:outage 
+compute.regionBackendServices.getHealth allow reads
+compute.regionBackendServices.insert allow 
+compute.regionBackendServices.patch either changes a setting
+compute.regionBackendServices.setIamPolicy cond 
+compute.regionBackendServices.setSecurityPolicy either 
+compute.regionBackendServices.testIamPermissions allow reads
+compute.regionBackendServices.update either changes a setting
+compute.regionCommitments.insert hold:money a one- or three-year commitment
+compute.regionCommitments.update hold:money 
+compute.regionCompositeHealthChecks.delete hold:outage 
+compute.regionCompositeHealthChecks.insert allow 
+compute.regionCompositeHealthChecks.patch either changes a setting
+compute.regionCompositeHealthChecks.testIamPermissions allow reads
+compute.regionDisks.addResourcePolicies allow 
+compute.regionDisks.bulkInsert allow 
+compute.regionDisks.createSnapshot allow 
+compute.regionDisks.delete hold:gone 
+compute.regionDisks.insert allow 
+compute.regionDisks.removeResourcePolicies either 
+compute.regionDisks.resize allow 
+compute.regionDisks.setIamPolicy cond 
+compute.regionDisks.setLabels allow labels
+compute.regionDisks.startAsyncReplication allow 
+compute.regionDisks.stopAsyncReplication hold:outage 
+compute.regionDisks.stopGroupAsyncReplication hold:outage 
+compute.regionDisks.testIamPermissions allow reads
+compute.regionDisks.update either changes a setting
+compute.regionDisks.updateKmsKey either 
+compute.regionHealthAggregationPolicies.delete hold:outage 
+compute.regionHealthAggregationPolicies.insert allow 
+compute.regionHealthAggregationPolicies.patch either changes a setting
+compute.regionHealthAggregationPolicies.testIamPermissions allow reads
+compute.regionHealthCheckServices.delete hold:outage 
+compute.regionHealthCheckServices.insert allow 
+compute.regionHealthCheckServices.patch either changes a setting
+compute.regionHealthCheckServices.testIamPermissions allow reads
+compute.regionHealthChecks.delete hold:outage 
+compute.regionHealthChecks.insert allow 
+compute.regionHealthChecks.patch either changes a setting
+compute.regionHealthChecks.testIamPermissions allow reads
+compute.regionHealthChecks.update either changes a setting
+compute.regionHealthSources.delete hold:outage 
+compute.regionHealthSources.insert allow 
+compute.regionHealthSources.patch either changes a setting
+compute.regionHealthSources.testIamPermissions allow reads
+compute.regionInstanceGroupManagerResizeRequests.cancel allow 
+compute.regionInstanceGroupManagerResizeRequests.delete allow 
+compute.regionInstanceGroupManagerResizeRequests.insert allow 
+compute.regionInstanceGroupManagers.abandonInstances either 
+compute.regionInstanceGroupManagers.applyUpdatesToInstances deploy 
+compute.regionInstanceGroupManagers.createInstances allow 
+compute.regionInstanceGroupManagers.delete hold:gone its instances go
+compute.regionInstanceGroupManagers.deleteInstances hold:gone 
+compute.regionInstanceGroupManagers.deletePerInstanceConfigs either 
+compute.regionInstanceGroupManagers.insert allow 
+compute.regionInstanceGroupManagers.listManagedInstances allow 
+compute.regionInstanceGroupManagers.listPerInstanceConfigs allow 
+compute.regionInstanceGroupManagers.patch either changes a setting
+compute.regionInstanceGroupManagers.patchPerInstanceConfigs either changes a setting
+compute.regionInstanceGroupManagers.recreateInstances hold:outage 
+compute.regionInstanceGroupManagers.resize cond 
+compute.regionInstanceGroupManagers.resumeInstances allow 
+compute.regionInstanceGroupManagers.setInstanceTemplate deploy 
+compute.regionInstanceGroupManagers.setTargetPools either changes a setting
+compute.regionInstanceGroupManagers.startInstances allow 
+compute.regionInstanceGroupManagers.stopInstances hold:outage 
+compute.regionInstanceGroupManagers.suspendInstances hold:outage 
+compute.regionInstanceGroupManagers.updatePerInstanceConfigs either changes a setting
+compute.regionInstanceGroups.listInstances allow 
+compute.regionInstanceGroups.setNamedPorts either changes a setting
+compute.regionInstanceGroups.testIamPermissions allow reads
+compute.regionInstanceTemplates.delete allow 
+compute.regionInstanceTemplates.insert allow 
+compute.regionInstances.bulkInsert allow 
+compute.regionInstantSnapshotGroups.delete hold:gone 
+compute.regionInstantSnapshotGroups.insert allow 
+compute.regionInstantSnapshotGroups.setIamPolicy cond 
+compute.regionInstantSnapshotGroups.testIamPermissions allow reads
+compute.regionInstantSnapshots.delete hold:gone 
+compute.regionInstantSnapshots.insert allow 
+compute.regionInstantSnapshots.setIamPolicy cond 
+compute.regionInstantSnapshots.setLabels allow labels
+compute.regionInstantSnapshots.testIamPermissions allow reads
+compute.regionNetworkEndpointGroups.attachNetworkEndpoints allow 
+compute.regionNetworkEndpointGroups.delete hold:outage 
+compute.regionNetworkEndpointGroups.detachNetworkEndpoints hold:outage 
+compute.regionNetworkEndpointGroups.insert allow 
+compute.regionNetworkEndpointGroups.listNetworkEndpoints allow 
+compute.regionNetworkFirewallPolicies.addAssociation allow 
+compute.regionNetworkFirewallPolicies.addRule either 
+compute.regionNetworkFirewallPolicies.cloneRules allow 
+compute.regionNetworkFirewallPolicies.delete hold:outage 
+compute.regionNetworkFirewallPolicies.insert allow 
+compute.regionNetworkFirewallPolicies.patch either changes a setting
+compute.regionNetworkFirewallPolicies.patchRule either changes a setting
+compute.regionNetworkFirewallPolicies.removeAssociation hold:exposed 
+compute.regionNetworkFirewallPolicies.removeRule either 
+compute.regionNetworkFirewallPolicies.setIamPolicy cond 
+compute.regionNetworkFirewallPolicies.testIamPermissions allow reads
+compute.regionNotificationEndpoints.delete hold:outage 
+compute.regionNotificationEndpoints.insert allow 
+compute.regionNotificationEndpoints.testIamPermissions allow reads
+compute.regionOperations.delete allow 
+compute.regionOperations.wait allow reads
+compute.regionSecurityPolicies.addRule allow 
+compute.regionSecurityPolicies.delete hold:outage 
+compute.regionSecurityPolicies.insert allow 
+compute.regionSecurityPolicies.patch either changes a setting
+compute.regionSecurityPolicies.patchRule either changes a setting
+compute.regionSecurityPolicies.removeRule either 
+compute.regionSecurityPolicies.setLabels allow labels
+compute.regionSnapshotSettings.patch either 
+compute.regionSnapshots.delete hold:gone 
+compute.regionSnapshots.insert allow 
+compute.regionSnapshots.setIamPolicy cond 
+compute.regionSnapshots.setLabels allow labels
+compute.regionSnapshots.testIamPermissions allow reads
+compute.regionSnapshots.updateKmsKey either 
+compute.regionSslCertificates.delete hold:outage 
+compute.regionSslCertificates.insert allow 
+compute.regionSslPolicies.delete hold:outage 
+compute.regionSslPolicies.insert allow 
+compute.regionSslPolicies.patch either changes a setting
+compute.regionTargetHttpProxies.delete hold:outage 
+compute.regionTargetHttpProxies.insert allow 
+compute.regionTargetHttpProxies.setUrlMap either changes a setting
+compute.regionTargetHttpsProxies.delete hold:outage 
+compute.regionTargetHttpsProxies.insert allow 
+compute.regionTargetHttpsProxies.patch either changes a setting
+compute.regionTargetHttpsProxies.setSslCertificates either changes a setting
+compute.regionTargetHttpsProxies.setUrlMap either changes a setting
+compute.regionTargetTcpProxies.delete hold:outage 
+compute.regionTargetTcpProxies.insert allow 
+compute.regionUrlMaps.delete hold:outage 
+compute.regionUrlMaps.insert allow 
+compute.regionUrlMaps.patch either changes a setting
+compute.regionUrlMaps.update either changes a setting
+compute.regionUrlMaps.validate allow reads
+compute.reservationBlocks.performMaintenance allow 
+compute.reservationBlocks.setIamPolicy cond 
+compute.reservationBlocks.testIamPermissions allow reads
+compute.reservationSlots.getVersion allow reads
+compute.reservationSlots.update either changes a setting
+compute.reservationSubBlocks.getVersion allow reads
+compute.reservationSubBlocks.performMaintenance allow 
+compute.reservationSubBlocks.reportFaulty allow 
+compute.reservationSubBlocks.setIamPolicy cond 
+compute.reservationSubBlocks.testIamPermissions allow reads
+compute.reservations.delete hold:outage 
+compute.reservations.insert hold:money 
+compute.reservations.performMaintenance allow 
+compute.reservations.resize either 
+compute.reservations.setIamPolicy cond 
+compute.reservations.testIamPermissions allow reads
+compute.reservations.update either changes a setting
+compute.resourcePolicies.delete either 
+compute.resourcePolicies.insert allow 
+compute.resourcePolicies.patch either changes a setting
+compute.resourcePolicies.setIamPolicy cond 
+compute.resourcePolicies.testIamPermissions allow reads
+compute.rolloutPlans.delete hold:outage 
+compute.rolloutPlans.insert allow 
+compute.rollouts.advance deploy 
+compute.rollouts.cancel either 
+compute.rollouts.delete hold:outage 
+compute.rollouts.pause either 
+compute.rollouts.resume allow 
+compute.routers.delete hold:outage 
+compute.routers.deleteRoutePolicy hold:outage 
+compute.routers.insert allow 
+compute.routers.patch either changes a setting
+compute.routers.patchRoutePolicy either changes a setting
+compute.routers.preview allow 
+compute.routers.update either changes a setting
+compute.routers.updateRoutePolicy either changes a setting
+compute.routes.delete hold:outage 
+compute.routes.insert allow 
+compute.routes.testIamPermissions allow reads
+compute.securityPolicies.addRule allow 
+compute.securityPolicies.delete hold:outage 
+compute.securityPolicies.insert allow 
+compute.securityPolicies.patch either changes a setting
+compute.securityPolicies.patchRule either changes a setting
+compute.securityPolicies.removeRule either 
+compute.securityPolicies.setLabels allow labels
+compute.serviceAttachments.delete hold:outage 
+compute.serviceAttachments.insert allow 
+compute.serviceAttachments.patch either changes a setting
+compute.serviceAttachments.setIamPolicy cond 
+compute.serviceAttachments.testIamPermissions allow reads
+compute.snapshotSettings.patch either 
+compute.snapshots.delete hold:gone 
+compute.snapshots.insert allow 
+compute.snapshots.setIamPolicy cond 
+compute.snapshots.setLabels allow labels
+compute.snapshots.testIamPermissions allow reads
+compute.snapshots.updateKmsKey either 
+compute.sslCertificates.delete hold:outage 
+compute.sslCertificates.insert allow 
+compute.sslPolicies.delete hold:outage 
+compute.sslPolicies.insert allow 
+compute.sslPolicies.patch either changes a setting
+compute.storagePools.delete hold:outage 
+compute.storagePools.insert allow 
+compute.storagePools.setIamPolicy cond 
+compute.storagePools.testIamPermissions allow reads
+compute.storagePools.update either changes a setting
+compute.subnetworks.delete hold:outage 
+compute.subnetworks.expandIpCidrRange allow 
+compute.subnetworks.insert allow 
+compute.subnetworks.patch either changes a setting
+compute.subnetworks.setIamPolicy cond 
+compute.subnetworks.setPrivateIpGoogleAccess allow 
+compute.subnetworks.testIamPermissions allow reads
+compute.targetGrpcProxies.delete hold:outage 
+compute.targetGrpcProxies.insert allow 
+compute.targetGrpcProxies.patch either changes a setting
+compute.targetHttpProxies.delete hold:outage 
+compute.targetHttpProxies.insert allow 
+compute.targetHttpProxies.patch either changes a setting
+compute.targetHttpProxies.setUrlMap either changes a setting
+compute.targetHttpsProxies.delete hold:outage 
+compute.targetHttpsProxies.insert allow 
+compute.targetHttpsProxies.patch either changes a setting
+compute.targetHttpsProxies.setCertificateMap either changes a setting
+compute.targetHttpsProxies.setQuicOverride either changes a setting
+compute.targetHttpsProxies.setSslCertificates either changes a setting
+compute.targetHttpsProxies.setSslPolicy either changes a setting
+compute.targetHttpsProxies.setUrlMap either changes a setting
+compute.targetInstances.delete hold:outage 
+compute.targetInstances.insert allow 
+compute.targetInstances.setSecurityPolicy either 
+compute.targetInstances.testIamPermissions allow reads
+compute.targetPools.addHealthCheck allow 
+compute.targetPools.addInstance allow 
+compute.targetPools.delete hold:outage 
+compute.targetPools.getHealth allow reads
+compute.targetPools.insert allow 
+compute.targetPools.removeHealthCheck hold:outage 
+compute.targetPools.removeInstance hold:outage 
+compute.targetPools.setBackup either changes a setting
+compute.targetPools.setSecurityPolicy either 
+compute.targetPools.testIamPermissions allow reads
+compute.targetSslProxies.delete hold:outage 
+compute.targetSslProxies.insert allow 
+compute.targetSslProxies.setBackendService either changes a setting
+compute.targetSslProxies.setCertificateMap either changes a setting
+compute.targetSslProxies.setProxyHeader either changes a setting
+compute.targetSslProxies.setSslCertificates either changes a setting
+compute.targetSslProxies.setSslPolicy either changes a setting
+compute.targetSslProxies.testIamPermissions allow reads
+compute.targetTcpProxies.delete hold:outage 
+compute.targetTcpProxies.insert allow 
+compute.targetTcpProxies.setBackendService either changes a setting
+compute.targetTcpProxies.setProxyHeader either changes a setting
+compute.targetTcpProxies.testIamPermissions allow reads
+compute.targetVpnGateways.delete hold:outage 
+compute.targetVpnGateways.insert allow 
+compute.targetVpnGateways.setLabels allow labels
+compute.urlMaps.delete hold:outage 
+compute.urlMaps.insert allow 
+compute.urlMaps.invalidateCache allow 
+compute.urlMaps.patch either changes a setting
+compute.urlMaps.testIamPermissions allow reads
+compute.urlMaps.update either changes a setting
+compute.urlMaps.validate allow reads
+compute.vpnGateways.delete hold:outage 
+compute.vpnGateways.insert allow 
+compute.vpnGateways.setLabels allow labels
+compute.vpnGateways.testIamPermissions allow reads
+compute.vpnTunnels.delete hold:outage 
+compute.vpnTunnels.insert allow 
+compute.vpnTunnels.setLabels allow labels
+compute.wireGroups.delete hold:outage 
+compute.wireGroups.insert allow 
+compute.wireGroups.patch either changes a setting
+compute.zoneOperations.delete allow 
+compute.zoneOperations.wait allow reads
+compute.zoneVmExtensionPolicies.delete hold:outage 
+compute.zoneVmExtensionPolicies.insert allow 
+compute.zoneVmExtensionPolicies.update either changes a setting
+storage.anywhereCaches.disable allow 
+storage.anywhereCaches.insert allow 
+storage.anywhereCaches.pause allow 
+storage.anywhereCaches.resume allow 
+storage.anywhereCaches.update either changes a setting
+storage.bucketAccessControls.delete either 
+storage.bucketAccessControls.insert cond 
+storage.bucketAccessControls.patch cond 
+storage.bucketAccessControls.update cond 
+storage.buckets.delete hold:outage only an empty bucket
+storage.buckets.insert allow 
+storage.buckets.lockRetentionPolicy hold:money cannot be undone; the bucket cannot be deleted until objects age
+storage.buckets.patch cond 
+storage.buckets.relocate either changes a setting
+storage.buckets.restore allow 
+storage.buckets.setIamPolicy cond 
+storage.buckets.update cond 
+storage.channels.stop allow 
+storage.defaultObjectAccessControls.delete either 
+storage.defaultObjectAccessControls.insert cond 
+storage.defaultObjectAccessControls.patch cond 
+storage.defaultObjectAccessControls.update cond 
+storage.folders.delete allow only empty
+storage.folders.deleteRecursive hold:gone 
+storage.folders.insert allow 
+storage.folders.rename allow 
+storage.managedFolders.delete allow only empty
+storage.managedFolders.insert allow 
+storage.managedFolders.setIamPolicy cond 
+storage.notifications.delete hold:outage 
+storage.notifications.insert allow 
+storage.objectAccessControls.delete either 
+storage.objectAccessControls.insert cond 
+storage.objectAccessControls.patch cond 
+storage.objectAccessControls.update cond 
+storage.objects.bulkRestore allow 
+storage.objects.compose either 
+storage.objects.copy either 
+storage.objects.delete hold:gone unless soft delete or versioning keeps it
+storage.objects.insert either overwrites the name
+storage.objects.move either 
+storage.objects.patch either 
+storage.objects.restore allow 
+storage.objects.rewrite either 
+storage.objects.setIamPolicy cond 
+storage.objects.update either 
+storage.objects.watchAll allow 
+storage.buckets.operations.advanceRelocateBucket either 
+storage.buckets.operations.cancel allow 
+storage.projects.hmacKeys.create hold:exposed 
+storage.projects.hmacKeys.delete allow only an inactive key
+storage.projects.hmacKeys.update cond 
+sql.backupRuns.delete hold:gone 
+sql.backupRuns.insert allow 
+sql.backups.createBackup allow 
+sql.backups.deleteBackup hold:gone 
+sql.backups.updateBackup either changes a setting
+sql.blueGreenDeployments.create allow 
+sql.blueGreenDeployments.delete either 
+sql.blueGreenDeployments.switchover either 
+sql.connect.generateEphemeral either a short-lived certificate to connect
+sql.databases.delete hold:gone 
+sql.databases.insert allow 
+sql.databases.patch either 
+sql.databases.update either 
+sql.instances.RotateEntraIdCertificate either 
+sql.instances.RotateServerCertificate either 
+sql.instances.acquireSsrsLease allow 
+sql.instances.addEntraIdCertificate allow 
+sql.instances.addReplicationSource allow 
+sql.instances.addServerCa allow 
+sql.instances.addServerCertificate allow 
+sql.instances.clone allow 
+sql.instances.delete hold:gone its automated backups go too, unless kept
+sql.instances.demote hold:outage 
+sql.instances.demoteMaster hold:outage 
+sql.instances.executeSql cond 
+sql.instances.export either to a bucket
+sql.instances.failover either a short interruption
+sql.instances.import either overwrites
+sql.instances.insert allow 
+sql.instances.patch cond 
+sql.instances.pointInTimeRestore allow a new instance
+sql.instances.preCheckMajorVersionUpgrade allow reads
+sql.instances.promoteReplica either 
+sql.instances.reencrypt either 
+sql.instances.releaseSsrsLease allow 
+sql.instances.removeReplicationSource hold:outage 
+sql.instances.resetSslConfig hold:outage clients' certificates stop
+sql.instances.restart either a short interruption
+sql.instances.restoreBackup hold:gone overwrites the instance's data
+sql.instances.rotateServerCa either 
+sql.instances.startReplica allow 
+sql.instances.stopReplica hold:outage 
+sql.instances.switchover either a short interruption
+sql.instances.truncateLog either 
+sql.instances.update cond 
+sql.operations.cancel allow 
+sql.projects.instances.performDiskShrink either 
+sql.projects.instances.rescheduleMaintenance allow 
+sql.projects.instances.resetReplicaSize either 
+sql.projects.instances.startExternalSync allow 
+sql.projects.instances.verifyExternalSyncSettings allow reads
+sql.sslCerts.createEphemeral either 
+sql.sslCerts.delete hold:outage 
+sql.sslCerts.insert hold:exposed 
+sql.users.delete hold:outage 
+sql.users.insert hold:exposed 
+sql.users.update hold:exposed may set a password
+container.projects.locations.acceleratorNetworkProfiles.create allow 
+container.projects.locations.acceleratorNetworkProfiles.delete allow 
+container.projects.locations.acceleratorNetworkProfiles.patch either changes a setting
+container.projects.locations.clusters.nodePools.completeUpgrade allow 
+container.projects.locations.clusters.nodePools.create allow 
+container.projects.locations.clusters.nodePools.delete hold:outage 
+container.projects.locations.clusters.nodePools.rollback either a short interruption
+container.projects.locations.clusters.nodePools.setAutoscaling either 
+container.projects.locations.clusters.nodePools.setManagement either changes a setting
+container.projects.locations.clusters.nodePools.setSize cond 
+container.projects.locations.clusters.nodePools.update either changes a setting
+container.projects.locations.clusters.completeControlPlaneUpgrade allow 
+container.projects.locations.clusters.completeConvertToAutopilot allow 
+container.projects.locations.clusters.completeIpRotation hold:outage clients with the old address stop
+container.projects.locations.clusters.create allow 
+container.projects.locations.clusters.delete hold:gone workloads and their volumes go
+container.projects.locations.clusters.setAddons either changes a setting
+container.projects.locations.clusters.setLegacyAbac cond 
+container.projects.locations.clusters.setLocations either changes a setting
+container.projects.locations.clusters.setLogging either changes a setting
+container.projects.locations.clusters.setMaintenancePolicy either changes a setting
+container.projects.locations.clusters.setMasterAuth hold:exposed 
+container.projects.locations.clusters.setMonitoring either changes a setting
+container.projects.locations.clusters.setNetworkPolicy either 
+container.projects.locations.clusters.setResourceLabels allow labels
+container.projects.locations.clusters.startIpRotation allow 
+container.projects.locations.clusters.update cond 
+container.projects.locations.clusters.updateMaster either changes a setting
+container.projects.locations.operations.cancel allow 
+container.projects.zones.clusters.nodePools.autoscaling either 
+container.projects.zones.clusters.nodePools.create allow 
+container.projects.zones.clusters.nodePools.delete hold:outage 
+container.projects.zones.clusters.nodePools.rollback either a short interruption
+container.projects.zones.clusters.nodePools.setManagement either changes a setting
+container.projects.zones.clusters.nodePools.setSize cond 
+container.projects.zones.clusters.nodePools.update either changes a setting
+container.projects.zones.clusters.addons either 
+container.projects.zones.clusters.completeControlPlaneUpgrade allow 
+container.projects.zones.clusters.completeIpRotation hold:outage 
+container.projects.zones.clusters.create allow 
+container.projects.zones.clusters.delete hold:gone 
+container.projects.zones.clusters.legacyAbac cond 
+container.projects.zones.clusters.locations either 
+container.projects.zones.clusters.logging either 
+container.projects.zones.clusters.master either 
+container.projects.zones.clusters.monitoring either 
+container.projects.zones.clusters.resourceLabels allow 
+container.projects.zones.clusters.setMaintenancePolicy either changes a setting
+container.projects.zones.clusters.setMasterAuth hold:exposed 
+container.projects.zones.clusters.setNetworkPolicy either 
+container.projects.zones.clusters.startIpRotation allow 
+container.projects.zones.clusters.update cond 
+container.projects.zones.operations.cancel allow 
+run.namespaces.domainmappings.create allow 
+run.namespaces.domainmappings.delete hold:outage 
+run.namespaces.executions.cancel allow 
+run.namespaces.executions.delete allow 
+run.namespaces.instances.create allow 
+run.namespaces.instances.delete hold:outage 
+run.namespaces.instances.replaceInstance deploy 
+run.namespaces.instances.start allow 
+run.namespaces.instances.stop hold:outage 
+run.namespaces.jobs.create allow 
+run.namespaces.jobs.delete hold:outage 
+run.namespaces.jobs.replaceJob deploy 
+run.namespaces.jobs.run either runs the job
+run.namespaces.revisions.delete either an old revision, or one taking traffic
+run.namespaces.services.create deploy 
+run.namespaces.services.delete hold:outage 
+run.namespaces.services.replaceService deploy 
+run.namespaces.workerpools.create allow 
+run.namespaces.workerpools.delete hold:outage 
+run.namespaces.workerpools.replaceWorkerPool deploy 
+run.projects.locations.domainmappings.create allow 
+run.projects.locations.domainmappings.delete hold:outage 
+run.projects.locations.instances.setIamPolicy cond 
+run.projects.locations.instances.testIamPermissions allow reads
+run.projects.locations.jobs.setIamPolicy cond 
+run.projects.locations.jobs.testIamPermissions allow reads
+run.projects.locations.operations.delete allow 
+run.projects.locations.operations.wait allow reads
+run.projects.locations.revisions.delete either 
+run.projects.locations.services.create deploy 
+run.projects.locations.services.delete hold:outage 
+run.projects.locations.services.replaceService deploy 
+run.projects.locations.services.setIamPolicy cond 
+run.projects.locations.services.testIamPermissions allow reads
+run.projects.locations.workerpools.setIamPolicy cond 
+run.projects.locations.workerpools.testIamPermissions allow reads
+iam.iamPolicies.lintPolicy allow 
+iam.iamPolicies.queryAuditableServices allow 
+iam.locations.workforcePools.providers.keys.create hold:exposed 
+iam.locations.workforcePools.providers.keys.delete hold:outage 
+iam.locations.workforcePools.providers.keys.undelete allow 
+iam.locations.workforcePools.providers.scimTenants.tokens.create hold:exposed 
+iam.locations.workforcePools.providers.scimTenants.tokens.delete hold:outage 
+iam.locations.workforcePools.providers.scimTenants.tokens.patch either changes a setting
+iam.locations.workforcePools.providers.scimTenants.tokens.undelete allow 
+iam.locations.workforcePools.providers.scimTenants.create allow 
+iam.locations.workforcePools.providers.scimTenants.delete hold:outage 
+iam.locations.workforcePools.providers.scimTenants.patch either changes a setting
+iam.locations.workforcePools.providers.scimTenants.undelete allow 
+iam.locations.workforcePools.providers.create hold:exposed 
+iam.locations.workforcePools.providers.delete hold:outage 
+iam.locations.workforcePools.providers.patch hold:exposed 
+iam.locations.workforcePools.providers.undelete allow 
+iam.locations.workforcePools.subjects.delete hold:outage 
+iam.locations.workforcePools.subjects.revokeSessions hold:outage 
+iam.locations.workforcePools.subjects.undelete allow 
+iam.locations.workforcePools.create hold:exposed 
+iam.locations.workforcePools.delete hold:outage 
+iam.locations.workforcePools.getIamPolicy allow 
+iam.locations.workforcePools.patch either changes a setting
+iam.locations.workforcePools.setIamPolicy cond 
+iam.locations.workforcePools.testIamPermissions allow reads
+iam.locations.workforcePools.undelete allow 
+iam.organizations.roles.create allow 
+iam.organizations.roles.delete hold:outage 
+iam.organizations.roles.patch either 
+iam.organizations.roles.undelete allow 
+iam.permissions.queryTestablePermissions allow 
+iam.projects.locations.oauthClients.credentials.create hold:exposed 
+iam.projects.locations.oauthClients.credentials.delete hold:outage 
+iam.projects.locations.oauthClients.credentials.patch either changes a setting
+iam.projects.locations.oauthClients.create either 
+iam.projects.locations.oauthClients.delete hold:outage 
+iam.projects.locations.oauthClients.patch either changes a setting
+iam.projects.locations.oauthClients.undelete allow 
+iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.workloadSources.create allow 
+iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.workloadSources.delete hold:outage 
+iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.workloadSources.patch either changes a setting
+iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.addAttestationRule hold:exposed 
+iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.create allow 
+iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.delete hold:outage 
+iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.getIamPolicy allow 
+iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.patch either changes a setting
+iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.removeAttestationRule hold:outage 
+iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.setAttestationRules either changes a setting
+iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.setIamPolicy cond 
+iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.testIamPermissions allow reads
+iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.undelete allow 
+iam.projects.locations.workloadIdentityPools.namespaces.workloadSources.create allow 
+iam.projects.locations.workloadIdentityPools.namespaces.workloadSources.delete hold:outage 
+iam.projects.locations.workloadIdentityPools.namespaces.workloadSources.patch either changes a setting
+iam.projects.locations.workloadIdentityPools.namespaces.addAttestationRule hold:exposed 
+iam.projects.locations.workloadIdentityPools.namespaces.create allow 
+iam.projects.locations.workloadIdentityPools.namespaces.delete hold:outage 
+iam.projects.locations.workloadIdentityPools.namespaces.getIamPolicy allow 
+iam.projects.locations.workloadIdentityPools.namespaces.patch either changes a setting
+iam.projects.locations.workloadIdentityPools.namespaces.removeAttestationRule hold:outage 
+iam.projects.locations.workloadIdentityPools.namespaces.setAttestationRules either changes a setting
+iam.projects.locations.workloadIdentityPools.namespaces.setIamPolicy cond 
+iam.projects.locations.workloadIdentityPools.namespaces.testIamPermissions allow reads
+iam.projects.locations.workloadIdentityPools.namespaces.undelete allow 
+iam.projects.locations.workloadIdentityPools.providers.keys.create hold:exposed 
+iam.projects.locations.workloadIdentityPools.providers.keys.delete hold:outage 
+iam.projects.locations.workloadIdentityPools.providers.keys.undelete allow 
+iam.projects.locations.workloadIdentityPools.providers.create hold:exposed 
+iam.projects.locations.workloadIdentityPools.providers.delete hold:outage 
+iam.projects.locations.workloadIdentityPools.providers.patch hold:exposed 
+iam.projects.locations.workloadIdentityPools.providers.undelete allow 
+iam.projects.locations.workloadIdentityPools.addAttestationRule hold:exposed 
+iam.projects.locations.workloadIdentityPools.create hold:exposed lets outside identities in
+iam.projects.locations.workloadIdentityPools.delete hold:outage 
+iam.projects.locations.workloadIdentityPools.getIamPolicy allow 
+iam.projects.locations.workloadIdentityPools.patch either changes a setting
+iam.projects.locations.workloadIdentityPools.removeAttestationRule hold:outage 
+iam.projects.locations.workloadIdentityPools.setAttestationRules either changes a setting
+iam.projects.locations.workloadIdentityPools.setIamPolicy cond 
+iam.projects.locations.workloadIdentityPools.testIamPermissions allow reads
+iam.projects.locations.workloadIdentityPools.undelete allow 
+iam.projects.roles.create allow 
+iam.projects.roles.delete hold:outage 
+iam.projects.roles.patch either 
+iam.projects.roles.undelete allow 
+iam.projects.serviceAccounts.keys.create hold:exposed 
+iam.projects.serviceAccounts.keys.delete hold:outage 
+iam.projects.serviceAccounts.keys.disable hold:outage 
+iam.projects.serviceAccounts.keys.enable allow 
+iam.projects.serviceAccounts.keys.upload hold:exposed 
+iam.projects.serviceAccounts.create allow 
+iam.projects.serviceAccounts.delete hold:outage 30 days to undelete
+iam.projects.serviceAccounts.disable hold:outage 
+iam.projects.serviceAccounts.enable allow 
+iam.projects.serviceAccounts.getIamPolicy allow 
+iam.projects.serviceAccounts.patch either changes a setting
+iam.projects.serviceAccounts.setIamPolicy cond 
+iam.projects.serviceAccounts.signBlob hold:exposed signs as the service account
+iam.projects.serviceAccounts.signJwt hold:exposed signs as the service account
+iam.projects.serviceAccounts.testIamPermissions allow reads
+iam.projects.serviceAccounts.undelete allow 
+iam.projects.serviceAccounts.update either changes a setting
+iam.roles.queryGrantableRoles allow 
+cloudresourcemanager.folders.capabilities.patch either changes a setting
+cloudresourcemanager.folders.settings.clear either 
+cloudresourcemanager.folders.settings.patch either changes a setting
+cloudresourcemanager.folders.create allow 
+cloudresourcemanager.folders.delete allow only an empty folder
+cloudresourcemanager.folders.getIamPolicy allow 
+cloudresourcemanager.folders.move hold:exposed 
+cloudresourcemanager.folders.patch either changes a setting
+cloudresourcemanager.folders.setIamPolicy cond 
+cloudresourcemanager.folders.testIamPermissions allow reads
+cloudresourcemanager.folders.undelete allow 
+cloudresourcemanager.liens.create allow 
+cloudresourcemanager.liens.delete hold:outage a protection against deleting the project goes
+cloudresourcemanager.locations.tagBindingCollections.patch either changes a setting
+cloudresourcemanager.organizations.settings.clear either 
+cloudresourcemanager.organizations.settings.patch either changes a setting
+cloudresourcemanager.organizations.getIamPolicy allow 
+cloudresourcemanager.organizations.setIamPolicy cond 
+cloudresourcemanager.organizations.testIamPermissions allow reads
+cloudresourcemanager.projects.settings.clear either 
+cloudresourcemanager.projects.settings.patch either changes a setting
+cloudresourcemanager.projects.create allow 
+cloudresourcemanager.projects.delete hold:recoverable 30 days to undelete, then gone with everything in it
+cloudresourcemanager.projects.getIamPolicy allow 
+cloudresourcemanager.projects.move hold:exposed 
+cloudresourcemanager.projects.patch either changes a setting
+cloudresourcemanager.projects.setIamPolicy cond 
+cloudresourcemanager.projects.testIamPermissions allow reads
+cloudresourcemanager.projects.undelete allow 
+cloudresourcemanager.tagBindings.create either 
+cloudresourcemanager.tagBindings.delete either tags may grant access
+cloudresourcemanager.tagKeys.create allow 
+cloudresourcemanager.tagKeys.delete allow 
+cloudresourcemanager.tagKeys.getIamPolicy allow 
+cloudresourcemanager.tagKeys.patch either changes a setting
+cloudresourcemanager.tagKeys.setIamPolicy cond 
+cloudresourcemanager.tagKeys.testIamPermissions allow reads
+cloudresourcemanager.tagValues.tagHolds.create allow 
+cloudresourcemanager.tagValues.tagHolds.delete allow 
+cloudresourcemanager.tagValues.create allow 
+cloudresourcemanager.tagValues.delete allow 
+cloudresourcemanager.tagValues.getIamPolicy allow 
+cloudresourcemanager.tagValues.patch either changes a setting
+cloudresourcemanager.tagValues.setIamPolicy cond 
+cloudresourcemanager.tagValues.testIamPermissions allow reads
+secretmanager.projects.locations.secrets.versions.destroy hold:gone 
+secretmanager.projects.locations.secrets.versions.disable hold:outage 
+secretmanager.projects.locations.secrets.versions.enable allow 
+secretmanager.projects.locations.secrets.addVersion either 
+secretmanager.projects.locations.secrets.create allow 
+secretmanager.projects.locations.secrets.delete hold:gone 
+secretmanager.projects.locations.secrets.patch either changes a setting
+secretmanager.projects.locations.secrets.setIamPolicy cond 
+secretmanager.projects.locations.secrets.testIamPermissions allow reads
+secretmanager.projects.secrets.versions.destroy hold:gone 
+secretmanager.projects.secrets.versions.disable hold:outage 
+secretmanager.projects.secrets.versions.enable allow 
+secretmanager.projects.secrets.addVersion either the new value becomes latest
+secretmanager.projects.secrets.create allow 
+secretmanager.projects.secrets.delete hold:gone every version goes
+secretmanager.projects.secrets.patch either changes a setting
+secretmanager.projects.secrets.setIamPolicy cond 
+secretmanager.projects.secrets.testIamPermissions allow reads
+pubsub.projects.schemas.commit either 
+pubsub.projects.schemas.create allow 
+pubsub.projects.schemas.delete hold:outage 
+pubsub.projects.schemas.deleteRevision allow 
+pubsub.projects.schemas.rollback either a short interruption
+pubsub.projects.schemas.setIamPolicy cond 
+pubsub.projects.schemas.testIamPermissions allow reads
+pubsub.projects.schemas.validate allow 
+pubsub.projects.schemas.validateMessage allow 
+pubsub.projects.snapshots.create allow 
+pubsub.projects.snapshots.delete hold:gone 
+pubsub.projects.snapshots.patch either changes a setting
+pubsub.projects.snapshots.setIamPolicy cond 
+pubsub.projects.snapshots.testIamPermissions allow reads
+pubsub.projects.subscriptions.acknowledge allow 
+pubsub.projects.subscriptions.create either a new subscriber receives every message
+pubsub.projects.subscriptions.delete hold:gone its unacknowledged messages go
+pubsub.projects.subscriptions.detach hold:outage 
+pubsub.projects.subscriptions.modifyAckDeadline allow 
+pubsub.projects.subscriptions.modifyPushConfig either may send messages to an endpoint
+pubsub.projects.subscriptions.patch either changes a setting
+pubsub.projects.subscriptions.pull allow 
+pubsub.projects.subscriptions.seek either seeking forward acknowledges messages
+pubsub.projects.subscriptions.setIamPolicy cond 
+pubsub.projects.subscriptions.testIamPermissions allow reads
+pubsub.projects.topics.create allow 
+pubsub.projects.topics.delete hold:outage 
+pubsub.projects.topics.patch either changes a setting
+pubsub.projects.topics.publish allow 
+pubsub.projects.topics.setIamPolicy cond 
+pubsub.projects.topics.testIamPermissions allow reads
+pubsub.projects.testMessageTransforms allow 
+pubsub.projects.validateMessageTransform allow 
+bigquery.datasets.delete hold:recoverable undelete within the time-travel window
+bigquery.datasets.insert allow 
+bigquery.datasets.patch cond 
+bigquery.datasets.undelete allow 
+bigquery.datasets.update cond 
+bigquery.jobs.cancel allow 
+bigquery.jobs.delete allow 
+bigquery.jobs.insert cond 
+bigquery.jobs.query cond 
+bigquery.models.delete hold:gone 
+bigquery.models.patch either changes a setting
+bigquery.routines.delete hold:outage 
+bigquery.routines.getIamPolicy allow 
+bigquery.routines.insert allow 
+bigquery.routines.setIamPolicy cond 
+bigquery.routines.testIamPermissions allow reads
+bigquery.routines.update either changes a setting
+bigquery.rowAccessPolicies.batchDelete hold:exposed 
+bigquery.rowAccessPolicies.delete hold:exposed its rows become visible to others
+bigquery.rowAccessPolicies.getIamPolicy allow 
+bigquery.rowAccessPolicies.insert allow 
+bigquery.rowAccessPolicies.testIamPermissions allow reads
+bigquery.rowAccessPolicies.update either changes a setting
+bigquery.tabledata.insertAll allow 
+bigquery.tables.delete hold:gone 
+bigquery.tables.getIamPolicy allow 
+bigquery.tables.insert allow 
+bigquery.tables.patch either 
+bigquery.tables.setIamPolicy cond 
+bigquery.tables.testIamPermissions allow reads
+bigquery.tables.update either may drop columns or set an expiry
+cloudfunctions.projects.locations.functions.abortFunctionUpgrade allow 
+cloudfunctions.projects.locations.functions.commitFunctionUpgrade allow 
+cloudfunctions.projects.locations.functions.commitFunctionUpgradeAsGen2 allow 
+cloudfunctions.projects.locations.functions.create deploy 
+cloudfunctions.projects.locations.functions.delete hold:outage 
+cloudfunctions.projects.locations.functions.detachFunction either 
+cloudfunctions.projects.locations.functions.generateDownloadUrl allow 
+cloudfunctions.projects.locations.functions.generateUploadUrl allow 
+cloudfunctions.projects.locations.functions.patch deploy 
+cloudfunctions.projects.locations.functions.redirectFunctionUpgradeTraffic allow 
+cloudfunctions.projects.locations.functions.rollbackFunctionUpgradeTraffic either a short interruption
+cloudfunctions.projects.locations.functions.setIamPolicy cond 
+cloudfunctions.projects.locations.functions.setupFunctionUpgradeConfig either changes a setting
+cloudfunctions.projects.locations.functions.testIamPermissions allow reads
+dns.changes.create cond 
+dns.managedZones.create allow 
+dns.managedZones.delete hold:outage 
+dns.managedZones.getIamPolicy allow 
+dns.managedZones.patch either changes a setting
+dns.managedZones.setIamPolicy cond 
+dns.managedZones.testIamPermissions allow reads
+dns.managedZones.update either changes a setting
+dns.policies.create allow 
+dns.policies.delete either 
+dns.policies.patch either changes a setting
+dns.policies.update either changes a setting
+dns.resourceRecordSets.create allow 
+dns.resourceRecordSets.delete hold:outage 
+dns.resourceRecordSets.patch either changes a setting
+dns.responsePolicies.create allow 
+dns.responsePolicies.delete either 
+dns.responsePolicies.patch either changes a setting
+dns.responsePolicies.update either changes a setting
+dns.responsePolicyRules.create allow 
+dns.responsePolicyRules.delete either 
+dns.responsePolicyRules.patch either changes a setting
+dns.responsePolicyRules.update either changes a setting
+cloudkms.folders.updateAutokeyConfig either changes a setting
+cloudkms.folders.updateKajPolicyConfig either changes a setting
+cloudkms.organizations.updateKajPolicyConfig either changes a setting
+cloudkms.projects.locations.ekmConfig.setIamPolicy cond 
+cloudkms.projects.locations.ekmConfig.testIamPermissions allow reads
+cloudkms.projects.locations.ekmConnections.create allow 
+cloudkms.projects.locations.ekmConnections.patch either changes a setting
+cloudkms.projects.locations.ekmConnections.setIamPolicy cond 
+cloudkms.projects.locations.ekmConnections.testIamPermissions allow reads
+cloudkms.projects.locations.keyHandles.create allow 
+cloudkms.projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.asymmetricDecrypt allow 
+cloudkms.projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.asymmetricSign allow 
+cloudkms.projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.create allow 
+cloudkms.projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.decapsulate allow 
+cloudkms.projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.delete allow only a destroyed or failed version
+cloudkms.projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.destroy hold:recoverable scheduled; 30 days by default, then what it encrypted is lost
+cloudkms.projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.import either 
+cloudkms.projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.macSign allow 
+cloudkms.projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.macVerify allow reads
+cloudkms.projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.patch cond 
+cloudkms.projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.rawDecrypt allow 
+cloudkms.projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.rawEncrypt allow 
+cloudkms.projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.restore allow 
+cloudkms.projects.locations.keyRings.cryptoKeys.create allow 
+cloudkms.projects.locations.keyRings.cryptoKeys.decrypt allow 
+cloudkms.projects.locations.keyRings.cryptoKeys.delete allow only with every version destroyed
+cloudkms.projects.locations.keyRings.cryptoKeys.encrypt allow 
+cloudkms.projects.locations.keyRings.cryptoKeys.patch either changes a setting
+cloudkms.projects.locations.keyRings.cryptoKeys.setIamPolicy cond 
+cloudkms.projects.locations.keyRings.cryptoKeys.testIamPermissions allow reads
+cloudkms.projects.locations.keyRings.cryptoKeys.updatePrimaryVersion either changes a setting
+cloudkms.projects.locations.keyRings.importJobs.create allow 
+cloudkms.projects.locations.keyRings.importJobs.setIamPolicy cond 
+cloudkms.projects.locations.keyRings.importJobs.testIamPermissions allow reads
+cloudkms.projects.locations.keyRings.create allow 
+cloudkms.projects.locations.keyRings.setIamPolicy cond 
+cloudkms.projects.locations.keyRings.testIamPermissions allow reads
+cloudkms.projects.locations.singleTenantHsmInstances.proposals.approve either 
+cloudkms.projects.locations.singleTenantHsmInstances.proposals.create allow 
+cloudkms.projects.locations.singleTenantHsmInstances.proposals.delete allow 
+cloudkms.projects.locations.singleTenantHsmInstances.proposals.execute either 
+cloudkms.projects.locations.singleTenantHsmInstances.create allow 
+cloudkms.projects.locations.generateRandomBytes allow reads
+cloudkms.projects.locations.updateEkmConfig either changes a setting
+cloudkms.projects.updateAutokeyConfig either changes a setting
+cloudkms.projects.updateKajPolicyConfig either changes a setting
+artifactregistry.projects.locations.operations.cancel allow 
+artifactregistry.projects.locations.repositories.aptArtifacts.import allow 
+artifactregistry.projects.locations.repositories.aptArtifacts.upload allow 
+artifactregistry.projects.locations.repositories.attachments.create allow 
+artifactregistry.projects.locations.repositories.attachments.delete allow 
+artifactregistry.projects.locations.repositories.files.delete hold:gone 
+artifactregistry.projects.locations.repositories.files.patch either changes a setting
+artifactregistry.projects.locations.repositories.files.upload allow 
+artifactregistry.projects.locations.repositories.genericArtifacts.upload allow 
+artifactregistry.projects.locations.repositories.goModules.upload allow 
+artifactregistry.projects.locations.repositories.googetArtifacts.import allow 
+artifactregistry.projects.locations.repositories.googetArtifacts.upload allow 
+artifactregistry.projects.locations.repositories.kfpArtifacts.upload allow 
+artifactregistry.projects.locations.repositories.packages.tags.create deploy 
+artifactregistry.projects.locations.repositories.packages.tags.delete either deploys that name the tag fail
+artifactregistry.projects.locations.repositories.packages.tags.patch deploy moves a tag
+artifactregistry.projects.locations.repositories.packages.versions.batchDelete hold:gone 
+artifactregistry.projects.locations.repositories.packages.versions.delete hold:gone 
+artifactregistry.projects.locations.repositories.packages.versions.patch either changes a setting
+artifactregistry.projects.locations.repositories.packages.delete hold:gone 
+artifactregistry.projects.locations.repositories.packages.patch either changes a setting
+artifactregistry.projects.locations.repositories.rules.create allow 
+artifactregistry.projects.locations.repositories.rules.delete either 
+artifactregistry.projects.locations.repositories.rules.patch either changes a setting
+artifactregistry.projects.locations.repositories.yumArtifacts.import allow 
+artifactregistry.projects.locations.repositories.yumArtifacts.upload allow 
+artifactregistry.projects.locations.repositories.checkPrewarmedArtifact allow reads
+artifactregistry.projects.locations.repositories.copyRepository allow 
+artifactregistry.projects.locations.repositories.create allow 
+artifactregistry.projects.locations.repositories.delete hold:gone 
+artifactregistry.projects.locations.repositories.exportArtifact either 
+artifactregistry.projects.locations.repositories.patch either changes a setting
+artifactregistry.projects.locations.repositories.prewarmArtifact allow 
+artifactregistry.projects.locations.repositories.reindex allow 
+artifactregistry.projects.locations.repositories.removePrewarmedArtifact allow 
+artifactregistry.projects.locations.repositories.setIamPolicy cond 
+artifactregistry.projects.locations.repositories.testIamPermissions allow reads
+artifactregistry.projects.locations.updateProjectConfig either changes a setting
+artifactregistry.projects.locations.updateVpcscConfig either changes a setting
+artifactregistry.projects.updateProjectSettings either changes a setting
+logging.billingAccounts.exclusions.create either stops keeping some logs
+logging.billingAccounts.exclusions.delete allow 
+logging.billingAccounts.exclusions.patch either changes a setting
+logging.billingAccounts.locations.buckets.links.create allow 
+logging.billingAccounts.locations.buckets.links.delete allow 
+logging.billingAccounts.locations.buckets.views.create allow 
+logging.billingAccounts.locations.buckets.views.delete allow 
+logging.billingAccounts.locations.buckets.views.patch either changes a setting
+logging.billingAccounts.locations.buckets.create allow 
+logging.billingAccounts.locations.buckets.createAsync allow 
+logging.billingAccounts.locations.buckets.delete hold:recoverable 7 days to undelete
+logging.billingAccounts.locations.buckets.move either changes a setting
+logging.billingAccounts.locations.buckets.patch either a shorter retention deletes older logs
+logging.billingAccounts.locations.buckets.undelete allow 
+logging.billingAccounts.locations.buckets.updateAsync either 
+logging.billingAccounts.locations.operations.cancel allow 
+logging.billingAccounts.locations.savedQueries.create allow 
+logging.billingAccounts.locations.savedQueries.delete allow 
+logging.billingAccounts.locations.savedQueries.patch either changes a setting
+logging.billingAccounts.logs.delete hold:gone 
+logging.billingAccounts.sinks.create hold:exposed routes logs to a destination
+logging.billingAccounts.sinks.delete hold:outage 
+logging.billingAccounts.sinks.patch hold:exposed 
+logging.billingAccounts.sinks.update hold:exposed 
+logging.data.query allow 
+logging.data.queryLocal allow 
+logging.data.querySync allow 
+logging.data.readQueryResults allow 
+logging.entries.copy allow 
+logging.entries.list allow 
+logging.entries.redact hold:gone 
+logging.entries.tail allow 
+logging.entries.write allow 
+logging.exclusions.create either stops keeping some logs
+logging.exclusions.delete allow 
+logging.exclusions.patch either changes a setting
+logging.folders.exclusions.create either stops keeping some logs
+logging.folders.exclusions.delete allow 
+logging.folders.exclusions.patch either changes a setting
+logging.folders.locations.buckets.links.create allow 
+logging.folders.locations.buckets.links.delete allow 
+logging.folders.locations.buckets.views.create allow 
+logging.folders.locations.buckets.views.delete allow 
+logging.folders.locations.buckets.views.getIamPolicy allow reads
+logging.folders.locations.buckets.views.patch either changes a setting
+logging.folders.locations.buckets.views.setIamPolicy cond 
+logging.folders.locations.buckets.views.testIamPermissions allow reads
+logging.folders.locations.buckets.create allow 
+logging.folders.locations.buckets.createAsync allow 
+logging.folders.locations.buckets.delete hold:recoverable 7 days to undelete
+logging.folders.locations.buckets.move either changes a setting
+logging.folders.locations.buckets.patch either a shorter retention deletes older logs
+logging.folders.locations.buckets.undelete allow 
+logging.folders.locations.buckets.updateAsync either 
+logging.folders.locations.logScopes.create allow 
+logging.folders.locations.logScopes.delete allow 
+logging.folders.locations.logScopes.patch either changes a setting
+logging.folders.locations.operations.cancel allow 
+logging.folders.locations.savedQueries.create allow 
+logging.folders.locations.savedQueries.delete allow 
+logging.folders.locations.savedQueries.patch either changes a setting
+logging.folders.logs.delete hold:gone 
+logging.folders.sinks.create hold:exposed routes logs to a destination
+logging.folders.sinks.delete hold:outage 
+logging.folders.sinks.patch hold:exposed 
+logging.folders.sinks.update hold:exposed 
+logging.folders.updateSettings either changes a setting
+logging.locations.buckets.links.create allow 
+logging.locations.buckets.links.delete allow 
+logging.locations.buckets.views.create allow 
+logging.locations.buckets.views.delete allow 
+logging.locations.buckets.views.getIamPolicy allow reads
+logging.locations.buckets.views.patch either changes a setting
+logging.locations.buckets.views.setIamPolicy cond 
+logging.locations.buckets.views.testIamPermissions allow reads
+logging.locations.buckets.create allow 
+logging.locations.buckets.createAsync allow 
+logging.locations.buckets.delete hold:recoverable 7 days to undelete
+logging.locations.buckets.move either changes a setting
+logging.locations.buckets.patch either a shorter retention deletes older logs
+logging.locations.buckets.undelete allow 
+logging.locations.buckets.updateAsync either 
+logging.locations.operations.cancel allow 
+logging.logs.delete hold:gone 
+logging.organizations.exclusions.create either stops keeping some logs
+logging.organizations.exclusions.delete allow 
+logging.organizations.exclusions.patch either changes a setting
+logging.organizations.locations.buckets.links.create allow 
+logging.organizations.locations.buckets.links.delete allow 
+logging.organizations.locations.buckets.views.create allow 
+logging.organizations.locations.buckets.views.delete allow 
+logging.organizations.locations.buckets.views.getIamPolicy allow reads
+logging.organizations.locations.buckets.views.patch either changes a setting
+logging.organizations.locations.buckets.views.setIamPolicy cond 
+logging.organizations.locations.buckets.views.testIamPermissions allow reads
+logging.organizations.locations.buckets.create allow 
+logging.organizations.locations.buckets.createAsync allow 
+logging.organizations.locations.buckets.delete hold:recoverable 7 days to undelete
+logging.organizations.locations.buckets.move either changes a setting
+logging.organizations.locations.buckets.patch either a shorter retention deletes older logs
+logging.organizations.locations.buckets.undelete allow 
+logging.organizations.locations.buckets.updateAsync either 
+logging.organizations.locations.logScopes.create allow 
+logging.organizations.locations.logScopes.delete allow 
+logging.organizations.locations.logScopes.patch either changes a setting
+logging.organizations.locations.operations.cancel allow 
+logging.organizations.locations.savedQueries.create allow 
+logging.organizations.locations.savedQueries.delete allow 
+logging.organizations.locations.savedQueries.patch either changes a setting
+logging.organizations.logs.delete hold:gone 
+logging.organizations.sinks.create hold:exposed routes logs to a destination
+logging.organizations.sinks.delete hold:outage 
+logging.organizations.sinks.patch hold:exposed 
+logging.organizations.sinks.update hold:exposed 
+logging.organizations.updateCmekSettings either changes a setting
+logging.organizations.updateSettings either changes a setting
+logging.projects.exclusions.create either stops keeping some logs
+logging.projects.exclusions.delete allow 
+logging.projects.exclusions.patch either changes a setting
+logging.projects.locations.buckets.links.create allow 
+logging.projects.locations.buckets.links.delete allow 
+logging.projects.locations.buckets.views.create allow 
+logging.projects.locations.buckets.views.delete allow 
+logging.projects.locations.buckets.views.getIamPolicy allow reads
+logging.projects.locations.buckets.views.patch either changes a setting
+logging.projects.locations.buckets.views.setIamPolicy cond 
+logging.projects.locations.buckets.views.testIamPermissions allow reads
+logging.projects.locations.buckets.create allow 
+logging.projects.locations.buckets.createAsync allow 
+logging.projects.locations.buckets.delete hold:recoverable 7 days to undelete
+logging.projects.locations.buckets.move either changes a setting
+logging.projects.locations.buckets.patch either a shorter retention deletes older logs
+logging.projects.locations.buckets.undelete allow 
+logging.projects.locations.buckets.updateAsync either 
+logging.projects.locations.logScopes.create allow 
+logging.projects.locations.logScopes.delete allow 
+logging.projects.locations.logScopes.patch either changes a setting
+logging.projects.locations.operations.cancel allow 
+logging.projects.locations.savedQueries.create allow 
+logging.projects.locations.savedQueries.delete allow 
+logging.projects.locations.savedQueries.patch either changes a setting
+logging.projects.logs.delete hold:gone 
+logging.projects.metrics.create allow 
+logging.projects.metrics.delete hold:outage alerts on it stop
+logging.projects.metrics.update either changes a setting
+logging.projects.sinks.create hold:exposed routes logs to a destination
+logging.projects.sinks.delete hold:outage 
+logging.projects.sinks.patch hold:exposed 
+logging.projects.sinks.update hold:exposed 
+logging.query.cancel allow 
+logging.query.validate allow reads
+logging.query.validateLocal allow reads
+logging.sinks.create hold:exposed routes logs to a destination
+logging.sinks.delete hold:outage 
+logging.sinks.update hold:exposed 
+logging.updateCmekSettings either changes a setting
+logging.updateSettings either changes a setting
+firestore.projects.databases.backupSchedules.create allow 
+firestore.projects.databases.backupSchedules.delete either 
+firestore.projects.databases.backupSchedules.patch either changes a setting
+firestore.projects.databases.collectionGroups.fields.patch either changes a setting
+firestore.projects.databases.collectionGroups.indexes.create allow 
+firestore.projects.databases.collectionGroups.indexes.delete hold:outage 
+firestore.projects.databases.documents.batchGet allow reads
+firestore.projects.databases.documents.batchWrite cond 
+firestore.projects.databases.documents.beginTransaction allow reads
+firestore.projects.databases.documents.commit cond 
+firestore.projects.databases.documents.createDocument allow 
+firestore.projects.databases.documents.delete hold:gone 
+firestore.projects.databases.documents.executePipeline allow reads
+firestore.projects.databases.documents.listCollectionIds allow reads
+firestore.projects.databases.documents.listen allow reads
+firestore.projects.databases.documents.partitionQuery allow reads
+firestore.projects.databases.documents.patch either 
+firestore.projects.databases.documents.rollback allow 
+firestore.projects.databases.documents.runAggregationQuery allow reads
+firestore.projects.databases.documents.runQuery allow reads
+firestore.projects.databases.documents.write either a stream
+firestore.projects.databases.operations.cancel allow 
+firestore.projects.databases.operations.delete allow 
+firestore.projects.databases.userCreds.create hold:exposed 
+firestore.projects.databases.userCreds.delete hold:outage 
+firestore.projects.databases.userCreds.disable hold:outage 
+firestore.projects.databases.userCreds.enable allow 
+firestore.projects.databases.userCreds.resetPassword hold:exposed 
+firestore.projects.databases.bulkDeleteDocuments hold:gone 
+firestore.projects.databases.clone allow 
+firestore.projects.databases.create allow 
+firestore.projects.databases.delete hold:gone unless delete protection is on
+firestore.projects.databases.exportDocuments either to a bucket
+firestore.projects.databases.importDocuments either overwrites
+firestore.projects.databases.patch cond 
+firestore.projects.databases.restore allow a new database
+firestore.projects.locations.backups.delete hold:gone 

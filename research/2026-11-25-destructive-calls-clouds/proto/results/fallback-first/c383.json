@@ -1,0 +1,356 @@
+{
+ "353": {
+  "fly": {
+   "allow_n": 23,
+   "tn": 23,
+   "hold_n": 13,
+   "tp": 6,
+   "fn": 7,
+   "either_n": 3,
+   "either_held": 0
+  },
+  "railway": {
+   "allow_n": 51,
+   "tn": 51,
+   "hold_n": 14,
+   "tp": 11,
+   "fn": 3,
+   "either_n": 4,
+   "either_held": 1,
+   "deploy_n": 1,
+   "deploy_held": 0
+  },
+  "supabase": {
+   "hold_n": 10,
+   "tp": 6,
+   "allow_n": 10,
+   "tn": 10,
+   "either_n": 3,
+   "either_held": 0,
+   "fn": 4
+  },
+  "vercel": {
+   "allow_n": 24,
+   "tn": 24,
+   "hold_n": 11,
+   "tp": 6,
+   "deploy_n": 2,
+   "deploy_held": 0,
+   "fn": 5,
+   "either_n": 2,
+   "either_held": 1
+  },
+  "cloudflare": {
+   "allow_n": 17,
+   "tn": 17,
+   "hold_n": 18,
+   "tp": 13,
+   "fn": 5,
+   "either_n": 2,
+   "either_held": 0
+  },
+  "total": {
+   "allow_n": 125,
+   "tn": 125,
+   "hold_n": 66,
+   "tp": 42,
+   "fn": 24,
+   "either_n": 14,
+   "either_held": 2,
+   "deploy_n": 3,
+   "deploy_held": 0
+  }
+ },
+ "383": {
+  "fly": {
+   "allow_n": 23,
+   "tn": 23,
+   "hold_n": 13,
+   "tp": 13,
+   "either_n": 3,
+   "either_held": 0
+  },
+  "railway": {
+   "allow_n": 51,
+   "tn": 51,
+   "hold_n": 14,
+   "tp": 14,
+   "either_n": 4,
+   "either_held": 1,
+   "deploy_n": 1,
+   "deploy_held": 0
+  },
+  "supabase": {
+   "hold_n": 10,
+   "tp": 10,
+   "allow_n": 10,
+   "tn": 10,
+   "either_n": 3,
+   "either_held": 0
+  },
+  "vercel": {
+   "allow_n": 24,
+   "tn": 24,
+   "hold_n": 11,
+   "tp": 11,
+   "deploy_n": 2,
+   "deploy_held": 0,
+   "either_n": 2,
+   "either_held": 1
+  },
+  "cloudflare": {
+   "allow_n": 17,
+   "tn": 17,
+   "hold_n": 18,
+   "tp": 18,
+   "either_n": 2,
+   "either_held": 0
+  },
+  "total": {
+   "allow_n": 125,
+   "tn": 125,
+   "hold_n": 66,
+   "tp": 66,
+   "either_n": 14,
+   "either_held": 2,
+   "deploy_n": 3,
+   "deploy_held": 0
+  }
+ },
+ "383blind": {
+  "fly": {
+   "allow_n": 23,
+   "tn": 23,
+   "hold_n": 13,
+   "tp": 13,
+   "either_n": 3,
+   "either_held": 0
+  },
+  "railway": {
+   "allow_n": 51,
+   "tn": 51,
+   "hold_n": 14,
+   "tp": 12,
+   "fn": 2,
+   "either_n": 4,
+   "either_held": 1,
+   "deploy_n": 1,
+   "deploy_held": 0
+  },
+  "supabase": {
+   "hold_n": 10,
+   "tp": 9,
+   "allow_n": 10,
+   "tn": 10,
+   "either_n": 3,
+   "either_held": 0,
+   "fn": 1
+  },
+  "vercel": {
+   "allow_n": 24,
+   "tn": 24,
+   "hold_n": 11,
+   "tp": 10,
+   "deploy_n": 2,
+   "deploy_held": 0,
+   "fn": 1,
+   "either_n": 2,
+   "either_held": 1
+  },
+  "cloudflare": {
+   "allow_n": 17,
+   "tn": 17,
+   "hold_n": 18,
+   "tp": 18,
+   "either_n": 2,
+   "either_held": 0
+  },
+  "total": {
+   "allow_n": 125,
+   "tn": 125,
+   "hold_n": 66,
+   "tp": 62,
+   "either_n": 14,
+   "either_held": 2,
+   "fn": 4,
+   "deploy_n": 3,
+   "deploy_held": 0
+  }
+ },
+ "fallback": {
+  "fly": {
+   "allow_n": 23,
+   "tn": 23,
+   "hold_n": 13,
+   "tp": 11,
+   "fn": 2,
+   "either_n": 3,
+   "either_held": 0
+  },
+  "railway": {
+   "allow_n": 51,
+   "tn": 51,
+   "hold_n": 14,
+   "tp": 11,
+   "fn": 3,
+   "either_n": 4,
+   "either_held": 1,
+   "deploy_n": 1,
+   "deploy_held": 0
+  },
+  "supabase": {
+   "hold_n": 10,
+   "tp": 5,
+   "allow_n": 10,
+   "tn": 10,
+   "either_n": 3,
+   "either_held": 0,
+   "fn": 5
+  },
+  "vercel": {
+   "allow_n": 24,
+   "tn": 24,
+   "hold_n": 11,
+   "tp": 11,
+   "deploy_n": 2,
+   "deploy_held": 1,
+   "either_n": 2,
+   "either_held": 2
+  },
+  "cloudflare": {
+   "allow_n": 17,
+   "tn": 17,
+   "hold_n": 18,
+   "tp": 13,
+   "fn": 5,
+   "either_n": 2,
+   "either_held": 0
+  },
+  "total": {
+   "allow_n": 125,
+   "tn": 125,
+   "hold_n": 66,
+   "tp": 51,
+   "fn": 15,
+   "either_n": 14,
+   "either_held": 3,
+   "deploy_n": 3,
+   "deploy_held": 1
+  }
+ },
+ "383+fb": {
+  "fly": {
+   "allow_n": 23,
+   "tn": 23,
+   "hold_n": 13,
+   "tp": 13,
+   "either_n": 3,
+   "either_held": 0
+  },
+  "railway": {
+   "allow_n": 51,
+   "tn": 51,
+   "hold_n": 14,
+   "tp": 14,
+   "either_n": 4,
+   "either_held": 1,
+   "deploy_n": 1,
+   "deploy_held": 0
+  },
+  "supabase": {
+   "hold_n": 10,
+   "tp": 10,
+   "allow_n": 10,
+   "tn": 10,
+   "either_n": 3,
+   "either_held": 0
+  },
+  "vercel": {
+   "allow_n": 24,
+   "tn": 24,
+   "hold_n": 11,
+   "tp": 11,
+   "deploy_n": 2,
+   "deploy_held": 1,
+   "either_n": 2,
+   "either_held": 2
+  },
+  "cloudflare": {
+   "allow_n": 17,
+   "tn": 17,
+   "hold_n": 18,
+   "tp": 18,
+   "either_n": 2,
+   "either_held": 0
+  },
+  "total": {
+   "allow_n": 125,
+   "tn": 125,
+   "hold_n": 66,
+   "tp": 66,
+   "either_n": 14,
+   "either_held": 3,
+   "deploy_n": 3,
+   "deploy_held": 1
+  }
+ },
+ "383blind+fb": {
+  "fly": {
+   "allow_n": 23,
+   "tn": 23,
+   "hold_n": 13,
+   "tp": 13,
+   "either_n": 3,
+   "either_held": 0
+  },
+  "railway": {
+   "allow_n": 51,
+   "tn": 51,
+   "hold_n": 14,
+   "tp": 12,
+   "fn": 2,
+   "either_n": 4,
+   "either_held": 1,
+   "deploy_n": 1,
+   "deploy_held": 0
+  },
+  "supabase": {
+   "hold_n": 10,
+   "tp": 9,
+   "allow_n": 10,
+   "tn": 10,
+   "either_n": 3,
+   "either_held": 0,
+   "fn": 1
+  },
+  "vercel": {
+   "allow_n": 24,
+   "tn": 24,
+   "hold_n": 11,
+   "tp": 11,
+   "deploy_n": 2,
+   "deploy_held": 1,
+   "either_n": 2,
+   "either_held": 2
+  },
+  "cloudflare": {
+   "allow_n": 17,
+   "tn": 17,
+   "hold_n": 18,
+   "tp": 18,
+   "either_n": 2,
+   "either_held": 0
+  },
+  "total": {
+   "allow_n": 125,
+   "tn": 125,
+   "hold_n": 66,
+   "tp": 63,
+   "either_n": 14,
+   "either_held": 3,
+   "fn": 3,
+   "deploy_n": 3,
+   "deploy_held": 1
+  }
+ }
+}

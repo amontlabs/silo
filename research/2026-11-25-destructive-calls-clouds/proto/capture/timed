@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# As #383's timed. timed <name> [VAR=v ...] -- cmd...: runs cmd through clienv (60 s limit), saves output, exit code
+# and seconds to outputs/<name>.txt, and marks the capture log so requests can be tied to the command.
+H="$(cd "$(dirname "$0")" && pwd)"
+name=$1; shift
+cli=${CLI:?set CLI}
+echo "{\"event\": \"command_start\", \"name\": \"$name\", \"t\": $(date +%s.%N)}" >> "$H/captures/$cli.jsonl"
+s=$(date +%s.%N)
+out=$(timeout 60 "$H/clienv" "$@" 2>&1 </dev/null); rc=$?
+e=$(date +%s.%N)
+echo "{\"event\": \"command_end\", \"name\": \"$name\", \"t\": $(date +%s.%N)}" >> "$H/captures/$cli.jsonl"
+{ echo "\$ ${*}"; echo "$out"; echo "--- exit=$rc seconds=$(echo "$e - $s" | bc)"; } > "$H/outputs/$name.txt"
+tail -n 15 "$H/outputs/$name.txt"
