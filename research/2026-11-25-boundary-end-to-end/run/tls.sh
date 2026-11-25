@@ -15,4 +15,5 @@ printf "subjectAltName=%s\nextendedKeyUsage=serverAuth\nbasicConstraints=CA:fals
 openssl x509 -req -in up-leaf.csr -CA up-ca.crt -CAkey up-ca.key -CAcreateserial -out up-leaf.crt -days 30 -extfile ext.cnf 2>/dev/null
 cat up-leaf.crt up-ca.crt > up-chain.crt
 cat /etc/ssl/certs/ca-certificates.crt silo-ca.crt > store-with-silo.crt
+cat silo-ca.crt up-ca.crt > silo-and-up.crt   # for the bench: a host passed through shows its own
 rm -f *.csr ext.cnf *.srl

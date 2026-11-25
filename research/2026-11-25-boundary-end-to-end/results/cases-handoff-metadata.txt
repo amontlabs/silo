@@ -23,7 +23,7 @@ PASS  c2 azure with the metadata placeholder: 200, host saw ['real:azure@managem
 PASS  c2 a placeholder to another allowed host: 400, host saw []: '{"error":{"message":"Silo: this request carries the placeholder of anthropic, which may not go to storage.goog'
 PASS  c2 a real key pasted in the computer: 400, host saw []: '{"type":"error","error":{"type":"invalid_request_error","message":"Silo: this computer was not given'
 PASS  c2 another computer's placeholder: 400, host saw []
-PASS  c2 a host not allowed: 000 rc=6 in 0.02s: 'curl: (6) Could not resolve host: evil.example'
+PASS  c2 a host not allowed: 000 rc=6 in 0.01s: 'curl: (6) Could not resolve host: evil.example'
 PASS  c2 github.com passed through, host's own certificate: rc=0 '{"ok": true, "host": "github.com"}' ''
 PASS  c2 ssh to github.com:22: b'SSH-2.0-standin\r\necho:SSH-2.0-client\r\n' 
 PASS  c2 TLS names another host than the connection: rc=1 ssl.SSLError: [SSL: TLSV1_UNRECOGNIZED_NAME] tlsv1 unrecognized name (_ssl.c:1035)
@@ -35,7 +35,7 @@ PASS  c2 lookups: an unknown name gets no answer: x7f3a.exfil.example no answer;
 PASS  c2 an address no lookup gave, with an allowed name in TLS: b'HTTP/1.1 200 OK' 
 PASS  c2 a private address on the local network: got b''
 PASS  broken PROXY header on the hand-off socket: closed with "ConnectionResetError(104, 'Connection reset by peer')"
-PASS  c1 a connection that sends nothing: closed after 10.1s: b'HTTP/1.1 403 Forbidden'
-certificates made: 5, ms each: [0.6, 0.67, 0.67, 0.82, 1.06]
+PASS  c1 a connection that sends nothing: closed after 10.3s: b'HTTP/1.1 403 Forbidden'
+certificates made: 5, ms each: [0.45, 0.57, 0.58, 0.59, 0.93]
 PASS  no real value in the record, the trace or any computer's files: []
 39/39 cases pass

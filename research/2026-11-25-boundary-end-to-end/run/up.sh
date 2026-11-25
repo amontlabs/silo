@@ -26,7 +26,7 @@ sleep 0.5
 ip netns add c1-$$ ; echo "c1-$$" > $OUT/ns1
 mkdir -p /etc/netns/c1-$$; printf '127.0.0.1 localhost\n' > /etc/netns/c1-$$/hosts; : > /etc/netns/c1-$$/resolv.conf
 ip netns exec c1-$$ ip link set lo up
-SOCK=$OUT/c1.connect.sock READY=$OUT/relay.ready bg ip netns exec c1-$$ python3 -I $R/relay.py
+NODELAY=${NODELAY:-1} SOCK=$OUT/c1.connect.sock READY=$OUT/relay.ready bg ip netns exec c1-$$ python3 -I $R/relay.py
 # c2: gvproxy with the hand-off; its lookups go to the boundary.
 GVA=${GVPROXY_ARGS:--no-gateway-api -no-host-loopback -outbound-deny private,host -outbound-handoff $OUT/c2.handoff.sock -dns-upstream 127.0.0.1:5302}
 bg $BIN/gvproxy-silo -listen unix://$OUT/net.sock -mtu 1500 $GVA > $OUT/gvproxy.log 2>&1

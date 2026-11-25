@@ -34,6 +34,6 @@ PASS  c2 an address no lookup gave, with an allowed name in TLS: b'HTTP/1.1 200 
 PASS  c2 a private address on the local network: no [Errno 111] Connection refused
 PASS  broken PROXY header on the hand-off socket: closed with "ConnectionResetError(104, 'Connection reset by peer')"
 PASS  c1 a connection that sends nothing: closed after 10.3s: b'HTTP/1.1 403 Forbidden'
-certificates made: 5, ms each: [0.51, 0.55, 0.61, 0.62, 0.87]
+certificates made: 5, ms each: [0.46, 0.5, 0.54, 0.57, 0.93]
 PASS  no real value in the record, the trace or any computer's files: []
 35/37 cases pass

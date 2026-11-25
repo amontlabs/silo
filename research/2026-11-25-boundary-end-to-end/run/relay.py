@@ -1,4 +1,6 @@
-"""Copied unchanged from #378 (research/2026-11-25-techniques-from-two-tools/closed-network/).
+"""Copied from #378 (research/2026-11-25-techniques-from-two-tools/closed-network/), with one change:
+the relay sets TCP_NODELAY on the program's connection (NODELAY=0 leaves it off, as #378 had it).
+Without it, a reply written in two pieces waits 40 ms on a kept-alive connection (results/).
 
 The computer's side of a closed network: 127.0.0.1:3128 relayed to the Mac's proxy.
 
@@ -38,6 +40,8 @@ def pump(a, b):
 
 
 def handle(c):
+    if os.environ.get("NODELAY", "1") != "0":
+        c.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     u = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         u.connect(SOCK)

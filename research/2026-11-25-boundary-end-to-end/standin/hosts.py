@@ -63,6 +63,13 @@ class H(http.server.BaseHTTPRequestHandler):
             return self.send(200, {"ok": True, "host": host})
         if not c.startswith("real:"):
             return self.send(401, {"error": {"type": "authentication_error", "message": f"invalid credential ({c})"}})
+        if self.path.startswith("/big"):
+            size = int(self.path.split("bytes=")[1]) if "bytes=" in self.path else 1 << 20
+            self.send_response(200); self.send_header("content-length", str(size)); self.end_headers()
+            chunk = b"x" * 65536; left = size
+            while left > 0:
+                self.wfile.write(chunk[:min(left, 65536)]); left -= 65536
+            return
         if host in MODEL_HOSTS:
             return self.forward(host, body)
         if host == "storage.googleapis.com":
@@ -97,6 +104,10 @@ class H(http.server.BaseHTTPRequestHandler):
 
 class S(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True; allow_reuse_address = True; request_queue_size = 512
+    def get_request(self):
+        # Without this, a head and a body written apart wait 40 ms on a kept-alive connection
+        # (Nagle's algorithm against a delayed acknowledgement), which would hide what is measured.
+        s, a = self.socket.accept(); s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1); return s, a
 
 def ssh_banner(port):
     l = socket.socket(); l.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); l.bind(("127.0.0.1", port)); l.listen(64)

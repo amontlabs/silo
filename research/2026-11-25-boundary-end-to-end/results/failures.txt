@@ -1,0 +1,26 @@
+c1 baseline: ('200', '', 0.03885793685913086)
+c2 baseline: ('200', '', 0.0534818172454834)
+c1 budget of $0.002, six calls: ['200', '{"type":"error","error":{"type":"invalid_request_error","message":"Silo: this computer\'s budget of $0.00 is reached ($0.00 spent). Raise it in the Sil', '{"type":"error","error":{"type":"invalid_request_error","message":"Silo: this computer\'s budget of $0.00 is reached ($0.00 spent). Raise it in the Sil', '{"type":"error","error":{"type":"invalid_request_error","message":"Silo: this computer\'s budget of $0.00 is reached ($0.00 spent). Raise it in the Sil', '{"type":"error","error":{"type":"invalid_request_error","message":"Silo: this computer\'s budget of $0.00 is reached ($0.00 spent). Raise it in the Sil', '{"type":"error","error":{"type":"invalid_request_error","message":"Silo: this computer\'s budget of $0.00 is reached ($0.00 spent). Raise it in the Sil']
+recorder stopped: 30 requests from c1: 20 passed, 10 did not; first that did not: ('000', 'curl: (56) CONNECT tunnel failed, response 403', 6.013244152069092); slowest 6.0s
+recorder stopped: c1's source: {'connected': True, 'acked': 23, 'last': 84, 'decisions_waiting': 40, 'observations_waiting': 20, 'dropped': 1, 'decisions_waited': 20, 'decisions_refused': 19}
+a download allowed before the stall, during it: {'out': '200 200000000', 'err': '', 'dt': 9.474008798599243}
+recorder back: c1 request: ('200', '', 0.03626370429992676)
+recorder back: c1's source: {'connected': True, 'acked': 84, 'last': 84, 'decisions_waiting': 0, 'observations_waiting': 0, 'dropped': 1, 'decisions_waited': 20, 'decisions_refused': 20}
+recorder killed: 5 requests from c2: ['200', '200', '200', '200', '200']
+recorder started again: c2 request: ('200', '', 0.033153533935546875)
+recorder started again: c2's source: {'connected': True, 'acked': 24, 'last': 24, 'decisions_waiting': 0, 'observations_waiting': 0, 'dropped': 0, 'decisions_waited': 0, 'decisions_refused': 0}
+recorder killed: 30 lookups from c2: {'connected': True, 'acked': 24, 'last': 24, 'decisions_waiting': 0, 'observations_waiting': 0, 'dropped': 0, 'decisions_waited': 0, 'decisions_refused': 0}
+recorder started again: c2's source: {'connected': True, 'acked': 88, 'last': 88, 'decisions_waiting': 0, 'observations_waiting': 0, 'dropped': 40, 'decisions_waited': 0, 'decisions_refused': 0}
+c1 host not answering (stopped): ('000', 'curl: (28) Operation timed out after 8002 milliseconds with 0 bytes received', 8.015713214874268)
+c2 host not answering (stopped): ('000', 'curl: (28) Operation timed out after 8002 milliseconds with 0 bytes received', 8.015920877456665)
+c1 host gone (connection refused): ('400', '', 0.03478813171386719)
+c2 host gone (connection refused): ('400', '', 0.04213523864746094)
+c1 boundary down: ('000', 'curl: (56) Recv failure: Connection reset by peer', 0.024931669235229492)
+c2 boundary down: ('000', 'curl: (6) Could not resolve host: storage.googleapis.com', 0.014636039733886719)
+c2 boundary down: a name lookup: rc=2 '' in 0.0s
+c1 boundary back (host still gone): ('400', '', 0.04312586784362793)
+c2 boundary back (host still gone): ('400', '', 0.03868556022644043)
+c1 relay down: ('000', "curl: (7) Failed to connect to 127.0.0.1 port 3128 after 0 ms: Couldn't connect to server", 0.011834383010864258)
+c2 gvproxy down: ('000', 'curl: (28) Resolving timed out after 8000 milliseconds', 8.016559839248657)
+record c1: 92 lines checked in 1 segments, 0 blob references · the chain holds; gaps []; {'connection/opened': 32, 'connection/secret-used': 22, 'connection/closed': 31, 'model-call/admitted': 1, 'model-call/counted': 1, 'model-call/refused': 5}
+record c2: 56 lines checked in 1 segments, 0 blob references · the chain holds; gaps [[29, 68]]; {'connection/name-looked-up': 30, 'connection/opened': 9, 'connection/secret-used': 7, 'connection/closed': 9, 'gap': 1}
