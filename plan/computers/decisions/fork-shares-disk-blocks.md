@@ -17,3 +17,24 @@ The options:
 
 Recommended: share the disk. Forks are made to try something and then dropped, and 60 GB each would
 rule them out on most Macs.
+
+## Which file system a Linux host should use (24 November 2026)
+
+An agent's part, 24 November 2026. From measurements in a Linux cloud container, with QEMU's
+tools for qcow2; the scripts and tables are in `research/2026-11-24-linux-host/`. It does not
+change the answer, which already names Btrfs, XFS and qcow2 on ext4.
+
+| On the host | A checkpoint of a disk in half a million pieces | Every write, all the time | Note |
+|---|---|---|---|
+| XFS, reflink | that computer's writes wait about 11 s | fastest (about 8,200 small writes per second) | the wait stays inside the computer copied |
+| Btrfs, reflink | 3 to 5 s | a third of XFS's | other computers lose a third of their writes during the copy |
+| ext4, qcow2 layer | under 1 s, no copy | through the layers | the computer must be stopped: libkrun cannot switch a running disk to a new layer |
+
+- With the engine's copy-before-write (the engine thread, 24 November 2026), the wait on XFS falls
+  under 0.3 s, and XFS's everyday speed decides. Without it, Btrfs's shorter wait does.
+- qcow2 has no fragmentation of the base and no copy, but every few checkpoints a layer has to be
+  merged into the one below it (4.4 s for 64 MiB of changes) and the chain rewritten from time to
+  time (38 s for 8 GiB), or reads slow down (#347: twice as slow through 50 layers).
+- Not measured, because the container had no device-mapper and no ZFS: dm-thin and LVM thin
+  volumes, and ZFS volumes. All three snapshot a block device rather than a file, at a fixed cost
+  that does not grow with fragmentation, and would be the next to try on a real server.

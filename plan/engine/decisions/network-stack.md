@@ -48,3 +48,27 @@ the host, and refuses to dial loopback, private, link-local and the host's own a
 A suggestion for the answer: no address inside a computer reaches an API or a service of the stack,
 except name lookups. That is the property `nothing-inside-reaches-the-stack` that #358 proposes, and
 the hostile test above checks it.
+
+## What a user-space stack costs, measured on Linux (24 November 2026)
+
+An agent's part, 24 November 2026. No virtual machine: a network namespace stood for the computer
+and another for the internet, and a small program played the virtual machine monitor, handing the
+computer's frames to the stack over a unix socket as libkrun does. Three runs each, the median.
+The scripts are in `research/2026-11-24-linux-host/`.
+
+| Path | Computer to internet | Internet to computer | Round trip | New connections per second |
+|---|---|---|---|---|
+| The kernel, with an nftables allow-list | 14.7 Gbit/s | 14.3 Gbit/s | 36 µs | about 5,000 |
+| passt | 1.3 to 3.0 Gbit/s | 13.3 Gbit/s | 102 µs | about 2,800 |
+| gvproxy, MTU 1500 | 1.4 Gbit/s | 0.96 Gbit/s | 187 µs | about 1,580 |
+| gvproxy, MTU 65520 | 4.1 Gbit/s | 3.0 Gbit/s | 193 µs | about 1,490 |
+
+- The kernel path cannot be Silo's boundary: nftables sees addresses and ports, not a request or a
+  secret. It shows what a user-space stack costs against a plain machine: 3 to 15 times the
+  throughput and 3 to 5 times the round trip.
+- An `npm install` or an image download rarely passes 1 Gbit/s, so it is not slowed. Two computers
+  that exchange gigabytes through the boundary are.
+- gvproxy at MTU 1500, the usual setting, was under 1 Gbit/s into the computer, and three times
+  faster at MTU 65520. Silo's stack should take large frames from the start.
+- These are a floor for Silo's stack, which also reads HTTP. Measured on a Linux container, not on
+  a Mac.

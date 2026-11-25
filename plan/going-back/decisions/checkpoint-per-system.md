@@ -72,3 +72,28 @@ longer as main ages. The proposal: a checkpoint is taken from Silo's own record 
 written where Silo sees them, and by a clone where it does not; the "to find out" becomes the three
 Mac tests in the research's README (a clone of a file sharing blocks with the live image, an NBD
 disk under a macOS computer, and what a write refused for lack of space does to the computer).
+
+## On a Linux host: neighbours, restore and reads afterwards (24 November 2026)
+
+An agent's part, 24 November 2026. Measured in a Linux cloud container, XFS and Btrfs on loop
+devices, an 8 GiB disk image in about half a million pieces as #347 made it. The scripts and the
+full tables are in `research/2026-11-24-linux-host/`. The engine thread measures the wait inside
+the computer being copied; this is what happens around it.
+
+- **Other computers do not wait.** While one computer's disk was copied, another computer writing
+  on the same file system kept four fifths of its writes per second on XFS and two thirds on
+  Btrfs, and its slowest write was no slower than outside the copy. Holding the copy back with the
+  kernel's I/O throttle did not help.
+- **A restore costs what a checkpoint costs.** Copying the checkpoint back took 10.6 to 11.7 s on
+  XFS and 4.5 s on Btrfs. With the disk in a Btrfs subvolume of its own, restored from a snapshot
+  of the checkpoint's snapshot, it took 0.8 s. The computer is stopped then, so the time is the user's wait, not a
+  stall.
+- **A restored disk reads slowly.** Read in order, as a boot reads, the restored disk gave 297 MB/s
+  on XFS against 2,482 MB/s for an image written in one go, and 173 to 257 against 1,256 to
+  1,360 MB/s on Btrfs.
+  Every checkpoint adds pieces, and nothing joins them again. A host that keeps checkpoints for
+  days needs to rewrite a stopped computer's disk in one piece from time to time, at the cost of
+  the space it shared.
+- **Pausing for a consistent copy.** This entry leaves open whether a copy needs the computer
+  paused. libkrun's 2.0 interface (its main branch, read on 24 November 2026) has
+  `krun_vmm_handle_pause` and `krun_vmm_handle_resume`, so a pause needs no patch on either host.

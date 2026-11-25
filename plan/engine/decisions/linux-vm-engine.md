@@ -318,3 +318,24 @@ whoever builds it.
   parameter set, and check it when it is fetched. Kernels, base images and libkrun builds that make
   a computer are checked by hash before use.
   ([source](https://github.com/evmts/guillotine-mini/blob/edafd394bc0aa48a9691b037da36b6f36525121a/build.zig.md?plain=1#L494))
+
+## On a Linux host (24 November 2026)
+
+An agent's part, 24 November 2026, from each project's documentation; the full table is in
+`research/2026-11-24-linux-host/README.md`. It does not change the answer.
+
+- **What libkrun keeps on Linux.** One engine for both systems (`macos-and-linux-consistent`), and
+  the computer's frames handed to Silo's network stack over a unix socket, the same route as on
+  the Mac. libkrun's 2.0 interface on its main branch can also pause and resume a computer and
+  check for nested virtualization. Firecracker takes a tap device only, which puts the kernel's network between the
+  computer and Silo's stack, and reads raw disks only, which rules out qcow2 on ext4.
+- **What it costs there.** A fork of a running computer, which matters most on a server (the case
+  of `linux-server-host`). Cloud Hypervisor has memory snapshots today, reads qcow2, and can hand
+  frames to a user-space stack through vhost-user, so Silo's boundary could stay in front. It
+  costs a second engine to build on and keep alike.
+- **A case to bring back to polarzero.** If libkrun's memory snapshots
+  ([#762](https://github.com/libkrun/libkrun/pull/762)) have not landed when `linux-server-host`
+  is built, the choice is between cold forks on servers and Cloud Hypervisor on Linux hosts only.
+- **Measurement 1 above needs a machine with `/dev/kvm`.** The Linux cloud containers agents work
+  in have none (the one of 24 November 2026 had KVM's modules in its kernel, without the device),
+  so it needs a rented dedicated server or a cloud instance with nested virtualization.
