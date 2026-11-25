@@ -28,3 +28,23 @@ second is marked Notes.
 
 The same table puts model calls, secrets and budgets at the boundary on both systems. Those lines
 have their homes in the parts `boundary` and `traffic`.
+
+## gvproxy sealed, measured (24 November 2026)
+
+An agent's part. PR #358 found that, with gvproxy's defaults, code inside a computer opens a port on
+every interface of the Mac through gvproxy's API, and reaches the Mac's own loopback at
+`192.168.127.254`. A 64-line patch, `-sealed`, removes the API from the gateway, maps no address to
+the host, and refuses to dial loopback, private, link-local and the host's own addresses. It is in
+`research/2026-11-24-red-team-fixes/network/`.
+
+| From inside a computer | Stock | API behind a token | Sealed |
+|---|---|---|---|
+| The Mac's loopback through `192.168.127.254` | 6 ports | 6 ports | none |
+| A port opened on the Mac's every interface | yes | no | no |
+| A service on the Mac's LAN address | reached | reached | not reached |
+| A host on the internet | reached | reached | reached |
+| Silo opens a port from the Mac, on its own socket | works | works | works |
+
+A suggestion for the answer: no address inside a computer reaches an API or a service of the stack,
+except name lookups. That is the property `nothing-inside-reaches-the-stack` that #358 proposes, and
+the hostile test above checks it.

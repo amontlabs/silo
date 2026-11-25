@@ -12,12 +12,16 @@ The options:
   request and keeps it nowhere. The API key is there already, because a rule of yours gives that
   secret to the computer. Silo says plainly that a subscription works in every computer and is not
   supported as fully as an API key. It costs a sign-in in each fresh computer where you use a
-  subscription.
+  subscription. It also costs the login itself: any code in the computer can copy the login file and
+  use it from anywhere, and a fork that keeps the login signs both computers out once tokens rotate
+  (measured with fake providers on 24 November 2026, below).
 - Silo keeps your logins and puts them in each computer. You sign in once on your Mac, and Silo adds
   your login to the requests of every computer, as it does for an API key. It costs the vendor's
   terms: Anthropic's, as read on 18 November 2026, forbid a developer to collect, store or
   intermediate the login of a Claude subscription. One large product does it anyway, with no public
-  agreement with Anthropic. Several computers that hold one login can also sign each other out.
+  agreement with Anthropic. A working prototype of this, a login vault, was measured on 24 November
+  2026 (below): a copied login is useless, and computers that share a login no longer sign each
+  other out.
 - Promise nothing yet. Silo says nothing about subscriptions until logins are designed as a whole.
   It costs anyone with a subscription knowing whether theirs works.
 
@@ -93,3 +97,31 @@ polarzero called the sign-in whose page opens on the Mac "super important". It i
   lean on it.
 - Anthropic's terms forbid a developer to "collect, store, or intermediate" a subscription's
   sign-in: `anthropic-reads-intermediate`.
+
+## A login vault, built and measured (24 November 2026)
+
+An agent's part. The prototype and its numbers are in `research/2026-11-24-red-team-fixes/logins/`
+(PR #358 ranks the stolen login seventh of 21 attacks).
+
+The vault sits in the boundary, which already ends the encrypted connection to the providers. The
+program signs in the vendor's own way. The vault keeps the real tokens from the provider's reply and
+gives the program placeholders of the same shape. It swaps the real token into each request,
+answers refreshes itself, and refuses a placeholder used from another computer. A login Silo did not
+see being made passes unchanged.
+
+Against fake Anthropic and OpenAI servers whose refresh tokens rotate and revoke the login on reuse,
+with the real Claude Code 2.1.331 and Codex 0.172.0 in two computers:
+
+- With the vault, both programs signed in, worked and refreshed unmodified. A login file copied out
+  of the computer got 401 and `invalid_grant`. A fork shared the login for three rounds of expiry
+  with no sign-out. No real token was in any file of either computer.
+- Passed through, as this entry recommends, the copied file worked from outside for use and refresh,
+  and signed you out. A fork that kept the login signed both computers out at the first refresh
+  after the other's.
+
+Whether Anthropic and OpenAI revoke a login when a refresh token is reused was modelled, not
+checked. The vault does what Anthropic's terms, as read, forbid for a subscription: it holds and
+intermediates the login. For an API key, and for a provider whose terms allow it, the same code
+applies. A partial guard fits the recommended option: the boundary sees the login's value in the
+requests it reads, so it can refuse a request to any other host it reads that carries that value.
+It cannot see the value leave through a host it does not read.

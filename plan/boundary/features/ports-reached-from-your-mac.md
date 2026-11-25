@@ -33,3 +33,25 @@ I believe is already planned."
 - A computer that reaches a port of your Mac is the other direction. It is not in this entry, and
   `nothing-shared-from-your-device` is in force.
 - `sign-in-from-a-computer` needs this entry.
+
+## Previews measured against a hostile page (24 November 2026)
+
+An agent's part. The prototype and its numbers are in
+`research/2026-11-24-red-team-fixes/preview/`. A page served on the computer's port 3000 tried 26
+ways to send the computer's secret to an attacker, in Chromium, through seven set-ups of Silo's
+forwarder. The app's own fetches, WebSocket, storage and cookie worked in all seven.
+
+| Set-up | Ways that reached the attacker |
+|---|---|
+| The port at localhost, as this entry says today | 26, the Mac's localhost cookie and a service on the Mac among them |
+| A strict content policy added by the forwarder | 10: navigations, speculation rules, popups, WebRTC |
+| An origin of its own per port, such as `3000.c1.silo.localhost` | 10, with the Mac's cookies out of reach |
+| A Silo page that holds the app in a sandboxed frame | 3, all WebRTC |
+| That page in a browser Silo starts, whose requests go through the computer's rules | 0; what the page tried was denied and recorded |
+
+The case for a change: "at localhost" puts a page the agent wrote next to everything your browser
+holds for localhost, and lets it leave by 26 ways the computer's rules never see. A suggestion for
+the entry: each port gets its own name under `.localhost`, which also gives two forks on port 3000
+two addresses, and opens inside a page of Silo's. Whether that page runs in your browser (3 ways left)
+or in a browser Silo starts (none left, but not your own browser) is the choice. A WKWebView's
+control of WebRTC was not checked on a Mac.

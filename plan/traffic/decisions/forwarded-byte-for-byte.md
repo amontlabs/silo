@@ -24,3 +24,21 @@ without Silo, and nothing of your login stays behind.
 "The changes listed above" are those of `what-silo-changes-in-traffic`.
 
 That Silo's own boundary forwards byte for byte is still to find out: `reading-each-agent-program`.
+
+## A strict reader, measured (24 November 2026)
+
+An agent's part. The case for a change: this answer lets a message the boundary cannot read pass
+unchanged. A request with two `Content-Length` headers is one request to the boundary and two to a
+lenient host, and the second one, with a `web_fetch` tool, is never read (PR #358, A3).
+
+A strict reader for the boundary, in Zig, is in `research/2026-11-24-red-team-fixes/strict/`. It
+reads a request whole or refuses it. Of 50 test requests, it read the 4 ordinary ones and refused
+the 46 hostile ones. Node, Go's `net/http`, Python's h11 and a lenient parser read 33 of the hostile
+ones two ways, or found a hidden request in them. Every JSON parser tried took the last of two
+duplicate keys, and Go's also matches keys whatever their case. All 49 real requests captured from
+Claude Code and Codex were read, none refused.
+
+A suggestion for the answer: on a host the boundary reads, a request that is not strictly
+well-formed, or whose body the boundary cannot read whole, is refused, and the record says why.
+Forwarding byte for byte stays the rule for every request that is read. That is the property
+`boundary-reads-whole` that #358 proposes.
