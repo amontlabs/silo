@@ -1,0 +1,68 @@
+# E1: milliseconds, 30 logins each. kex = the boundary hands over the server's KEX_ECDH_REPLY -> first encrypted client packet. sign = the agent hands over the signature -> next client packet. Real host 20 ms round trip from the boundary. 4 CPUs; 'loaded' runs stress-ng with 8 CPU workers.
+local openssh        idle   logins=30/30  kex  n=30 min=  19.00 p50=  19.69 p95=  23.93 max=  26.96
+                                           sign n=30 min=   0.12 p50=   0.17 p95=   0.30 max=   0.67
+local openssh-x25519 idle   logins=30/30  kex  n=30 min=   2.34 p50=   2.59 p95=   4.36 max=   4.65
+                                           sign n=30 min=   0.11 p50=   0.16 p95=   0.29 max=   0.30
+local paramiko       idle   logins=30/30  kex  n=30 min=  40.85 p50=  42.61 p95=  44.62 max=  44.67
+                                           sign n=30 min=   0.13 p50=   0.16 p95=   0.27 max=   0.29
+local asyncssh       idle   logins=30/30  kex  n=30 min=   0.94 p50=   1.34 p95=   1.97 max=   2.17
+                                           sign n=30 min=   0.17 p50=   0.22 p95=   0.72 max=   2.52
+local go             idle   logins=30/30  kex  n=30 min=   0.46 p50=   0.56 p95=   0.94 max=   1.50
+                                           sign n=30 min=   0.12 p50=   0.19 p95=   0.30 max=   0.32
+local openssh        loaded logins=30/30  kex  n=30 min=  28.83 p50=  46.94 p95=  59.52 max=  63.33
+                                           sign n=30 min=   0.08 p50=   0.11 p95=   6.58 max=   7.88
+local openssh-x25519 loaded logins=30/30  kex  n=30 min=   0.12 p50=   2.55 p95=  10.57 max=  11.40
+                                           sign n=30 min=   0.08 p50=   0.10 p95=   0.26 max=   3.70
+local paramiko       loaded logins=30/30  kex  n=30 min=  40.64 p50=  48.51 p95=  52.44 max=  56.16
+                                           sign n=30 min=   0.10 p50=   0.15 p95=   3.69 max=   7.36
+local asyncssh       loaded logins=30/30  kex  n=30 min=   0.97 p50=   1.88 p95=   8.86 max=   9.63
+                                           sign n=30 min=   0.14 p50=   0.20 p95=   8.82 max=   9.23
+local go             loaded logins=30/30  kex  n=30 min=   0.49 p50=   0.97 p95=   7.95 max=   8.74
+                                           sign n=30 min=   0.09 p50=   0.17 p95=   9.38 max=  10.74
+outsider set rtt=  0.0 ms        logins=30/30  kex  n=30 min=  19.26 p50=  19.75 p95=  23.54 max=  25.11
+                                           sign n=30 min=   0.22 p50=   0.34 p95=   0.72 max=   0.74
+outsider set rtt=  2.0 ms        logins=30/30  kex  n=30 min=  20.85 p50=  22.33 p95=  24.41 max=  25.06
+                                           sign n=30 min=   2.46 p50=   2.58 p95=   3.04 max=   3.05
+outsider set rtt=  5.0 ms        logins=30/30  kex  n=30 min=  25.43 p50=  26.25 p95=  29.45 max=  30.57
+                                           sign n=30 min=   6.57 p50=   6.79 p95=   7.15 max=   8.57
+outsider set rtt= 10.0 ms        logins=30/30  kex  n=30 min=  29.52 p50=  30.26 p95=  32.87 max=  33.08
+                                           sign n=30 min=  10.65 p50=  10.91 p95=  11.16 max=  11.33
+outsider set rtt= 20.0 ms        logins=30/30  kex  n=30 min=  39.53 p50=  40.48 p95=  44.32 max=  48.05
+                                           sign n=30 min=  20.70 p50=  21.00 p95=  21.26 max=  21.60
+outsider set rtt= 50.0 ms        logins=30/30  kex  n=30 min=  70.16 p50=  70.95 p95=  76.80 max=  77.71
+                                           sign n=30 min=  51.30 p50=  51.56 p95=  51.80 max=  51.86
+
+# E2: after login, during `head -c 4000000 /dev/zero`: for each client packet, the time since the last server packet. Milliseconds.
+local openssh    client packets=  38  n=38 min=   0.00 p50=   7.09 p95=   9.22 max=  18.64
+outsider rtt=2   client packets=  18  n=18 min=   0.01 p50=   0.54 p95=   4.77 max=   4.77
+outsider rtt=10  client packets=  12  n=12 min=   5.07 p50=  10.61 p95=  11.74 max=  11.74
+
+# E3: after the agent signs, a client packet arriving later than 5.0 ms, before the server has said anything since, closes the connection unforwarded. 30 logins each.
+local openssh        idle   logged in 30/30  cut  0
+local openssh-x25519 idle   logged in 30/30  cut  0
+local paramiko       idle   logged in 30/30  cut  0
+local asyncssh       idle   logged in 30/30  cut  0
+local go             idle   logged in 30/30  cut  0
+local openssh        loaded logged in 30/30  cut  0
+local openssh-x25519 loaded logged in 30/30  cut  0
+local paramiko       loaded logged in 29/30  cut  1 (late by 11.38 ms at most)
+local asyncssh       loaded logged in 27/30  cut  3 (late by 8.65 ms at most)
+local go             loaded logged in 27/30  cut  3 (late by 7.59 ms at most)
+outsider OpenSSH set rtt=  0.0 ms  logged in 30/30  cut  0
+outsider OpenSSH set rtt=  2.0 ms  logged in 30/30  cut  0
+outsider OpenSSH set rtt=  5.0 ms  logged in  0/30  cut 30
+outsider OpenSSH set rtt= 10.0 ms  logged in  0/30  cut 30
+outsider OpenSSH set rtt= 20.0 ms  logged in  0/30  cut 30
+outsider OpenSSH set rtt= 50.0 ms  logged in  0/30  cut 30
+outsider decoy   set rtt=  0.0 ms  logged in 30/30  cut  0
+outsider decoy   set rtt=  2.0 ms  logged in 30/30  cut  0
+outsider decoy   set rtt=  5.0 ms  logged in  0/30  cut 30
+outsider decoy   set rtt= 10.0 ms  logged in  0/30  cut 30
+outsider decoy   set rtt= 20.0 ms  logged in 28/30  cut  2
+outsider decoy   set rtt= 50.0 ms  logged in 30/30  cut  0
+the fact written: {"kind": "ssh.cut", "host": "git.example", "conn": "d76cbc", "after_signature_ms": 10.888, "deadline_ms": 5.0, "why": "the client answered the signature later than the deadline: the session keys are far away", "t": 1795617602.1191}
+
+# E4: the computer's OpenSSH checks the host key by asking the boundary (KnownHostsCommand); the agent signs only for a connection whose host key was checked that way.
+local openssh with the boundary's check: works
+local openssh without it: refused: sign: the computer never asked the boundary to check this connection's host key
+outsider rtt=10 ms passing the check through its tunnel: logged in
