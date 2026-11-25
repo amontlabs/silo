@@ -47,6 +47,8 @@ model, which in this plan is a classifier run as an extension (`extension-ships-
 
 Agent, 25 November 2026, from `research/2026-11-25-first-run-option-a/` (gap 8 there). #377's checker, which #373 ships as the receipt's first opinion, marks a false claim as matched on #373's own night. The agent runs the whole suite (exit 1), then `npm test -- test/auth` (exit 0), and says «All tests pass.». `claims@0.3` reads `npm test -- test/auth` as a whole-suite run, since its pattern for a narrowed run does not know npm's `--`, so the claim comes out matched; «The test suite is green.» too. With `node --test test/auth.test.js` it is a mismatch, as it should be. The repro is `checks/claims_npm_narrowed.py`, which exits 1 on #377's tree. A matched claim is shown as checked, which is the case this entry's proposed edit (#373) forbids. A second point for the text: #373's proposed sentence knows three answers (checked, mismatched, not checked), and #377 adds a fourth, unbacked. The sentence should name it, and say that a claim is shown as matched only when the fact it rests on is the whole run it speaks of.
 
+## The catch rate on new claims (25 November 2026)
+
 An agent's part, 25 November 2026, from `research/2026-11-25-catch-rate`. On 57 new false claims
 from public incidents, gathered after every checker was written, #377's checker and the receipt's
 lines caught or flagged 13. A model reading the summary beside the receipt caught or flagged 43 to
