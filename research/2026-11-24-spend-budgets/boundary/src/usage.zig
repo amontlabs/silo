@@ -60,6 +60,14 @@ pub const Meter = struct {
     events: u32 = 0,
     malformed: u32 = 0,
     error_status: bool = false,
+    /// OpenAI Responses: the response's id, which a later request names in
+    /// `previous_response_id`, and its status. A background response answers `queued` or
+    /// `in_progress` at once and runs on at the provider: its counts come later, by its id.
+    resp_id: ?[]u8 = null,
+    status: ?[]u8 = null,
+    /// Searches the provider ran and bills by the thousand, outside the token counts: OpenAI's
+    /// `web_search_call` items, Gemini's grounding queries.
+    searches: i64 = 0,
 
     pub fn init(gpa: Allocator, format: Format) Meter {
         return .{ .gpa = gpa, .format = format };
@@ -68,6 +76,8 @@ pub const Meter = struct {
     pub fn deinit(self: *Meter) void {
         if (self.model) |m| self.gpa.free(m);
         if (self.tier) |t| self.gpa.free(t);
+        if (self.resp_id) |t| self.gpa.free(t);
+        if (self.status) |t| self.gpa.free(t);
         for (self.parts.items) |p| self.gpa.free(p.model);
         self.parts.deinit(self.gpa);
     }
@@ -82,6 +92,17 @@ pub const Meter = struct {
     fn setTier(self: *Meter, s: []const u8) void {
         if (self.tier) |t| self.gpa.free(t);
         self.tier = self.gpa.dupe(u8, s) catch null;
+    }
+
+    fn setOwned(self: *Meter, field: *?[]u8, s: []const u8) void {
+        if (field.*) |t| self.gpa.free(t);
+        field.* = self.gpa.dupe(u8, s) catch null;
+    }
+
+    /// A Responses reply that said the work goes on at the provider: no count yet.
+    pub fn pending(self: *const Meter) bool {
+        const st = self.status orelse return false;
+        return eq(st, "queued") or eq(st, "in_progress");
     }
 
     /// The counts the call is settled on: the attempts when listed, else the top level.
@@ -188,12 +209,15 @@ pub const Meter = struct {
     fn responses(self: *Meter, o: std.json.ObjectMap, whole: bool) !void {
         if (whole and eq(str(o.get("object")) orelse "", "response")) {
             self.responseObject(o);
-            self.final = true;
+            self.final = !self.pending();
             return;
         }
         const typ = str(o.get("type")) orelse return;
         if (eq(typ, "response.created") or eq(typ, "response.in_progress")) {
-            if (obj(o.get("response"))) |r| if (str(r.get("model"))) |s| self.setModel(s);
+            if (obj(o.get("response"))) |r| {
+                if (str(r.get("model"))) |s| self.setModel(s);
+                if (str(r.get("id"))) |s| self.setOwned(&self.resp_id, s);
+            }
         } else if (std.mem.endsWith(u8, typ, ".delta")) {
             if (str(o.get("delta"))) |s| self.visible_chars += s.len;
         } else if (eq(typ, "response.completed") or eq(typ, "response.incomplete") or eq(typ, "response.failed")) {
@@ -207,8 +231,15 @@ pub const Meter = struct {
     fn responseObject(self: *Meter, r: std.json.ObjectMap) void {
         if (str(r.get("model"))) |s| self.setModel(s);
         if (str(r.get("service_tier"))) |s| self.setTier(s);
+        if (str(r.get("id"))) |s| self.setOwned(&self.resp_id, s);
+        if (str(r.get("status"))) |s| self.setOwned(&self.status, s);
+        var searches: i64 = 0;
+        if (arr(r.get("output"))) |items| for (items.items) |it| {
+            if (it == .object and eq(str(it.object.get("type")) orelse "", "web_search_call")) searches += 1;
+        };
+        self.searches = searches;
         const u = obj(r.get("usage")) orelse return;
-        var c: Counts = .{};
+        var c: Counts = .{ .web_searches = searches };
         const total_in = int(u.get("input_tokens")) orelse 0;
         if (obj(u.get("input_tokens_details"))) |d| {
             c.cache_read = int(d.get("cached_tokens")) orelse 0;
@@ -272,6 +303,9 @@ pub const Meter = struct {
                 if (p.object.get("functionCall")) |fc| self.visible_chars += jsonLen(fc);
             };
             if (str(cand.object.get("finishReason")) != null) self.final = true;
+            if (obj(cand.object.get("groundingMetadata"))) |g| if (arr(g.get("webSearchQueries"))) |q| {
+                self.searches = @intCast(q.items.len);
+            };
         };
         // Each chunk may carry usageMetadata; the last one has the totals. Take the latest.
         const u = obj(o.get("usageMetadata")) orelse return;
@@ -283,6 +317,7 @@ pub const Meter = struct {
         const cand_out = int(u.get("candidatesTokenCount")) orelse 0;
         c.reasoning = int(u.get("thoughtsTokenCount")) orelse 0;
         c.output = cand_out + c.reasoning;
+        c.web_searches = self.searches;
         self.counts = c;
         self.input_known = true;
         if (str(u.get("serviceTier"))) |s| self.setTier(s);
@@ -438,4 +473,27 @@ test "gemini: a body that is not streamed is an array of chunks" {
     try m.onBody("[{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"a\"}]}}]},{\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":9,\"candidatesTokenCount\":3}}]");
     try std.testing.expect(m.final);
     try std.testing.expectEqual(@as(i64, 9), m.billed().input);
+}
+
+test "responses: a background response is not final until it ends, and searches count" {
+    const gpa = std.testing.allocator;
+    var m = Meter.init(gpa, .responses);
+    defer m.deinit();
+    try m.onBody("{\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"queued\",\"model\":\"gpt-6.2-sol\",\"output\":[]}");
+    try std.testing.expect(!m.final);
+    try std.testing.expect(m.pending());
+    try std.testing.expectEqualStrings("resp_1", m.resp_id.?);
+    var d = Meter.init(gpa, .responses);
+    defer d.deinit();
+    try d.onBody("{\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"completed\",\"output\":[{\"type\":\"web_search_call\"},{\"type\":\"web_search_call\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}");
+    try std.testing.expect(d.final);
+    try std.testing.expectEqual(@as(i64, 2), d.billed().web_searches);
+}
+
+test "gemini: grounding queries are searches" {
+    const gpa = std.testing.allocator;
+    var m = Meter.init(gpa, .gemini);
+    defer m.deinit();
+    try m.onBody("{\"candidates\":[{\"finishReason\":\"STOP\",\"groundingMetadata\":{\"webSearchQueries\":[\"a\",\"b\"]}}],\"usageMetadata\":{\"promptTokenCount\":9,\"candidatesTokenCount\":3}}");
+    try std.testing.expectEqual(@as(i64, 2), m.billed().web_searches);
 }

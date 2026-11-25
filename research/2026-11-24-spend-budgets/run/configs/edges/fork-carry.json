@@ -1,0 +1,2 @@
+{"policy": "finish", "prices": "/home/user/silo/research/2026-11-24-spend-budgets/prices.json", "fork_conversations": "carry", "computers": [{"name": "script", "address": "127.0.0.7", "credentials": [{"value": "sk-proj-script-fake"}, {"value": "sk-ant-api03-script-fake"}, {"value": "AIzaScriptFake000"}], "limits": {"total": 5, "conversation_total": 0.5}},
+ {"name": "fork", "address": "127.0.0.8", "fork_of": "script", "credentials": [{"value": "sk-ant-api03-fork-fake"}]}]}

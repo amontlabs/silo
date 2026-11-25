@@ -19,7 +19,7 @@ printf 'nameserver 127.0.0.1\n' > $OUT/.resolv; mount --bind $OUT/.resolv /etc/r
 cd $OUT
 env -i PATH=/usr/bin:/bin ${DUMP:+DUMP=1} OUT=$OUT SCENARIO=$SCEN TLS_CERT=$TLS/up-chain.crt TLS_KEY=$TLS/up-leaf.key PORT=8443 python3 $E/fake/provider.py 2> $OUT/fake.err &
 FP=\$!
-env -i PATH=/usr/bin:/bin SILO_CONFIG=$CONF RECORD=$OUT/record.jsonl CERT=$TLS/silo-chain.crt KEY=$TLS/silo-leaf.key UPSTREAM_CA=$TLS/up-ca.crt HOLD=0 \${SILO_TODAY:+SILO_TODAY=\$SILO_TODAY} $E/boundary/zig-out/bin/boundary 2> $OUT/boundary.err &
+env -i PATH=/usr/bin:/bin SILO_CONFIG=$CONF RECORD=$OUT/record.jsonl CERT=$TLS/silo-chain.crt KEY=$TLS/silo-leaf.key UPSTREAM_CA=$TLS/up-ca.crt HOLD=0 \${SILO_TODAY:+SILO_TODAY=\$SILO_TODAY} ${BOUNDARY:-$E/boundary/zig-out/bin/boundary} 2> $OUT/boundary.err &
 BP=\$!
 sleep 1; kill -0 \$BP || { echo boundary did not start; cat $OUT/boundary.err; exit 1; }
 IN
@@ -43,7 +43,7 @@ PR
 done
 cat >> $OUT/.inner.sh <<IN
 wait \$PIDS
-sleep 0.5; kill \$BP \$FP; wait 2>/dev/null
+sleep 2; kill \$BP \$FP; wait 2>/dev/null
 IN
 unshare -n -m --propagation private bash $OUT/.inner.sh
 for p in "$@"; do echo "$p: $(cat $OUT/$p/result.txt 2>/dev/null)"; done

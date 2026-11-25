@@ -7,7 +7,7 @@ for d in sorted(glob.glob(f"out/over-{model}-*")):
     r = json.loads(subprocess.check_output([sys.executable, "run/compare.py", d, "--json"]))
     dec = r.get("decompose_main", {})
     rows[pol].append((r["billed"], r["calls_billed"], dec.get("late_admissions", 0) or 0, dec.get("in_flight_at_limit", 0) or 0))
-order = ["finish", "finish-time", "admit-input", "reserve-typical", "reserve-max"]
+order = ["finish", "finish-time", "admit-input", "reserve-typical", "reserve-max", "cut", "typical-cut"]
 print(f"| Policy | Spent, each run | Over the ${limit:g} budget, worst | From calls that left after the limit was reached, worst | Calls done, mean |")
 print("|---|---|---|---|---|")
 for p in order:
