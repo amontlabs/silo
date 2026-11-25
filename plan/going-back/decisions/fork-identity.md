@@ -2,6 +2,30 @@
 
 ## The choice
 
+An agent's part, 25 November 2026, from the challenge of #355 (page 3).
+
+The case: you fork main to try a database migration. The agent in the fork runs
+`prisma migrate reset` against `DATABASE_URL`, which points to your production database outside the
+computer. The earlier answer says "the database an agent needs starts as it does in the parent",
+which is right for a database inside the computer and says nothing of a remote one; every case in
+#350's evidence used a remote one.
+
+The options:
+
+- A remote database is reached through the fork's own secret: a branch where the provider offers one
+  (Neon, PlanetScale, Supabase), otherwise a credential that only reads (recommended). It costs a
+  database secret that knows the provider, which #355 proposes as `database-secret`, and a fork that
+  cannot write to a database with no branches.
+- The fork gets the parent's credential, as the earlier answer allows by saying nothing. It costs
+  the case above.
+
+Recommended: the fork's own secret. A fork exists to try things, and a migration tried against
+production is the case it should stop.
+
+## The earlier choice
+
+The choice as it stood before 25 November 2026. The answer it recommended is now an option of the choice above.
+
 An agent's part, 22 November 2026. Main runs a job every night at 02:00 that emails your team a
 report, and a Tailscale node that puts main on your private network. At 18:00 you fork main to let
 an agent try something risky.

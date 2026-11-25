@@ -1,11 +1,10 @@
 {
   "name": "What the app shows, as text",
-  "what": "Everything the app shows can be read with the `silo` command, as plain text that a program can parse, and each view from the day it is built. On your Mac that is all of it. Inside a computer it is only what that computer may read. An agent can then answer \"what did that run do\" from the record and not by guessing.",
+  "what": "Everything the app shows can be read with the `silo` command, as plain text that a program can parse, and each view from the day it is built, on the command line or in the app, whichever comes first. On your Mac that is all of it. Inside a computer it is only what that computer may read. An agent can then answer \"what did that run do\" from the record and not by guessing.",
   "needs": [
     "silo-command-reads-the-app",
     "computer-reads-its-record",
     "where-precautions-live",
-    "now-in-the-app",
     "engine-program-and-clients"
   ],
   "suggest": {

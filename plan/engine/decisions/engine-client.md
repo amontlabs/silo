@@ -74,3 +74,9 @@ The answer's last sentence was added on 22 November 2026, from these lessons.
   never from a literal typed in the code, and keep test-only entry points out of what ships by the
   build itself.
   ([source](https://github.com/evmts/guillotine/blob/dbdf61bd7902c726cdfb4cf80d60ed0e02da5663/src/root_c.zig#L40))
+
+## A note to drop, 25 November 2026
+
+An agent's part, from #352 (file 01). These notes say handles are "ids with a generation". With ids
+from a counter that only grows, a row is never named twice, so the generation adds nothing: one way of
+naming a row is enough. The answer does not change. Agents may drop the generation from these notes.

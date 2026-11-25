@@ -2,6 +2,29 @@
 
 ## The choice
 
+An agent's part, 25 November 2026, from the challenge of #355 (page 2), with #363 and #356.
+
+The case: github.com is allowed so that agents can clone public repositories, and no GitHub secret
+is given. A worm in the computer pushes what it stole to its own repository, with its own token.
+Under the earlier answer that connection "passes encrypted and unread", so no rule can see the
+token, let alone refuse it.
+
+The options:
+
+- A rule can ask the boundary to read a host it allows, and each request must name the host of its
+  handshake (recommended). With `foreign-credential-refused`, a host read this way refuses a
+  credential that is not Silo's. #363 and #356 both found that a request naming another host than
+  its handshake has to get no secret; over HTTP/2 the answer is the status 421 (#355). It costs the
+  encryption of the hosts such a rule names, which Silo then reads.
+- Read only the hosts the earlier answer lists. It costs the worm's case.
+
+Recommended: a rule can ask to read a host. The default does not change: a host is read only when it
+is a provider's, a registry a rule names, one that gets a secret, or one a rule names.
+
+## The earlier choice
+
+The choice as it stood before 25 November 2026. The answer it recommended is now an option of the choice above.
+
 An agent's part, 22 November 2026. Claude Code in main talks to api.anthropic.com. An install script
 fetches from registry.npmjs.org, which your rule on package age names. An agent clones a repository
 from github.com.

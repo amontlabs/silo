@@ -1,0 +1,7 @@
+{
+  "asks": "How is the code that reads what a computer sends checked?",
+  "answer": "Every parser of bytes a computer controls is fuzzed for crashes, hangs and broken assertions. Each format it reads is also tested on both sides of every limit, and round-trips. A parser of a format another program also reads, such as a filesystem macOS reads or an HTTP request a host reads, rejects any input that program could read differently.",
+  "replaces": [
+    "fuzz-untrusted-parsers"
+  ]
+}

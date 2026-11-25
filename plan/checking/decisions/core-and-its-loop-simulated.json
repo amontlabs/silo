@@ -1,0 +1,7 @@
+{
+  "asks": "How is the core checked?",
+  "answer": "The core and the loop that feeds it reach the disk, the clock and the drivers only through interfaces given at start, so a simulator drives them with millions of random sequences of inputs, crashes included. It checks every safety property after every step, and every liveness property within its number once its faults stop. On a failure the simulator removes inputs until the smallest failing sequence is left.",
+  "replaces": [
+    "core-simulator"
+  ]
+}

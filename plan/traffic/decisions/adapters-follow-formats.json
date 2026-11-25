@@ -1,0 +1,7 @@
+{
+  "asks": "Do Silo's adapters follow agent programs or model providers?",
+  "answer": "The adapters that carry weight sit at the boundary and follow the formats of model traffic, not programs or hosts: four formats cover nearly all of it, Anthropic's Messages, OpenAI's Responses and Chat Completions, and Google's. The boundary chooses the reader by the request's path, since one host serves several formats.",
+  "replaces": [
+    "adapters-follow-providers"
+  ]
+}
