@@ -11,16 +11,85 @@ It takes a checkpoint of the computer's disk at each model request (so at each t
 CHECKPOINT_EVERY seconds, compares it with the one before from outside, and writes file facts.
 It reads the probe's trace (strace, standing in for the probe inside the computer) as reports.
 """
-import json, os, re, sys, time, socket, threading, hashlib, shutil, http.server, http.client, select, urllib.parse
+import json, os, re, sys, time, socket, threading, hashlib, shutil, http.server, http.client, select, ssl, urllib.parse
 sys.path.insert(0, os.path.dirname(__file__))
 import record as R
 
 CFG = json.load(open(os.environ["NIGHT_CONFIG"]))
 ROOT = CFG["record"]
-PRICES = json.load(open(os.path.join(os.path.dirname(__file__), "prices.json")))
+PRICES = json.load(open(os.environ.get("SILO_PRICES") or os.path.join(os.path.dirname(__file__), "prices.json")))
 MODEL_UPSTREAM = ("127.0.0.1", CFG["model_port"])
 CHECKPOINT_EVERY = CFG.get("checkpoint_every", 15)
 HOLD_LIMIT = CFG.get("hold_limit", 30)
+
+# A real night (`night.py --real`): the model calls go to each provider's own API. The computers
+# only ever hold a placeholder; the boundary puts the real key in, from its own environment
+# (`secret-placeholder`). Allowed connections reach the real internet.
+UPSTREAM = CFG.get("upstream")
+KEYS = {"anthropic": os.environ.get("SILO_KEY_ANTHROPIC"), "openai": os.environ.get("SILO_KEY_OPENAI")}
+PLACEHOLDER = "placeholder-not-a-key"
+REAL_NET = CFG.get("real_internet", False)
+MAX_USD = CFG.get("max_usd")
+SPENT = {"usd": 0.0}
+SPENT_LOCK = threading.Lock()
+
+
+def outbound_proxy():
+    p = os.environ.get("SILO_OUTBOUND_PROXY") or os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+    return urllib.parse.urlsplit(p) if p else None
+
+
+def open_upstream(provider):
+    """The connection a model call is forwarded on, and the path prefix of the provider's API."""
+    if not UPSTREAM:
+        return http.client.HTTPConnection(*MODEL_UPSTREAM, timeout=600), ""
+    u = urllib.parse.urlsplit(UPSTREAM[provider])
+    if u.scheme != "https":
+        return http.client.HTTPConnection(u.hostname, u.port or 80, timeout=600), u.path.rstrip("/")
+    ctx = ssl.create_default_context(cafile=os.environ.get("SSL_CERT_FILE"))
+    px = outbound_proxy()
+    if px:
+        conn = http.client.HTTPSConnection(px.hostname, px.port or 80, timeout=600, context=ctx)
+        conn.set_tunnel(u.hostname, u.port or 443)
+    else:
+        conn = http.client.HTTPSConnection(u.hostname, u.port or 443, timeout=600, context=ctx)
+    return conn, u.path.rstrip("/")
+
+
+def swap_key(provider, hdrs):
+    """The placeholder the program sent becomes the real key, only on its way out."""
+    if not UPSTREAM:
+        return hdrs
+    out = {}
+    for k, v in hdrs.items():
+        if k.lower() == "x-api-key" and PLACEHOLDER in v:
+            v = KEYS[provider] or ""
+        elif k.lower() == "authorization" and PLACEHOLDER in v:
+            v = f"Bearer {KEYS[provider] or ''}"
+        out[k] = v
+    return out
+
+
+def refusal(provider, model):
+    """Why a model call is not forwarded, or None. While the night has a budget, a call Silo
+    cannot count is refused too (#373, `budget-rule-or-precaution`)."""
+    if UPSTREAM and not KEYS.get(provider):
+        return f"Silo: no {provider} key was given for this night."
+    if MAX_USD is None:
+        return None
+    if model not in PRICES:
+        return f"Silo: {model} has no price, so its spend cannot be counted while the night has a budget of ${MAX_USD}."
+    with SPENT_LOCK:
+        if SPENT["usd"] >= MAX_USD:
+            return f"Silo: the night's budget of ${MAX_USD} is reached (${SPENT['usd']:.2f} counted)."
+    return None
+
+
+def error_body(provider, msg):
+    """A 400 in the provider's own error format stops every program and shows the sentence (#369)."""
+    if provider == "anthropic":
+        return {"type": "error", "error": {"type": "invalid_request_error", "message": msg}}
+    return {"error": {"message": msg, "type": "invalid_request_error", "param": None, "code": "silo_refused"}}
 
 
 # ------------------------------------------------------------------ computers
@@ -380,6 +449,9 @@ def model_call(c, provider, req_body, status, resp_raw, ctype, t0, t1, pid_repor
     cv["turns"] += 1
     cv["calls"] = {x["id"] for x in calls}
     cost = price(answered or model, tin, tout, cread, cwrite) if status == 200 else 0
+    if cost:
+        with SPENT_LOCK:
+            SPENT["usd"] += cost
     asked = user_text(provider, first) if cv["turns"] == 1 else None
     f = c.w.fact("model call", "boundary", at=R.at_of(t1), started=R.at_of(t0), provider=provider, login=CFG["logins"][provider],
                  status=status, model_asked=model, model_answered=answered, side=side or None,
@@ -432,9 +504,25 @@ def model_handler(c, provider, our_port):
             is_call = self.command == "POST" and ("/messages" in self.path or "/responses" in self.path) and "count_tokens" not in self.path
             if is_call:
                 checkpoint_soon(c, "turn")
-            up = http.client.HTTPConnection(*MODEL_UPSTREAM, timeout=600)
-            hdrs = {k: v for k, v in self.headers.items() if k.lower() not in ("host", "connection", "accept-encoding")}
-            up.request(self.command, self.path, body=body or None, headers=hdrs)
+                try:
+                    raw = body
+                    if (self.headers.get("content-encoding") or "") == "gzip":
+                        import gzip; raw = gzip.decompress(body)
+                    asked = json.loads(raw).get("model")
+                except Exception:
+                    asked = None
+                why = refusal(provider, asked)
+                if why:
+                    f = c.w.fact("control", "engine", what="model call refused", by="rule:night-budget@1", provider=provider, model_asked=asked, reason=why)
+                    alert(c, {"id": "night-budget", "version": 1}, why, [f["id"]], place="now")
+                    b = json.dumps(error_body(provider, why)).encode()
+                    self.send_response(400); self.send_header("content-type", "application/json"); self.send_header("content-length", str(len(b)))
+                    self.send_header("connection", "close"); self.end_headers(); self.wfile.write(b)
+                    self.close_connection = True
+                    return
+            up, prefix = open_upstream(provider)
+            hdrs = swap_key(provider, {k: v for k, v in self.headers.items() if k.lower() not in ("host", "connection", "accept-encoding")})
+            up.request(self.command, prefix + self.path, body=body or None, headers=hdrs)
             r = up.getresponse()
             self.send_response(r.status)
             ctype = r.getheader("content-type")
@@ -472,6 +560,47 @@ def model_handler(c, provider, our_port):
 
 # ------------------------------------------------------------------ the proxy: every other connection
 
+def dial(host, port):
+    """A socket to host:port, through this machine's own outbound proxy when it has one."""
+    px = outbound_proxy()
+    if not px:
+        return socket.create_connection((host, port), timeout=30)
+    s = socket.create_connection((px.hostname, px.port or 80), timeout=30)
+    s.sendall(f"CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\n\r\n".encode())
+    head = b""
+    while b"\r\n\r\n" not in head:
+        chunk = s.recv(4096)
+        if not chunk:
+            raise OSError("outbound proxy closed")
+        head += chunk
+    if b" 200" not in head.split(b"\r\n", 1)[0]:
+        s.close()
+        raise OSError("outbound proxy refused: " + head.split(b"\r\n", 1)[0].decode(errors="replace"))
+    return s
+
+
+def pipe(a, b):
+    """Copy both ways until either side closes. Returns (bytes a->b, bytes b->a)."""
+    n = {a: 0, b: 0}
+    a.settimeout(None); b.settimeout(None)
+    try:
+        while True:
+            r, _, _ = select.select([a, b], [], [], 600)
+            if not r:
+                break
+            for s in r:
+                d = s.recv(65536)
+                if not d:
+                    return n[a], n[b]
+                (b if s is a else a).sendall(d)
+                n[s] += len(d)
+    except OSError:
+        pass
+    finally:
+        b.close()
+    return n[a], n[b]
+
+
 FAKE_INTERNET = CFG.get("internet", {})
 
 
@@ -506,11 +635,30 @@ def proxy_handler(c, our_port):
                     if pid: c.w.report("owner", "probe", pid=pid, about=f["id"])
                     new_host(c, host, f)
                     return self.refuse(f"Silo: the request to {host} waited for your answer for {HOLD_LIMIT} s and nobody answered, so it was refused.")
+            if REAL_NET:
+                return self.tunnel(host, port, pid, t0)
             # allowed: no route to the real internet from this prototype
             f = c.w.fact("connection", "boundary", host=host, port=port, decision="allowed", decided_by=None, bytes_out=0, bytes_in=0, opened=False, note="no fake server for this host")
             if pid: c.w.report("owner", "probe", pid=pid, about=f["id"])
             new_host(c, host, f)
             self.refuse("no route in this prototype", 502)
+
+        def tunnel(self, host, port, pid, t0):
+            """A real night: an allowed connection is opened for real; its bytes are counted when it closes."""
+            try:
+                up = dial(host, port)
+            except OSError as e:
+                f = c.w.fact("connection", "boundary", host=host, port=port, decision="allowed", decided_by=None, bytes_out=0, bytes_in=0, opened=False, note=f"could not connect: {e!r}"[:200])
+                if pid: c.w.report("owner", "probe", pid=pid, about=f["id"])
+                new_host(c, host, f)
+                return self.refuse(f"Silo: could not reach {host}:{port}.", 502)
+            f = c.w.fact("connection", "boundary", host=host, port=port, decision="allowed", decided_by=None, opened=True, note="bytes in the fact `connection closed` about this one")
+            if pid: c.w.report("owner", "probe", pid=pid, about=f["id"])
+            new_host(c, host, f)
+            self.wfile.write(b"HTTP/1.1 200 Connection established\r\n\r\n"); self.wfile.flush()
+            sent, got = pipe(self.connection, up)
+            c.w.fact("connection closed", "boundary", about=f["id"], host=host, bytes_out=sent, bytes_in=got, seconds=round(time.time() - t0, 1))
+            self.close_connection = True
 
         def refuse(self, msg, code=403):
             b = (msg + "\n").encode()

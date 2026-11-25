@@ -80,6 +80,9 @@ SILO_NIGHT=/tmp/night python3 proto/page.py /tmp/morning.html            # the p
 python3 proto/night.py /tmp/night --end                                  # stop what is left
 ```
 
+`night.py --real` runs the same night on the real models; `research/2026-11-25-real-night` packages
+it as one command for a Mac, and `proto/claims.py` holds the claim checker in three versions.
+
 | File | Holds |
 |---|---|
 | `proto/night.py` | The computers, the rules, the four runs |

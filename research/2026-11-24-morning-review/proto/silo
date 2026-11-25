@@ -216,8 +216,8 @@ class Morning:
         if sub:
             out.append(f" {'':<21}" + " · ".join(sub))
         for cl in v.claims(r):
-            if cl["says"] == "mismatch":
-                out.append(f" {'':<21}◇ mismatch: its words say {words(cl['claim'], 50)} · {cl['rests_on']}")
+            if cl["says"] in ("mismatch", "unbacked"):
+                out.append(f" {'':<21}◇ {cl['says']}: its words say {words(cl['claim'], 50)} · {cl['rests_on']}")
         return out
 
     # ------------------------------------------------------------ the receipt
