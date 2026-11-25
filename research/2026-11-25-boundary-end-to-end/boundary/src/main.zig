@@ -1005,6 +1005,55 @@ const Head = struct {
     status: u16 = 0,
 };
 
+/// A program's request head is read strictly, so that the boundary and the host read the same
+/// request: every line ends in CRLF, no line is folded, a header name is a token with nothing
+/// between it and its colon, Content-Length is digits and comes once, Transfer-Encoding is exactly
+/// "chunked" and comes once and never with a length, and the target is in origin form with no
+/// empty, "." or ".." segment, no trailing slash and no percent sign before the query.
+pub fn strictRequestHead(raw: []const u8) bool {
+    for (raw, 0..) |ch, k| {
+        if (ch == '\n' and (k == 0 or raw[k - 1] != '\r')) return false;
+        if (ch == '\r' and (k + 1 >= raw.len or raw[k + 1] != '\n')) return false;
+        if (ch == 0) return false;
+    }
+    var it = std.mem.splitSequence(u8, raw[0 .. raw.len - 4], "\r\n");
+    const first = it.next() orelse return false;
+    var parts = std.mem.splitScalar(u8, first, ' ');
+    const method = parts.next() orelse return false;
+    const target = parts.next() orelse return false;
+    const version = parts.next() orelse return false;
+    if (parts.next() != null or method.len == 0 or !std.mem.eql(u8, version, "HTTP/1.1")) return false;
+    const q = std.mem.indexOfScalar(u8, target, '?') orelse target.len;
+    const path = target[0..q];
+    if (path.len == 0 or path[0] != '/') return false;
+    if (std.mem.indexOfScalar(u8, path, '%') != null or std.mem.indexOfScalar(u8, path, '#') != null or std.mem.indexOfScalar(u8, path, ';') != null) return false;
+    if (path.len > 1 and path[path.len - 1] == '/') return false;
+    var segs = std.mem.splitScalar(u8, path[1..], '/');
+    while (segs.next()) |sg| if (sg.len == 0 or std.mem.eql(u8, sg, ".") or std.mem.eql(u8, sg, "..")) {
+        if (!(path.len == 1 and sg.len == 0)) return false;
+    };
+    var cl: u8 = 0;
+    var te: u8 = 0;
+    while (it.next()) |line| {
+        if (line.len == 0 or line[0] == ' ' or line[0] == '\t') return false;
+        const colon = std.mem.indexOfScalar(u8, line, ':') orelse return false;
+        if (colon == 0) return false;
+        for (line[0..colon]) |ch| if (!(std.ascii.isAlphanumeric(ch) or std.mem.indexOfScalar(u8, "!#$%&'*+-.^_`|~", ch) != null)) return false;
+        const name = line[0..colon];
+        const value = std.mem.trim(u8, line[colon + 1 ..], " \t");
+        if (std.ascii.eqlIgnoreCase(name, "content-length")) {
+            cl += 1;
+            if (value.len == 0 or value.len > 18) return false;
+            for (value) |ch| if (!std.ascii.isDigit(ch)) return false;
+        }
+        if (std.ascii.eqlIgnoreCase(name, "transfer-encoding")) {
+            te += 1;
+            if (!std.ascii.eqlIgnoreCase(value, "chunked")) return false;
+        }
+    }
+    return cl <= 1 and te <= 1 and !(cl == 1 and te == 1);
+}
+
 /// Reads until the end of a head. Bytes read past it stay in `extra`.
 fn readHead(side: Side, extra: *std.ArrayList(u8)) !?Head {
     var buf: [16384]u8 = undefined;
@@ -1084,6 +1133,7 @@ const Decoder = struct {
                     const r = c.inflate(&d.z, c.Z_NO_FLUSH);
                     if (r != c.Z_OK and r != c.Z_STREAM_END and r != c.Z_BUF_ERROR) return error.Inflate;
                     try out.appendSlice(gpa, tmp[0 .. tmp.len - d.z.avail_out]);
+                    if (out.items.len > ReqCtx.max_body) return error.RequestTooLarge;
                     if (r == c.Z_STREAM_END) break;
                 }
             },
@@ -1094,6 +1144,7 @@ const Decoder = struct {
                     const r = c.ZSTD_decompressStream(d.zs, &ob, &ib);
                     if (c.ZSTD_isError(r) != 0) return error.Zstd;
                     try out.appendSlice(gpa, tmp[0..ob.pos]);
+                    if (out.items.len > ReqCtx.max_body) return error.RequestTooLarge;
                 }
             },
         }
@@ -1168,7 +1219,11 @@ fn pumpBody(from: Side, h: *const Head, extra: *std.ArrayList(u8), ctx: anytype)
 const ReqCtx = struct {
     body: std.ArrayList(u8) = .empty,
     raw: std.ArrayList(u8) = .empty,
+    /// The largest request body the boundary holds, raw or decoded: above the providers' own
+    /// limits (32 MB at Anthropic), far below what one compressed body can unpack to.
+    const max_body = 64 << 20;
     pub fn onRaw(self: *ReqCtx, raw: []const u8, decoded: *std.ArrayList(u8), _: bool) !void {
+        if (self.raw.items.len + raw.len > max_body or self.body.items.len + decoded.items.len > max_body) return error.RequestTooLarge;
         try self.raw.appendSlice(gpa, raw);
         try self.body.appendSlice(gpa, decoded.items);
     }
@@ -1785,6 +1840,12 @@ fn readHost(fd: posix.fd_t, comp: usize, way: Way, id: u32, name: []const u8, po
     while (true) {
         var req = (try readHead(client, &cextra)) orelse return;
         defer gpa.free(req.raw);
+        if (!strictRequestHead(req.raw)) {
+            record("\"conn\":{d},\"kind\":\"refused\",\"why\":\"request-not-strict\",\"line\":{f}", .{ id, j(req.first) });
+            decide(comp, "connection", "\"what\":\"refused\",\"decision\":\"refused\",\"decided_by\":\"silo\",\"host\":{f},\"line\":{f},\"why\":\"request-not-strict\"", .{ j(name), j(swap.lineForRecord(req.first)) }) catch {};
+            try writeRefusal(client, defaultFormat(provider), "Silo: this request is not written the way Silo reads requests, so it cannot leave.");
+            return;
+        }
         const t_req = now_ms();
         var rc: ReqCtx = .{};
         defer rc.body.deinit(gpa);

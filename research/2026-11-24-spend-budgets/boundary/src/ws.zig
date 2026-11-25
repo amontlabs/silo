@@ -104,6 +104,12 @@ pub const Reader = struct {
                 try self.inflated.appendSlice(self.gpa, tmp[0 .. tmp.len - self.strm.avail_out]);
                 if (self.inflated.items.len > self.max_message) return error.MessageTooLarge;
                 if (r == z.Z_BUF_ERROR) break;
+                // A final block ends the stream: what follows it (the tail) is not read. The next
+                // message starts a new stream.
+                if (r == z.Z_STREAM_END) {
+                    _ = z.inflateReset(&self.strm);
+                    break;
+                }
             }
         }
         if (self.no_context_takeover) _ = z.inflateReset(&self.strm);
