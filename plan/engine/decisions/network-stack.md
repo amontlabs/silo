@@ -35,11 +35,13 @@ An agent's part, 25 November 2026, from `research/2026-11-25-gvproxy-component/`
 network namespaces, with no virtual machine and no Mac.
 
 - #363's `-sealed` patch filters TCP and UDP. gvproxy 0.9.0 added ping forwarding, so a sealed
-  computer still pings the Mac's own address and every machine on the local network.
-- A patch of about 320 lines adds five options to gvproxy: no API on the computer's gateway, no
+  computer still pings the Mac's own address and every machine on the local network. It also
+  refuses only private ranges, so a local network on public addresses, as in an office, stays in
+  reach.
+- A patch of about 330 lines adds five options to gvproxy: no API on the computer's gateway, no
   address that leads to the Mac's loopback, a list of destinations that no TCP, UDP or ping may
   reach, lookups sent to a server Silo names or refused, and a hand-off of every TCP connection to
-  Silo's boundary, after a PROXY protocol v2 header, so that gvproxy dials nothing. In 21 cases
+  Silo's boundary, after a PROXY protocol v2 header, so that gvproxy dials nothing. In 23 cases
   from inside a computer, it reaches nothing of the Mac or the local network. Closed, it reaches
   nothing at all and SSH still gets in. With the boundary stopped, it reaches nothing.
 - The options cost nothing measurable against stock gvproxy: 1.4 Gbit/s out and 1.1 Gbit/s in at

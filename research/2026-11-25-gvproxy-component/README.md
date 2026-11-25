@@ -13,14 +13,19 @@ virtual machine and no Mac.
   Mac's own address and every machine on your local network. On a Mac this works without root,
   because macOS lets any user open an ICMP socket. That is enough to find every machine on your
   network from inside a computer.
+- **A local network on public addresses was still in reach.** The Mac kit's thread (#390) found
+  that `-sealed` refused only private ranges, so a router or a neighbour on an office or university
+  network with public addresses, or on a global IPv6 network, answered from inside. The suite now
+  shows it failing, and the deny list's `host-networks` entry, part of `-sealed`, refuses every
+  network the Mac is attached to.
 - **gvproxy's API on the computer's gateway is still on by default upstream.** CVE-2026-107935
   (published 9 October 2026, CVSS 9.3 per Endor Labs, Important per Red Hat) let code in the
   computer delete any file of the gvproxy user on the host through that API. 0.9.0 fixed the file
   deletion, not the API: the address `192.168.127.1:80` still opens ports on the host unless a
   token is set, as #358 showed.
-- **A patch of about 320 lines (and 180 lines of tests) makes gvproxy fit Silo.** It adds five
+- **A patch of about 330 lines (and 200 lines of tests) makes gvproxy fit Silo.** It adds five
   options, each useful outside Silo, so each can be proposed upstream on its own. With them, a
-  computer reaches nothing of your Mac or your network in any of 21 hostile cases, a closed computer
+  computer reaches nothing of your Mac or your network in any of 23 hostile cases, a closed computer
   reaches nothing at all while SSH still gets in, and every TCP connection can be handed to Silo's
   boundary so that gvproxy itself dials nothing.
 - **The options cost nothing measurable.** Throughput, round trip and new connections per second
@@ -44,10 +49,10 @@ virtual machine and no Mac.
 |---|---|---|
 | `-no-gateway-api` | gvproxy serves its HTTP API only on the sockets Silo opens on the Mac, never on `192.168.127.1:80` inside the computer | #358: one `curl` from inside opened a port on every interface of the Mac |
 | `-no-host-loopback` | No address inside the computer leads to the Mac's `127.0.0.1` (the default maps `192.168.127.254` there) | #358: six services on the Mac's loopback were reached |
-| `-outbound-deny <list>` | Destinations no TCP connection, UDP datagram or ping may reach, checked after address translation. Entries are addresses, CIDRs, `private`, `host` (the Mac's own addresses, read again each second) or `all` | The local network, the Mac's own addresses, cloud metadata, and the ping that #363 missed |
+| `-outbound-deny <list>` | Destinations no TCP connection, UDP datagram or ping may reach, checked after address translation. Entries are addresses, CIDRs, `private`, `host` (the Mac's own addresses, read again each second), `host-networks` (every network the Mac is attached to) or `all` | The local network, the Mac's own addresses, cloud metadata, and the ping that #363 missed. `host-networks` covers a local network on public addresses, as in an office, a university or a global IPv6 network, which `private` does not |
 | `-dns-upstream none` or `<ip:port>` | Names outside gvproxy's own zones go to that server, or are refused, instead of to the Mac's resolver | A lookup of `<data>.attacker.example` otherwise carries data out through the Mac's resolver, even from a closed computer |
 | `-outbound-handoff <socket>` | Every TCP connection is handed to a unix socket, after a PROXY protocol v2 header with the address and port the computer asked for. gvproxy dials nothing; UDP and pings to the outside are dropped | The boundary decides every connection and dials it itself, which `network-modes` asks for: Silo looks the name up and connects to the address it found, whatever address the computer used |
-| `-sealed`, `-closed` | Shorthands: `-sealed` is the first two plus `-outbound-deny private,host`; `-closed` adds `-outbound-deny all` and `-dns-upstream none` | The three settings of `network-modes` without a boundary running |
+| `-sealed`, `-closed` | Shorthands: `-sealed` is the first two plus `-outbound-deny private,host,host-networks`; `-closed` adds `-outbound-deny all` and `-dns-upstream none` | The three settings of `network-modes` without a boundary running |
 
 The PROXY protocol header is the one HAProxy defined and many proxies read, so the boundary needs no
 format of Silo's for it. The source address in it tells the boundary which computer opened the
@@ -59,7 +64,8 @@ connection when one gvproxy serves several.
 outside. The computer is a network namespace whose only interface is gvforwarder's tap device, so it
 sees what a virtual machine behind gvproxy sees. Around it, the suite places a service on the host's
 loopback, a service on all of the host's addresses, a neighbour on the local network at `10.77.0.2`
-that also runs the host's DNS resolver, and an internet host at `203.0.113.10`. `runall.sh` runs every
+that also runs the host's DNS resolver, a neighbour on a local network with public addresses at
+`198.51.100.2`, and an internet host at `203.0.113.10` behind a router. `runall.sh` runs every
 mode and compares each result with [`suite/expected.txt`](suite/expected.txt), which is what Silo
 needs. Results are in [`suite/results/`](suite/results/).
 
@@ -70,6 +76,7 @@ needs. Results are in [`suite/results/`](suite/results/).
 | gvproxy's API: list, and open a port on the Mac | both work | refused | refused | refused | refused | refused |
 | A service on the Mac's own address | reached | blocked | blocked | blocked | blocked | blocked |
 | A neighbour on the local network, TCP / UDP | reached | blocked | blocked | blocked | blocked | blocked |
+| **A neighbour on a local network with public addresses, TCP / ping** | reached | **reached** | blocked | blocked | blocked | blocked |
 | **Ping the neighbour, ping the Mac's own address** | reached | **reached** | blocked | blocked | blocked | blocked |
 | Cloud metadata `169.254.169.254`, `0.0.0.1` | blocked | blocked | blocked | blocked | blocked | blocked |
 | An internet host, TCP | reached | reached | reached | blocked | reached, by the boundary | blocked |
@@ -96,8 +103,8 @@ boundary is the Zig program of #347; reading this header is the one thing it wou
 
 ## Throughput
 
-[`bench/`](bench/) is #366's rig with the internet moved to `203.0.113.10`, since a sealed gvproxy
-refuses #366's private address. A namespace stands for the computer; `fwd` carries its frames to
+[`bench/`](bench/) is #366's rig with the internet moved to `203.0.113.10` behind a router, since a
+sealed gvproxy refuses #366's private address and the networks the host is attached to. A namespace stands for the computer; `fwd` carries its frames to
 gvproxy over a unix stream socket, as libkrun does, and `fwdgram` over a datagram socket, one frame
 per datagram, as Apple's `VZFileHandleNetworkDeviceAttachment` does. iperf3 for 6 s each way, one-byte
 round trips, and 300 connections opened one after the other. Median of 3 runs, on a 4-core Linux
@@ -120,11 +127,24 @@ container.
 
 The raw lines are in [`bench/results/`](bench/results/). The first eight rows use the stream socket.
 
+After `host-networks` was added, the internet moved behind a router and the patched builds were
+measured again over the stream socket ([`bench/results/after-host-networks.txt`](bench/results/after-host-networks.txt)):
+
+| gvproxy | MTU | computer to internet, Gbit/s | internet to computer, Gbit/s | round trip p50 / p99, µs | new connections per s | gvproxy memory, MB | runs |
+|---|---|---|---|---|---|---|---|
+| stock | 1500 | 1.49 | 1.14 | 228 / 401 | 1419 | 30 | 3 |
+| `-sealed` | 1500 | 1.49 | 1.10 | 234 / 396 | 1124 | 30 | 3 |
+| `-sealed` | 65520 | 4.32 | 2.91 | 183 / 340 | 1323 | 29 | 3 |
+| hand-off to the stand-in boundary | 1500 | 1.40 | 1.12 | 327 / 526 | 1046 | 30 | 3 |
+| hand-off to the stand-in boundary | 65520 | 3.95 | 2.80 | 315 / 500 | 1167 | 30 | 3 |
+
 - **The patch costs nothing measurable.** `-sealed` checks a list on every new connection and reads
   the Mac's addresses at most once a second; #363's patch read them on every connection. Neither
   shows in the numbers.
 - **The hand-off costs about 0.1 ms per round trip** (one more unix socket and a relay) and no
-  throughput. The boundary's own work, ending TLS and reading requests, comes on top: #347 measured
+  throughput. New connections per second are noisy, from 880 to 1,550 across runs. In the second
+  series the hand-off opened about 1,050 a second against 1,420 for stock, in the first about the
+  same as stock; a connection through it costs one more socket to open. The boundary's own work, ending TLS and reading requests, comes on top: #347 measured
   no cost on the first byte of a streamed reply, and 34 ms to read a 2 MB request.
 - **MTU 65520 triples the throughput** over a stream socket, as #366 found. The computer's network
   device should be set to it from the start.
@@ -155,7 +175,7 @@ on Linux with Claude Code, curl, git, npm and pip.
 | How the boundary learns the host | the address asked for, then the TLS name | the same | the same | the same | the `CONNECT host:port`, before TLS |
 | Settings inside the computer | none | none | none | none | system proxy, `HTTP(S)_PROXY`, an SSH `ProxyCommand`, a relay daemon on vsock |
 | Throughput | as measured above | the same | the same engine, so about the same | unknown until built | not measured |
-| Code Silo keeps | the patch: 320 lines over 12 files | none | about 3,000 lines plus gVisor (92,000 lines, vendored) | a TCP implementation | a small responder and a relay |
+| Code Silo keeps | the patch: 330 lines over 12 files | none | about 3,000 lines plus gVisor (92,000 lines, vendored) | a TCP implementation | a small responder and a relay |
 | What Silo follows | every upstream change to the files it patches: 47 commits in the last year | releases | gVisor's API, which changes often | nothing outside | each program's proxy support |
 | macOS and Linux | both | both | both | both | both (#378 reads that a macOS 27 guest needs the ARP answer, or it stays offline) |
 
