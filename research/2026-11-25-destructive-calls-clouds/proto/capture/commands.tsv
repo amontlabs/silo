@@ -156,8 +156,8 @@ az-role-owner	az	hold:exposed	az role assignment create --assignee-object-id 000
 az-lock-delete	az	hold:outage	az lock delete -n lock1 -g rg1
 az-cosmos-delete	az	hold:gone	az cosmosdb delete -g rg1 -n cdb1 --yes
 az-redis-delete	az	hold:gone	az redis delete -g rg1 -n cache1 --yes
-az-acr-delete	az	hold:gone	az acr delete -n acr1 --yes
-az-acr-admin	az	hold:exposed	az acr update -n acr1 --admin-enabled true
+az-acr-delete	az	hold:gone	az acr delete -n acrapp1 --yes
+az-acr-admin	az	hold:exposed	az acr update -n acrapp1 --admin-enabled true
 az-deploy-complete	az	hold:gone	az deployment group create -g rg1 -n d1 --template-file /opt/clis/work-az/t.json --mode Complete --no-wait
 az-deploy-incremental	az	deploy	az deployment group create -g rg1 -n d2 --template-file /opt/clis/work-az/t.json --mode Incremental --no-wait
 az-public-ip-delete	az	hold:outage	az network public-ip delete -g rg1 -n ip1

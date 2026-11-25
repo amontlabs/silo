@@ -12,6 +12,8 @@
 - A REST rule with "no_verb" does not match a path whose last segment holds a Google custom
   method (":verb").
 - Query-protocol AWS operations are told apart by Version when two services share an endpoint.
+- With "options": {"unreadable_body": "unknown"} (rules.json, not the blind rules), a body condition on a
+  body that is neither JSON nor a form is unknown instead of absent.
 - A REST rule is skipped early when no reading of the path has a length its templates can match
   (speed only: about 5,000 rules here).
 
@@ -195,6 +197,9 @@ class Detector(engine383.Detector):
         return super()._rest(api, rule, ctx, matches, facts)
 
     def _body_cond(self, cond, ctx, vars_):
+        if isinstance(cond, dict) and "field" in cond and (self.rules.get("options") or {}).get("unreadable_body") == "unknown":
+            if ctx.body().strip() and ctx.json() is None and not ctx.form():
+                raise base.Unknown("the body is neither JSON nor a form, so Silo cannot read %s" % cond["field"])
         if isinstance(cond, list):
             return all(self._body_cond(c, ctx, vars_) for c in cond)
         if "regex" in cond:

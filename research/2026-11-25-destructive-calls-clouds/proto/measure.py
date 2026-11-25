@@ -5,7 +5,7 @@
   s383         #383's surface of Railway, Fly, Vercel, Supabase and Cloudflare (labelled by #383)
   c383         #383's CLI captures
   corpus       #353's corpus and captures
-Writes results/<set>.json and prints the tables.
+Writes results/<set>.json and prints the tables. For the surface, only the mistakes are kept as rows.
 
 Run: python3 measure.py [set ...] [--rules name,name]
 """
@@ -68,6 +68,9 @@ def main(argv):
             if name.split("+")[0] in score.RULES and not os.path.exists(score.RULES[name.split("+")[0]]):
                 continue
             agg, rows = score.score(score.load(name), cs)
+            if w == "surface":   # 5,546 rows per rule set: keep only the mistakes
+                rows = [r for r in rows if (r["label"].startswith("hold") and r["got"] != "hold")
+                        or (r["label"] == "allow" and r["got"] == "hold")]
             out[name] = {"summary": agg, "rows": rows}
             print(score.table(agg, "\n%s, %s" % (w, name)))
         with open(os.path.join(HERE, "results", w + ".json"), "w") as f:

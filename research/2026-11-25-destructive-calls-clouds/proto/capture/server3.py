@@ -162,7 +162,7 @@ def az_token(resource):
     now = int(time.time())
     claims = {"aud": resource, "iss": "https://sts.windows.net/%s/" % TENANT, "tid": TENANT, "oid": "00000000-0000-0000-0000-000000000001",
               "appid": "00000000-0000-0000-0000-000000000003", "iat": now, "nbf": now, "exp": now + 3600, "xms_mirid": "/subscriptions/%s/rg1/mi" % SUB}
-    return ".".join([b64({"alg": "none", "typ": "JWT"}), b64(claims), "made-up"])
+    return ".".join([b64({"alg": "none", "typ": "JWT"}), b64(claims), base64.urlsafe_b64encode(b"made up").decode().rstrip("=")])
 
 
 def azure(method, host, path, query, text, headers):
@@ -207,8 +207,13 @@ def azure(method, host, path, query, text, headers):
            "kind": "StorageV2", "properties": {"provisioningState": "Succeeded", "mode": "Incremental", "count": 1, "accessPolicies": [],
                                                "tenantId": TENANT, "sku": {"family": "A", "name": "standard"}, "agentPoolProfiles": [{"name": "np1", "count": 1, "mode": "User"}],
                                                "primaryEndpoints": {"blob": "https://sa1.blob.core.windows.net/"}, "networkAcls": {"defaultAction": "Deny", "bypass": "AzureServices"},
-                                               "adminUserEnabled": False, "loginServer": "acr1.azurecr.io", "state": "Running", "keys": [{"keyName": "key1", "value": "x"}],
+                                               "adminUserEnabled": False, "encryption": {"keySource": "Microsoft.Storage", "services": {"blob": {"enabled": True}}}, "loginServer": "acr1.azurecr.io", "state": "Running", "keys": [{"keyName": "key1", "value": "x"}],
                                                "kubeconfigs": [{"name": "clusterAdmin", "value": base64.b64encode(b"apiVersion: v1\nkind: Config\nclusters: []\n").decode()}]}}
+    if method == "GET" and (re.search(r"/registries$", path, re.I) or path.endswith("/resources")):
+        rid = "/subscriptions/%s/resourceGroups/rg1/providers/Microsoft.ContainerRegistry/registries/acrapp1" % SUB
+        return j({"value": [dict(obj, name="acrapp1", id=rid, type="Microsoft.ContainerRegistry/registries")]})
+    if method == "GET" and re.search(r"/agentPools$", path, re.I):
+        return j({"value": [dict(obj, name="np1", id=path + "/np1")]})
     if method == "GET" and re.search(r"/(locks|resourceGroups|resourcegroups)$", path):
         return j({"value": [dict(obj, name="lock1", id=path + "/lock1")]})
     return j(obj)
@@ -227,7 +232,7 @@ def gh_graphql(text):
         m.schema = build_client_schema(json.load(open("/opt/specs/github-gql.json")), assume_valid=True)
         m.fx = {"id": "R_1", "nameWithOwner": "acme/app", "login": "acme", "name": "app", "databaseId": 1, "number": 1,
                 "defaultBranchRef": None, "url": "https://github.com/acme/app", "viewerPermission": "ADMIN", "state": "OPEN",
-                "headRefName": "feature", "baseRefName": "main", "mergeable": "MERGEABLE", "oid": "1" * 40, "title": "x"}
+                "headRefName": "feature", "PullRequest.mergeStateStatus": "CLEAN", "isInMergeQueue": False, "isMergeQueueEnabled": False, "Query.user": None, "baseRefName": "main", "mergeable": "MERGEABLE", "oid": "1" * 40, "title": "x"}
         _gh_mock.append(m)
     return j(_gh_mock[0].answer(text))
 
@@ -248,7 +253,7 @@ def github(method, host, path, query, text, headers):
     if path.endswith("/secrets/public-key") or path.endswith("/variables/public-key"):
         return j({"key_id": "k1", "key": base64.b64encode(b"\x09" * 32).decode()}, headers=scopes)
     if "/releases/tags/" in path:
-        return j({"id": 5, "tag_name": "v1", "name": "v1", "assets": []}, headers=scopes)
+        return j({"id": 5, "tag_name": "v1", "name": "v1", "assets": [], "url": "https://api.github.com/repos/acme/app/releases/5"}, headers=scopes)
     if "/actions/workflows" in path and method == "GET":
         wf = {"id": 7, "name": "ci", "path": ".github/workflows/ci.yml", "state": "active"}
         return j({"total_count": 1, "workflows": [wf]} if path.endswith("/workflows") else wf, headers=scopes)

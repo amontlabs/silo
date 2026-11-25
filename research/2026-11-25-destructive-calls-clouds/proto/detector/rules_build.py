@@ -266,7 +266,7 @@ def outcome_of(label):
 
 def rest_rule(rid, method, path, outcome, say, body=None, query=None, action="hold"):
     m = {"method": method, "path": path}
-    if re.search(r"/\{[^}/]+\}$", path) and "googleapis" in CUR.get("host", ""):
+    if isinstance(path, str) and re.search(r"/\{[^}/]+\}$", path) and "googleapis" in CUR.get("host", ""):
         m["no_verb"] = True
     if body is not None:
         m["body"] = body
@@ -421,8 +421,22 @@ def aws_labelled():
     return services, params
 
 
-# ---------------------------------------------------------------- tuned after the captures (empty until then)
-TUNED = {}
+# ---------------------------------------------------------------- tuned after the captures
+# Each fixes a miss of the blind rules on the CLI captures; tests/test_tuned.py shows it failing first.
+PUBLIC_BINDING = f("bindings.*.members.*", PUBLIC_MEMBERS)
+TUNED = {
+    # Cloud Storage's JSON API takes the IAM policy as the body itself, not under "policy"
+    "gcp-storage": [rest_rule("tuned.gcs-iam-public", "PUT", "/storage/v1/b/{bucket}/iam", X, "gives everyone access to the bucket {bucket}", body=PUBLIC_BINDING)],
+    # gcloud 570 still calls Resource Manager v1 and Cloud Functions v1; the surface read v3 and v2
+    "gcp-cloudresourcemanager": [
+        rest_rule("tuned.crm-v1-project-delete", "DELETE", "/v1/projects/{project}", R, "deletes the Google Cloud project {project} (30 days to undelete)"),
+        rest_rule("tuned.crm-v1-iam-public", "POST", "/v1/projects/*:setiampolicy", X, "gives everyone a role on the project {path}", body=f("policy.bindings.*.members.*", PUBLIC_MEMBERS))],
+    "gcp-cloudfunctions": [rest_rule("tuned.gcf-v1-delete", "DELETE", "/v1/projects/{project}/locations/{location}/functions/{function}", O, "deletes the Cloud Function {function}")],
+    # Microsoft.Web was not among the providers the Azure surface read
+    "azure": [rest_rule("tuned.web-stop", "POST", ["/subscriptions/{s}/resourceGroups/{rg}/providers/Microsoft.Web/sites/{name}/stop",
+                                                   "/subscriptions/{s}/resourceGroups/{rg}/providers/Microsoft.Web/sites/{name}/slots/{slot}/stop"],
+                        O, "stops the web app {name}")],
+}
 
 
 def build(tuned):
@@ -457,6 +471,9 @@ def build(tuned):
     # the any-host MCP sniffer stays last
     out["apis"] = [a for a in out["apis"] if not a.get("mcp_sniff")] + [a for a in out["apis"] if a.get("mcp_sniff")]
     if tuned:
+        # a body a condition must read but that is neither JSON nor a form (az's deployment body,
+        # kubectl's protobuf) is unknown, not absent
+        out["options"] = {"unreadable_body": "unknown"}
         for api in out["apis"]:
             api["rules"] = TUNED.get(api["id"], []) + api.get("rules", [])
     name = "rules.json" if tuned else "rules-blind.json"
