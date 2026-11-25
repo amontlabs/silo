@@ -1,0 +1,157 @@
+{
+ "Basic authorization": {
+  "#386 exact|missed": 51,
+  "forms+shapes|held": 51,
+  "forms|held": 51,
+  "shapes+decode|held": 51,
+  "shapes|held": 51
+ },
+ "CRLF line ends": {
+  "#386 exact|held": 45,
+  "#386 exact|missed": 6,
+  "forms+shapes|held": 51,
+  "forms|held": 51,
+  "shapes+decode|held": 42,
+  "shapes+decode|missed": 9,
+  "shapes|held": 42,
+  "shapes|missed": 9
+ },
+ "JSON escaped the Go way": {
+  "#386 exact|held": 45,
+  "#386 exact|missed": 6,
+  "forms+shapes|held": 51,
+  "forms|held": 51,
+  "shapes+decode|held": 42,
+  "shapes+decode|missed": 9,
+  "shapes|held": 42,
+  "shapes|missed": 9
+ },
+ "URL password, percent-encoded": {
+  "#386 exact|held": 36,
+  "#386 exact|missed": 15,
+  "forms+shapes|held": 51,
+  "forms|held": 51,
+  "shapes+decode|held": 51,
+  "shapes|held": 45,
+  "shapes|missed": 6
+ },
+ "URL query, percent-encoded": {
+  "#386 exact|held": 36,
+  "#386 exact|missed": 15,
+  "forms+shapes|held": 51,
+  "forms|held": 51,
+  "shapes+decode|held": 51,
+  "shapes|held": 51
+ },
+ "base64 inside a file": {
+  "#386 exact|missed": 51,
+  "forms+shapes|held": 51,
+  "forms|held": 51,
+  "shapes+decode|held": 44,
+  "shapes+decode|missed": 7,
+  "shapes|missed": 51
+ },
+ "file in a request body": {
+  "#386 exact|held": 45,
+  "#386 exact|missed": 6,
+  "forms+shapes|held": 51,
+  "forms|held": 51,
+  "shapes+decode|held": 42,
+  "shapes+decode|missed": 9,
+  "shapes|held": 42,
+  "shapes|missed": 9
+ },
+ "hex": {
+  "#386 exact|missed": 51,
+  "forms+shapes|held": 51,
+  "forms|held": 51,
+  "shapes+decode|missed": 51,
+  "shapes|missed": 51
+ },
+ "prompt": {
+  "#386 exact|held": 51,
+  "forms+shapes|held": 51,
+  "forms|held": 51,
+  "shapes+decode|held": 36,
+  "shapes+decode|missed": 9,
+  "shapes+decode|partial": 6,
+  "shapes|held": 36,
+  "shapes|missed": 9,
+  "shapes|partial": 6
+ },
+ "raw model stream": {
+  "#386 exact|missed": 51,
+  "forms+shapes|missed": 51,
+  "forms|missed": 51,
+  "shapes+decode|missed": 51,
+  "shapes|missed": 51
+ },
+ "rewrapped at 76": {
+  "#386 exact|held": 27,
+  "#386 exact|missed": 24,
+  "forms+shapes|held": 51,
+  "forms|held": 51,
+  "shapes+decode|held": 21,
+  "shapes+decode|missed": 27,
+  "shapes+decode|partial": 3,
+  "shapes|held": 21,
+  "shapes|missed": 27,
+  "shapes|partial": 3
+ },
+ "screen of 80 columns": {
+  "#386 exact|held": 24,
+  "#386 exact|missed": 27,
+  "forms+shapes|held": 51,
+  "forms|held": 51,
+  "shapes+decode|held": 24,
+  "shapes+decode|missed": 24,
+  "shapes+decode|partial": 3,
+  "shapes|held": 24,
+  "shapes|missed": 24,
+  "shapes|partial": 3
+ },
+ "shell trace": {
+  "#386 exact|held": 39,
+  "#386 exact|missed": 12,
+  "forms+shapes|held": 51,
+  "forms|held": 51,
+  "shapes+decode|held": 42,
+  "shapes+decode|missed": 9,
+  "shapes|held": 42,
+  "shapes|missed": 9
+ },
+ "split across two lines": {
+  "#386 exact|missed": 51,
+  "forms+shapes|held": 19,
+  "forms+shapes|missed": 2,
+  "forms+shapes|partial": 30,
+  "forms|held": 19,
+  "forms|missed": 2,
+  "forms|partial": 30,
+  "shapes+decode|missed": 35,
+  "shapes+decode|partial": 16,
+  "shapes|missed": 35,
+  "shapes|partial": 16
+ },
+ "tool arguments (JSON in JSON)": {
+  "#386 exact|held": 45,
+  "#386 exact|missed": 6,
+  "forms+shapes|held": 51,
+  "forms|held": 51,
+  "shapes+decode|held": 48,
+  "shapes+decode|missed": 3,
+  "shapes|held": 48,
+  "shapes|missed": 3
+ },
+ "tool output": {
+  "#386 exact|held": 51,
+  "forms+shapes|held": 51,
+  "forms|held": 51,
+  "shapes+decode|held": 42,
+  "shapes+decode|missed": 1,
+  "shapes+decode|partial": 8,
+  "shapes|held": 42,
+  "shapes|missed": 1,
+  "shapes|partial": 8
+ }
+}
