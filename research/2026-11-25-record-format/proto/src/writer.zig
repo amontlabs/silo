@@ -32,24 +32,43 @@ pub const Line = struct {
 
 pub const Appended = enum { written, duplicate };
 
+/// How the writer flushes on a Mac (SILOREC_FLUSH; research/2026-11-25-durability-on-a-mac).
+/// `full`: every flush is F_FULLFSYNC (the default). `barrier`: the flush before an
+/// acknowledgement is F_FULLFSYNC and every other is F_BARRIERFSYNC, #394's mac-barrier model,
+/// which kept every acknowledged line through its power-cut test. `fsync`: plain fsync(2), which
+/// keeps nothing through a power cut on a Mac; only for measuring what the others cost. On Linux
+/// every mode is fsync and fdatasync, which are durable there.
+pub const Flush = enum { full, barrier, fsync };
+pub var flush_mode: Flush = .full;
+
 /// Makes a file's data and size, or a folder's entries, survive a power cut before it returns.
 /// On a Mac, fsync(2) only hands the data to the drive, which may keep it in its cache and write it
 /// out of order; F_FULLFSYNC flushes that cache. Zig's std.posix.fsync, fdatasync and File.sync
 /// call plain fsync on macOS, so the writer asks for F_FULLFSYNC itself. A volume that does not
 /// support it (SMB) falls back to fsync, as Go's File.Sync does.
 pub fn durable(fd: std.posix.fd_t) !void {
-    if (comptime builtin.os.tag.isDarwin()) return fullFsync(fd);
+    if (comptime builtin.os.tag.isDarwin()) return switch (flush_mode) {
+        .full => macFlush(fd, std.c.F.FULLFSYNC),
+        .barrier => macFlush(fd, F_BARRIERFSYNC),
+        .fsync => std.posix.fsync(fd),
+    };
     try std.posix.fsync(fd);
 }
 
-/// The same for a segment's appended lines: on Linux the size and the data, not the times.
+/// The flush before an acknowledgement: a segment's appended lines. On Linux the size and the
+/// data, not the times.
 pub fn durableData(fd: std.posix.fd_t) !void {
-    if (comptime builtin.os.tag.isDarwin()) return fullFsync(fd);
+    if (comptime builtin.os.tag.isDarwin()) return switch (flush_mode) {
+        .full, .barrier => macFlush(fd, std.c.F.FULLFSYNC),
+        .fsync => std.posix.fsync(fd),
+    };
     try std.posix.fdatasync(fd);
 }
 
-fn fullFsync(fd: std.posix.fd_t) !void {
-    const rc = std.c.fcntl(fd, std.c.F.FULLFSYNC);
+const F_BARRIERFSYNC: c_int = 85;
+
+fn macFlush(fd: std.posix.fd_t, cmd: c_int) !void {
+    const rc = std.c.fcntl(fd, cmd);
     if (rc == 0) return;
     switch (std.posix.errno(rc)) {
         .OPNOTSUPP, .INVAL => try std.posix.fsync(fd),

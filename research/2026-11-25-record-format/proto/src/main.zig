@@ -10,6 +10,11 @@
 //!   silorec redact-cost <secrets> <lines>      what redaction costs per line
 //!   silorec workload <dir> <max_segment>       the crash test's workload, printing each ack (power-cut test)
 //!   silorec start <dir> <max_segment> [rule]   starts the writer on what is there and stops it (power-cut test)
+//!   silorec bench <dir> <lines> <per_flush> <bytes> <blob_every>
+//!                                              what an acknowledgement costs: <lines> lines of
+//!                                              <bytes>, a flush every <per_flush>, a new blob every
+//!                                              <blob_every> lines (0: none); prints one JSON line.
+//!                                              SILOREC_FLUSH=full|barrier|fsync picks the Mac flush
 const std = @import("std");
 const format = @import("format.zig");
 const verify = @import("verify.zig");
@@ -45,6 +50,7 @@ pub fn main() !void {
     if (args.len < 2) return usage();
     // SILOREC_START_RULE=after_head runs any command with that start rule (power-cut test).
     if (std.posix.getenv("SILOREC_START_RULE")) |r| writer.start_rule = std.meta.stringToEnum(writer.StartRule, r) orelse return usage();
+    if (std.posix.getenv("SILOREC_FLUSH")) |f| writer.flush_mode = std.meta.stringToEnum(writer.Flush, f) orelse return usage();
     const cmd = args[1];
     if (std.mem.eql(u8, cmd, "verify") and args.len == 4) {
         var dir = try std.fs.cwd().openDir(args[2], .{ .iterate = true });
@@ -149,6 +155,8 @@ pub fn main() !void {
         };
         w.close();
         out("started\n", .{});
+    } else if (std.mem.eql(u8, cmd, "bench") and args.len == 7) {
+        try bench(gpa, args[2], try std.fmt.parseInt(usize, args[3], 10), try std.fmt.parseInt(usize, args[4], 10), try std.fmt.parseInt(usize, args[5], 10), try std.fmt.parseInt(usize, args[6], 10));
     } else if (std.mem.eql(u8, cmd, "import") and args.len == 4) {
         try importLines(gpa, args[2], args[3]);
     } else if (std.mem.eql(u8, cmd, "redact-cost") and args.len == 4) {
@@ -209,4 +217,53 @@ fn redactCost(gpa: std.mem.Allocator, count: usize, input: []const u8) !void {
     }
     const ns = std.time.nanoTimestamp() - t0;
     out("{{\"secrets\":{d},\"lines\":{d},\"bytes\":{d},\"ns_per_line\":{d},\"mb_per_s\":{d:.1}}}\n", .{ count, lines, bytes.len, @divFloor(ns, @as(i128, lines)), @as(f64, @floatFromInt(bytes.len)) / (@as(f64, @floatFromInt(ns)) / 1e9) / 1e6 });
+}
+
+/// What the writer's acknowledgement costs on this disk, in the flush mode SILOREC_FLUSH picks:
+/// the time of each flush (the wait before lines are acknowledged) and of each new blob.
+fn bench(gpa: std.mem.Allocator, path: []const u8, lines: usize, per_flush: usize, bytes: usize, blob_every: usize) !void {
+    std.fs.cwd().deleteTree(path) catch {};
+    var w = try writer.Writer.open(gpa, path, "c1", .{});
+    defer w.close();
+    const filler = try gpa.alloc(u8, bytes);
+    defer gpa.free(filler);
+    @memset(filler, 'x');
+    var flushes: std.ArrayList(u64) = .empty;
+    defer flushes.deinit(gpa);
+    var blobs: std.ArrayList(u64) = .empty;
+    defer blobs.deinit(gpa);
+    var timer = try std.time.Timer.start();
+    const t0 = timer.read();
+    for (0..lines) |i| {
+        var b = Body.init(gpa, w.opts.redactor);
+        defer b.deinit();
+        try b.str("event", "output");
+        if (blob_every > 0 and i % blob_every == 0) {
+            var cb: [64]u8 = undefined;
+            const s0 = timer.read();
+            const r = try w.putBlob(std.fmt.bufPrint(&cb, "blob {d} {d}", .{ i, t0 }) catch unreachable);
+            try blobs.append(gpa, timer.read() - s0);
+            try b.str("blob", &r);
+        }
+        try b.str("text", filler);
+        _ = try w.append(.{ .time_ns = 1795574467000000000 + @as(i128, @intCast(i)) * 1000, .source = "bench", .count = "c", .n = i + 1, .is = "report", .kind = "process", .body = b.buf.items });
+        if (i % per_flush == per_flush - 1 or i == lines - 1) {
+            const s0 = timer.read();
+            try w.flush();
+            try flushes.append(gpa, timer.read() - s0);
+        }
+    }
+    const total = timer.read() - t0;
+    const ms = struct {
+        fn q(l: []u64, f: f64) f64 {
+            if (l.len == 0) return 0;
+            std.mem.sort(u64, l, {}, std.sort.asc(u64));
+            return @as(f64, @floatFromInt(l[@min(l.len - 1, @as(usize, @intFromFloat(f * @as(f64, @floatFromInt(l.len)))))])) / 1e6;
+        }
+    }.q;
+    out("{{\"flush\":\"{s}\",\"lines\":{d},\"per_flush\":{d},\"bytes\":{d},\"blob_every\":{d},\"flushes\":{d},\"ack_p50_ms\":{d:.3},\"ack_p99_ms\":{d:.3},\"ack_max_ms\":{d:.3},\"blob_p50_ms\":{d:.3},\"blob_p99_ms\":{d:.3},\"lines_per_s\":{d:.0}}}\n", .{
+        @tagName(writer.flush_mode), lines,                  per_flush,             bytes,                 blob_every,
+        flushes.items.len,           ms(flushes.items, 0.5), ms(flushes.items, 0.99), ms(flushes.items, 1.0), ms(blobs.items, 0.5),
+        ms(blobs.items, 0.99),       @as(f64, @floatFromInt(lines)) / (@as(f64, @floatFromInt(total)) / 1e9),
+    });
 }
