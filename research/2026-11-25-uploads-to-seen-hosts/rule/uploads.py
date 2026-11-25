@@ -86,13 +86,35 @@ def graphql_place(b):
     return "upload", "github:?node"
 
 
+BUCKET = re.compile(r"[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]")
+
+
 def classify(rec):
+    kind, place = _classify(rec)
+    if place and place.startswith("gcs:") and not BUCKET.fullmatch(place[4:]):
+        return "unknown-write", None  # not a bucket name Google would accept as it reads
+    return kind, place
+
+
+def _classify(rec):
     """(kind, place). place may contain "{cred}" when the host files the data under the credential's account."""
     host, m = rec["host"], rec["method"]
-    path = unquote(urlsplit(rec["target"]).path)
-    if path.startswith("/resumable/upload/"):
-        path = path[len("/resumable"):]
-    parts = [p for p in path.split("/") if p]
+    raw = urlsplit(rec["target"]).path
+    q0 = parse_qs(urlsplit(rec["target"]).query)
+    overrides = [h for h in ("x-http-method-override", "x-http-method", "x-method-override") if hdr(rec, h)]
+    if overrides or "_method" in q0:
+        return "unknown-write", None  # a GET the host may run as a POST
+    checked = raw
+    if host in GCS_JSON and "/o/" in raw:
+        checked = raw.split("/o/", 1)[0]  # GCS object names carry %2F by design; the bucket comes first
+    if m not in ("GET", "HEAD", "OPTIONS") and (
+            re.search(r"%2f|%2e|%5c|\\\\", checked, re.I) or "//" in checked
+            or any(seg in (".", "..") for seg in checked.split("/"))):
+        return "unknown-write", None  # a path the host may read differently from the rule
+    if raw.startswith("/resumable/upload/"):
+        raw = raw[len("/resumable"):]
+    path = unquote(raw)
+    parts = [unquote(p) for p in raw.split("/") if p]  # split first: an encoded slash stays in its segment
     q = parse_qs(urlsplit(rec["target"]).query)
     if m in ("GET", "HEAD", "OPTIONS"):
         return "read", None
@@ -124,6 +146,8 @@ def classify(rec):
             return "upload", f"github:{parts[1].lower()}"
         return "unknown-write", None
     if host == "ghcr.io":
+        if path == "/token":
+            return "read", None  # trades a credential for a registry token; puts nothing on the host
         if parts[:1] == ["v2"] and len(parts) >= 4:
             return "upload", f"github:{parts[1].lower()}"  # a GHCR namespace is a GitHub account
         return "unknown-write", None
