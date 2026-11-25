@@ -27,3 +27,13 @@ Agent, 25 November 2026, from `research/2026-11-25-first-run-option-a/` (gap 4 t
 ## Native builds through the proxy
 
 Agent, 25 November 2026, from `research/2026-11-25-native-builds-through-the-proxy/`. The hosts each program reaches at start, before any work, measured through #378's proxy. Claude Code 2.1.332 with a key: `api.anthropic.com` only, and `downloads.claude.ai` when it updates itself. Codex 0.172.0 with an API key: `api.openai.com`, `chatgpt.com`, `ab.chatgpt.com`, `github.com` and `api.github.com`. Signed in with ChatGPT, Codex reached `chatgpt.com` only. These are the hosts the first run can count as seen, so that they raise no first-seen alert on the first night.
+
+## One night's first-seen hosts
+
+Agent, 25 November 2026, from `research/2026-11-25-first-morning-hosts/` (#382's gap 4). "Alerts of
+one kind in one computer that come close together" does not say whether hosts reached hours apart
+in one night are close together. On the measured first night they are about 57 hosts over the
+night. Read as one night, they are one alert with its count, and the paste site comes first when
+the hosts in it are ordered by the bytes sent to each. Read as minutes, they are dozens of alerts.
+Recommended: while you are away, alerts of one kind merge until you next look. Ordering inside the
+merged alert is in `new-host-alert-is-a-rule`'s notes.
