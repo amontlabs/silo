@@ -22,3 +22,9 @@ and the rest is there when something looks wrong.
 The design record gives this as a list with no mark. Its first item, "the request that started
 the run", is written here "what you asked the agent": "request" names only what waits at the
 boundary.
+
+An agent's part, 24 November 2026, from the prototype in `research/2026-11-24-morning-review`. Two of four runs left a process running
+that nothing in their words mentioned (`node scripts/sessiond.js`, `bun test --watch`). The
+receipt's outcome showed it from the probe's reports: "1 process it started still running". The
+outcome also shows the last run of the whole suite apart from the last test command of any kind,
+since a run that ends on a narrower test is the case that misleads.
