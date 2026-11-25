@@ -279,6 +279,8 @@ class Image:
         ji = self.inode(self.journal_ino)
         jmap = list(self.file_blocks(ji))     # journal block i -> fs block
         def jblock(i):
+            if i >= len(jmap):
+                raise Refused('journal-block')
             return self.block(jmap[i])
         sbj = jblock(0)
         if be32(sbj, 0) != JBD2_MAGIC or be32(sbj, 4) not in (3, 4):
@@ -286,6 +288,8 @@ class Image:
         maxlen, first, seq, start = be32(sbj, 16), be32(sbj, 20), be32(sbj, 24), be32(sbj, 28)
         if start == 0:
             return {}                          # clean: nothing to replay
+        if maxlen > len(jmap) or not 0 < first < maxlen or not first <= start < maxlen:
+            raise Refused('journal-superblock')
         incompat = be32(sbj, 0x28) if be32(sbj, 4) == 4 else 0
         j64, csum3, csum2 = incompat & 0x2, incompat & 0x10, incompat & 0x8
         if csum3:
