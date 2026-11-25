@@ -1,0 +1,5 @@
+{"data": {"project": {"id": "p1", "name": "prod-app", "workspaceId": "w1", "deletedAt": null, "workspace": {"name": "acme"},
+ "buckets": {"edges": []},
+ "environments": {"edges": [{"node": {"id": "e1", "name": "production", "canAccess": true, "deletedAt": null, "unmergedChangesCount": 0}}, {"node": {"id": "e2", "name": "staging", "canAccess": true, "deletedAt": null, "unmergedChangesCount": 0}}]},
+ "services": {"edges": [{"node": {"id": "s1", "name": "api"}}]},
+ "volumes": {"edges": [{"node": {"id": "vol-1", "name": "pg-data"}}]}}}}

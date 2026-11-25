@@ -1,0 +1,6 @@
+$ SUPABASE_ACCESS_TOKEN=sbp_FAKE -- supabase projects delete abcdefghijklmnopqrst --yes
+Confirmed by --yes: Delete project abcdefghijklmnopqrst
+failed to delete project: SchemaError(Missing key
+  at ["id"])
+Try rerunning the command with --debug to troubleshoot the error.
+--- exit=1 seconds=1.026420307

@@ -1,0 +1,8 @@
+$ SUPABASE_ACCESS_TOKEN=sbp_FAKE -- supabase projects delete abcdefghijklmnopqrst --yes
+Confirmed by --yes: Delete project abcdefghijklmnopqrst
+│
+◇  Deleting project...
+Failed to delete project abcdefghijklmnopqrst: Held by Silo and not answered: deleting volume X needs your yes.
+Try rerunning the command with --debug to troubleshoot the error.
+--- exit=1 seconds=3.041988697
+--- matching requests held: 1

@@ -1,0 +1,6 @@
+$ AWS_ACCESS_KEY_ID=AKIAFAKEFAKEFAKE0000 AWS_SECRET_ACCESS_KEY=fakesecret AWS_DEFAULT_REGION=us-east-1 AWS_PAGER= -- aws s3 rb s3://silo-test-bucket --force
+delete failed: s3://silo-test-bucket/backups/db-2026-11-23.dump An error occurred (AccessDenied) when calling the DeleteObject operation: Held by Silo and not answered: deleting volume X needs your yes.
+delete failed: s3://silo-test-bucket/backups/db-2026-11-24.dump An error occurred (AccessDenied) when calling the DeleteObject operation: Held by Silo and not answered: deleting volume X needs your yes.
+
+aws: [ERROR]: remove_bucket failed: Unable to delete all objects in the bucket, bucket will not be deleted.
+--- exit=255 seconds=2.679344707

@@ -1,0 +1,5 @@
+$ RAILWAY_TOKEN=test-token-123 -- railway volume delete --volume vol-1 --yes
+> Select a volume pg-data
+Held by Silo and not answered: deleting volume X needs your yes.
+--- exit=1 seconds=2.227817330
+--- matching requests held: 1

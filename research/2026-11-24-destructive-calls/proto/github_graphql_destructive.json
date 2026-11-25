@@ -1,0 +1,842 @@
+{
+ "source": "https://docs.github.com/public/fpt/schema.docs.graphql",
+ "read": "2026-11-24",
+ "sha256": "a70103efc655a6b81afa69cdbce8b27d90d8202270b19ea54130e95c650047b7",
+ "has_deleteRepository": false,
+ "total_mutations": 285,
+ "selected": 88,
+ "by_kind": {
+  "cancel": 5,
+  "archive": 3,
+  "clear": 2,
+  "close": 3,
+  "watch": 13,
+  "delete": 30,
+  "disable": 1,
+  "dismiss": 4,
+  "merge": 2,
+  "revoke": 4,
+  "remove": 19,
+  "transfer": 2
+ },
+ "mutations": [
+  {
+   "mutation": "archiveProjectV2Item",
+   "kind": "archive",
+   "description": "Archives a ProjectV2Item",
+   "input": "ArchiveProjectV2ItemInput",
+   "category": "projects",
+   "note": null
+  },
+  {
+   "mutation": "archivePullRequest",
+   "kind": "archive",
+   "description": "Archive a pull request. Closes and marks the pull request as archived. Users with the triage role or higher can archive pull requests.",
+   "input": "ArchivePullRequestInput",
+   "category": "pulls",
+   "note": null
+  },
+  {
+   "mutation": "archiveRepository",
+   "kind": "archive",
+   "description": "Marks a repository as archived.",
+   "input": "ArchiveRepositoryInput",
+   "category": "repos",
+   "note": null
+  },
+  {
+   "mutation": "abortQueuedMigrations",
+   "kind": "cancel",
+   "description": "Clear all of a customer's queued migrations",
+   "input": "AbortQueuedMigrationsInput",
+   "category": "migrations",
+   "note": null
+  },
+  {
+   "mutation": "abortRepositoryMigration",
+   "kind": "cancel",
+   "description": "Abort a repository migration queued or in progress.",
+   "input": "AbortRepositoryMigrationInput",
+   "category": "migrations",
+   "note": null
+  },
+  {
+   "mutation": "cancelEnterpriseAdminInvitation",
+   "kind": "cancel",
+   "description": "Cancels a pending invitation for an administrator to join an enterprise.",
+   "input": "CancelEnterpriseAdminInvitationInput",
+   "category": "enterprise-admin",
+   "note": null
+  },
+  {
+   "mutation": "cancelEnterpriseMemberInvitation",
+   "kind": "cancel",
+   "description": "Cancels a pending invitation for an unaffiliated member to join an enterprise.",
+   "input": "CancelEnterpriseMemberInvitationInput",
+   "category": "enterprise-admin",
+   "note": null
+  },
+  {
+   "mutation": "cancelSponsorship",
+   "kind": "cancel",
+   "description": "Cancel an active sponsorship.",
+   "input": "CancelSponsorshipInput",
+   "category": "sponsors",
+   "note": null
+  },
+  {
+   "mutation": "clearLabelsFromLabelable",
+   "kind": "clear",
+   "description": "Clears all labels from a labelable object.",
+   "input": "ClearLabelsFromLabelableInput",
+   "category": "issues",
+   "note": null
+  },
+  {
+   "mutation": "clearProjectV2ItemFieldValue",
+   "kind": "clear",
+   "description": "This mutation clears the value of a field for an item in a Project. Currently only text, number, date, assignees, labels, single-select, multi-select, iteration and milestone fields are supported.",
+   "input": "ClearProjectV2ItemFieldValueInput",
+   "category": "projects",
+   "note": null
+  },
+  {
+   "mutation": "closeDiscussion",
+   "kind": "close",
+   "description": "Close a discussion.",
+   "input": "CloseDiscussionInput",
+   "category": "discussions",
+   "note": null
+  },
+  {
+   "mutation": "closeIssue",
+   "kind": "close",
+   "description": "Close an issue.",
+   "input": "CloseIssueInput",
+   "category": "issues",
+   "note": null
+  },
+  {
+   "mutation": "closePullRequest",
+   "kind": "close",
+   "description": "Close a pull request.",
+   "input": "ClosePullRequestInput",
+   "category": "pulls",
+   "note": null
+  },
+  {
+   "mutation": "deleteBranchProtectionRule",
+   "kind": "delete",
+   "description": "Delete a branch protection rule",
+   "input": "DeleteBranchProtectionRuleInput",
+   "category": "branches",
+   "note": null
+  },
+  {
+   "mutation": "deleteDeployment",
+   "kind": "delete",
+   "description": "Deletes a deployment.",
+   "input": "DeleteDeploymentInput",
+   "category": "deployments",
+   "note": null
+  },
+  {
+   "mutation": "deleteDiscussion",
+   "kind": "delete",
+   "description": "Delete a discussion and all of its replies.",
+   "input": "DeleteDiscussionInput",
+   "category": "discussions",
+   "note": null
+  },
+  {
+   "mutation": "deleteDiscussionComment",
+   "kind": "delete",
+   "description": "Delete a discussion comment. If it has replies, wipe it instead.",
+   "input": "DeleteDiscussionCommentInput",
+   "category": "discussions",
+   "note": null
+  },
+  {
+   "mutation": "deleteEnvironment",
+   "kind": "delete",
+   "description": "Deletes an environment",
+   "input": "DeleteEnvironmentInput",
+   "category": "deployments",
+   "note": null
+  },
+  {
+   "mutation": "deleteIpAllowListEntry",
+   "kind": "delete",
+   "description": "Deletes an IP allow list entry.",
+   "input": "DeleteIpAllowListEntryInput",
+   "category": "enterprise-admin",
+   "note": null
+  },
+  {
+   "mutation": "deleteIssue",
+   "kind": "delete",
+   "description": "Deletes an Issue object.",
+   "input": "DeleteIssueInput",
+   "category": "issues",
+   "note": null
+  },
+  {
+   "mutation": "deleteIssueComment",
+   "kind": "delete",
+   "description": "Deletes an IssueComment object.",
+   "input": "DeleteIssueCommentInput",
+   "category": "issues",
+   "note": null
+  },
+  {
+   "mutation": "deleteIssueField",
+   "kind": "delete",
+   "description": "Deletes an issue field.",
+   "input": "DeleteIssueFieldInput",
+   "category": "issues",
+   "note": null
+  },
+  {
+   "mutation": "deleteIssueFieldValue",
+   "kind": "delete",
+   "description": "Deletes an issue field value from an issue.",
+   "input": "DeleteIssueFieldValueInput",
+   "category": "issues",
+   "note": null
+  },
+  {
+   "mutation": "deleteIssueType",
+   "kind": "delete",
+   "description": "Delete an issue type",
+   "input": "DeleteIssueTypeInput",
+   "category": "issues",
+   "note": null
+  },
+  {
+   "mutation": "deleteLabel",
+   "kind": "delete",
+   "description": "Deletes a label.",
+   "input": "DeleteLabelInput",
+   "category": "issues",
+   "note": null
+  },
+  {
+   "mutation": "deleteLinkedBranch",
+   "kind": "delete",
+   "description": "Unlink a branch from an issue.",
+   "input": "DeleteLinkedBranchInput",
+   "category": "issues",
+   "note": null
+  },
+  {
+   "mutation": "deletePackageVersion",
+   "kind": "delete",
+   "description": "Delete a package version.",
+   "input": "DeletePackageVersionInput",
+   "category": "packages",
+   "note": null
+  },
+  {
+   "mutation": "deleteProject",
+   "kind": "delete",
+   "description": "Deletes a project.",
+   "input": "DeleteProjectInput",
+   "category": null,
+   "note": null
+  },
+  {
+   "mutation": "deleteProjectCard",
+   "kind": "delete",
+   "description": "Deletes a project card.",
+   "input": "DeleteProjectCardInput",
+   "category": null,
+   "note": null
+  },
+  {
+   "mutation": "deleteProjectColumn",
+   "kind": "delete",
+   "description": "Deletes a project column.",
+   "input": "DeleteProjectColumnInput",
+   "category": null,
+   "note": null
+  },
+  {
+   "mutation": "deleteProjectV2",
+   "kind": "delete",
+   "description": "Delete a project.",
+   "input": "DeleteProjectV2Input",
+   "category": "projects",
+   "note": null
+  },
+  {
+   "mutation": "deleteProjectV2Field",
+   "kind": "delete",
+   "description": "Delete a project field.",
+   "input": "DeleteProjectV2FieldInput",
+   "category": "projects",
+   "note": null
+  },
+  {
+   "mutation": "deleteProjectV2Item",
+   "kind": "delete",
+   "description": "Deletes an item from a Project.",
+   "input": "DeleteProjectV2ItemInput",
+   "category": "projects",
+   "note": null
+  },
+  {
+   "mutation": "deleteProjectV2StatusUpdate",
+   "kind": "delete",
+   "description": "Deletes a project status update.",
+   "input": "DeleteProjectV2StatusUpdateInput",
+   "category": "projects",
+   "note": null
+  },
+  {
+   "mutation": "deleteProjectV2View",
+   "kind": "delete",
+   "description": "Deletes a view from a project.",
+   "input": "DeleteProjectV2ViewInput",
+   "category": "projects",
+   "note": null
+  },
+  {
+   "mutation": "deleteProjectV2Workflow",
+   "kind": "delete",
+   "description": "Deletes a project workflow.",
+   "input": "DeleteProjectV2WorkflowInput",
+   "category": "projects",
+   "note": null
+  },
+  {
+   "mutation": "deletePullRequestReview",
+   "kind": "delete",
+   "description": "Deletes a pull request review.",
+   "input": "DeletePullRequestReviewInput",
+   "category": "pulls",
+   "note": null
+  },
+  {
+   "mutation": "deletePullRequestReviewComment",
+   "kind": "delete",
+   "description": "Deletes a pull request review comment.",
+   "input": "DeletePullRequestReviewCommentInput",
+   "category": "pulls",
+   "note": null
+  },
+  {
+   "mutation": "deleteRef",
+   "kind": "delete",
+   "description": "Delete a Git Ref.",
+   "input": "DeleteRefInput",
+   "category": "git",
+   "note": null
+  },
+  {
+   "mutation": "deleteRepositoryCustomProperty",
+   "kind": "delete",
+   "description": "Delete a repository custom property.",
+   "input": "DeleteRepositoryCustomPropertyInput",
+   "category": "repos",
+   "note": null
+  },
+  {
+   "mutation": "deleteRepositoryRuleset",
+   "kind": "delete",
+   "description": "Delete a repository ruleset",
+   "input": "DeleteRepositoryRulesetInput",
+   "category": "repos",
+   "note": null
+  },
+  {
+   "mutation": "deleteUserList",
+   "kind": "delete",
+   "description": "Deletes a user list.",
+   "input": "DeleteUserListInput",
+   "category": "users",
+   "note": null
+  },
+  {
+   "mutation": "deleteVerifiableDomain",
+   "kind": "delete",
+   "description": "Deletes a verifiable domain.",
+   "input": "DeleteVerifiableDomainInput",
+   "category": "orgs",
+   "note": null
+  },
+  {
+   "mutation": "disablePullRequestAutoMerge",
+   "kind": "disable",
+   "description": "Disable auto merge on the given pull request",
+   "input": "DisablePullRequestAutoMergeInput",
+   "category": "pulls",
+   "note": null
+  },
+  {
+   "mutation": "dismissPullRequestReview",
+   "kind": "dismiss",
+   "description": "Dismisses an approved or rejected pull request review.",
+   "input": "DismissPullRequestReviewInput",
+   "category": "pulls",
+   "note": null
+  },
+  {
+   "mutation": "dismissRepositoryVulnerabilityAlert",
+   "kind": "dismiss",
+   "description": "Dismisses the Dependabot alert.",
+   "input": "DismissRepositoryVulnerabilityAlertInput",
+   "category": "dependabot",
+   "note": null
+  },
+  {
+   "mutation": "rejectDeployments",
+   "kind": "dismiss",
+   "description": "Reject all pending deployments under one or more environments",
+   "input": "RejectDeploymentsInput",
+   "category": "deployments",
+   "note": null
+  },
+  {
+   "mutation": "rejectPendingIssueSuggestions",
+   "kind": "dismiss",
+   "description": "Rejects a batch of pending issue suggestions on an issue atomically.",
+   "input": "RejectPendingIssueSuggestionsInput",
+   "category": "issues",
+   "note": null
+  },
+  {
+   "mutation": "mergeBranch",
+   "kind": "merge",
+   "description": "Merge a head into a branch.",
+   "input": "MergeBranchInput",
+   "category": "branches",
+   "note": null
+  },
+  {
+   "mutation": "mergePullRequest",
+   "kind": "merge",
+   "description": "Merge a pull request.  > [!NOTE] > We recommend using the [asynchronous merge REST API](${externalDocsUrl}/rest/pulls/pulls#merge-a-pull-request-asynchronously) instead. > This mutation does not support stacked pull requests.",
+   "input": "MergePullRequestInput",
+   "category": "pulls",
+   "note": null
+  },
+  {
+   "mutation": "removeAssigneesFromAssignable",
+   "kind": "remove",
+   "description": "Removes assignees from an assignable object.",
+   "input": "RemoveAssigneesFromAssignableInput",
+   "category": "issues",
+   "note": null
+  },
+  {
+   "mutation": "removeBlockedBy",
+   "kind": "remove",
+   "description": "Removes a 'blocked by' relationship from an issue.",
+   "input": "RemoveBlockedByInput",
+   "category": "issues",
+   "note": null
+  },
+  {
+   "mutation": "removeCloseIssueReferences",
+   "kind": "remove",
+   "description": "Removes one or more manually linked pull requests from an issue. Auto-detected closing references from pull request body keywords are not removed; edit the pull request body instead.",
+   "input": "RemoveCloseIssueReferencesInput",
+   "category": "issues",
+   "note": null
+  },
+  {
+   "mutation": "removeEnterpriseAdmin",
+   "kind": "remove",
+   "description": "Removes an administrator from the enterprise.",
+   "input": "RemoveEnterpriseAdminInput",
+   "category": "enterprise-admin",
+   "note": null
+  },
+  {
+   "mutation": "removeEnterpriseIdentityProvider",
+   "kind": "remove",
+   "description": "Removes the identity provider from an enterprise. Owners of enterprises both with and without Enterprise Managed Users may use this mutation.",
+   "input": "RemoveEnterpriseIdentityProviderInput",
+   "category": "enterprise-admin",
+   "note": null
+  },
+  {
+   "mutation": "removeEnterpriseMember",
+   "kind": "remove",
+   "description": "Completely removes a user from the enterprise asynchronously.",
+   "input": "RemoveEnterpriseMemberInput",
+   "category": "enterprise-admin",
+   "note": null
+  },
+  {
+   "mutation": "removeEnterpriseOrganization",
+   "kind": "remove",
+   "description": "Removes an organization from the enterprise",
+   "input": "RemoveEnterpriseOrganizationInput",
+   "category": "enterprise-admin",
+   "note": null
+  },
+  {
+   "mutation": "removeEnterpriseSupportEntitlement",
+   "kind": "remove",
+   "description": "Removes a support entitlement from an enterprise member.",
+   "input": "RemoveEnterpriseSupportEntitlementInput",
+   "category": "enterprise-admin",
+   "note": null
+  },
+  {
+   "mutation": "removeLabelsFromLabelable",
+   "kind": "remove",
+   "description": "Removes labels from a Labelable object.",
+   "input": "RemoveLabelsFromLabelableInput",
+   "category": "issues",
+   "note": null
+  },
+  {
+   "mutation": "removeOutsideCollaborator",
+   "kind": "remove",
+   "description": "Removes outside collaborator from all repositories in an organization.",
+   "input": "RemoveOutsideCollaboratorInput",
+   "category": "orgs",
+   "note": null
+  },
+  {
+   "mutation": "removePullRequestCreationCapBypassUsers",
+   "kind": "remove",
+   "description": "Remove users from the pull request creation cap bypass list. Only users with maintainer permissions can manage the bypass list.",
+   "input": "RemovePullRequestCreationCapBypassUsersInput",
+   "category": "pulls",
+   "note": null
+  },
+  {
+   "mutation": "removeReaction",
+   "kind": "remove",
+   "description": "Removes a reaction from a subject.",
+   "input": "RemoveReactionInput",
+   "category": "reactions",
+   "note": null
+  },
+  {
+   "mutation": "removeRelatesTo",
+   "kind": "remove",
+   "description": "Removes a 'relates to' relationship between two issues.",
+   "input": "RemoveRelatesToInput",
+   "category": "issues",
+   "note": null
+  },
+  {
+   "mutation": "removeStar",
+   "kind": "remove",
+   "description": "Removes a star from a Starrable.",
+   "input": "RemoveStarInput",
+   "category": "activity",
+   "note": null
+  },
+  {
+   "mutation": "removeSubIssue",
+   "kind": "remove",
+   "description": "Removes a sub-issue from a given issue",
+   "input": "RemoveSubIssueInput",
+   "category": "issues",
+   "note": null
+  },
+  {
+   "mutation": "removeUpvote",
+   "kind": "remove",
+   "description": "Remove an upvote to a discussion or discussion comment.",
+   "input": "RemoveUpvoteInput",
+   "category": "discussions",
+   "note": null
+  },
+  {
+   "mutation": "unlinkProjectV2FromRepository",
+   "kind": "remove",
+   "description": "Unlinks a project from a repository.",
+   "input": "UnlinkProjectV2FromRepositoryInput",
+   "category": "projects",
+   "note": null
+  },
+  {
+   "mutation": "unlinkProjectV2FromTeam",
+   "kind": "remove",
+   "description": "Unlinks a project to a team.",
+   "input": "UnlinkProjectV2FromTeamInput",
+   "category": "projects",
+   "note": null
+  },
+  {
+   "mutation": "unlinkRepositoryFromProject",
+   "kind": "remove",
+   "description": "Deletes a repository link from a project.",
+   "input": "UnlinkRepositoryFromProjectInput",
+   "category": null,
+   "note": null
+  },
+  {
+   "mutation": "regenerateEnterpriseIdentityProviderRecoveryCodes",
+   "kind": "revoke",
+   "description": "Regenerates the identity provider recovery codes for an enterprise",
+   "input": "RegenerateEnterpriseIdentityProviderRecoveryCodesInput",
+   "category": "enterprise-admin",
+   "note": null
+  },
+  {
+   "mutation": "regenerateVerifiableDomainToken",
+   "kind": "revoke",
+   "description": "Regenerates a verifiable domain's verification token.",
+   "input": "RegenerateVerifiableDomainTokenInput",
+   "category": "orgs",
+   "note": null
+  },
+  {
+   "mutation": "revokeEnterpriseOrganizationsMigratorRole",
+   "kind": "revoke",
+   "description": "Revoke the migrator role to a user for all organizations under an enterprise account.",
+   "input": "RevokeEnterpriseOrganizationsMigratorRoleInput",
+   "category": "enterprise-admin",
+   "note": null
+  },
+  {
+   "mutation": "revokeMigratorRole",
+   "kind": "revoke",
+   "description": "Revoke the migrator role from a user or a team.",
+   "input": "RevokeMigratorRoleInput",
+   "category": "migrations",
+   "note": null
+  },
+  {
+   "mutation": "transferEnterpriseOrganization",
+   "kind": "transfer",
+   "description": "Transfer an organization from one enterprise to another enterprise.",
+   "input": "TransferEnterpriseOrganizationInput",
+   "category": "enterprise-admin",
+   "note": null
+  },
+  {
+   "mutation": "transferIssue",
+   "kind": "transfer",
+   "description": "Transfer an issue to a different repository",
+   "input": "TransferIssueInput",
+   "category": "issues",
+   "note": null
+  },
+  {
+   "mutation": "createCommitOnBranch",
+   "kind": "watch",
+   "description": "Appends a commit to the given branch as the authenticated user.  This mutation creates a commit whose parent is the HEAD of the provided branch and also updates that branch to point to the new commit. It can be thought of as similar to `git commit`.  ### Locating a Branch  Commits are appended to a `branch` of type `Ref`. This must refer to a git branch (i.e.  the fully qualified path must begin with `refs/heads/`, although including this prefix is optional.  Callers may specify the `branch` to commit to either by its global node ID or by passing both of `repositoryNameWithOwner` and `refName`.  For more details see the documentation for `CommittableBranch`.  ### Describing Changes  `fileChanges` are specified as a `FilesChanges` object describing `FileAdditions` and `FileDeletions`.  Please see the documentation for `FileChanges` for more information on how to use this argument to describe any set of file changes.  ### Authorship  Similar to the web commit interface, this mutation does not support specifying the author or committer of the commit and will not add support for this in the future.  A commit created by a successful execution of this mutation will be authored by the owner of the credential which authenticates the API request.  The committer will be identical to that of commits authored using the web interface.  If you need full control over author and committer information, please use the Git Database REST API instead.  ### Commit Signing  Commits made using this mutation are automatically signed by GitHub if supported and will be marked as verified in the user interface.",
+   "input": "CreateCommitOnBranchInput",
+   "category": "commits",
+   "note": "writes to a branch; not destructive by itself",
+   "input_fields": [
+    "branch",
+    "clientMutationId",
+    "expectedHeadOid",
+    "fileChanges",
+    "message"
+   ]
+  },
+  {
+   "mutation": "inviteEnterpriseAdmin",
+   "kind": "watch",
+   "description": "Invite someone to become an administrator of the enterprise.",
+   "input": "InviteEnterpriseAdminInput",
+   "category": "enterprise-admin",
+   "note": "grants enterprise admin",
+   "input_fields": [
+    "clientMutationId",
+    "email",
+    "enterpriseId",
+    "invitee",
+    "role"
+   ]
+  },
+  {
+   "mutation": "updateBranchProtectionRule",
+   "kind": "watch",
+   "description": "Update a branch protection rule",
+   "input": "UpdateBranchProtectionRuleInput",
+   "category": "branches",
+   "note": "can weaken protection",
+   "input_fields": [
+    "allowsDeletions",
+    "allowsForcePushes",
+    "blocksCreations",
+    "branchProtectionRuleId",
+    "bypassForcePushActorIds",
+    "bypassPullRequestActorIds",
+    "clientMutationId",
+    "dismissesStaleReviews",
+    "isAdminEnforced",
+    "lockAllowsFetchAndMerge",
+    "lockBranch",
+    "pattern",
+    "pushActorIds",
+    "requireLastPushApproval",
+    "requiredApprovingReviewCount",
+    "requiredDeploymentEnvironments",
+    "requiredStatusCheckContexts",
+    "requiredStatusChecks",
+    "requiresApprovingReviews",
+    "requiresCodeOwnerReviews",
+    "requiresCommitSignatures",
+    "requiresConversationResolution",
+    "requiresDeployments",
+    "requiresLinearHistory",
+    "requiresStatusChecks",
+    "requiresStrictStatusChecks",
+    "restrictsPushes",
+    "restrictsReviewDismissals",
+    "reviewDismissalActorIds"
+   ]
+  },
+  {
+   "mutation": "updateEnterpriseAllowPrivateRepositoryForkingSetting",
+   "kind": "watch",
+   "description": "Sets whether private repository forks are enabled for an enterprise.",
+   "input": "UpdateEnterpriseAllowPrivateRepositoryForkingSettingInput",
+   "category": "enterprise-admin",
+   "note": "enterprise policy",
+   "input_fields": [
+    "clientMutationId",
+    "enterpriseId",
+    "policyValue",
+    "settingValue"
+   ]
+  },
+  {
+   "mutation": "updateEnterpriseMembersCanChangeRepositoryVisibilitySetting",
+   "kind": "watch",
+   "description": "Sets whether organization members with admin permissions on a repository can change repository visibility.",
+   "input": "UpdateEnterpriseMembersCanChangeRepositoryVisibilitySettingInput",
+   "category": "enterprise-admin",
+   "note": "enterprise policy",
+   "input_fields": [
+    "clientMutationId",
+    "enterpriseId",
+    "settingValue"
+   ]
+  },
+  {
+   "mutation": "updateEnterpriseMembersCanDeleteRepositoriesSetting",
+   "kind": "watch",
+   "description": "Sets the members can delete repositories setting for an enterprise.",
+   "input": "UpdateEnterpriseMembersCanDeleteRepositoriesSettingInput",
+   "category": "enterprise-admin",
+   "note": "enterprise policy on repo deletion",
+   "input_fields": [
+    "clientMutationId",
+    "enterpriseId",
+    "settingValue"
+   ]
+  },
+  {
+   "mutation": "updateIpAllowListEnabledSetting",
+   "kind": "watch",
+   "description": "Sets whether an IP allow list is enabled on an owner.",
+   "input": "UpdateIpAllowListEnabledSettingInput",
+   "category": "enterprise-admin",
+   "note": "can turn off IP allow list",
+   "input_fields": [
+    "clientMutationId",
+    "ownerId",
+    "settingValue"
+   ]
+  },
+  {
+   "mutation": "updateOrganizationAllowPrivateRepositoryForkingSetting",
+   "kind": "watch",
+   "description": "Sets whether private repository forks are enabled for an organization.",
+   "input": "UpdateOrganizationAllowPrivateRepositoryForkingSettingInput",
+   "category": "orgs",
+   "note": "org policy",
+   "input_fields": [
+    "clientMutationId",
+    "forkingEnabled",
+    "organizationId"
+   ]
+  },
+  {
+   "mutation": "updateRef",
+   "kind": "watch",
+   "description": "Update a Git Ref.",
+   "input": "UpdateRefInput",
+   "category": "git",
+   "note": "can force-move a ref (force: true)",
+   "input_fields": [
+    "clientMutationId",
+    "force",
+    "oid",
+    "refId"
+   ]
+  },
+  {
+   "mutation": "updateRefs",
+   "kind": "watch",
+   "description": "Creates, updates and/or deletes multiple refs in a repository.  This mutation takes a list of `RefUpdate`s and performs these updates on the repository. All updates are performed atomically, meaning that if one of them is rejected, no other ref will be modified.  `RefUpdate.beforeOid` specifies that the given reference needs to point to the given value before performing any updates. A value of `0000000000000000000000000000000000000000` can be used to verify that the references should not exist.  `RefUpdate.afterOid` specifies the value that the given reference will point to after performing all updates. A value of `0000000000000000000000000000000000000000` can be used to delete a reference.  If `RefUpdate.force` is set to `true`, a non-fast-forward updates for the given reference will be allowed.",
+   "input": "UpdateRefsInput",
+   "category": "git",
+   "note": "batch ref updates; can delete refs (all-zero afterOid) and force-move them",
+   "input_fields": [
+    "clientMutationId",
+    "refUpdates",
+    "repositoryId"
+   ]
+  },
+  {
+   "mutation": "updateRepository",
+   "kind": "watch",
+   "description": "Update information about a repository.",
+   "input": "UpdateRepositoryInput",
+   "category": "repos",
+   "note": "has no visibility field (checked); renames and turns features off",
+   "input_fields": [
+    "clientMutationId",
+    "description",
+    "hasDiscussionsEnabled",
+    "hasIssuesEnabled",
+    "hasProjectsEnabled",
+    "hasPullRequestsEnabled",
+    "hasSponsorshipsEnabled",
+    "hasWikiEnabled",
+    "homepageUrl",
+    "issueCreationPolicy",
+    "name",
+    "pullRequestCreationPolicy",
+    "repositoryId",
+    "template"
+   ]
+  },
+  {
+   "mutation": "updateRepositoryRuleset",
+   "kind": "watch",
+   "description": "Update a repository ruleset",
+   "input": "UpdateRepositoryRulesetInput",
+   "category": "repos",
+   "note": "can weaken rulesets",
+   "input_fields": [
+    "bypassActors",
+    "clientMutationId",
+    "conditions",
+    "enforcement",
+    "name",
+    "repositoryRulesetId",
+    "rules",
+    "target"
+   ]
+  },
+  {
+   "mutation": "updateTeamsRepository",
+   "kind": "watch",
+   "description": "Update team repository.",
+   "input": "UpdateTeamsRepositoryInput",
+   "category": "teams",
+   "note": "changes team permissions on repos",
+   "input_fields": [
+    "clientMutationId",
+    "permission",
+    "repositoryId",
+    "teamIds"
+   ]
+  }
+ ]
+}

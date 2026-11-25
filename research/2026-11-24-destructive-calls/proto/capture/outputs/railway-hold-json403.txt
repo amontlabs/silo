@@ -1,0 +1,5 @@
+$ RAILWAY_TOKEN=test-token-123 -- railway volume delete --volume vol-1 --yes
+> Select a volume pg-data
+Failed to get data from GraphQL response
+--- exit=1 seconds=2.247001866
+--- matching requests held: 1

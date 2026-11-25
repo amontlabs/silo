@@ -1,0 +1,7 @@
+[
+ {"method": "GET", "path": "^/api/v2/auth", "body": {"account_id": "u1", "auth_method": "api_key_user"}},
+ {"method": "GET", "path": "^/api/v2/users/me$", "body": {"id": "u1", "email": "alice@example.com", "login": "alice", "name": "Alice", "billing_account": {}, "auth_accounts": [], "projects_limit": 10, "branches_limit": 10, "max_autoscaling_limit": 4, "plan": "free"}},
+ {"method": "GET", "path": "/branches", "body": {"branches": [{"id": "br-main-123", "project_id": "proj-123", "name": "br-main", "default": false, "current_state": "ready", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"}], "annotations": {}}},
+ {"method": "DELETE", "path": "/branches/", "body": {"branch": {"id": "br-main-123", "project_id": "proj-123", "name": "br-main", "current_state": "ready", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"}, "operations": []}},
+ {"method": "DELETE", "path": "^/api/v2/projects/", "body": {"project": {"id": "proj-123", "name": "prod", "region_id": "aws-eu-central-1", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z", "platform_id": "aws", "pg_version": 17}}}
+]

@@ -1,0 +1,6 @@
+$ -- git push --force https://github.com/o/r.git main
+error: RPC failed; HTTP 403 curl 22 The requested URL returned error: 403
+send-pack: unexpected disconnect while reading sideband packet
+fatal: the remote end hung up unexpectedly
+Everything up-to-date
+--- exit=1 seconds=3.131838305

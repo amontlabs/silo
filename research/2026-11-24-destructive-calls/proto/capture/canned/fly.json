@@ -1,0 +1,7 @@
+[
+ {"method": "GET", "path": "^/v1/apps/my-app/machines/3d8d1", "body": {"id": "3d8d1", "name": "prod-db-1", "state": "started", "region": "cdg", "instance_id": "01H", "config": {"image": "flyio/postgres:17"}}},
+ {"method": "GET", "path": "^/v1/apps/my-app/volumes/vol_123", "body": {"id": "vol_123", "name": "pg_data", "state": "created", "size_gb": 10, "region": "cdg", "attached_machine_id": "3d8d1"}},
+ {"method": "GET", "path": "^/v1/apps/my-app(\\?|$)", "body": {"id": "my-app", "name": "my-app", "status": "deployed", "organization": {"name": "acme", "slug": "acme"}}},
+ {"method": "DELETE", "path": "/volumes/", "body": {"id": "vol_123", "name": "pg_data", "state": "destroying"}},
+ {"method": "DELETE", "body": {"ok": true}}
+]

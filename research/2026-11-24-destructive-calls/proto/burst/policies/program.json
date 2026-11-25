@@ -1,0 +1,1 @@
+{"hold_ops": "[a-z0-9-]+:(Delete|Revoke|Detach|Terminate|Remove|Disassociate|Deregister|DELETE ).*|s3:PutBucketVersioning", "group": "program", "window": 3, "join_while_shown": true, "retry_join": true, "retry_window": 120, "answer_after": 8, "answer": "yes", "hold_limit": 90}

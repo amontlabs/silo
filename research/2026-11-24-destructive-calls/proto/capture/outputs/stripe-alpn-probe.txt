@@ -1,0 +1,5 @@
+$ STRIPE_API_KEY=sk_test_fake123 -- stripe customers delete cus_123 --confirm
+This command will be executed on the account with the following details:
+> Mode: Test
+{}
+--- exit=0 seconds=.256293580

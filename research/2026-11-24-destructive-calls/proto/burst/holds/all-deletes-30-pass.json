@@ -1,0 +1,1 @@
+{"rules": [{"op": "[a-z0-9]+:(Delete|Revoke|Detach|Terminate|Remove)[A-Za-z]*", "seconds": 30, "then": "pass"}]}

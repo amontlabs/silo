@@ -1,0 +1,17 @@
+{
+  "name": "Destructive calls held for your yes",
+  "what": "A set of rules you can switch on reads the requests a computer sends to the APIs agents reach most, such as Railway, Vercel, Fly, Supabase, Neon, AWS, Google Cloud, Cloudflare, Stripe and GitHub. It holds each call that deletes data, moves money or makes something public, whatever tool sends it. The ask says what the call does to which resource, and what the provider can bring back. The agent gets the refusal in the provider's own error form, and each hold ends before the program that sent it gives up by itself.",
+  "needs": [
+    "worst-case-and-rule-sets",
+    "held-requests-and-asks",
+    "rule-sets",
+    "control-plane-hosts-read",
+    "operation-of-a-request",
+    "outcome-of-a-call",
+    "asks-for-a-burst"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The costliest incidents with agents are deletions through an API the agent was allowed to reach, and a checkpoint of the computer brings none of them back."
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "asks": "What does a set of rules say a destructive call does, and which ones does it hold?",
+  "answer": "Each operation the set lists names its outcome. Gone: data is lost and the provider cannot bring it back. Recoverable: the provider can bring it back, and the set says how and for how long. Outage: nothing is lost, but something stops working. Money: it moves money or reaches people outside. Exposed: it makes something readable by anyone, which cannot be taken back once someone has copied it. The set holds every call that is gone, recoverable, money or exposed, and every call that turns off a protection the provider offers, such as deletion protection or a final snapshot. An outage raises an alert and passes. The ask shows the outcome, and what the provider says brings the thing back, as the provider's word.",
+  "needs": [
+    "operation-of-a-request",
+    "kinds-of-action"
+  ]
+}

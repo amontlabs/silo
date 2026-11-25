@@ -1,0 +1,3 @@
+$ GH_TOKEN=test-token-123 -- gh api -X DELETE repos/o/r/git/refs/heads/feature
+{"message":"Held by Silo and not answered: deleting volume X needs your yes.","documentation_url":"https://silo.example/held"}gh: Held by Silo and not answered: deleting volume X needs your yes. (HTTP 403)
+--- exit=1 seconds=2.060242086

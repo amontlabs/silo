@@ -1,0 +1,1 @@
+{"rules": [{"op": "s3:DeleteObject", "seconds": 30, "then": "403", "times": 1}]}

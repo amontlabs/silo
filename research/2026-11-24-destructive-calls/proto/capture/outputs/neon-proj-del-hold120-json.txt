@@ -1,0 +1,3 @@
+$ NEON_API_KEY=test-token-123 -- neonctl projects delete proj-123 --output json
+ERROR: Request timed out
+--- exit=1 seconds=60.805156389

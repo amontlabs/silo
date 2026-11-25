@@ -1,0 +1,8 @@
+{
+  "asks": "Does the boundary read the traffic to the hosts a set of rules names by what each request does?",
+  "answer": "Yes, as it reads a registry host that a rule on package age names (`registry-traffic-read`). For each host that a set of rules switched on for a computer names by operation, the boundary ends the encrypted connection, whether or not Silo holds a secret for that host, and reads each request. A connection to such a host that the boundary cannot read, because a program inside does not trust Silo's certificate or uses a transport the boundary does not end, fails, and nothing reaches the host.",
+  "needs": [
+    "ending-the-encrypted-connection",
+    "registry-traffic-read"
+  ]
+}

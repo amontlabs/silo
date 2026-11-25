@@ -1,0 +1,143 @@
+[
+ {
+  "method": "GET",
+  "path": "^/v\\d+/teams/(acme|team_1)",
+  "body": {
+   "id": "team_1",
+   "slug": "acme",
+   "name": "Acme"
+  }
+ },
+ {
+  "method": "GET",
+  "path": "custom-environments",
+  "body": {
+   "environments": []
+  }
+ },
+ {
+  "method": "GET",
+  "path": "^/v2/user",
+  "body": {
+   "user": {
+    "id": "u1",
+    "uid": "u1",
+    "username": "alice",
+    "email": "alice@example.com",
+    "name": "Alice",
+    "defaultTeamId": null,
+    "version": "northstar",
+    "softBlock": null
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "^/v2/teams",
+  "body": {
+   "teams": [],
+   "pagination": {
+    "count": 0,
+    "next": null,
+    "prev": null
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "^/v\\d+/projects/prj_1(\\?|$)",
+  "body": {
+   "id": "prj_1",
+   "name": "my-app",
+   "accountId": "u1",
+   "createdAt": 1700000000000,
+   "updatedAt": 1700000000000,
+   "env": [
+    {
+     "id": "env_1",
+     "key": "DATABASE_URL",
+     "type": "encrypted",
+     "target": [
+      "production"
+     ],
+     "createdAt": 1700000000000
+    }
+   ]
+  }
+ },
+ {
+  "method": "GET",
+  "path": "^/v\\d+/projects/my-app",
+  "body": {
+   "id": "prj_1",
+   "name": "my-app",
+   "accountId": "u1",
+   "createdAt": 1700000000000,
+   "updatedAt": 1700000000000,
+   "env": [
+    {
+     "id": "env_1",
+     "key": "DATABASE_URL",
+     "type": "encrypted",
+     "target": [
+      "production"
+     ],
+     "createdAt": 1700000000000
+    }
+   ]
+  }
+ },
+ {
+  "method": "GET",
+  "path": "^/v\\d+/projects/[^/]+/env",
+  "body": {
+   "envs": [
+    {
+     "id": "env_1",
+     "key": "DATABASE_URL",
+     "type": "encrypted",
+     "target": [
+      "production"
+     ],
+     "createdAt": 1700000000000,
+     "updatedAt": 1700000000000
+    }
+   ]
+  }
+ },
+ {
+  "method": "GET",
+  "path": "^/v\\d+/(now/)?deployments",
+  "body": {
+   "deployments": [
+    {
+     "uid": "dpl_1",
+     "url": "my-app-abc.vercel.app",
+     "name": "my-app",
+     "state": "READY",
+     "created": 1700000000000,
+     "target": "production"
+    }
+   ],
+   "pagination": {
+    "count": 1,
+    "next": null
+   }
+  }
+ },
+ {
+  "method": "GET",
+  "path": "^/v\\d+/aliases",
+  "body": {
+   "aliases": [],
+   "pagination": {
+    "count": 0,
+    "next": null
+   }
+  }
+ },
+ {
+  "method": "DELETE",
+  "body": {}
+ }
+]

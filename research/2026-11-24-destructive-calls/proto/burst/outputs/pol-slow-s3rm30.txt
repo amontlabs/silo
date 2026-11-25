@@ -1,0 +1,32 @@
+delete: s3://prod-backups/db/part-10.dump
+delete: s3://prod-backups/db/part-07.dump
+delete: s3://prod-backups/db/part-08.dump
+delete: s3://prod-backups/db/part-03.dump
+delete: s3://prod-backups/db/part-05.dump
+delete: s3://prod-backups/db/part-06.dump
+delete: s3://prod-backups/db/part-04.dump
+delete: s3://prod-backups/db/part-01.dump
+delete: s3://prod-backups/db/part-02.dump
+delete: s3://prod-backups/db/part-09.dump
+delete: s3://prod-backups/db/part-24.dump
+delete: s3://prod-backups/db/part-12.dump
+delete: s3://prod-backups/db/part-19.dump
+delete: s3://prod-backups/db/part-11.dump
+delete: s3://prod-backups/db/part-13.dump
+delete: s3://prod-backups/db/part-21.dump
+delete: s3://prod-backups/db/part-22.dump
+delete: s3://prod-backups/db/part-14.dump
+delete: s3://prod-backups/db/part-20.dump
+delete: s3://prod-backups/db/part-23.dump
+delete: s3://prod-backups/db/part-27.dump
+delete: s3://prod-backups/db/part-29.dump
+delete: s3://prod-backups/db/part-30.dump
+delete: s3://prod-backups/db/part-18.dump
+delete: s3://prod-backups/db/part-25.dump
+delete: s3://prod-backups/db/part-15.dump
+delete: s3://prod-backups/db/part-17.dump
+delete: s3://prod-backups/db/part-16.dump
+delete: s3://prod-backups/db/part-28.dump
+delete: s3://prod-backups/db/part-26.dump
+
+[exit 0 after 219.8 s]

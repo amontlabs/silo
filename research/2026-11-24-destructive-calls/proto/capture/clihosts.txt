@@ -1,0 +1,11 @@
+127.0.0.2 git
+127.0.0.3 gh
+127.0.0.4 aws
+127.0.0.5 railway
+127.0.0.6 vercel
+127.0.0.7 fly
+127.0.0.8 wrangler
+127.0.0.9 stripe
+127.0.0.10 supabase
+127.0.0.11 neon
+127.0.0.12 heroku

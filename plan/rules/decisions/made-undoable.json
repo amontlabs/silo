@@ -1,0 +1,9 @@
+{
+  "asks": "May Silo make a destructive call undoable before it lets the call pass?",
+  "answer": "Yes, when the set of rules for that host knows a way, and only on your yes or a rule you set. The ask then offers a third answer beside yes and no: yes, made undoable. Silo either sends the request changed as the set says, so that the provider keeps its own way back, such as a final snapshot of a database, or first makes the copy the set names, with the same secret, waits for it to exist, and only then lets the request pass. The record keeps the request as the agent sent it and what Silo sent. Making a call undoable is granting, not protective: a wrong one costs money and keeps data you meant to erase, so a precaution never does it. A change that can only make the provider refuse more, such as a limit on how many rows a delete may touch, is protective.",
+  "needs": [
+    "outcome-of-a-call",
+    "kinds-of-action",
+    "what-silo-changes-in-traffic"
+  ]
+}

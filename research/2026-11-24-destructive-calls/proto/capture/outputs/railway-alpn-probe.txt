@@ -1,0 +1,4 @@
+$ RAILWAY_TOKEN=test-token-123 -- railway volume delete --volume vol-1 --yes
+> Select a volume pg-data
+Volume "pg-data" deleted
+--- exit=0 seconds=.255928431

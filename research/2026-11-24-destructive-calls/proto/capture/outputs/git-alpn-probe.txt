@@ -1,0 +1,3 @@
+$ -- git push --force https://github.com/o/r.git main
+fatal: unable to access 'https://github.com/o/r.git/': getpeername() failed with errno 107: Transport endpoint is not connected
+--- exit=128 seconds=.049196561
