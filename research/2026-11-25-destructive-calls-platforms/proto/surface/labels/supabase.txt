@@ -1,0 +1,98 @@
+# Supabase Management API (api.supabase.com), from https://api.supabase.com/api/v1-json, labelled by hand on 2026-11-25.
+# Key: METHOD path. See ../label.md.
+PATCH /v1/branches/{branch_id_or_ref} either
+DELETE /v1/branches/{branch_id_or_ref} hold:gone
+POST /v1/branches/{branch_id_or_ref}/merge hold:gone applies the branch's migrations to production
+POST /v1/branches/{branch_id_or_ref}/push deploy
+POST /v1/branches/{branch_id_or_ref}/reset hold:gone
+POST /v1/branches/{branch_id_or_ref}/restore allow undoes a scheduled deletion
+POST /v1/oauth/revoke hold:outage
+POST /v1/oauth/token allow
+POST /v1/organizations allow
+POST /v1/organizations/{slug}/project-claim/{token} either
+POST /v1/projects either a new project is billed
+DELETE /v1/projects/{ref} hold:gone
+PATCH /v1/projects/{ref} allow name only
+PATCH /v1/projects/{ref}/actions/{run_id}/status allow
+POST /v1/projects/{ref}/analytics/endpoints/logs allow a read sent as POST
+POST /v1/projects/{ref}/api-keys hold:exposed mints a key
+PUT /v1/projects/{ref}/api-keys/legacy hold:outage disables anon and service_role keys
+PATCH /v1/projects/{ref}/api-keys/{id} either
+DELETE /v1/projects/{ref}/api-keys/{id} hold:outage
+PATCH /v1/projects/{ref}/billing/addons hold:money
+DELETE /v1/projects/{ref}/billing/addons/{addon_variant} hold:outage downsizes compute or drops PITR
+POST /v1/projects/{ref}/branches either a branch is billed
+DELETE /v1/projects/{ref}/branches hold:gone deletes every preview branch
+POST /v1/projects/{ref}/claim-token hold:exposed lets another org claim the project
+DELETE /v1/projects/{ref}/claim-token allow
+POST /v1/projects/{ref}/cli/login-role either a temporary database login
+DELETE /v1/projects/{ref}/cli/login-role allow
+PATCH /v1/projects/{ref}/config/auth either can open sign-ups or switch off checks
+POST /v1/projects/{ref}/config/auth/signing-keys allow standby key
+POST /v1/projects/{ref}/config/auth/signing-keys/legacy either
+DELETE /v1/projects/{ref}/config/auth/signing-keys/{id} hold:outage
+PATCH /v1/projects/{ref}/config/auth/signing-keys/{id} hold:outage revoking a key logs every user out
+POST /v1/projects/{ref}/config/auth/sso/providers hold:exposed
+PUT /v1/projects/{ref}/config/auth/sso/providers/{provider_id} hold:exposed
+DELETE /v1/projects/{ref}/config/auth/sso/providers/{provider_id} hold:outage
+POST /v1/projects/{ref}/config/auth/third-party-auth hold:exposed
+DELETE /v1/projects/{ref}/config/auth/third-party-auth/{tpa_id} hold:outage
+PATCH /v1/projects/{ref}/config/database/pooler either
+PUT /v1/projects/{ref}/config/database/postgres either restarts the database
+PATCH /v1/projects/{ref}/config/database/postgres either restarts the database
+POST /v1/projects/{ref}/config/disk either costs more, cannot shrink
+PATCH /v1/projects/{ref}/config/realtime either
+POST /v1/projects/{ref}/config/realtime/shutdown hold:outage
+PATCH /v1/projects/{ref}/config/storage either
+DELETE /v1/projects/{ref}/custom-hostname hold:outage
+POST /v1/projects/{ref}/custom-hostname/activate either
+POST /v1/projects/{ref}/custom-hostname/initialize allow
+POST /v1/projects/{ref}/custom-hostname/reverify allow
+POST /v1/projects/{ref}/database/backups/restore hold:gone replaces the database with the backup
+POST /v1/projects/{ref}/database/backups/restore-pitr hold:gone same
+POST /v1/projects/{ref}/database/backups/restore-point allow
+PATCH /v1/projects/{ref}/database/backups/schedule allow
+POST /v1/projects/{ref}/database/backups/undo hold:gone everything after the restore point
+POST /v1/projects/{ref}/database/jit hold:exposed
+PUT /v1/projects/{ref}/database/jit hold:exposed
+POST /v1/projects/{ref}/database/jit/invite hold:exposed an outside user
+POST /v1/projects/{ref}/database/jit/invite/accept allow
+DELETE /v1/projects/{ref}/database/jit/invite/{invite_id} allow
+DELETE /v1/projects/{ref}/database/jit/{user_id} either
+POST /v1/projects/{ref}/database/migrations cond SQL decides
+PUT /v1/projects/{ref}/database/migrations allow recorded, not applied
+DELETE /v1/projects/{ref}/database/migrations hold:gone rollback runs down migrations
+PATCH /v1/projects/{ref}/database/migrations/{version} either
+PATCH /v1/projects/{ref}/database/password hold:outage every client using the old password stops
+POST /v1/projects/{ref}/database/query cond SQL decides
+POST /v1/projects/{ref}/database/query/read-only allow runs as supabase_read_only_user
+POST /v1/projects/{ref}/database/webhooks/enable allow
+POST /v1/projects/{ref}/functions deploy
+PUT /v1/projects/{ref}/functions deploy
+DELETE /v1/projects/{ref}/functions hold:gone every Edge Function
+POST /v1/projects/{ref}/functions/deploy deploy
+PATCH /v1/projects/{ref}/functions/{function_slug} deploy
+DELETE /v1/projects/{ref}/functions/{function_slug} hold:gone
+PUT /v1/projects/{ref}/jit-access either
+DELETE /v1/projects/{ref}/network-bans either lifts bans
+POST /v1/projects/{ref}/network-bans/retrieve allow a read sent as POST
+POST /v1/projects/{ref}/network-bans/retrieve/enriched allow a read sent as POST
+PATCH /v1/projects/{ref}/network-restrictions hold:exposed can open the database to any address
+POST /v1/projects/{ref}/network-restrictions/apply hold:exposed same
+POST /v1/projects/{ref}/network-restrictions/review either
+POST /v1/projects/{ref}/pause hold:outage
+PUT /v1/projects/{ref}/pgsodium hold:gone "can cause all data encrypted with the older key to become inaccessible"
+PATCH /v1/projects/{ref}/postgrest hold:exposed can expose more schemas through the data API
+POST /v1/projects/{ref}/read-replicas/remove hold:outage
+POST /v1/projects/{ref}/read-replicas/setup either billed
+POST /v1/projects/{ref}/readonly/temporary-disable either lifts a safety Supabase set because the disk is full
+POST /v1/projects/{ref}/restart hold:outage
+POST /v1/projects/{ref}/restore allow unpauses
+POST /v1/projects/{ref}/restore/cancel either
+POST /v1/projects/{ref}/secrets either overwrites values
+DELETE /v1/projects/{ref}/secrets hold:gone
+PUT /v1/projects/{ref}/ssl-enforcement hold:exposed can switch SSL off
+POST /v1/projects/{ref}/upgrade hold:outage Postgres major upgrade, downtime, no downgrade
+DELETE /v1/projects/{ref}/vanity-subdomain hold:outage
+POST /v1/projects/{ref}/vanity-subdomain/activate either
+POST /v1/projects/{ref}/vanity-subdomain/check-availability allow

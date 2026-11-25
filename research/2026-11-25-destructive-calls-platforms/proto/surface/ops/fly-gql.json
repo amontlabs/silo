@@ -1,0 +1,746 @@
+[
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "addAllowedReplaySourceOrgs",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "addCertificate",
+"args": [
+"appId",
+"hostname"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "addWireGuardPeer",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "allocateEgressIpAddress",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "allocateIpAddress",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "attachPostgresCluster",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "cancelBuild",
+"args": [
+"buildId"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "checkCertificate",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "createAddOn",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "createApp",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "createBuild",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "createCheckJob",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "createCheckJobRun",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "createDoctorReport",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "createDoctorUrl",
+"args": [],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "createExtensionTosAgreement",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "createLimitedAccessToken",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "createOrganization",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "createOrganizationInvitation",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "createPostgresClusterDatabase",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "createPostgresClusterUser",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "createRelease",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "createTemplateDeployment",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "createThirdPartyConfiguration",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "deleteAddOn",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "deleteApp",
+"args": [
+"appId"
+],
+"summary": "Delete an app"
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "deleteCertificate",
+"args": [
+"appId",
+"hostname"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "deleteDeploymentSource",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "deleteLimitedAccessToken",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "deleteOrganization",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "deleteOrganizationInvitation",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "deleteOrganizationMembership",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "deleteRemoteBuilder",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "deleteThirdPartyConfiguration",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "detachPostgresCluster",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "dummyWireGuardPeer",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "enablePostgresConsul",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "ensureDepotRemoteBuilder",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "ensureMachineRemoteBuilder",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "establishSshKey",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "finishBuild",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "grantPostgresClusterUserAccess",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "issueCertificate",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "logOut",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "moveApp",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "releaseEgressIpAddress",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "releaseIpAddress",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "removeAllowedReplaySourceOrgs",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "removeWireGuardPeer",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "resetAddOnPassword",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "revokePostgresClusterUserAccess",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "saveDeploymentSource",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "setAllowAllCrossNetworkReplays",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "setSecrets",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "startBuild",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "unsetSecrets",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "updateAddOn",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "updateOrganizationMembership",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "updateRelease",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "updateRemoteBuilder",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "updateThirdPartyConfiguration",
+"args": [
+"input"
+],
+"summary": ""
+},
+{
+"provider": "fly-gql",
+"kind": "graphql",
+"host": "api.fly.io",
+"method": "POST",
+"path": "/graphql",
+"name": "validateWireGuardPeers",
+"args": [
+"input"
+],
+"summary": ""
+}
+]

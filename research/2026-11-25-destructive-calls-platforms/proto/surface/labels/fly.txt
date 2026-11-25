@@ -1,0 +1,56 @@
+# Fly Machines REST (api.machines.dev/v1), from fly-go v0.12.8 flaps/*.go, labelled by hand on 2026-11-25.
+CreateApp allow
+DeleteApp hold:gone
+Launch deploy
+Update deploy
+Start allow
+Stop hold:outage
+Restart either
+Destroy hold:gone
+Kill hold:outage POST .../signal with signal 9
+AcquireLease allow
+ReleaseLease allow
+Exec either runs a command in a production machine
+Cordon hold:outage takes the machine out of the proxy
+Uncordon allow
+SetMetadata either
+DeleteMetadata either
+Suspend hold:outage
+CreateVolume allow
+UpdateVolume either snapshot retention, auto-backup
+CreateVolumeSnapshot allow
+ExtendVolume either billed, cannot shrink
+DeleteVolume hold:recoverable Fly keeps a deleted volume's snapshot (#353 paas.md)
+SetAppSecret either overwrites one value
+DeleteAppSecret hold:gone
+UpdateAppSecrets cond null values delete
+SetSecretKey either
+GenerateSecretKey either
+DeleteSecretKey hold:gone
+EncryptSecretKey allow
+DecryptSecretKey allow
+SignSecretKey allow
+VerifySecretKey allow
+CreateACMECertificate allow
+CreateCustomCertificate allow
+CheckCertificate allow
+DeleteCertificate hold:outage
+DeleteACMECertificate hold:outage
+DeleteCustomCertificate hold:outage
+AssignIP either
+DeleteIPAssignment hold:outage
+CreateManagedPostgresCluster either billed
+DeleteManagedPostgresCluster hold:gone
+CreateManagedPostgresUser hold:exposed
+UpdateManagedPostgresUserRole hold:exposed
+RotateManagedPostgresUserPassword hold:outage
+DeleteManagedPostgresUser hold:outage
+CreateManagedPostgresDatabase allow
+CreateManagedPostgresBackup allow
+RestoreManagedPostgresCluster either fly-go does not say if it restores in place
+ForkManagedPostgresCluster allow
+EnableManagedPostgresExtension allow
+DisableManagedPostgresExtension hold:gone with force, objects that use it go
+CreateManagedPostgresAttachment allow
+DeleteManagedPostgresAttachment hold:outage
+UpdateManagedPostgresMaintenanceWindow allow

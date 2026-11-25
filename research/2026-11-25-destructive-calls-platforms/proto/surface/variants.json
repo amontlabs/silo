@@ -1,0 +1,68 @@
+{
+ "_about": "Bodies for operations whose effect depends on what they send (label cond). Each variant is labelled on its own; the operation itself is not counted.",
+ "railway mutation environmentPatchCommit": [
+  {"label": "hold:gone", "args": {"environmentId": "env_1", "patch": {"volumes": {"vol_9": {"isDeleted": true}}}}, "note": "deletes a volume"},
+  {"label": "allow", "args": {"environmentId": "env_1", "patch": {"services": {"svc_1": {"variables": {"X": {"value": "1"}}}}}}, "note": "sets a variable"}],
+ "railway mutation environmentStageChanges": [
+  {"label": "hold:gone", "args": {"environmentId": "env_1", "input": {"services": {"svc_1": {"isDeleted": true}}}}, "note": "stages a service delete"},
+  {"label": "allow", "args": {"environmentId": "env_1", "input": {"services": {"svc_1": {"variables": {"X": {"value": "1"}}}}}}, "note": "stages a variable"}],
+ "railway mutation projectUpdate": [
+  {"label": "hold:exposed", "args": {"id": "prj_1", "input": {"isPublic": true}}, "note": "makes the project public"},
+  {"label": "allow", "args": {"id": "prj_1", "input": {"description": "x"}}, "note": "description"}],
+ "railway mutation serviceInstanceUpdate": [
+  {"label": "hold:outage", "args": {"serviceId": "svc_1", "environmentId": "env_1", "input": {"numReplicas": 0}}, "note": "scales to zero"},
+  {"label": "allow", "args": {"serviceId": "svc_1", "environmentId": "env_1", "input": {"healthcheckPath": "/health"}}, "note": "health check path"}],
+ "railway mutation variableCollectionUpsert": [
+  {"label": "hold:gone", "args": {"input": {"projectId": "p", "environmentId": "e", "serviceId": "s", "replace": true, "variables": {"A": "1"}}}, "note": "replace: every other variable is deleted"},
+  {"label": "either", "args": {"input": {"projectId": "p", "environmentId": "e", "serviceId": "s", "variables": {"A": "1"}}}, "note": "upserts values"}],
+ "fly-gql mutation setSecrets": [
+  {"label": "hold:gone", "args": {"input": {"appId": "my-app", "secrets": [{"key": "A", "value": "1"}], "replaceAll": true}}, "note": "replaceAll deletes every other secret"},
+  {"label": "either", "args": {"input": {"appId": "my-app", "secrets": [{"key": "A", "value": "1"}]}}, "note": "sets a secret"}],
+ "fly POST /v1/apps/{app}/secrets": [
+  {"label": "hold:gone", "body": {"values": {"DATABASE_URL": null}}, "note": "a null value deletes the secret (fly-go UpdateAppSecrets)"},
+  {"label": "either", "body": {"values": {"A": "1"}}, "note": "sets a value"}],
+ "supabase POST /v1/projects/{ref}/database/query": [
+  {"label": "hold:gone", "body": {"query": "DROP TABLE users"}, "note": "DROP"},
+  {"label": "allow", "body": {"query": "select count(*) from users"}, "note": "SELECT"}],
+ "supabase POST /v1/projects/{ref}/database/migrations": [
+  {"label": "hold:gone", "body": {"query": "alter table users drop column email", "name": "m1"}, "note": "drops a column"},
+  {"label": "allow", "body": {"query": "create table t (id int)", "name": "m2"}, "note": "creates a table"}],
+ "vercel PATCH /v1/global-config/{edgeConfigId}/items": [
+  {"label": "hold:gone", "body": {"items": [{"operation": "delete", "key": "flag"}]}, "note": "deletes an item"},
+  {"label": "either", "body": {"items": [{"operation": "upsert", "key": "flag", "value": true}]}, "note": "upserts"}],
+ "vercel PATCH /v9/projects/{idOrName}": [
+  {"label": "hold:exposed", "body": {"ssoProtection": null}, "note": "removes Vercel Authentication from deployments"},
+  {"label": "hold:exposed", "body": {"passwordProtection": null}, "note": "removes password protection"},
+  {"label": "hold:exposed", "body": {"publicSource": true}, "note": "makes source and logs public"},
+  {"label": "allow", "body": {"name": "my-app-2"}, "note": "renames"},
+  {"label": "either", "body": {"buildCommand": "npm run build"}, "note": "build command"}],
+ "cloudflare POST /client/v4/accounts/{account_id}/d1/database/{database_id}/query": [
+  {"label": "hold:gone", "body": {"sql": "DROP TABLE users"}, "note": "DROP"},
+  {"label": "allow", "body": {"sql": "SELECT * FROM users LIMIT 5"}, "note": "SELECT"}],
+ "cloudflare POST /client/v4/accounts/{account_id}/d1/database/{database_id}/raw": [
+  {"label": "hold:gone", "body": {"sql": "DELETE FROM users"}, "note": "DELETE without WHERE"},
+  {"label": "allow", "body": {"sql": "SELECT 1"}, "note": "SELECT"}],
+ "cloudflare POST /client/v4/accounts/{account_id}/d1/database/{database_id}/import": [
+  {"label": "either", "body": {"action": "init", "etag": "abc"}, "note": "starts an import; the SQL file goes to an upload URL Silo does not see in this request"}],
+ "cloudflare PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/domains/managed": [
+  {"label": "hold:exposed", "body": {"enabled": true}, "note": "turns on public r2.dev access"},
+  {"label": "allow", "body": {"enabled": false}, "note": "turns it off"}],
+ "cloudflare PATCH /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances/{instance_id}/status": [
+  {"label": "hold:outage", "body": {"status": "terminate"}, "note": "terminate"},
+  {"label": "allow", "body": {"status": "resume"}, "note": "resume"}],
+ "cloudflare PATCH /client/v4/zones/{zone_id}": [
+  {"label": "hold:outage", "body": {"paused": true}, "note": "pauses Cloudflare for the zone"},
+  {"label": "allow", "body": {"vanity_name_servers": []}, "note": "vanity name servers"}],
+ "cloudflare POST /client/v4/zones/{zone_id}/dns_records/batch": [
+  {"label": "hold:outage", "body": {"deletes": [{"id": "rec_1"}]}, "note": "deletes a record"},
+  {"label": "hold:outage", "body": {"patches": [{"id": "rec_1", "content": "203.0.113.9"}]}, "note": "changes where a name points"},
+  {"label": "either", "body": {"posts": [{"type": "A", "name": "new.example.com", "content": "203.0.113.9"}]}, "note": "adds a record"}],
+ "cloudflare PATCH /client/v4/zones/{zone_id}/settings": [
+  {"label": "hold:exposed", "body": {"items": [{"id": "ssl", "value": "off"}]}, "note": "SSL off"},
+  {"label": "allow", "body": {"items": [{"id": "brotli", "value": "on"}]}, "note": "brotli"}],
+ "cloudflare PATCH /client/v4/zones/{zone_id}/settings/{setting_id}": [
+  {"label": "hold:exposed", "path": {"setting_id": "ssl"}, "body": {"value": "off"}, "note": "SSL off"},
+  {"label": "hold:exposed", "path": {"setting_id": "always_use_https"}, "body": {"value": "off"}, "note": "HTTPS redirect off"},
+  {"label": "hold:exposed", "path": {"setting_id": "security_level"}, "body": {"value": "essentially_off"}, "note": "security level off"},
+  {"label": "allow", "path": {"setting_id": "brotli"}, "body": {"value": "on"}, "note": "brotli"}]
+}

@@ -1,0 +1,497 @@
+[
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps",
+"name": "CreateApp",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "DELETE",
+"path": "/v1/apps/{app}",
+"name": "DeleteApp",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/machines",
+"name": "Launch",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/machines/{id}",
+"name": "Update",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/machines/{id}/start",
+"name": "Start",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/machines/{id}/stop",
+"name": "Stop",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/machines/{id}/restart",
+"name": "Restart",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "DELETE",
+"path": "/v1/apps/{app}/machines/{id}",
+"name": "Destroy",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/machines/{id}/signal",
+"name": "Kill",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/machines/{id}/lease",
+"name": "AcquireLease",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "DELETE",
+"path": "/v1/apps/{app}/machines/{id}/lease",
+"name": "ReleaseLease",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/machines/{id}/exec",
+"name": "Exec",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/machines/{id}/cordon",
+"name": "Cordon",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/machines/{id}/uncordon",
+"name": "Uncordon",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/machines/{id}/metadata/{key}",
+"name": "SetMetadata",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "DELETE",
+"path": "/v1/apps/{app}/machines/{id}/metadata/{key}",
+"name": "DeleteMetadata",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/machines/{id}/suspend",
+"name": "Suspend",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/volumes",
+"name": "CreateVolume",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "PUT",
+"path": "/v1/apps/{app}/volumes/{id}",
+"name": "UpdateVolume",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/volumes/{id}/snapshots",
+"name": "CreateVolumeSnapshot",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "PUT",
+"path": "/v1/apps/{app}/volumes/{id}/extend",
+"name": "ExtendVolume",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "DELETE",
+"path": "/v1/apps/{app}/volumes/{id}",
+"name": "DeleteVolume",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/secrets/{name}",
+"name": "SetAppSecret",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "DELETE",
+"path": "/v1/apps/{app}/secrets/{name}",
+"name": "DeleteAppSecret",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/secrets",
+"name": "UpdateAppSecrets",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/secretkeys/{name}",
+"name": "SetSecretKey",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/secretkeys/{name}/generate",
+"name": "GenerateSecretKey",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "DELETE",
+"path": "/v1/apps/{app}/secretkeys/{name}",
+"name": "DeleteSecretKey",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/secretkeys/{name}/encrypt",
+"name": "EncryptSecretKey",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/secretkeys/{name}/decrypt",
+"name": "DecryptSecretKey",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/secretkeys/{name}/sign",
+"name": "SignSecretKey",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/secretkeys/{name}/verify",
+"name": "VerifySecretKey",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/certificates/acme",
+"name": "CreateACMECertificate",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/certificates/custom",
+"name": "CreateCustomCertificate",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/certificates/{host}/check",
+"name": "CheckCertificate",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "DELETE",
+"path": "/v1/apps/{app}/certificates/{host}",
+"name": "DeleteCertificate",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "DELETE",
+"path": "/v1/apps/{app}/certificates/{host}/acme",
+"name": "DeleteACMECertificate",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "DELETE",
+"path": "/v1/apps/{app}/certificates/{host}/custom",
+"name": "DeleteCustomCertificate",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/apps/{app}/ip_assignments",
+"name": "AssignIP",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "DELETE",
+"path": "/v1/apps/{app}/ip_assignments/{ip}",
+"name": "DeleteIPAssignment",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/postgres",
+"name": "CreateManagedPostgresCluster",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "DELETE",
+"path": "/v1/postgres/{id}",
+"name": "DeleteManagedPostgresCluster",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/postgres/{id}/users",
+"name": "CreateManagedPostgresUser",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "PATCH",
+"path": "/v1/postgres/{id}/users/{user}",
+"name": "UpdateManagedPostgresUserRole",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/postgres/{id}/users/{user}/rotate_password",
+"name": "RotateManagedPostgresUserPassword",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "DELETE",
+"path": "/v1/postgres/{id}/users/{user}",
+"name": "DeleteManagedPostgresUser",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/postgres/{id}/databases",
+"name": "CreateManagedPostgresDatabase",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/postgres/{id}/backups",
+"name": "CreateManagedPostgresBackup",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/postgres/{id}/restore",
+"name": "RestoreManagedPostgresCluster",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/postgres/{id}/fork",
+"name": "ForkManagedPostgresCluster",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/postgres/{id}/databases/{db}/extensions",
+"name": "EnableManagedPostgresExtension",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "DELETE",
+"path": "/v1/postgres/{id}/databases/{db}/extensions/{name}",
+"name": "DisableManagedPostgresExtension",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "POST",
+"path": "/v1/postgres/{id}/attachments",
+"name": "CreateManagedPostgresAttachment",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "DELETE",
+"path": "/v1/postgres/{id}/attachments/{app}",
+"name": "DeleteManagedPostgresAttachment",
+"summary": ""
+},
+{
+"provider": "fly",
+"kind": "rest",
+"host": "api.machines.dev",
+"method": "PATCH",
+"path": "/v1/postgres/{id}/maintenance_window",
+"name": "UpdateManagedPostgresMaintenanceWindow",
+"summary": ""
+}
+]

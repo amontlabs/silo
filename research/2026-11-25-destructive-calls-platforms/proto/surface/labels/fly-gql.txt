@@ -1,0 +1,63 @@
+# Fly.io GraphQL mutations (api.fly.io/graphql), labelled by hand on 2026-11-25. See ../label.md.
+addAllowedReplaySourceOrgs either lets another org's traffic be replayed into the app
+addCertificate allow
+addWireGuardPeer hold:exposed a new way into the org's private network
+allocateEgressIpAddress allow
+allocateIpAddress either a public IP makes the app reachable
+attachPostgresCluster allow
+cancelBuild either
+checkCertificate allow
+createAddOn either a paid extension
+createApp allow
+createBuild deploy
+createCheckJob allow
+createCheckJobRun allow
+createDoctorReport allow
+createDoctorUrl allow
+createExtensionTosAgreement allow
+createLimitedAccessToken hold:exposed mints a credential
+createOrganization allow
+createOrganizationInvitation hold:exposed
+createPostgresClusterDatabase allow
+createPostgresClusterUser hold:exposed a new database login
+createRelease deploy
+createTemplateDeployment deploy
+createThirdPartyConfiguration allow
+deleteAddOn hold:gone the extension's data goes with it
+deleteApp hold:gone
+deleteCertificate hold:outage
+deleteDeploymentSource either
+deleteLimitedAccessToken hold:outage
+deleteOrganization hold:gone
+deleteOrganizationInvitation allow
+deleteOrganizationMembership hold:outage
+deleteRemoteBuilder either rebuilt on the next deploy
+deleteThirdPartyConfiguration either
+detachPostgresCluster hold:outage the app loses its DATABASE_URL
+dummyWireGuardPeer allow
+enablePostgresConsul allow
+ensureDepotRemoteBuilder allow
+ensureMachineRemoteBuilder allow
+establishSshKey either an SSH certificate for the org
+finishBuild deploy
+grantPostgresClusterUserAccess hold:exposed
+issueCertificate either
+logOut allow
+moveApp hold:exposed the app moves to another organization
+releaseEgressIpAddress hold:outage
+releaseIpAddress hold:outage
+removeAllowedReplaySourceOrgs either
+removeWireGuardPeer either
+resetAddOnPassword hold:outage
+revokePostgresClusterUserAccess hold:outage
+saveDeploymentSource deploy
+setAllowAllCrossNetworkReplays either
+setSecrets cond
+startBuild deploy
+unsetSecrets hold:gone
+updateAddOn either can change the plan
+updateOrganizationMembership hold:exposed role change
+updateRelease deploy
+updateRemoteBuilder allow
+updateThirdPartyConfiguration either
+validateWireGuardPeers allow
