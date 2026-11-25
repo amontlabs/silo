@@ -457,6 +457,7 @@
         "manifest-is-enforced",
         "recipe-names-its-needs",
         "extension-secrets",
+        "summary-reader-model",
         "extension-spend",
         "what-wakes-an-extension",
         "what-ships-with-silo",
