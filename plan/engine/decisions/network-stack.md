@@ -28,3 +28,22 @@ second is marked Notes.
 
 The same table puts model calls, secrets and budgets at the boundary on both systems. Those lines
 have their homes in the parts `boundary` and `traffic`.
+
+## A closed network with no stack
+
+Agent, 25 November 2026, from `research/2026-11-25-techniques-from-two-tools/`. A third option
+for the first build, between Apple's NAT and a patched gvproxy: main gets a network card whose
+other end, on the Mac, answers ARP for one router address and drops every other frame. Main has
+no route and no name server. The only way out is a proxy at `127.0.0.1:3128` in main, carried over
+vsock to Silo on the Mac, which checks each `CONNECT host:port` against the rules and looks the
+name up itself. A packet that does not go to the proxy goes nowhere, so every packet that leaves
+passes Silo, as the answer asks, with no stack to build or patch.
+
+Measured on Linux with a Unix socket in place of vsock: Claude Code worked through the proxy, each
+of its connections was logged by host name, and without the proxy settings it reached nothing.
+What it gives up: a program that ignores proxy settings, UDP (QUIC, DNS), ICMP and raw TCP to other
+ports get nothing, where Silo's stack would carry them under rules. An open-source tool already
+runs macOS 27 guests this way; a macOS guest needs the ARP answer, or it stays offline.
+
+Recommended for the first build over Apple's NAT: it is closed or allowlisted from the first day,
+and it does not wait on #359's test 07. Silo's full stack stays the answer for later.

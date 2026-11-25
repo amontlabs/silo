@@ -20,3 +20,11 @@ The options:
 
 Recommended: dollars everywhere, and the plan's share for the plan. One unit lets you compare
 conversations and computers, and the share tells you when the plan runs out.
+
+## A figure the computer wrote
+
+Agent, 25 November 2026, from `research/2026-11-25-techniques-from-two-tools/`. An open-source
+gateway once summed a cost found in a task's log, where the agent's own output was copied too. A
+forged line claiming $999,999 refused every task until it aged out. A cost an agent prints is the
+agent's claim: Silo shows it with the agent as its author, if at all, and never adds it to what
+Silo counted.
