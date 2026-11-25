@@ -1,0 +1,9 @@
+{"mount_two_checkpoints_s":.078589478}
+{"paths_seen":20262,"changed_by_run":20219,"put_back":20209,"removed":8,"shown_not_put_back":2,"find_s":1.15,"put_s":0.60,"applied":true}
+shown: proj/src/file3.c
+shown: proj/src/file7.c
+{"deps_back":true}
+{"later_edits_kept":true}
+{"run_new_files_removed":true}
+{"run_new_dirs_removed":true}
+{"later_new_file_kept":true}

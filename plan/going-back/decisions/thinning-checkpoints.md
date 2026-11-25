@@ -23,3 +23,27 @@ many recent moments and few old ones.
 
 That old automatic checkpoints are thinned, and that removing them really frees space, comes from
 the plan's notes. That a rule does it, on their age and number, is a proposal.
+
+## The rule run over 40 days, and what it costs in disk (24 November 2026)
+
+An agent's part, 24 November 2026, from `research/2026-11-24-checkpoint-engine/` (`ckpt thin`): 40
+simulated days of 10 hours of work, a checkpoint every 5 minutes, the rule as the answer gives it.
+
+- **Which checkpoint stays for an hour or a day.** The answer does not say. Keeping the oldest
+  still there makes thinning give the same result whether it runs every minute, once a day or after
+  a crash; a test checks this on 300 random histories. Keeping the newest would remove checkpoints
+  the rule wants later. The answer could say "the first of each hour and of each day".
+- **How many.** Without checkpoints at each turn: 71 kept at most, 12 removed in an hour at most.
+  With three turns a minute (`checkpoint-at-each-turn`): 504 kept and 233 removed in an hour. Each
+  removal made the computer's writes wait 0.08 to 0.19 s on XFS; on APFS that is a test for the Mac.
+- **How much disk.** Each daily checkpoint keeps its own copy of what the agents rewrote that day.
+  Under a model of an agent rewriting 2 GiB an hour into a working set of 4 to 16 GiB, the kept
+  checkpoints hold 247 to 413 GiB beyond the computer's disk with 30 days of dailies, and 72 to
+  105 GiB with 7. So on most Macs the disk limit, not the 30 days, decides how far back you can go.
+  The model's numbers are guesses until a Mac measures a real day of agents.
+
+A challenge to the answer, on that case: a Mac with 200 GB free cannot keep 30 days of dailies of
+a computer that rewrites 2 GiB an hour, so "one per day for the last 30 days" promises what the
+default limit takes away within a week or two. A proposal: the limit as a share of the free space,
+the Timeline showing how far back the kept checkpoints reach, and an alert when the limit removes
+a checkpoint younger than 30 days.

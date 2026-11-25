@@ -1,0 +1,12 @@
+{"daily_days":30,"days":40,"interval_s":300,"turns_per_min":0.0,"gib_per_h":0.5,"hot_gib":4,"taken":4800,"kept_now":48,"kept_max":71,"removed_max_per_hour":12,"kept_disk_gib":107.1}
+{"daily_days":7,"days":40,"interval_s":300,"turns_per_min":0.0,"gib_per_h":0.5,"hot_gib":4,"taken":4800,"kept_now":25,"kept_max":48,"removed_max_per_hour":12,"kept_disk_gib":27.1}
+{"daily_days":30,"days":40,"interval_s":300,"turns_per_min":0.0,"gib_per_h":0.5,"hot_gib":16,"taken":4800,"kept_now":48,"kept_max":71,"removed_max_per_hour":12,"kept_disk_gib":135.2}
+{"daily_days":7,"days":40,"interval_s":300,"turns_per_min":0.0,"gib_per_h":0.5,"hot_gib":16,"taken":4800,"kept_now":25,"kept_max":48,"removed_max_per_hour":12,"kept_disk_gib":32.3}
+{"daily_days":30,"days":40,"interval_s":300,"turns_per_min":0.0,"gib_per_h":2.0,"hot_gib":4,"taken":4800,"kept_now":48,"kept_max":71,"removed_max_per_hour":12,"kept_disk_gib":246.5}
+{"daily_days":7,"days":40,"interval_s":300,"turns_per_min":0.0,"gib_per_h":2.0,"hot_gib":4,"taken":4800,"kept_now":25,"kept_max":48,"removed_max_per_hour":12,"kept_disk_gib":72.2}
+{"daily_days":30,"days":40,"interval_s":300,"turns_per_min":0.0,"gib_per_h":2.0,"hot_gib":16,"taken":4800,"kept_now":48,"kept_max":71,"removed_max_per_hour":12,"kept_disk_gib":412.8}
+{"daily_days":7,"days":40,"interval_s":300,"turns_per_min":0.0,"gib_per_h":2.0,"hot_gib":16,"taken":4800,"kept_now":25,"kept_max":48,"removed_max_per_hour":12,"kept_disk_gib":105.3}
+{"daily_days":30,"days":40,"interval_s":300,"turns_per_min":0.0,"gib_per_h":5.0,"hot_gib":4,"taken":4800,"kept_now":48,"kept_max":71,"removed_max_per_hour":12,"kept_disk_gib":424.3}
+{"daily_days":7,"days":40,"interval_s":300,"turns_per_min":0.0,"gib_per_h":5.0,"hot_gib":4,"taken":4800,"kept_now":25,"kept_max":48,"removed_max_per_hour":12,"kept_disk_gib":133.0}
+{"daily_days":30,"days":40,"interval_s":300,"turns_per_min":0.0,"gib_per_h":5.0,"hot_gib":16,"taken":4800,"kept_now":48,"kept_max":71,"removed_max_per_hour":12,"kept_disk_gib":699.9}
+{"daily_days":7,"days":40,"interval_s":300,"turns_per_min":0.0,"gib_per_h":5.0,"hot_gib":16,"taken":4800,"kept_now":25,"kept_max":48,"removed_max_per_hour":12,"kept_disk_gib":198.8}
