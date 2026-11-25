@@ -124,3 +124,8 @@ underneath, not a new release of the program. A rule of three days, read as for 
 before. So the answer, as it reads for packages, does not fit images. What I would add: images are
 named in the rule only by choice, the app says that a tag is usually younger than a few days, and
 the age it reads is the image's (by digest), so that a pinned digest a few weeks old passes.
+
+## Swift packages
+
+An agent's note, 24 November 2026. For Swift packages fetched from Git, there is no registry date to
+read. See the note in `registry-traffic-read`.

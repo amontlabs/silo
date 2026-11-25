@@ -15,3 +15,12 @@ The options:
 
 Recommended: two loads. Many developers work on a 16 GB Mac, and the heavy case is the one you set
 for those who run many agents.
+
+## For an iOS developer
+
+An agent's challenge, 24 November 2026. The heavy load, 16 agents in main on a 32 GB Mac, does not
+fit an iOS developer: an agent that checks its work wants a booted simulator, and each holds about
+3.4 GB (measured by the xcfs project on a Mac, not by Silo). Four booted simulators already take
+13.6 GB, before any build. What fits is many agents sharing a few simulators, with a maximum booted
+at once, as `simulators-for-parallel-agents` proposes. The load to measure for this user is then
+the number of simulators, not of agents. Mac test 25 of `research/2026-11-24-mac-and-ios-developers/README.md` measures it in a computer.

@@ -16,3 +16,11 @@ The options:
 
 Recommended: each computer its own caches. A fork already gets its parent's for free, and a cache
 filled only by Silo from what registries sent can come later if fresh computers wait too long.
+
+## Simulator runtimes and Xcode
+
+An agent's note, 24 November 2026. Simulator runtimes (9.0 GB for iOS 27.3) and Xcode are signed by
+Apple, so they fit the store outside every computer that only Silo fills: Silo can check each
+against Apple's signature, as it would check a package against a registry's hash. Inside one
+computer, several agents on the same repository each resolve Swift packages into their own build
+folder, which this answer does not cover since it is about several computers. Details: `research/2026-11-24-mac-and-ios-developers/README.md`.

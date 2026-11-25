@@ -46,3 +46,10 @@ So main can be made with its user and SSH on from the first start, the way Silo 
 (`computer-reached-over-ssh`), with nothing typed into the screen. On a Mac before macOS 27, or a
 guest before it, the keystroke way stays the only one known. What to try on a Mac: the time from
 restore to an SSH login, and whether a password is needed at all once Silo puts its key in.
+
+## With Xcode
+
+An agent's note, 24 November 2026. For a Mac or iOS developer, the installed state worth keeping
+includes Xcode and a simulator runtime, over 20 GB that every later macOS computer would otherwise
+fetch again. `xcode-in-a-computer` proposes keeping it the way this answer keeps the installed
+system. Mac test 23 of `research/2026-11-24-mac-and-ios-developers/README.md` measures it.

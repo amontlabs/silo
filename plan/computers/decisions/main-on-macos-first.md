@@ -80,3 +80,10 @@ the answer nor the recommendation.
 - Several agents in one macOS computer clash over the iOS simulator. `simulators-for-parallel-agents`
   asks what Silo does about it.
 
+## The limit, from Apple
+
+An agent's note, 24 November 2026. Apple's developer support said in September 2026 that the
+framework enforces the limit of two for macOS guests only, and "has no fixed cap for Linux VMs".
+It declined to say how to get the written exception the license mentions. For an iOS developer, the
+parallel work then happens inside main, which is what `simulators-for-parallel-agents` is about.
+Details: `research/2026-11-24-mac-and-ios-developers/README.md`.

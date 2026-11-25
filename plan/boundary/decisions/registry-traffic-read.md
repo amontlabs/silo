@@ -52,3 +52,13 @@ certificate from a test authority found only in the system's store (Ubuntu, the
 So a computer needs Silo's certificate in three places: the system store, Node's (by the
 environment), and uv's (by the environment). A Java installed outside the distribution also needs
 it in its own store.
+
+## Swift packages and CocoaPods
+
+An agent's note, 24 November 2026. Swift packages mostly have no registry: a version is a Git tag
+fetched from GitHub, and the date on a tag's commit is written by whoever made it, so it is not a
+fact. What the boundary could read instead is when GitHub first saw the tag, from GitHub's API,
+which is GitHub's report. CocoaPods' trunk becomes read-only on 2 December 2026, so nothing new is
+published there to judge. An app in a simulator keeps its own certificate store: if a host it calls
+is one where the boundary ends the connection, Silo's certificate has to be added to each simulator.
+Mac test 27 of `research/2026-11-24-mac-and-ios-developers/README.md` checks it.

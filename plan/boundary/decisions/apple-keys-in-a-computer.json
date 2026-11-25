@@ -1,0 +1,7 @@
+{
+  "asks": "Which of your Apple keys may enter a computer?",
+  "answer": "None of your account's keys. Builds for the simulator need no key. A development certificate that Xcode makes in a computer belongs to that computer, and you can revoke it. App Store builds are signed with Apple's cloud-managed certificate, reached with your App Store Connect key, which stays outside the computer as `signing-keys-re-signed` answers. A Developer ID key never enters a computer: a build that needs it is signed on your Mac, after you say yes to that one signing.",
+  "needs": [
+    "signing-keys-re-signed"
+  ]
+}

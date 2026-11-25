@@ -541,3 +541,11 @@ limits a secret to requests that only read. Binding to a path goes one step furt
 needs the request to be read, which Silo already does on a host that gets a secret
 (`ending-the-encrypted-connection`). What is to find out is the cost: how a person writes such a
 binding without breaking the agent program, and which programs call more paths than they need.
+
+## Keys that sign requests
+
+An agent's note, 24 November 2026. The answer leaves keys that sign requests to find out. One way
+is now proposed in `signing-keys-re-signed`: the computer holds a placeholder key of the same
+kind, and the boundary signs each request again with the real key. A prototype did this on Linux
+for App Store Connect, the key every Mac and iOS developer's release tools use. Codex's network
+proxy ships the same thing for AWS request signatures. Details: `research/2026-11-24-mac-and-ios-developers/README.md`.
