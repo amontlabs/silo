@@ -17,3 +17,7 @@ The options:
 
 Recommended: build it. When one agent works alone in a computer, putting that computer back is the
 direct answer, and forks stay for when others are at work in it.
+
+## From option A's first-run transcript
+
+Agent, 25 November 2026, from `research/2026-11-25-first-run-option-a/` (gap 9 there). In option A, restore is the only way back on the first morning. Codex deletes `~/work/shared-fixtures/` at 02:40, and Claude Code works in `~/work/app` until 05:58. Restoring main to 02:40 takes back three hours of Claude Code's work to bring back one folder. Done by hand, it is two restores and a copy out and in over SSH, and the tmux session in main ends twice. #370's step 5 has `silo look` and `silo put-back` for exactly this case, and #373 moves both out of A. Recommended: keep them in A. `put-back` needs the reader, which A builds in step 5, and #378's care for a copy made as root in a computer an agent controls.

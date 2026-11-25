@@ -32,3 +32,7 @@ chose and nothing after.
 - polarzero did not speak of the other direction, a file from a computer to your Mac.
   `files-through-a-channel` covers both.
 - Stage: placed in the app's stage beside `ways-out-shown` by an agent. polarzero did not say when.
+
+## From option A's first-run transcript
+
+Agent, 25 November 2026, from `research/2026-11-25-first-run-option-a/` (gap 2 there). #373 moves this feature out of option A, with `look` and `put-back`, as small once the disk reader exists. Import does not use the reader: #370's `drivers/import.zig` is a copy over SSH. Without it, the first run ends with no repository in main, and you copy them by hand (`rsync -a ~/work/app main:work/`), which also copies the `.env` files Git ignores that #354's import left on the Mac. Recommended: keep it in A. Also found: repositories copied in keep `git@github.com:` remotes, and main has no key for them (Silo's entry forwards no SSH agent). In A the way is HTTPS with `gh auth login` inside main, which leaves a GitHub token in main where every agent can use it. The import could say so, and offer to switch the remotes to HTTPS.

@@ -19,3 +19,7 @@ and the list of what needs you already keeps what is still true.
 ## Notes
 
 Marked Notes in the design record.
+
+## From option A's first-run transcript
+
+Agent, 25 November 2026, from `research/2026-11-25-first-run-option-a/` (gap 4 there). `new-host-raises-an-alert` (in force) gives an alert for each host seen for the first time. On a first night every host is new: #371 saw Codex reach four hosts at start, before any work. The first morning then opens on about twenty such alerts, and the paste site an agent sent a log to is one of them. Two things no entry says: hosts reached by the first run's own installers count as seen, and the first-seen hosts of one night are merged into one line with their count, each still an alert. This entry merges repeats of one alert; it does not say how alerts of one kind on many hosts are merged.

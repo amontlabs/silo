@@ -28,3 +28,7 @@ The sketch shows content, not design.
  paste.rs               1 call   2.1 MB sent  codex     first time seen ⚠   [deny this host]
  Denied             your Mac ×2 · cloud metadata ×4
 ```
+
+## From option A's first-run transcript
+
+Agent, 25 November 2026, from `research/2026-11-25-first-run-option-a/` (gap 10 there). With #378's network, a program in main that ignores the proxy settings makes no connection, so the record has no line for it. A build that clears its environment, a launchd job started before the settings were written, or a container build inside main fail as if offline, and the morning shows nothing. The Mac end of the dead-end card sees every frame it drops, so it can count them by kind and destination address. Proposed: the place shows that count, such as "main sent 340 packets that went nowhere, to 3 addresses", as a fact.

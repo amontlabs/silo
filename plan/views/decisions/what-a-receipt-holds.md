@@ -22,3 +22,7 @@ and the rest is there when something looks wrong.
 The design record gives this as a list with no mark. Its first item, "the request that started
 the run", is written here "what you asked the agent": "request" names only what waits at the
 boundary.
+
+## From option A's first-run transcript
+
+Agent, 25 November 2026, from `research/2026-11-25-first-run-option-a/` (gap 7 there). Option A has no probe, so the receipt's "processes it started that are still running" is "not known yet". That costs more than its line. #377's corpus of 49 false claims from public incidents, read again with the processes taken out (`checks/catch_rate_under_a.py`): on the 30 test cases, the receipt's outcome lines alone catch 3 instead of 7, and with `claims@0.3` they catch or flag 10 instead of 13. On all 49, 22 instead of 25. A process left running is the outcome line A loses, and it is the one `processes-in-the-record` brings back.

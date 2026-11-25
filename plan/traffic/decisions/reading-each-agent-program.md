@@ -199,3 +199,7 @@ forwards the sign-in inside each request and stores it nowhere (`logins`).
   and OpenAI's help-centre articles.
 - This is a reading of the terms, not legal advice. No lawyer has read it, and neither vendor was
   asked.
+
+## From option A's first-run transcript
+
+Agent, 25 November 2026, from `research/2026-11-25-first-run-option-a/` (gap 6 and 11 there). Two shapes no check covers yet. First, the exit code of a command is a report the program sends to its model, and #377 finds it with a text pattern on the tool result ("Exit code", "Process exited with code"). Codex 0.172.0 now sends its commands as JavaScript to one `exec` tool, which returns `JSON.stringify(result)` (#374). The command is then JavaScript source and the exit a field of JSON, so the receipt's commands, its last whole test run and the side-by-side link to a deleted path can all be empty for Codex. The check of each program should cover the shape of its tool calls and results, not only its hosts and format. Second, every trial of the boundary ran Claude Code from npm (#347, #374, #377), while `main-set-up-for-agents` installs it with `claude.ai/install.sh`. That build has not run through the boundary, through `HTTPS_PROXY`, or with `NODE_EXTRA_CA_CERTS`, and Codex's WebSocket has not run through a `CONNECT` proxy. A program that ignores the settings does not fail at once: Claude Code retried for 193 s (#378). So the first run should run each program once, signed in, through the boundary before it says main is ready.

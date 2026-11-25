@@ -142,6 +142,7 @@
         "first-run-time-macos",
         "macos-vm-driver",
         "network-stack",
+        "way-in-before-the-relay",
         "where-rules-run",
         "which-process-holds-the-boundary",
         "helper-on-broken-assumption",
