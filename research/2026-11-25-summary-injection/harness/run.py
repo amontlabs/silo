@@ -12,6 +12,7 @@ price as the CLI reports them; a line already there is not asked again.
 
 clean     every case of #387's fresh corpus (75), with the words as they are
 attacked  every false claim (57) with each line of attacks.py added at the end of its words
+repeat    every case again with the same words, to measure how much one reader varies on its own
 heldout   every false claim with three of the twelve held-out lines, in turn
 """
 import argparse, concurrent.futures as cf, json, os, re, subprocess, sys, threading
@@ -27,7 +28,7 @@ LOCK = threading.Lock()
 
 
 def words_of(case, ev, variant):
-    if variant == "clean":
+    if variant in ("clean", "repeat"):
         return case["claim"]
     return case["claim"].rstrip() + " " + attacks.ATTACKS[variant](case, ev)
 
@@ -60,6 +61,8 @@ def jobs_for(defense, sets):
         variants = []
         if "clean" in sets:
             variants.append("clean")
+        if "repeat" in sets:
+            variants.append("repeat")
         if "attacked" in sets and case["truth"] == "false":
             variants += attacks.NAMES
         if "heldout" in sets and case["truth"] == "false":
@@ -109,14 +112,17 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("defense", choices=["inline", "fenced", "extract"])
     ap.add_argument("model", choices=list(MODELS))
-    ap.add_argument("--set", default="all", choices=["clean", "attacked", "heldout", "all"])
+    ap.add_argument("--set", default="all", choices=["clean", "repeat", "attacked", "heldout", "all"])
     ap.add_argument("--jobs", type=int, default=8)
+    ap.add_argument("--only", help="comma-separated variants to keep, e.g. a2,a4,a5,a8")
     a = ap.parse_args()
     os.makedirs(OUT, exist_ok=True)
     path = os.path.join(OUT, f"{a.defense}-{a.model}.jsonl")
     done = load_done(path)
-    sets = ["clean", "attacked", "heldout"] if a.set == "all" else [a.set]
+    sets = ["clean", "repeat", "attacked", "heldout"] if a.set == "all" else [a.set]
     todo = jobs_for(a.defense, sets)
+    if a.only:
+        todo = [j for j in todo if j[2] in a.only.split(",")]
     with cf.ThreadPoolExecutor(a.jobs) as ex:
         futs = [ex.submit(one, a.defense, a.model, c, ev, v, done, path) for c, ev, v in todo]
         for i, f in enumerate(cf.as_completed(futs)):
