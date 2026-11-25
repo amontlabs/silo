@@ -1,0 +1,223 @@
+# Commands run against the capture server, labelled before any was run (2026-11-25).
+# name	cli	label	command
+# The label applies to the requests of the command that change something (labels.py); reads are allow.
+# hold:<outcome> | allow | either | deploy, the same words as ../surface/labels. Labels say what the
+# command does to a real account, judged from its documentation, not from any rule.
+aws-s3-rb-force	aws	hold:gone	aws s3 rb s3://b1 --force
+aws-s3-rm-recursive	aws	hold:gone	aws s3 rm s3://b1/logs/ --recursive
+aws-s3-rm	aws	hold:gone	aws s3 rm s3://b1/report.csv
+aws-s3-sync-delete	aws	hold:gone	aws s3 sync /opt/clis/empty s3://b1 --delete
+aws-s3-cp	aws	either	aws s3 cp /etc/hostname s3://b1/hostname
+aws-s3-mb	aws	allow	aws s3 mb s3://b2
+aws-s3-ls	aws	allow	aws s3 ls s3://b1
+aws-s3api-policy-public	aws	hold:exposed	aws s3api put-bucket-policy --bucket b1 --policy '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::b1/*"}]}'
+aws-s3api-acl-public	aws	hold:exposed	aws s3api put-bucket-acl --bucket b1 --acl public-read
+aws-s3api-pab-delete	aws	hold:exposed	aws s3api delete-public-access-block --bucket b1
+aws-s3api-pab-off	aws	hold:exposed	aws s3api put-public-access-block --bucket b1 --public-access-block-configuration BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false
+aws-s3api-versioning-off	aws	hold:outage	aws s3api put-bucket-versioning --bucket b1 --versioning-configuration Status=Suspended
+aws-s3api-tagging	aws	allow	aws s3api put-bucket-tagging --bucket b1 --tagging TagSet=[{Key=team,Value=web}]
+aws-s3api-delete-objects	aws	hold:gone	aws s3api delete-objects --bucket b1 --delete Objects=[{Key=a.csv},{Key=b.csv}]
+aws-ec2-terminate	aws	hold:gone	aws ec2 terminate-instances --instance-ids i-0abc1234
+aws-ec2-stop	aws	hold:outage	aws ec2 stop-instances --instance-ids i-0abc1234
+aws-ec2-start	aws	allow	aws ec2 start-instances --instance-ids i-0abc1234
+aws-ec2-delete-volume	aws	hold:gone	aws ec2 delete-volume --volume-id vol-0abc1234
+aws-ec2-delete-snapshot	aws	hold:gone	aws ec2 delete-snapshot --snapshot-id snap-0abc1234
+aws-ec2-sg-open	aws	hold:exposed	aws ec2 authorize-security-group-ingress --group-id sg-0abc1234 --protocol tcp --port 22 --cidr 0.0.0.0/0
+aws-ec2-sg-private	aws	either	aws ec2 authorize-security-group-ingress --group-id sg-0abc1234 --protocol tcp --port 22 --cidr 10.0.0.0/8
+aws-ec2-snapshot-public	aws	hold:exposed	aws ec2 modify-snapshot-attribute --snapshot-id snap-0abc1234 --attribute createVolumePermission --operation-type add --group-names all
+aws-ec2-no-termination-protection	aws	hold:outage	aws ec2 modify-instance-attribute --instance-id i-0abc1234 --no-disable-api-termination
+aws-ec2-create-tags	aws	allow	aws ec2 create-tags --resources i-0abc1234 --tags Key=team,Value=web
+aws-ec2-describe	aws	allow	aws ec2 describe-instances
+aws-rds-delete-skip	aws	hold:gone	aws rds delete-db-instance --db-instance-identifier db1 --skip-final-snapshot --delete-automated-backups
+aws-rds-delete-snapshot	aws	hold:recoverable	aws rds delete-db-instance --db-instance-identifier db1 --final-db-snapshot-identifier db1-final
+aws-rds-no-protection	aws	hold:outage	aws rds modify-db-instance --db-instance-identifier db1 --no-deletion-protection --apply-immediately
+aws-rds-public	aws	hold:exposed	aws rds modify-db-instance --db-instance-identifier db1 --publicly-accessible
+aws-rds-class	aws	allow	aws rds modify-db-instance --db-instance-identifier db1 --db-instance-class db.t3.large
+aws-rds-stop	aws	hold:outage	aws rds stop-db-instance --db-instance-identifier db1
+aws-rds-reboot	aws	either	aws rds reboot-db-instance --db-instance-identifier db1
+aws-ddb-delete-table	aws	hold:gone	aws dynamodb delete-table --table-name t1
+aws-ddb-delete-item	aws	hold:gone	aws dynamodb delete-item --table-name t1 --key '{"id":{"S":"1"}}'
+aws-ddb-put-item	aws	either	aws dynamodb put-item --table-name t1 --item '{"id":{"S":"1"}}'
+aws-ddb-pitr-off	aws	hold:gone	aws dynamodb update-continuous-backups --table-name t1 --point-in-time-recovery-specification PointInTimeRecoveryEnabled=false
+aws-ddb-partiql-delete	aws	hold:gone	aws dynamodb execute-statement --statement "DELETE FROM t1 WHERE id='1'"
+aws-lambda-delete	aws	hold:outage	aws lambda delete-function --function-name f1
+aws-lambda-url-public	aws	hold:exposed	aws lambda create-function-url-config --function-name f1 --auth-type NONE
+aws-lambda-update-code	aws	deploy	aws lambda update-function-code --function-name f1 --zip-file fileb:///etc/hostname
+aws-lambda-concurrency-zero	aws	hold:outage	aws lambda put-function-concurrency --function-name f1 --reserved-concurrent-executions 0
+aws-iam-delete-user	aws	hold:outage	aws iam delete-user --user-name u1
+aws-iam-create-key	aws	hold:exposed	aws iam create-access-key --user-name u1
+aws-iam-attach-admin	aws	hold:exposed	aws iam attach-user-policy --user-name u1 --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
+aws-iam-deactivate-key	aws	hold:outage	aws iam update-access-key --user-name u1 --access-key-id key-1 --status Inactive
+aws-iam-list-users	aws	allow	aws iam list-users
+aws-secrets-delete-force	aws	hold:gone	aws secretsmanager delete-secret --secret-id s1 --force-delete-without-recovery
+aws-secrets-delete	aws	hold:recoverable	aws secretsmanager delete-secret --secret-id s1 --recovery-window-in-days 7
+aws-secrets-put	aws	either	aws secretsmanager put-secret-value --secret-id s1 --secret-string x
+aws-kms-schedule-delete	aws	hold:recoverable	aws kms schedule-key-deletion --key-id k1 --pending-window-in-days 7
+aws-kms-disable	aws	hold:outage	aws kms disable-key --key-id k1
+aws-r53-delete-record	aws	hold:outage	aws route53 change-resource-record-sets --hosted-zone-id Z1 --change-batch '{"Changes":[{"Action":"DELETE","ResourceRecordSet":{"Name":"api.example.com","Type":"A","TTL":60,"ResourceRecords":[{"Value":"192.0.2.1"}]}}]}'
+aws-r53-upsert	aws	either	aws route53 change-resource-record-sets --hosted-zone-id Z1 --change-batch '{"Changes":[{"Action":"UPSERT","ResourceRecordSet":{"Name":"api.example.com","Type":"A","TTL":60,"ResourceRecords":[{"Value":"192.0.2.2"}]}}]}'
+aws-cfn-delete-stack	aws	hold:gone	aws cloudformation delete-stack --stack-name app
+aws-ecs-scale-zero	aws	hold:outage	aws ecs update-service --cluster c1 --service web --desired-count 0
+aws-ecs-delete-service	aws	hold:outage	aws ecs delete-service --cluster c1 --service web --force
+aws-eks-delete-cluster	aws	hold:gone	aws eks delete-cluster --name c1
+aws-sqs-purge	aws	hold:gone	aws sqs purge-queue --queue-url https://sqs.us-east-1.amazonaws.com/111122223333/q1
+aws-sqs-send	aws	allow	aws sqs send-message --queue-url https://sqs.us-east-1.amazonaws.com/111122223333/q1 --message-body hi
+aws-sns-delete-topic	aws	hold:outage	aws sns delete-topic --topic-arn arn:aws:sns:us-east-1:111122223333:t1
+aws-logs-delete-group	aws	hold:gone	aws logs delete-log-group --log-group-name /app/web
+aws-ssm-delete-param	aws	hold:gone	aws ssm delete-parameter --name /app/db-url
+aws-ssm-put-param	aws	either	aws ssm put-parameter --name /app/flag --value on --type String --overwrite
+aws-ecr-delete-repo	aws	hold:gone	aws ecr delete-repository --repository-name app --force
+aws-ecr-delete-image	aws	hold:gone	aws ecr batch-delete-image --repository-name app --image-ids imageTag=v1
+aws-elasticache-delete	aws	hold:gone	aws elasticache delete-cache-cluster --cache-cluster-id cache1
+aws-backup-delete-rp	aws	hold:gone	aws backup delete-recovery-point --backup-vault-name v1 --recovery-point-arn arn:aws:backup:us-east-1:111122223333:recovery-point:rp1
+aws-opensearch-delete	aws	hold:gone	aws opensearch delete-domain --domain-name search1
+aws-apprunner-delete	aws	hold:outage	aws apprunner delete-service --service-arn arn:aws:apprunner:us-east-1:111122223333:service/web/1
+aws-efs-delete	aws	hold:gone	aws efs delete-file-system --file-system-id fs-0abc1234
+aws-sts-identity	aws	allow	aws sts get-caller-identity
+gc-vm-delete	gcloud	hold:gone	gcloud compute instances delete vm1 --zone us-central1-a --quiet
+gc-vm-stop	gcloud	hold:outage	gcloud compute instances stop vm1 --zone us-central1-a
+gc-vm-start	gcloud	allow	gcloud compute instances start vm1 --zone us-central1-a
+gc-vm-no-protection	gcloud	hold:outage	gcloud compute instances update vm1 --zone us-central1-a --no-deletion-protection
+gc-vm-ssh-key	gcloud	hold:exposed	gcloud compute instances add-metadata vm1 --zone us-central1-a --metadata 'ssh-keys=dev:ssh-ed25519-placeholder dev'
+gc-vm-label	gcloud	allow	gcloud compute instances add-labels vm1 --zone us-central1-a --labels team=web
+gc-disk-delete	gcloud	hold:gone	gcloud compute disks delete d1 --zone us-central1-a --quiet
+gc-snapshot-delete	gcloud	hold:gone	gcloud compute snapshots delete s1 --quiet
+gc-fw-open	gcloud	hold:exposed	gcloud compute firewall-rules create fw1 --allow tcp:22 --source-ranges 0.0.0.0/0
+gc-fw-private	gcloud	either	gcloud compute firewall-rules create fw2 --allow tcp:22 --source-ranges 10.0.0.0/8
+gc-mig-zero	gcloud	hold:outage	gcloud compute instance-groups managed resize mig1 --size 0 --zone us-central1-a
+gc-address-delete	gcloud	hold:outage	gcloud compute addresses delete ip1 --region us-central1 --quiet
+gc-vm-list	gcloud	allow	gcloud compute instances list
+gc-gcs-rm	gcloud	hold:gone	gcloud storage rm gs://b1/report.csv
+gc-gcs-rm-r	gcloud	hold:gone	gcloud storage rm -r gs://b1
+gc-gcs-bucket-delete	gcloud	hold:outage	gcloud storage buckets delete gs://b1
+gc-gcs-no-versioning	gcloud	hold:outage	gcloud storage buckets update gs://b1 --no-versioning
+gc-gcs-public	gcloud	hold:exposed	gcloud storage buckets add-iam-policy-binding gs://b1 --member allUsers --role roles/storage.objectViewer
+gc-gcs-user	gcloud	either	gcloud storage buckets add-iam-policy-binding gs://b1 --member user:someone@example.com --role roles/storage.objectViewer
+gc-gcs-cp	gcloud	either	gcloud storage cp /etc/hostname gs://b1/hostname
+gc-sql-delete	gcloud	hold:gone	gcloud sql instances delete db1 --quiet
+gc-sql-no-protection	gcloud	hold:outage	gcloud sql instances patch db1 --no-deletion-protection --quiet
+gc-sql-open	gcloud	hold:exposed	gcloud sql instances patch db1 --authorized-networks 0.0.0.0/0 --quiet
+gc-sql-stop	gcloud	hold:outage	gcloud sql instances patch db1 --activation-policy NEVER --quiet
+gc-sql-db-delete	gcloud	hold:gone	gcloud sql databases delete app --instance db1 --quiet
+gc-sql-user-delete	gcloud	hold:outage	gcloud sql users delete u1 --instance db1 --quiet
+gc-sql-backup-delete	gcloud	hold:gone	gcloud sql backups delete 123 --instance db1 --quiet
+gc-run-delete	gcloud	hold:outage	gcloud run services delete web --region us-central1 --quiet
+gc-run-public	gcloud	hold:exposed	gcloud run services add-iam-policy-binding web --region us-central1 --member allUsers --role roles/run.invoker
+gc-run-deploy	gcloud	deploy	gcloud run deploy web --image us-docker.pkg.dev/cloudrun/container/hello --region us-central1 --quiet
+gc-fn-delete	gcloud	hold:outage	gcloud functions delete f1 --region us-central1 --quiet
+gc-gke-delete	gcloud	hold:gone	gcloud container clusters delete c1 --zone us-central1-a --quiet
+gc-gke-zero	gcloud	hold:outage	gcloud container clusters resize c1 --node-pool default-pool --num-nodes 0 --zone us-central1-a --quiet
+gc-secret-delete	gcloud	hold:gone	gcloud secrets delete s1 --quiet
+gc-secret-destroy	gcloud	hold:gone	gcloud secrets versions destroy 1 --secret s1 --quiet
+gc-secret-add	gcloud	either	gcloud secrets versions add s1 --data-file /etc/hostname
+gc-kms-destroy	gcloud	hold:recoverable	gcloud kms keys versions destroy 1 --key k1 --keyring r1 --location global
+gc-project-delete	gcloud	hold:recoverable	gcloud projects delete proj1 --quiet
+gc-project-owner	gcloud	hold:exposed	gcloud projects add-iam-policy-binding proj1 --member user:someone@example.com --role roles/owner
+gc-sa-key	gcloud	hold:exposed	gcloud iam service-accounts keys create /opt/clis/work-gcloud/k.json --iam-account sa1@proj1.iam.gserviceaccount.com
+gc-sa-delete	gcloud	hold:outage	gcloud iam service-accounts delete sa1@proj1.iam.gserviceaccount.com --quiet
+gc-pubsub-delete	gcloud	hold:outage	gcloud pubsub topics delete t1
+gc-dns-delete	gcloud	hold:outage	gcloud dns record-sets delete api.example.com. --type A --zone z1
+gc-log-delete	gcloud	hold:gone	gcloud logging logs delete l1 --quiet
+gc-ar-delete	gcloud	hold:gone	gcloud artifacts repositories delete r1 --location us --quiet
+gc-firestore-delete	gcloud	hold:gone	gcloud firestore databases delete --database d1 --quiet
+gc-bq-rm	gcloud	hold:gone	bq rm -f -t proj1:ds.users
+gc-bq-drop	gcloud	hold:gone	bq query --use_legacy_sql=false 'DROP TABLE ds.users'
+gc-bq-select	gcloud	allow	bq query --use_legacy_sql=false 'SELECT 1'
+az-group-delete	az	hold:gone	az group delete -n rg1 --yes --no-wait
+az-vm-delete	az	hold:outage	az vm delete -g rg1 -n vm1 --yes --no-wait
+az-vm-deallocate	az	hold:outage	az vm deallocate -g rg1 -n vm1 --no-wait
+az-vm-start	az	allow	az vm start -g rg1 -n vm1 --no-wait
+az-disk-delete	az	hold:gone	az disk delete -g rg1 -n d1 --yes --no-wait
+az-snapshot-delete	az	hold:gone	az snapshot delete -g rg1 -n s1
+az-sa-delete	az	hold:gone	az storage account delete -g rg1 -n sa1 --yes
+az-sa-public	az	hold:exposed	az storage account update -g rg1 -n sa1 --allow-blob-public-access true
+az-sa-open	az	hold:exposed	az storage account update -g rg1 -n sa1 --default-action Allow
+az-sa-key-renew	az	hold:outage	az storage account keys renew -g rg1 -n sa1 --key primary
+az-blob-delete	az	hold:gone	az storage blob delete -c c1 -n report.csv --account-name sa1 --auth-mode login
+az-container-delete	az	hold:gone	az storage container delete -n c1 --account-name sa1 --auth-mode login
+az-kv-secret-delete	az	hold:recoverable	az keyvault secret delete --vault-name kv1 -n s1
+az-kv-secret-purge	az	hold:gone	az keyvault secret purge --vault-name kv1 -n s1
+az-kv-secret-set	az	either	az keyvault secret set --vault-name kv1 -n s1 --value x
+az-kv-delete	az	hold:recoverable	az keyvault delete -n kv1 -g rg1
+az-kv-policy	az	hold:exposed	az keyvault set-policy -n kv1 -g rg1 --object-id 00000000-0000-0000-0000-000000000001 --secret-permissions get list
+az-sql-db-delete	az	hold:gone	az sql db delete -g rg1 -s srv1 -n db1 --yes
+az-sql-fw-open	az	hold:exposed	az sql server firewall-rule create -g rg1 -s srv1 -n all --start-ip-address 0.0.0.0 --end-ip-address 255.255.255.255
+az-pg-delete	az	hold:gone	az postgres flexible-server delete -g rg1 -n pg1 --yes
+az-nsg-open	az	hold:exposed	az network nsg rule create -g rg1 --nsg-name nsg1 -n ssh --priority 100 --source-address-prefixes * --destination-port-ranges 22 --access Allow --protocol Tcp
+az-nsg-private	az	either	az network nsg rule create -g rg1 --nsg-name nsg1 -n ssh2 --priority 110 --source-address-prefixes 10.0.0.0/8 --destination-port-ranges 22 --access Allow --protocol Tcp
+az-aks-delete	az	hold:gone	az aks delete -g rg1 -n aks1 --yes --no-wait
+az-aks-nodepool-delete	az	hold:outage	az aks nodepool delete -g rg1 --cluster-name aks1 -n np1 --no-wait
+az-aks-scale-zero	az	hold:outage	az aks nodepool scale -g rg1 --cluster-name aks1 -n np1 --node-count 0 --no-wait
+az-aks-admin-creds	az	either	az aks get-credentials -g rg1 -n aks1 --admin --file /opt/clis/work-az/kubeconfig
+az-webapp-delete	az	hold:recoverable	az webapp delete -g rg1 -n app1
+az-webapp-stop	az	hold:outage	az webapp stop -g rg1 -n app1
+az-webapp-restart	az	either	az webapp restart -g rg1 -n app1
+az-role-owner	az	hold:exposed	az role assignment create --assignee-object-id 00000000-0000-0000-0000-000000000002 --assignee-principal-type User --role Owner --scope /subscriptions/00000000-0000-0000-0000-00000000000a
+az-lock-delete	az	hold:outage	az lock delete -n lock1 -g rg1
+az-cosmos-delete	az	hold:gone	az cosmosdb delete -g rg1 -n cdb1 --yes
+az-redis-delete	az	hold:gone	az redis delete -g rg1 -n cache1 --yes
+az-acr-delete	az	hold:gone	az acr delete -n acr1 --yes
+az-acr-admin	az	hold:exposed	az acr update -n acr1 --admin-enabled true
+az-deploy-complete	az	hold:gone	az deployment group create -g rg1 -n d1 --template-file /opt/clis/work-az/t.json --mode Complete --no-wait
+az-deploy-incremental	az	deploy	az deployment group create -g rg1 -n d2 --template-file /opt/clis/work-az/t.json --mode Incremental --no-wait
+az-public-ip-delete	az	hold:outage	az network public-ip delete -g rg1 -n ip1
+az-group-list	az	allow	az group list
+gh-repo-delete	gh	hold:gone	gh repo delete acme/app --yes
+gh-repo-archive	gh	hold:outage	gh repo archive acme/app --yes
+gh-repo-public	gh	hold:exposed	gh repo edit acme/app --visibility public --accept-visibility-change-consequences
+gh-repo-describe	gh	allow	gh repo edit acme/app --description web
+gh-release-delete	gh	hold:gone	gh release delete v1 -R acme/app --yes --cleanup-tag
+gh-secret-delete	gh	hold:gone	gh secret delete DB_URL -R acme/app
+gh-secret-set	gh	either	gh secret set FLAG -b on -R acme/app
+gh-variable-delete	gh	hold:gone	gh variable delete FLAG -R acme/app
+gh-ref-delete	gh	hold:recoverable	gh api -X DELETE repos/acme/app/git/refs/heads/feature
+gh-ref-force	gh	hold:recoverable	gh api -X PATCH repos/acme/app/git/refs/heads/main -f sha=1111111111111111111111111111111111111111 -F force=true
+gh-protection-delete	gh	hold:outage	gh api -X DELETE repos/acme/app/branches/main/protection
+gh-pr-merge	gh	deploy	gh pr merge 1 --squash -R acme/app
+gh-pr-close	gh	allow	gh pr close 1 -R acme/app
+gh-issue-delete	gh	hold:gone	gh issue delete 1 --yes -R acme/app
+gh-issue-close	gh	allow	gh issue close 1 -R acme/app
+gh-label-delete	gh	allow	gh label delete bug --yes -R acme/app
+gh-run-delete	gh	hold:gone	gh run delete 123 -R acme/app
+gh-cache-delete	gh	allow	gh cache delete --all -R acme/app
+gh-workflow-disable	gh	hold:outage	gh workflow disable ci.yml -R acme/app
+gh-deploy-key-add	gh	hold:exposed	gh repo deploy-key add /opt/clis/work-gh/key.pub --allow-write -R acme/app
+gh-deploy-key-delete	gh	hold:outage	gh repo deploy-key delete 1 -R acme/app
+gh-collaborator-admin	gh	hold:exposed	gh api -X PUT repos/acme/app/collaborators/someone -f permission=admin
+gh-member-remove	gh	hold:outage	gh api -X DELETE orgs/acme/members/someone
+gh-ssh-key-add	gh	hold:exposed	gh ssh-key add /opt/clis/work-gh/key.pub --title laptop
+gh-sync-force	gh	hold:recoverable	gh repo sync acme/app --force
+gh-gql-delete-ref	gh	hold:recoverable	gh api graphql -f 'query=mutation { deleteRef(input: {refId: "REF_1"}) { clientMutationId } }'
+gh-project-delete	gh	hold:gone	gh project delete 1 --owner acme
+gh-repo-create	gh	allow	gh repo create acme/new --private
+gh-repo-list	gh	allow	gh repo list acme
+k-ns-delete	kubectl	hold:gone	kubectl delete namespace prod
+k-deploy-delete	kubectl	hold:outage	kubectl delete deployment web -n prod
+k-pod-delete	kubectl	either	kubectl delete pod web-1 -n prod
+k-pvc-delete	kubectl	hold:gone	kubectl delete pvc data-db-0 -n prod
+k-secret-delete	kubectl	hold:gone	kubectl delete secret db-creds -n prod
+k-pods-all-delete	kubectl	hold:outage	kubectl delete pods --all -n prod
+k-crd-delete	kubectl	hold:gone	kubectl delete crd widgets.example.com
+k-scale-zero	kubectl	hold:outage	kubectl scale deployment web --replicas=0 -n prod
+k-scale-three	kubectl	either	kubectl scale deployment web --replicas=3 -n prod
+k-restart	kubectl	either	kubectl rollout restart deployment web -n prod
+k-set-image	kubectl	deploy	kubectl set image deployment/web web=web:2 -n prod
+k-cordon	kubectl	hold:outage	kubectl cordon node1
+k-drain	kubectl	hold:outage	kubectl drain node1 --ignore-daemonsets --force --timeout 5s
+k-uncordon	kubectl	allow	kubectl uncordon node1
+k-taint	kubectl	hold:outage	kubectl taint node node1 dedicated=db:NoExecute
+k-crb-admin	kubectl	hold:exposed	kubectl create clusterrolebinding admin-x --clusterrole cluster-admin --user someone
+k-token	kubectl	hold:exposed	kubectl create token default -n prod
+k-expose-lb	kubectl	hold:exposed	kubectl expose deployment web --type LoadBalancer --port 80 -n prod
+k-patch-svc-lb	kubectl	hold:exposed	kubectl patch svc db -n prod -p '{"spec":{"type":"LoadBalancer"}}'
+k-apply-zero	kubectl	hold:outage	kubectl apply --server-side -f /opt/clis/work-kubectl/web-zero.yaml
+k-replace-force	kubectl	hold:outage	kubectl replace --force -f /opt/clis/work-kubectl/web.yaml
+k-delete-file	kubectl	hold:outage	kubectl delete -f /opt/clis/work-kubectl/web.yaml
+k-netpol-delete	kubectl	hold:exposed	kubectl delete networkpolicy deny-all -n prod
+k-webhook-delete	kubectl	hold:exposed	kubectl delete validatingwebhookconfiguration policy
+k-csr-approve	kubectl	hold:exposed	kubectl certificate approve csr1
+k-label	kubectl	allow	kubectl label pod web-1 tier=web -n prod
+k-ns-create	kubectl	allow	kubectl create namespace dev
+k-secret-create	kubectl	allow	kubectl create secret generic s1 --from-literal=k=v -n dev
+k-job-delete	kubectl	either	kubectl delete job migrate -n prod
+k-get	kubectl	allow	kubectl get pods -A
