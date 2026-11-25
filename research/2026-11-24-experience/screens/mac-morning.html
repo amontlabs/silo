@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Silo morning</title>
+<style>
+:root {
+  --paper: #f7f7f4; --surface: #fff; --sidebar: #eeefec; --ink: #282a2f; --muted: #666a73;
+  --faint: #8a8e92; --line: #e2e3e0; --rule: #c6c9c5; --accent: #ff9f0a; --accent-ink: #995700;
+  --accent-wash: #fff2dc; --no: #c4493c; --hover: #f1f1ee; --tip-bg: #282a2f; --tip-ink: #f7f7f4;
+  --ok: #3e8e5a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #1b1e1f; --surface: #202425; --sidebar: #171a1b; --ink: #e5e7e4; --muted: #a5adaa;
+    --faint: #7f8785; --line: #2f3535; --rule: #4b5454; --accent: #ff9f0a; --accent-ink: #e8b66e;
+    --accent-wash: #30291f; --no: #ee7d70; --hover: #282d2e; --tip-bg: #e5e7e4; --tip-ink: #1b1e1f;
+    --ok: #6cc28a;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #1b1e1f; --surface: #202425; --sidebar: #171a1b; --ink: #e5e7e4; --muted: #a5adaa;
+  --faint: #7f8785; --line: #2f3535; --rule: #4b5454; --accent: #ff9f0a; --accent-ink: #e8b66e;
+  --accent-wash: #30291f; --no: #ee7d70; --hover: #282d2e; --tip-bg: #e5e7e4; --tip-ink: #1b1e1f;
+  --ok: #6cc28a;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--paper); color: var(--ink);
+  font: 13px/20px -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, "Helvetica Neue", system-ui, sans-serif;
+  display: grid; grid-template-rows: 38px 1fr; overflow: hidden;
+}
+code { font: 12px/20px ui-monospace, "SF Mono", Menlo, "JetBrains Mono", monospace; }
+
+/* title bar */
+.titlebar { display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--sidebar); }
+.lights { display: flex; gap: 8px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+.lights i:nth-child(1) { background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.titlebar .title { flex: 1; text-align: center; font-weight: 600; margin-right: 52px; }
+
+.app { display: grid; grid-template-columns: 184px 1fr; min-height: 0; }
+
+/* computers */
+.side { background: var(--sidebar); border-right: 1px solid var(--line); padding: 12px 8px; }
+.side h2, .main h2 { font-size: 11px; line-height: 20px; letter-spacing: .06em; font-weight: 600; color: var(--muted); margin: 0; padding: 0 8px; text-transform: uppercase; }
+.comp { display: grid; grid-template-columns: 14px 1fr auto; align-items: center; height: 28px; padding: 0 8px; border-radius: 6px; }
+.comp.sel { background: var(--hover); }
+.comp .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.comp .n { color: var(--faint); font-size: 12px; }
+.comp.fork { padding-left: 8px; }
+.comp.fork .name::before { content: "└ "; color: var(--rule); }
+
+/* list */
+.main { display: grid; grid-template-rows: auto 1fr auto; min-height: 0; background: var(--surface); }
+.since { height: 44px; display: flex; align-items: center; padding: 0 24px; color: var(--muted); border-bottom: 1px solid var(--line); gap: 6px; white-space: nowrap; }
+.since b { color: var(--ink); font-weight: 600; }
+.sep { color: var(--rule); }
+.list { padding: 12px 16px; overflow: hidden; }
+.list h2 { padding: 12px 8px 4px; display: flex; gap: 8px; }
+.list h2 .c { color: var(--faint); font-weight: 500; }
+.row {
+  display: grid; grid-template-columns: 64px 92px minmax(0, 1fr) 44px 156px; align-items: center;
+  column-gap: 12px; height: 36px; padding: 0 8px; border-radius: 6px; white-space: nowrap;
+}
+.row:hover { background: var(--hover); }
+.row .comp-n { color: var(--muted); }
+.row .who { font-weight: 500; }
+.row .what { min-width: 0; }
+.row .what .d { color: var(--muted); }
+.row .t { color: var(--faint); font-variant-numeric: tabular-nums; text-align: right; }
+.row .act { text-align: right; }
+.row + .row { box-shadow: 0 -1px 0 var(--line); }
+.row:hover, .row:hover + .row { box-shadow: none; }
+.needs .who-dot { color: var(--accent-ink); }
+
+/* one family of controls */
+.btn {
+  font: inherit; font-weight: 500; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--rule); border-radius: 6px; height: 26px; padding: 0 10px; cursor: pointer;
+}
+.btn:hover { background: var(--hover); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.btn.primary { background: var(--accent-wash); border-color: var(--accent); color: var(--accent-ink); }
+
+/* marks */
+.m { position: relative; cursor: help; color: var(--muted); font-family: "DejaVu Sans", -apple-system, sans-serif; font-size: 12px; outline: none; }
+.m.op { color: var(--accent-ink); }
+.q { position: relative; cursor: help; outline: none; }
+.q::before { content: "«"; color: var(--faint); } .q::after { content: "»"; color: var(--faint); }
+.tip { position: relative; outline: none; }
+.tip > .bubble {
+  display: none; position: absolute; left: 50%; bottom: calc(100% + 6px); transform: translateX(-50%);
+  background: var(--tip-bg); color: var(--tip-ink); font: 500 11px/16px -apple-system, Inter, sans-serif;
+  padding: 3px 7px; border-radius: 6px; white-space: nowrap; z-index: 2; pointer-events: none;
+}
+.tip:hover > .bubble, .tip:focus > .bubble, .tip.show > .bubble { display: block; }
+.mismatch { color: var(--no); font-weight: 500; }
+
+/* footer */
+.foot { height: 48px; display: flex; align-items: center; gap: 8px; padding: 0 24px; border-top: 1px solid var(--line); }
+.foot .grow { flex: 1; }
+.places { display: flex; gap: 2px; }
+.places a { color: var(--muted); text-decoration: none; padding: 3px 10px; border-radius: 6px; font-weight: 500; }
+.places a:hover { background: var(--hover); color: var(--ink); }
+.places a:focus-visible { outline: 2px solid var(--accent); }
+</style>
+</head>
+<body>
+<div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="title">Silo</div></div>
+<div class="app">
+  <nav class="side" aria-label="Computers">
+    <h2>Computers</h2>
+    <div class="comp sel"><span class="dot"></span><span class="name">main</span><span class="n">running</span></div>
+    <div class="comp fork"><span class="dot"></span><span class="name">try-bun</span><span class="n">1 run</span></div>
+  </nav>
+
+  <main class="main">
+    <div class="since">
+      <span>Since you last looked,</span><b>Mon 22:58</b>
+      <span class="sep">·</span><span>8 h</span>
+      <span class="sep">·</span><span>3 runs</span>
+      <span class="sep">·</span><span>214 turns</span>
+      <span class="sep">·</span><span>$31.00</span>
+      <span class="sep">·</span><span>your Mac stayed awake</span>
+    </div>
+
+    <div class="list">
+      <section class="needs" aria-label="Needs you">
+        <h2>Needs you <span class="c">3</span></h2>
+        <div class="row">
+          <span class="comp-n">main</span>
+          <span class="who"><span class="tip m op" tabindex="0" role="img" aria-label="Opinion of which-run-did-it">◇<span class="bubble">Opinion of which-run-did-it</span></span> claude #2</span>
+          <span class="what">Deleted <code>~/work/shared-fixtures/</code> <span class="d">· 3,412 files · 1.2 GB · outside ~/work/app</span></span>
+          <span class="t">02:47</span>
+          <span class="act"><button class="btn primary">Put back from 02:46</button></span>
+        </div>
+        <div class="row">
+          <span class="comp-n">try-bun</span>
+          <span class="who">codex</span>
+          <span class="what"><span class="tip m op" tabindex="0" role="img" aria-label="Opinion of how-each-run-is-going">◇<span class="bubble">Opinion of how-each-run-is-going</span></span> Stuck since 04:58 <span class="d">· no model call for 2 h · <span class="tip m" tabindex="0" role="img" aria-label="Told by the probe, unverified">◌<span class="bubble">Told by the probe, unverified</span></span> runs <code>bun test --watch</code></span></span>
+          <span class="t">04:58</span>
+          <span class="act"><button class="btn">Stop run</button></span>
+        </div>
+        <div class="row">
+          <span class="comp-n">main</span>
+          <span class="who"><span class="tip m op" tabindex="0" role="img" aria-label="Opinion of which-run-did-it">◇<span class="bubble">Opinion of which-run-did-it</span></span> claude #2</span>
+          <span class="what">2 pushes to github.com/ana/app refused <span class="d">· you were away</span></span>
+          <span class="t">01:12</span>
+          <span class="act"><button class="btn">Allow next time</button></span>
+        </div>
+      </section>
+
+      <section aria-label="Done">
+        <h2>Done <span class="c">2</span></h2>
+        <div class="row">
+          <span class="comp-n">main</span>
+          <span class="who">claude #1</span>
+          <span class="what"><span class="d">6 h 54 · $14.20 · 38 files ·</span> <span class="tip m" tabindex="0" role="img" aria-label="Told by the probe, unverified">◌<span class="bubble">Told by the probe, unverified</span></span> last full <code>npm test</code>: 3 failed <span class="sep">·</span> <span class="tip q" tabindex="0" aria-label="Words claude #1 wrote">All tests pass<span class="bubble">Words claude #1 wrote</span></span> <span class="tip m op show" tabindex="0" role="img" aria-label="Opinion of the claims classifier">◇<span class="bubble">Opinion of the claims classifier</span></span> <span class="mismatch">mismatch</span></span>
+          <span class="t">05:52</span>
+          <span class="act"><button class="btn">Receipt</button></span>
+        </div>
+        <div class="row">
+          <span class="comp-n">main</span>
+          <span class="who">claude #2</span>
+          <span class="what"><span class="d">5 h 16 · $9.10 · 61 files ·</span> 1 deletion outside the repo</span>
+          <span class="t">04:20</span>
+          <span class="act"><button class="btn">Receipt</button></span>
+        </div>
+      </section>
+    </div>
+
+    <div class="foot">
+      <button class="btn">Checkpoint</button>
+      <button class="btn">Pause all</button>
+      <span class="grow"></span>
+      <nav class="places" aria-label="Places">
+        <a href="#now">Now</a><a href="#disk">Disk</a><a href="#network">Network</a><a href="#timeline">Timeline</a>
+      </nav>
+    </div>
+  </main>
+</div>
+</body>
+</html>
