@@ -1,0 +1,12 @@
+measure/screen.js, 240 s of a scripted browser session at 1440x900 (form, long page, table,
+editor, idle reading), recorded by Playwright, then encoded again by ffmpeg 6 on Linux.
+
+source  vp8 (Playwright)            25 fps   15,844,932 B  0.52 Mbit/s  0.22 GiB/h
+h264    libx264 crf 23              30 fps   15,520,815 B               0.215 GiB/h
+h264    libx264 crf 23              10 fps   14,370,297 B               0.199 GiB/h
+hevc    libx265 crf 28              10 fps   15,169,970 B               0.21 GiB/h
+h264    libx264 crf 23               5 fps   13,659,969 B               0.189 GiB/h
+h264    libx264 6 Mbit/s constant   30 fps   54,541,205 B               0.754 GiB/h
+
+Encoding by quality, the frame rate barely matters: a still screen costs almost nothing.
+A constant bitrate costs 3.5 times more for the same screen.
