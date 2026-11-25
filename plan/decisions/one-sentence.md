@@ -66,3 +66,26 @@ something at 14:07, checkpoints exist for 14:00 and 14:10, and 14:07 cannot be r
 proposes: "Agents work in a computer of their own. Silo records what they do there, shows you what
 matters, and takes you back to a saved moment.", and "You can go back to any checkpoint, or continue
 from it in a fork." in `what-to-say`.
+
+## What each build lets the sentence say
+
+An agent's part, 24 November 2026. The first build proposed in #348 has main, checkpoints taken
+on their own, restore, and which files changed between two checkpoints. It records no processes and
+reads no model traffic: those come in its second and third builds. A visitor reads "Silo records
+what they run, change, send and spend there", installs Silo, and finds a list of changed files. The
+first sentence they read is then one Silo does not keep yet.
+
+Proposed: the sentence the home page shows follows what is built, and the recommended answer is
+the one it ends on.
+
+- With the first build: "Let your agents work with full access in a macOS virtual machine on your
+  Mac. Silo takes checkpoints of the whole disk on its own, so anything they break, you can put
+  back."
+- Once processes and connections are recorded: "Your agents work with full access in a virtual
+  machine on your Mac. Silo records what they run and change there and where they connect, and
+  takes it back to a checkpoint."
+- Once model calls are read: the recommended answer, with "send and spend".
+
+The first build's sentence still says something few people can do today: going back that covers
+what the agent did in the shell, in subagents and in ignored files, because the checkpoint copies
+the disk. #350 ranks work destroyed by the agent as the most frequent serious pain.
