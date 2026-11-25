@@ -17,3 +17,30 @@ The options:
 
 Recommended: what Silo sees, and no more. A few providers carry nearly all model traffic, so reading
 a new provider covers every program that uses it, where a reader of files covers one program.
+
+## A model on your Mac, designed and tried (25 November 2026)
+
+An agent's part, from `research/2026-11-25-local-models`. It answers the question above with a
+design and a prototype against stand-ins of Ollama and LM Studio (no real server ran).
+
+- **The channel.** You grant one computer one model server of your Mac. Inside, it gets
+  `models.silo.internal:11434`. The boundary, on the Mac, is the only one that dials the Mac's
+  loopback, with the Host that server expects and no Origin.
+- **Only calls that run or list a model pass.** Pulling, pushing, creating, copying and deleting a
+  model, and LM Studio's download and load, are refused with a 400 in the route's format and never
+  reach the Mac. Codex asking Ollama to pull a missing model (#369) is the real case.
+- **Cloud models are refused**, by name (`-cloud`) and by what Ollama's `/api/show` says
+  (`remote_host`), which catches a model made with `ollama create` from a cloud model.
+- **Memory is capped.** `keep_alive` over 5 minutes or `-1`, and a context over 65,536 tokens, are
+  lowered, and the record says so.
+- **Every call is recorded** with its tokens, read from all four formats the programs use. One gap:
+  Chat Completions streamed without `include_usage` carries no usage.
+- About 0.1 ms is added per call on loopback.
+
+This touches `nothing-shared-from-your-device`, a property in force: "Nothing from your device is
+shared into a computer." The channel shares a server of the Mac into a computer. It can be built
+only if polarzero changes the property, for example to "nothing from your device is shared into a
+computer unless you grant it, one channel at a time, through the boundary". Until then the
+property holds and the channel waits.
+
+Recommended: the channel, off by default, any model already on the Mac, cloud models refused.

