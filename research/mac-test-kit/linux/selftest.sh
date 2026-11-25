@@ -56,11 +56,14 @@ for f in c/*.c; do
 done
 rm -rf "$tmpbin"
 
-step "RESULTS.md is up to date"
-cp RESULTS.md /tmp/.kit-results-before 2>/dev/null || : > /tmp/.kit-results-before
+step "RESULTS.md and DECISIONS.md are up to date"
+tmpdoc="$(mktemp -d)"
+for d in RESULTS.md DECISIONS.md; do cp "$d" "$tmpdoc/$d" 2>/dev/null || : > "$tmpdoc/$d"; done
 python3 py/kitreport.py doc . >/dev/null
-if cmp -s RESULTS.md /tmp/.kit-results-before; then ok "RESULTS.md"; else bad "RESULTS.md was stale and has been rewritten; commit it"; fi
-rm -f /tmp/.kit-results-before
+for d in RESULTS.md DECISIONS.md; do
+  if cmp -s "$d" "$tmpdoc/$d"; then ok "$d"; else bad "$d was stale and has been rewritten; commit it"; fi
+done
+rm -rf "$tmpdoc"
 
 step "Linux analogues and fakes"
 for f in linux/test-*.sh; do

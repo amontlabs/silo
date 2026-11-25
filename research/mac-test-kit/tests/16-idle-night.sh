@@ -4,7 +4,8 @@
 # tier: long
 # time: one night (8 hours by default; KIT_IDLE_HOURS sets it)
 # needs: the installed computer of test 00, macOS 27 on the Mac, the Mac on power and left awake (the test holds a caffeinate assertion while it runs)
-# decides: own-cost-targets and silo-is-light (the idle reference every cost target is read against), the default filter of silo changes
+# step: 3
+# decides: mac-kept-awake (whether the computer's process holds the Mac awake by itself, read before the test's own assertion), own-cost-targets and silo-is-light (the idle reference every cost target is read against), the default filter of silo changes
 # question: Left idle for a night, what does a provisioned macOS computer cost the Mac in processor, memory and disk, and which paths does macOS write inside it by itself?
 # outcome quiet: After the first half hour the computer is quiet: the Virtualization process uses under 5% of
 #   one core (median of the quiet windows) and macOS changes fewer than 2,000 files per half hour. The
@@ -40,6 +41,12 @@ if guest_local; then
   ( while :; do date > "$DATA/Library/Logs/system.log"; date > "$DATA/private/var/db/state-$((RANDOM % 3))"; sleep 1; done ) &
   WRITER=$!
 else
+  # Before the kit's own assertion: does the computer's process hold the Mac awake by itself?
+  pmset -g assertions > "$KIT_WORK/assertions.txt" 2>&1
+  kit_attach "$KIT_WORK/assertions.txt"
+  a="$(python3 -I "$KIT_ROOT/py/assertions.py" "$(cat "$GB/run.pid")" $(pgrep -f com.apple.Virtualization.VirtualMachine) < "$KIT_WORK/assertions.txt")"
+  kit_fact vz_holds_assertion "$(echo "$a" | head -1)"
+  [ "$(echo "$a" | wc -l)" -gt 1 ] && kit_note "held by the computer: $(echo "$a" | sed 1d | tr '\n' ' ')"
   caffeinate -i -w $$ & CAF=$!
 fi
 

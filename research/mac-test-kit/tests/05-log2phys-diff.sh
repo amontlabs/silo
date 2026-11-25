@@ -4,6 +4,7 @@
 # tier: quick
 # time: about 5 minutes
 # needs: 12 GB free, no VM, no sudo
+# step: 5
 # decides: file-changes-from-outside (catching writes past APFS), research 11 "Where the trust comes from", the "how much changed" of a gap
 # question: Does F_LOG2PHYS_EXT on two APFS clones of a disk image tell exactly which blocks differ, matching a byte comparison, and how fast?
 # outcome map-tells: Every block whose bytes differ has a different device place, and few equal blocks are flagged: the engine can list the blocks written between two checkpoints from the Mac's side, and a write past APFS inside main shows (research 11's design point 4).

@@ -4,6 +4,7 @@
 # tier: long
 # time: about 1.5 hours
 # needs: the installed computer of test 00, macOS 27 on the Mac, no other macOS VM running (UTM, Tart, Parallels)
+# step: 2
 # decides: what-stop-ends, neutral-core (a refused start taken as a fact)
 # question: Asked to stop while busy, how often does a macOS 27 guest shut down by itself within 30 seconds, and does a stop ever leave one of Apple's two places for macOS computers taken?
 # outcome clean-stops: At least 18 of 20 busy guests shut down within 30 s of request-stop and no

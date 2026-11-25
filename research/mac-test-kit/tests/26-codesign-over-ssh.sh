@@ -4,6 +4,7 @@
 # tier: vm
 # time: about 15 minutes
 # needs: the Xcode computer of test 23, macOS 27 on the Mac; no Apple account (a throwaway self-signed identity is made in the computer)
+# step: later
 # decides: apple-keys-in-a-computer (whether a development identity in the computer works for agents with nobody at the screen)
 # question: Over SSH, does codesign sign with an identity in the login keychain, and with one in a keychain of its own set up the way CI does it, without a dialog on the screen?
 # outcome both-sign: Both keychains signed over SSH. Nothing special is needed for a development

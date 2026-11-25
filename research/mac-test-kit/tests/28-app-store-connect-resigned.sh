@@ -4,6 +4,7 @@
 # tier: guided
 # time: about 30 minutes, with you at the keyboard for the key's details and perhaps one approval in the computer's window
 # needs: the Xcode computer of test 23, macOS 27 on the Mac, Xcode on this Mac, an App Store Connect API key (.p8) on this Mac with its key ID and issuer ID (KIT_ASC_KEY, KIT_ASC_KEY_ID, KIT_ASC_ISSUER, or asked), network; for xcodebuild, KIT_ASC_PROJECT and KIT_ASC_SCHEME (a project of yours, copied into the computer)
+# step: later
 # decides: signing-keys-re-signed, apple-keys-in-a-computer (whether an App Store Connect key can stay out of every computer)
 # question: With the real App Store Connect key kept on the Mac and a placeholder key in the computer, do notarytool, altool and xcodebuild -allowProvisioningUpdates work through a boundary that ends TLS and signs each token again with the real key, also when each GET token is scoped to its one request, and which hosts, audiences and token lifetimes do they use?
 # outcome works-scoped: Every tool tried worked through the boundary, also with each GET token scoped

@@ -4,6 +4,7 @@
 # tier: quick
 # time: about 25 minutes (stops early past its time limit)
 # needs: 30 GB free, no VM, no sudo (the ASIF part asks for sudo only if its device is not yours)
+# step: 4
 # decides: checkpoint-per-system, speed-budgets (the checkpoint's target), research 07 "What to do if APFS behaves like XFS"
 # question: Does cloning a disk image stall a program writing to it, and does the stall grow with the pieces checkpoints leave the image in, raw and ASIF?
 # outcome no-stall: At 1000 checkpoints a write waited at most 0.1 s during a clone: checkpoints need none of research 07's mitigations; the checkpoint's target can be written as the clone time.

@@ -4,6 +4,7 @@
 # tier: long
 # time: about 50 minutes (four runs of an 8 GiB image, then the catalog killed at 300 steps)
 # needs: 40 GB free, no VM, no sudo; Zig 0.15.2 (downloaded from ziglang.org, about 51 MB, if not on PATH) and the prototype's source (fetched from this repository's branch if not next to the kit); both asked first
+# step: 4
 # decides: checkpoint-per-system (which way a checkpoint is taken on a Mac: a clone, cbw, or delta), checkpoint-at-each-turn, thinning-checkpoints (the wait of a drop), research 2026-11-24-checkpoint-engine
 # question: On APFS, does cloning a file that shares blocks with the live disk image (the last checkpoint, which nobody writes) make the live image's writes wait, as it did on XFS (up to 1.0 s), and how do the prototype's ways compare there?
 # outcome full-free: Even a clone of the live image kept every write under 0.1 s: the plan's checkpoint (a clone) holds on APFS at this fragmentation;
