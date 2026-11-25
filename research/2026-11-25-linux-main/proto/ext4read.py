@@ -21,9 +21,28 @@ def u16(b, o): return struct.unpack_from('<H', b, o)[0]
 def u32(b, o): return struct.unpack_from('<I', b, o)[0]
 def be32(b, o): return struct.unpack_from('>I', b, o)[0]
 
+def _table():
+    t = []
+    for i in range(256):
+        c = i
+        for _ in range(8):
+            c = (c >> 1) ^ 0x82F63B78 if c & 1 else c >> 1
+        t.append(c)
+    return t
+_T = _table()
+
+def crc32c_update(crc, data):
+    """crc32c with no inversion before or after, as ext4's metadata checksums use it."""
+    for byte in data:
+        crc = _T[(crc ^ byte) & 0xFF] ^ (crc >> 8)
+    return crc
+
 JBD2_MAGIC = 0xC03B3998
 INCOMPAT_64BIT, INCOMPAT_EXTENTS, INCOMPAT_INLINE = 0x80, 0x40, 0x8000
 COMPAT_HAS_JOURNAL = 0x4
+COMPAT_DIR_INDEX, INODE_INDEX, INCOMPAT_LARGEDIR, INCOMPAT_CSUM_SEED = 0x20, 0x1000, 0x4000, 0x2000
+RO_COMPAT_METADATA_CSUM = 0x400
+DIR_BLOCKS_MAX = 1 << 20      # 4 GiB of directory at 4 KiB blocks; larger is refused
 
 class Image:
     def __init__(self, path, replay=True, offset=0):
@@ -48,7 +67,20 @@ class Image:
             raise Refused('inline-data')
         self.desc_size = u16(sb, 0xFE) if self.incompat & INCOMPAT_64BIT else 32
         self.journal_ino = u32(sb, 0xE0)
-        self.ngroups = (self.blocks_count - self.first_data + u32(sb, 32) - 1) // u32(sb, 32)
+        bpg = u32(sb, 32)
+        if not self.ipg or not bpg:
+            raise Refused('superblock')
+        if self.isize < 128 or self.isize > self.bs or self.isize & (self.isize - 1):
+            raise Refused('inode-size')
+        if self.incompat & INCOMPAT_64BIT and not (
+                64 <= self.desc_size <= 1024 and not self.desc_size & (self.desc_size - 1)):
+            raise Refused('descriptor-size')
+        self.ngroups = (self.blocks_count - self.first_data + bpg - 1) // bpg
+        if self.inodes_count != self.ipg * self.ngroups:
+            raise Refused('superblock')            # the kernel refuses to mount it as well
+        self.csum = u32(sb, 0x64) & RO_COMPAT_METADATA_CSUM
+        self.csum_seed = (u32(sb, 0x270) if self.incompat & INCOMPAT_CSUM_SEED
+                          else crc32c_update(0xFFFFFFFF, sb[0x68:0x78]))
         gdt = self.first_data + 1
         self.itable = []
         for g in range(self.ngroups):
@@ -95,6 +127,8 @@ class Image:
             entries, depth = u16(b, 2), u16(b, 6)
             if budget == 0:
                 raise Refused('extent-depth')
+            if 12 + 12 * entries > len(b):
+                raise Refused('extent-entries')
             for k in range(entries):
                 e = 12 + 12 * k
                 if depth == 0:
@@ -116,17 +150,125 @@ class Image:
             for k in range(ln):
                 yield pblk + k
 
-    def dir_entries(self, ino_bytes):
-        for pblk in self.file_blocks(ino_bytes):
-            b = self.block(pblk)
+    # --- directories, read the way Linux lists them ------------------------------------------
+    #
+    # A directory is read up to its size. On a file system with metadata_csum each block's
+    # checksum is checked, and a block that fails it is refused, as the kernel refuses it. A
+    # directory with an htree index is listed through its index, as the kernel's readdir does: a
+    # leaf the index does not name is not listed. Whatever the kernel would answer with an error,
+    # or read in a way this reader does not follow, is refused here, never read another way.
+
+    def dir_entries(self, ino, ino_bytes):
+        bs = self.bs
+        size = u32(ino_bytes, 4) | (u32(ino_bytes, 108) << 32)
+        if size % bs or size // bs > DIR_BLOCKS_MAX:
+            raise Refused('dir-size')
+        n = size // bs
+        lmap = {}
+        for lblk, pblk, ln in self.extents(ino_bytes):
+            for k in range(min(ln, max(0, n - lblk))):
+                if lblk + k in lmap:
+                    raise Refused('extent-overlap')
+                lmap[lblk + k] = pblk + k
+        seed = crc32c_update(crc32c_update(self.csum_seed, struct.pack('<I', ino)),
+                             ino_bytes[100:104]) if self.csum else None
+        leaves = self.dx_leaves(ino_bytes, lmap, seed)
+        for lblk in (leaves if leaves is not None else range(n)):
+            if lblk not in lmap:
+                raise Refused('dir-hole')
+            b = self.block(lmap[lblk])
+            dx = leaves is not None and u32(b, 0) == 0 and u16(b, 4) == bs
+            if seed is not None:
+                self.dir_block_csum(b, seed, 'node' if dx else 'leaf')
             o = 0
-            while o < self.bs:
-                ino, rec_len, name_len, ftype = u32(b, o), u16(b, o + 4), b[o + 6], b[o + 7]
-                if rec_len < 8 or o + rec_len > self.bs or name_len > rec_len - 8:
+            while o < bs:
+                if o + 8 > bs:
                     raise Refused('dirent')
-                if ino and ftype != 0xDE:
-                    yield ino, ftype, b[o + 8: o + 8 + name_len]
+                d_ino, rec_len, name_len, ftype = u32(b, o), u16(b, o + 4), b[o + 6], b[o + 7]
+                if rec_len < 12 or rec_len % 4 or o + rec_len > bs or name_len > rec_len - 8:
+                    raise Refused('dirent')
+                if d_ino > self.inodes_count:
+                    raise Refused('dirent')
+                if d_ino:
+                    # The checksum tail has inode 0, so it is never listed. Its type, 0xDE, on an
+                    # entry with an inode is an unknown type to Linux, which lists the entry.
+                    yield d_ino, ftype, b[o + 8: o + 8 + name_len]
                 o += rec_len
+
+    def dir_block_csum(self, b, seed, kind):
+        """Refuses a directory block whose checksum fails, as the kernel does: a leaf's dirent
+        tail, or the dx tail of an index root or node."""
+        bs = self.bs
+        if kind == 'leaf':
+            t = bs - 12
+            if u32(b, t) != 0 or u16(b, t + 4) != 12 or b[t + 6] != 0 or b[t + 7] != 0xDE:
+                raise Refused('dir-block-checksum')   # no tail: the kernel refuses the block too
+            if u32(b, t + 8) != crc32c_update(seed, b[:t]):
+                raise Refused('dir-block-checksum')
+            return
+        if kind == 'root':
+            if u16(b, 4) != 12 or u16(b, 16) != bs - 12 or u32(b, 0x18) != 0 or b[0x1D] != 8:
+                raise Refused('dir-block-checksum')
+            co = 0x20
+        else:
+            co = 8
+        limit, count = u16(b, co), u16(b, co + 2)
+        if co + limit * 8 > bs - 8 or count > limit:
+            raise Refused('dir-block-checksum')
+        t = co + limit * 8
+        # the entries in use, then the tail with its checksum field as zero
+        want = crc32c_update(crc32c_update(seed, b[:co + count * 8]), b[t:t + 4] + bytes(4))
+        if u32(b, t + 4) != want:
+            raise Refused('dir-block-checksum')
+
+    def dx_leaves(self, ino_bytes, lmap, seed):
+        """The logical blocks an htree index names, in its order, or None to read the directory
+        block by block: no index, or an index the kernel calls bad (ERR_BAD_DX_DIR) and reads
+        around. Each leaf named once; hashes in order."""
+        if not (self.compat & COMPAT_DIR_INDEX and u32(ino_bytes, 32) & INODE_INDEX):
+            return None
+        if 0 not in lmap:
+            raise Refused('dx-root')
+        bs = self.bs
+        csum_size = 8 if seed is not None else 0
+        root = self.block(lmap[0])
+        levels = 3 if self.incompat & INCOMPAT_LARGEDIR else 2
+        if (root[0x1C] not in (0, 1, 2) or root[0x1F] & 1 or root[0x1E] >= levels
+                or root[0x1D] != 8 or u16(root, 0x20) != (bs - 0x20 - csum_size) // 8):
+            return None
+        if seed is not None:
+            self.dir_block_csum(root, seed, 'root')
+        leaves, seen = [], {0}
+        def entries(b, co):
+            count = u16(b, co + 2)
+            if not count or count > u16(b, co):
+                raise Refused('dx-count')
+            out, last = [u32(b, co + 4) & 0x0FFFFFFF], None
+            for k in range(1, count):
+                h, blk = u32(b, co + 8 * k), u32(b, co + 8 * k + 4) & 0x0FFFFFFF
+                if last is not None and h < last:
+                    raise Refused('dx-hash-order')
+                last = h
+                out.append(blk)
+            return out
+        def walk(blks, depth):
+            for lblk in blks:
+                if lblk in seen:
+                    raise Refused('dx-block-twice')
+                seen.add(lblk)
+                if depth == 0:
+                    leaves.append(lblk)
+                    continue
+                if lblk not in lmap:
+                    raise Refused('dir-hole')
+                node = self.block(lmap[lblk])
+                if u32(node, 0) != 0 or u16(node, 4) != bs or u16(node, 8) != (bs - 8 - csum_size) // 8:
+                    raise Refused('dx-node')
+                if seed is not None:
+                    self.dir_block_csum(node, seed, 'node')
+                walk(entries(node, 8), depth - 1)
+        walk(entries(root, 0x20), root[0x1E])
+        return leaves
 
     # --- the journal -------------------------------------------------------------------------
 
@@ -232,10 +374,10 @@ class Image:
                 raise Refused('directory-cycle')
             seen_dirs.add(ino)
             ib = self.inode(ino)
-            for child, ftype, name in self.dir_entries(ib):
+            for child, ftype, name in self.dir_entries(ino, ib):
                 if name in (b'.', b'..'):
                     continue
-                if b'/' in name or not name:
+                if b'/' in name or b'\0' in name or not name:
                     raise Refused('name')
                 p = path + b'/' + name
                 cb = self.inode(child)
