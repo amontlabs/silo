@@ -198,3 +198,9 @@ of Silo's own).
 Recommended: count it at a bound. A budget still holds, since the bound is above what the provider
 charges, and a new model does not stop work. This would replace the sentence of the answer on a
 model Silo has no price for. The answer is left as it is for polarzero to choose.
+
+## Where the drafts disagree, second pass (integration)
+
+An agent's part, 25 November 2026, written while merging #390 and #392 to #396 onto #391 (`research/2026-11-25-integration-2/`).
+
+The answer says a call to a model Silo has no price for does not leave while a budget covers it (from #373 and #374). #396 measured a third option: count it at twice the dearest price of the same provider and tier. A budget still held, and a new model did not stop every budgeted computer on the day it was released. Recommended: #396's option, with `where-prices-come-from` deciding where the table comes from.

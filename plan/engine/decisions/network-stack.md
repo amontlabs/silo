@@ -219,3 +219,11 @@ faults came up between the drafts.
 - #374 tells computers apart by the address a connection comes from. Neither way in gives one: vsock
   has none, and every computer behind its own gvproxy is `192.168.127.2`. The boundary gave each
   computer its own socket on each way in, and its own port for lookups.
+
+## Where the drafts disagree, second pass (integration)
+
+An agent's part, 25 November 2026, written while merging #390 and #392 to #396 onto #391 (`research/2026-11-25-integration-2/`).
+
+- #380 runs gvproxy's hand-off with `-outbound-deny private,host,host-networks`, which drops `169.254.169.254` before the boundary sees it. #379 serves cloud credentials from a metadata server at that address. #395 found the two cannot both hold. Recommended: gvproxy hands the metadata address to the boundary like any other connection, so the boundary answers it, and the deny list keeps `host` and `host-networks`. This needs #395's one-line fix of `-ec2-metadata-access`, or the same rule in #380's patch.
+- #374 tells computers apart by the address a connection comes from. Neither way in gives one: vsock has no address, and every computer behind its own gvproxy is `192.168.127.2`. Recommended, as #395 built it: one socket per computer on each way in, and one port per computer for lookups.
+- #378's relay sets no `TCP_NODELAY`, which cost 44 ms on every kept-alive request in #395's run. A one-line fix in #378's relay and in the Mac end.

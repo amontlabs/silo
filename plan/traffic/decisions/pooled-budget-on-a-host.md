@@ -23,3 +23,9 @@ Recommended: a pooled limit beside each person's budget. It is what a team lead 
 host it costs a local call.
 
 Not built: the reservation is #374's, run for one computer, not shared between boundaries.
+
+## Where the drafts disagree, second pass (integration)
+
+An agent's part, 25 November 2026, written while merging #390 and #392 to #396 onto #391 (`research/2026-11-25-integration-2/`).
+
+#388's `pooled-budget-ledger` and this entry answer the same question in two places. This one keeps one count on a host and reserves each call against it; #388's gives each Mac a slice from a ledger. They agree once the ledger runs on the host, as #388 suggests. Recommended: computers on the host draw from the host's count directly, Macs take slices from the same count as #388's leases, and this entry needs `pooled-budget-ledger`.

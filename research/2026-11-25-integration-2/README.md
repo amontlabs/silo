@@ -1,5 +1,8 @@
 # The drafts of 25 November, merged on top of #375
 
+Second pass, 14:00 UTC: #390 and #392 to #396 are merged too, and #380, #388 and #389 again at
+their new heads. See "Second pass" below.
+
 For polarzero, 25 November 2026, by an agent. This branch is #375's branch (`b567132`, every draft
 up to #374 merged into `main` at `1b8f191`) with every draft from #376 to #389 merged into it.
 `plan check` passed after each merge. Nothing here is new research. The only changes made on this
@@ -94,6 +97,46 @@ Collected from the drafts, with what this branch recommends where two disagree.
 - `thinning-checkpoints` and `low-disk` (#389).
 - Keep import, `silo look` and `silo put-back` in option A (#382).
 - Every entry #376 wrote: about forty, each takes or drops in one step.
+
+## Second pass
+
+Heads of 25 November, 14:00 UTC. `plan check` passed after each merge. #393 is stacked on this
+branch, and #394 and #395 on #386.
+
+| PR | Head | Fix-up on merge |
+|---|---|---|
+| #380 | `3576a41` | none (two new commits: `host-networks` in the deny list, and a helper that owns the link) |
+| #388 | `1947c16` | `what-a-budget-promises.md`: #388's new paragraph has no heading and fell under this branch's note on that entry. It gets its own, "A cut at the budget over a team" |
+| #389 | `a22c808` | none |
+| #390 | `15820da` | none |
+| #392 | `6b7471f` | `linux-server-host.md`, `teams.md`: added sections, all kept |
+| #393 | `1ef9497` | none |
+| #394 | `ceb068d` | none. Then #394's note for `record-edits-show`, kept in its README because #362 had not landed, added to that entry |
+| #395 | `9b5715f` | `secret-placeholder.md`, `network-stack.md`, `ending-the-encrypted-connection.md`: added sections. #395's paragraphs in the first two have no heading; each gets "The boundary end to end" |
+| #396 | `7a89929` | `budget-and-work-out-of-sight.md`, `how-spend-is-shown.md`, `what-a-budget-promises.md`: added sections, all kept |
+
+### Where they disagree
+
+Each row is also a note on the entry named, under "Where the drafts disagree, second pass
+(integration)".
+
+| Drafts | They disagree on | Recommended | Note on |
+|---|---|---|---|
+| #376's answer against #378 and #395 | "No proxy is configured inside", while #378's card configures one | #395's sentence: the boundary swaps the value, whichever way requests reach it | `secret-placeholder` |
+| #377 against #376 and #395 | One placeholder for every computer, or one per computer; with one, #374's check passes any computer's key | One per secret and per computer | `secret-placeholder` |
+| #380 against #379 (found by #395) | The deny list drops `169.254.169.254`, where #379's metadata server answers | gvproxy hands the metadata address to the boundary; deny keeps `host` and `host-networks` | `network-stack` |
+| #374 against #378 and #380 (found by #395) | Computers told apart by source address, which neither way in gives | One socket per computer on each way in | `network-stack` |
+| #373 and #374 against #396 | A model with no price: denied under a budget, or counted at twice the dearest price of its tier | #396's bound | `what-a-budget-promises` |
+| #388 against #392 | Two entries for one pooled team budget: leases from a ledger, or one count on the host | One count: the host's count is the ledger; Macs take slices of it | `pooled-budget-on-a-host`, `pooled-budget-ledger` |
+| #386 against #394 | "Keep recording" after damage at start flags every power cut | #386's option with #394's after-head rule | `record-damaged-at-start` |
+
+### For polarzero to rule, added
+
+- `claude-key-or-plan` (#393, new): what replaces "read only where Silo holds the key" in option A.
+- `where-prices-come-from` (#396, new): Silo's own signed table, fetched.
+- `record-head-off-the-mac` (#394, new): a Git repository with a protected branch for one person.
+- The nine entries of #392 for a team host, from `members-on-a-host` to `team-host-size`.
+- `enforcing-and-recording` (#395): a limit after which a request waiting for the record is refused.
 
 ## Not done here
 

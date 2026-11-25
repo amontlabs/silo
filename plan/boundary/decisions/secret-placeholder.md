@@ -556,3 +556,10 @@ one, `placeholder-not-a-key`. With that, Silo cannot tell which computer's place
 #374's check that a key was given to this computer passes any computer's. The placeholder must also
 keep the shape programs read: Claude Code tells a key (`sk-ant-api03-…`) from a sign-in
 (`sk-ant-oat01-…`) by it, and Azure's tokens must be JWTs.
+
+## Where the drafts disagree, second pass (integration)
+
+An agent's part, 25 November 2026, written while merging #390 and #392 to #396 onto #391 (`research/2026-11-25-integration-2/`).
+
+- The answer says "No proxy is configured inside". #378's card that leads nowhere configures one, and #395 ran the swap the same way through it and through gvproxy's hand-off. Recommended: #395's sentence in its place, "The real value is swapped in by the boundary, whichever way the computer's requests reach it."
+- #377's real night gave every computer the same placeholder (`placeholder-not-a-key` in its kit). This answer, as #376 edited it, says a placeholder belongs to one computer, and #395 shows why: with one shared placeholder, #374's check that a key was given to this computer passes any computer's. Recommended: one placeholder per secret and per computer, keeping the shape programs read (`sk-ant-api03-…`, a JWT for Azure).

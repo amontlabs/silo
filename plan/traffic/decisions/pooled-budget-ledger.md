@@ -68,3 +68,9 @@ under leases a $4 batch was admitted in every run, where fixed $3 shares refused
 Not built yet: a lease that expires, so a slice held by a Mac that went to sleep comes back; and
 admitting each call at the ledger once less than a slice per Mac is free, which would remove the
 recalls at the end of a budget (they made calls wait up to 48 s through a Git repository).
+
+## Where the drafts disagree, second pass (integration)
+
+An agent's part, 25 November 2026, written while merging #390 and #392 to #396 onto #391 (`research/2026-11-25-integration-2/`).
+
+#392's `pooled-budget-on-a-host` answers the same question for a team on one host, with one exact count. The note there proposes that the host's count is this ledger, so one team budget has one count wherever its computers run.
