@@ -153,6 +153,8 @@ def main():
     ap.add_argument("--sock", required=True)
     ap.add_argument("--mac", required=True)
     ap.add_argument("--ready", required=True)
+    # No DHCP: ADDRESS/MASK,ROUTER set by hand, as a card that leads nowhere has no DHCP (test 40).
+    ap.add_argument("--static", help="ADDRESS,MASK,ROUTER instead of asking DHCP")
     a = ap.parse_args()
     mac = bytes(int(x, 16) for x in a.mac.split(":"))
 
@@ -167,7 +169,11 @@ def main():
     conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 << 20)
     conn.connect(a.sock)
     conn.send(b"VFKT")
-    lease = dhcp(conn, mac)
+    if a.static:
+        addr, mask, router = a.static.split(",")
+        lease = {"address": addr, "mask": mask, "router": router, "static": True}
+    else:
+        lease = dhcp(conn, mac)
 
     tap = os.open("/dev/net/tun", os.O_RDWR)
     fcntl.ioctl(tap, TUNSETIFF, ifreq("tap0", struct.pack("H", IFF_TAP | IFF_NO_PI)))

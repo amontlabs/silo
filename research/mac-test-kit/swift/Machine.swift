@@ -201,7 +201,7 @@ func loadHardwareModel(_ b: VMBundle) throws -> VZMacHardwareModel {
 @available(macOS 14, *)
 func makeConfiguration(_ b: VMBundle, _ cfg: BundleConfig, net: NetChoice, disk: DiskModes,
                        extraDisks: [(String, Bool)], mtu: Int? = nil,
-                       mainNBD: NBDChoice? = nil) throws -> VZVirtualMachineConfiguration {
+                       mainNBD: NBDChoice? = nil, vsock: Bool = false) throws -> VZVirtualMachineConfiguration {
   let c = VZVirtualMachineConfiguration()
   c.bootLoader = VZMacOSBootLoader()
 
@@ -268,6 +268,8 @@ func makeConfiguration(_ b: VMBundle, _ cfg: BundleConfig, net: NetChoice, disk:
     }
     c.networkDevices = [dev]
   }
+  // With --vsock-in or --vsock-out: one virtio socket device, which the guest reaches as CID 2.
+  if vsock { c.socketDevices = [VZVirtioSocketDeviceConfiguration()] }
 
   try c.validate()
   return c
@@ -498,6 +500,90 @@ func emit(_ event: String, _ fields: [(String, J)]) {
 /// which would make the calls from cmdRun and the control socket's handler cross-actor calls. The
 /// window's closing is observed through NotificationCenter instead.
 @available(macOS 14, *)
+/// The vsock bridges of `silovm run` (VsockBridgeSpec in Core.swift). Every connection is one
+/// "vsock" event when it opens and one when it ends, with the bytes each way. The framework's
+/// calls are made on the main queue, the machine's queue.
+@available(macOS 14, *)
+final class VsockBridges: NSObject, VZVirtioSocketListenerDelegate {
+  let device: VZVirtioSocketDevice
+  var listeners: [VZVirtioSocketListener] = []
+  var sources: [DispatchSourceRead] = []
+  /// Open connections, kept so that the framework does not close them under the splice.
+  var open: [Int: VZVirtioSocketConnection] = [:]
+  var outPaths: [UInt32: String] = [:]
+  var next = 0
+
+  init(vm: VZVirtualMachine, specs: [VsockBridgeSpec]) throws {
+    guard let d = vm.socketDevices.first as? VZVirtioSocketDevice else { throw Fail("the machine has no virtio socket device") }
+    device = d
+    super.init()
+    for s in specs {
+      if s.inward {
+        let fd = try unixListen(s.path)
+        let src = DispatchSource.makeReadSource(fileDescriptor: fd, queue: .main)
+        src.setEventHandler { [weak self] in
+          let client = accept(fd, nil, nil)
+          if client >= 0 { self?.inward(client, s) }
+        }
+        src.resume()
+        sources.append(src)
+      } else {
+        let l = VZVirtioSocketListener()
+        l.delegate = self
+        device.setSocketListener(l, forPort: s.port)
+        listeners.append(l)
+        outPaths[s.port] = s.path
+      }
+      emit("vsock", [("state", .s("listening")), ("dir", .s(s.inward ? "in" : "out")), ("port", .i(Int(s.port))), ("path", .s(s.path))])
+    }
+  }
+
+  func keep(_ c: VZVirtioSocketConnection, _ unixFD: Int32, dir: String) {
+    next += 1
+    let id = next
+    open[id] = c
+    let vfd = dup(c.fileDescriptor)
+    emit("vsock", [("state", .s("open")), ("dir", .s(dir)), ("id", .i(id)),
+                   ("port", .i(Int(c.destinationPort))), ("t", .d(now()))])
+    splice(vfd, unixFD) { [weak self] toUnix, toGuest in
+      DispatchQueue.main.async {
+        self?.open[id]?.close()
+        self?.open[id] = nil
+        emit("vsock", [("state", .s("closed")), ("dir", .s(dir)), ("id", .i(id)),
+                       ("bytes_from_guest", .i(Int(toUnix))), ("bytes_to_guest", .i(Int(toGuest))), ("t", .d(now()))])
+      }
+    }
+  }
+
+  /// Silo's side opened the Unix socket: open the port inside.
+  func inward(_ client: Int32, _ s: VsockBridgeSpec) {
+    device.connect(toPort: s.port) { [weak self] result in
+      switch result {
+      case .success(let c):
+        self?.keep(c, client, dir: "in")
+      case .failure(let e):
+        close(client)
+        emit("vsock", [("state", .s("refused")), ("dir", .s("in")), ("port", .i(Int(s.port)))] + ErrorInfo(e).fields)
+      }
+    }
+  }
+
+  /// The computer opened a port of the Mac: connect its Unix socket.
+  func listener(_ listener: VZVirtioSocketListener, shouldAcceptNewConnection connection: VZVirtioSocketConnection,
+                from socketDevice: VZVirtioSocketDevice) -> Bool {
+    guard let path = outPaths[connection.destinationPort] else { return false }
+    do {
+      let fd = try unixConnect(path)
+      keep(connection, fd, dir: "out")
+      return true
+    } catch {
+      emit("vsock", [("state", .s("refused")), ("dir", .s("out")), ("port", .i(Int(connection.destinationPort))),
+                     ("error", .s("\(error)"))])
+      return false
+    }
+  }
+}
+
 final class Runner: NSObject, VZVirtualMachineDelegate {
   let bundle: VMBundle
   let vm: VZVirtualMachine
@@ -515,6 +601,8 @@ final class Runner: NSObject, VZVirtualMachineDelegate {
   var finished = false
   var startedAt: Double?
   var provisioned = false
+  var bridges: [VsockBridgeSpec] = []
+  var vsock: VsockBridges?
 
   init(bundle: VMBundle, vm: VZVirtualMachine, provision: ProvisionRequest?, continueOnProvisioningError: Bool,
        maxSeconds: Int?, gui: Bool) {
@@ -627,6 +715,14 @@ final class Runner: NSObject, VZVirtualMachineDelegate {
       let t = now()
       self.startedAt = t
       emit("started", [("t", .d(t)), ("provisioned", .b(withProvisioning))])
+      if !self.bridges.isEmpty {
+        do {
+          self.vsock = try VsockBridges(vm: self.vm, specs: self.bridges)
+        } catch {
+          logErr("vsock: \(error)")
+          emit("vsock", [("state", .s("error")), ("error", .s("\(error)"))])
+        }
+      }
       if let n = self.maxSeconds {
         DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(n)) { [weak self] in
           guard let self = self, !self.finished else { return }
@@ -814,7 +910,8 @@ var nbdObserver: AnyObject?
 func cmdRun(_ argv: [String]) throws {
   let a = try Args(argv,
                    valued: ["bundle", "provision-user", "provision-password", "provision-full-name", "net",
-                            "disk-cache", "disk-sync", "extra-disk", "max-seconds", "mtu", "disk-nbd", "nbd-timeout"],
+                            "disk-cache", "disk-sync", "extra-disk", "max-seconds", "mtu", "disk-nbd", "nbd-timeout",
+                            "vsock-in", "vsock-out"],
                    flags: ["no-autologin", "no-ssh", "gui", "continue-on-provisioning-error"])
   let b = VMBundle(try a.require("bundle"))
   try b.mustExist()
@@ -844,6 +941,8 @@ func cmdRun(_ argv: [String]) throws {
   } else if a.value("nbd-timeout") != nil {
     throw Fail("--nbd-timeout applies only to --disk-nbd URL")
   }
+  let bridges = try a.all("vsock-in").map { try VsockBridgeSpec.parse($0, inward: true) }
+    + a.all("vsock-out").map { try VsockBridgeSpec.parse($0, inward: false) }
   var maxSeconds: Int? = nil
   if a.value("max-seconds") != nil { maxSeconds = try a.int("max-seconds", default: 0) }
 
@@ -861,18 +960,21 @@ func cmdRun(_ argv: [String]) throws {
   let app = NSApplication.shared
   if !a.has("gui") { app.setActivationPolicy(.prohibited) }
 
-  let conf = try makeConfiguration(b, cfg, net: net, disk: disk, extraDisks: extra, mtu: mtu, mainNBD: nbd)
+  let conf = try makeConfiguration(b, cfg, net: net, disk: disk, extraDisks: extra, mtu: mtu, mainNBD: nbd,
+                                vsock: !bridges.isEmpty)
   nbdObserver = nbd?.observer
   let vm = VZVirtualMachine(configuration: conf)
   emit("config", [("mac", .s(cfg.mac)), ("cpus", .i(conf.cpuCount)), ("memory_gb", .i(Int(conf.memorySize >> 30))),
                   ("net", .s(net.name)), ("mtu", mtu.map { J.i($0) } ?? J.null), ("disk_cache", .s(disk.cacheName)), ("disk_sync", .s(disk.syncName)),
                   ("disk_format", .s(cfg.diskFormat)), ("extra_disks", .i(extra.count)), ("gui", .b(a.has("gui"))),
                   ("disk_nbd", nbd.map { J.s($0.url.absoluteString) } ?? J.null),
+                  ("vsock", .s(bridges.map { "\($0.inward ? "in" : "out"):\($0.port):\($0.path)" }.joined(separator: " "))),
                   ("provision_user", provision.map { J.s($0.user) } ?? J.null),
                   ("provisioning_api", .b(provisioningAPIAvailable()))])
   let r = Runner(bundle: b, vm: vm, provision: provision,
                  continueOnProvisioningError: a.has("continue-on-provisioning-error"),
                  maxSeconds: maxSeconds, gui: a.has("gui"))
+  r.bridges = bridges
   runner = r
   try r.begin()
   app.run()

@@ -145,6 +145,27 @@ class VZNetworkDeviceConfiguration: NSObject {
 }
 class VZVirtioNetworkDeviceConfiguration: VZNetworkDeviceConfiguration {}
 class VZNetworkDevice: NSObject {}
+class VZSocketDeviceConfiguration: NSObject {}
+class VZVirtioSocketDeviceConfiguration: VZSocketDeviceConfiguration {}
+class VZSocketDevice: NSObject {}
+class VZVirtioSocketConnection: NSObject {
+  var fileDescriptor: Int32 { -1 }
+  var sourcePort: UInt32 { 0 }
+  var destinationPort: UInt32 { 0 }
+  func close() {}
+}
+protocol VZVirtioSocketListenerDelegate: AnyObject {
+  func listener(_ listener: VZVirtioSocketListener, shouldAcceptNewConnection connection: VZVirtioSocketConnection,
+                from socketDevice: VZVirtioSocketDevice) -> Bool
+}
+class VZVirtioSocketListener: NSObject {
+  weak var delegate: VZVirtioSocketListenerDelegate?
+}
+class VZVirtioSocketDevice: VZSocketDevice {
+  func setSocketListener(_ listener: VZVirtioSocketListener, forPort port: UInt32) {}
+  func removeSocketListener(forPort port: UInt32) {}
+  func connect(toPort port: UInt32, completionHandler: @escaping (Result<VZVirtioSocketConnection, any Error>) -> Void) {}
+}
 class VZVirtualMachineConfiguration: NSObject {
   var bootLoader: VZBootLoader?
   var platform: VZPlatformConfiguration = VZPlatformConfiguration()
@@ -156,6 +177,7 @@ class VZVirtualMachineConfiguration: NSObject {
   var entropyDevices: [VZEntropyDeviceConfiguration] = []
   var storageDevices: [VZStorageDeviceConfiguration] = []
   var networkDevices: [VZNetworkDeviceConfiguration] = []
+  var socketDevices: [VZSocketDeviceConfiguration] = []
   class var minimumAllowedCPUCount: Int { 1 }
   class var maximumAllowedCPUCount: Int { 8 }
   class var minimumAllowedMemorySize: UInt64 { 1 << 30 }
@@ -192,6 +214,7 @@ class VZVirtualMachine: NSObject, KVOStub {
   var state: State { .stopped }
   weak var delegate: VZVirtualMachineDelegate?
   var canStop: Bool { true }
+  var socketDevices: [VZSocketDevice] { [] }
   var canRequestStop: Bool { true }
   func start(options: VZVirtualMachineStartOptions, completionHandler: @escaping ((any Error)?) -> Void) {}
   func stop(completionHandler: @escaping ((any Error)?) -> Void) {}
