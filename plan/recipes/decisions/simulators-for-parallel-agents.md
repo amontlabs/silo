@@ -33,3 +33,15 @@ takes in a computer and how many fit.
 
 It bears on `sizing-target`: 16 agents in main on a 32 GB Mac cannot each have a booted simulator.
 The heavy load for an iOS developer is a few booted simulators shared out by this maximum.
+
+## The record names who touched a simulator, from a second draft (24 November 2026)
+
+An agent's part, 24 November 2026. A second draft asked the same question under this id, in
+`computers`, and recommended that Silo not choose and only make the clash visible. Two drafts held
+one id, so it is kept here as a note. What it adds to the answer above: the record shows which
+process booted, erased or installed into each simulator, so that if agent B still erases the
+simulator agent A was testing in, the morning shows it. Two facts it found also stand here: Claude
+Code's documentation says that when a prompt names no simulator Claude uses one already running,
+even one another session opened; and a reported issue has the simulator tool ignoring the requested
+device when two sessions run on one Mac. It is to check on a Mac whether `xcrun simctl` events are
+enough for the record to name the process.
