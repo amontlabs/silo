@@ -21,3 +21,11 @@ a mix of two, and the rebuild that follows is the one you would run after a fres
 ## Notes
 
 The record marks this sentence Proposed (l.2254–2255, l.1108–1109).
+
+## Caches and build output
+
+An agent's part, 25 November 2026, from `research/2026-11-25-checkpoint-disk-use/`. With left-out folders on a second disk, "come back
+empty" is one step: Silo gives the restored computer an empty second disk. Package caches (npm,
+pip, Cargo) are addressed by content hash, so one from later never gives a build the wrong file.
+They could stay across a restore and save the downloads, while build output and `node_modules`
+come back empty.

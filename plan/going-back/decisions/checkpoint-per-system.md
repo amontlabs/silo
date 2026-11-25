@@ -185,3 +185,22 @@ marks that range again for the next checkpoint. A simulated night of 20,000 requ
 checkpoints failed every time without the rule and passed every time with it. The rule rests on the
 hook's documented promise that no other change happens while it runs; if libkrun ever writes from
 several threads, the hook needs a second call after each write instead.
+
+## Compression needs checkpoints as Silo's own files
+
+An agent's part, 25 November 2026, from `research/2026-11-25-checkpoint-disk-use/`. A 512 GB Mac with an agent rewriting 2 GiB an
+hour keeps 4.3 days of checkpoints under #389's limit. Compressed with zstd, the same blocks take
+24% of their size, and the same Mac keeps 26.3 days. An APFS clone cannot be compressed or
+deduplicated: APFS has no block dedup, and its file compression is undone when the file is written.
+So that gain exists only when checkpoints are files Silo writes, as in #365's `delta`.
+
+In #365's `delta`, the oldest checkpoint is still a clone. It held 25% of the checkpoints' space at
+2 GiB an hour and 68% on a macOS computer without TRIM, which brings the gain down to 13.3 days, and
+to 3.3 instead of 11.3 without TRIM. Copying each block's old content into the open checkpoint's
+file before the first write to it leaves no clone: every byte held is compressible, and removing the
+oldest checkpoint deletes one file. Its cost is that a damaged live image damages every checkpoint,
+which one compressed full copy renewed each week bounds.
+
+A challenge to the answer: "a copy of the computer's disk that shares blocks with it" would rule
+out compression. Proposed instead: a checkpoint is a file of the blocks it alone holds, written and
+compressed by Silo outside the computer, with one full compressed copy as an anchor.
