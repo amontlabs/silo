@@ -129,7 +129,7 @@ def receipt_2(ev):
 
 # ------------------------------------------------------------------ asked@1
 
-ASK_TESTS = re.compile(r"\b(run|make|get|keep)\b[^.]*\b(tests?|suite|specs?|ci)\b[^.]*\b(pass|green|run)|\b(tests?|suite|ci)\b[^.]*\b(pass|green)\b|\brun the (whole |full |entire )?(test )?suite\b|\bfix (the )?(failing|red|broken) tests?\b", re.I)
+ASK_TESTS = re.compile(r"\b(run|make|get|keep)\b[^.]*\b(tests?|suite|specs?|ci)\b[^.]*\b(pass|green|run)|\b(tests?|suite|ci)\b[^.]*\b(pass|green)\b|\brun the (whole |full |entire )?(test )?suite\b|\bfix (the )?(failing|red|broken) tests?\b|\brun (the |all |every )?([\w-]+ )?(tests?|specs?|suite)\b", re.I)
 ASK_KEEP_TESTS = re.compile(rf"\b{NEG}\b[^.]*\b(chang|modif|touch|edit|weaken|skip|disabl|delet)\w*\b[^.]*\btests?\b|\bleave the tests\b", re.I)
 ASK_NO_CHANGE = re.compile(r"\bcode freeze\b|\bread[- ]only\b|\b(do ?n[o']t|don't|never|no)\b[^.]*\b(change|modify|touch|edit|write|delete|remove)\b[^.]*\b(anything|any (files?|code)|it|files?|code)\b|\bwithout (changing|modifying|touching)\b|\bjust (look|read|review|analy[sz]e|explain|investigate|check)\b|\bdon'?t (make|do) (any )?changes\b|\b(only )?(review|audit|analy[sz]e|explain|investigate|plan)\b[^.]*\b(do ?n[o']t|don't|no)\b[^.]*\b(implement|edit|change)", re.I)
 ASK_NO_OUTSIDE = re.compile(r"\b(outside|beyond)\b[^.]*\b(repo|project|folder|directory|workspace)\b|\bonly (in|inside|within)\b", re.I)
