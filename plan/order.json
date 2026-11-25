@@ -354,6 +354,8 @@
         "provider-sees-silos-connection",
         "reading-each-agent-program",
         "subscription-and-key-alike",
+        "google-sign-in-unread",
+        "silos-own-model-calls",
         "hooks-for-tool-calls",
         "tool-calls-from-traffic",
         "hidden-reasoning-stays-closed",
