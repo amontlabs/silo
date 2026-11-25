@@ -1,0 +1,54 @@
+silo  works  ssh to an allowed host, OpenSSH 9.6  
+silo  works  10 logins, mean seconds  0.183
+silo  fails  ssh to a host not on the key's list  sign: host not on this key's list
+silo  fails  host now answers with a key the boundary does not know  ['Host key verification failed.']
+silo  fails  same, with the computer accepting any host key  bind: host key not in the boundary's known_hosts for this name
+silo  fails  login to a server reached without crossing the boundary  bind: host signature never seen on an open connection of this computer
+silo  fails  relay attack: an outsider logs in with the computer's agent  bind: host signature never seen on an open connection of this computer
+silo  works  relay attack through a tunnel the computer carries  
+silo  fails  raw userauth sign request with no bind  sign: userauth on an agent connection with no session-bind
+silo  works  git clone and push over SSH  warning: You appear to have cloned an empty repository.
+silo  works  git commit -S with gpg.format=ssh  
+silo  fails  ssh-keygen -Y sign in namespace 'file'  sshsig: namespace not allowed for this key
+silo  works  ssh -A: the first login  ['agent=0']
+silo  fails  ssh -A, then ssh from the server onward  bind: forwarding onward from the computer
+silo  fails  Paramiko client with the agent  sign: userauth on an agent connection with no session-bind
+silo  fails  asyncssh client with the agent  sign: userauth on an agent connection with no session-bind
+silo  fails  Go x/crypto/ssh client with the agent  sign: userauth on an agent connection with no session-bind
+silo  works  ssh-add -L lists  ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMhe... polarzero@mac
+silo+infer works  ssh to an allowed host, OpenSSH 9.6  
+silo+infer works  10 logins, mean seconds  0.184
+silo+infer fails  ssh to a host not on the key's list  sign: host not on this key's list
+silo+infer fails  host now answers with a key the boundary does not know  ['Host key verification failed.']
+silo+infer fails  same, with the computer accepting any host key  bind: host key not in the boundary's known_hosts for this name
+silo+infer fails  login to a server reached without crossing the boundary  bind: host signature never seen on an open connection of this computer
+silo+infer fails  relay attack: an outsider logs in with the computer's agent  bind: host signature never seen on an open connection of this computer
+silo+infer works  relay attack through a tunnel the computer carries  
+silo+infer fails  raw userauth sign request with no bind  sign: no open connection of this computer has this session id
+silo+infer works  git clone and push over SSH  warning: remote HEAD refers to nonexistent ref, unable to checkout
+silo+infer works  git commit -S with gpg.format=ssh  
+silo+infer fails  ssh-keygen -Y sign in namespace 'file'  sshsig: namespace not allowed for this key
+silo+infer works  ssh -A: the first login  ['agent=0']
+silo+infer fails  ssh -A, then ssh from the server onward  bind: forwarding onward from the computer
+silo+infer works  Paramiko client with the agent  
+silo+infer works  asyncssh client with the agent  
+silo+infer works  Go x/crypto/ssh client with the agent  
+silo+infer works  ssh-add -L lists  ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMhe... polarzero@mac
+plain works  ssh to an allowed host, OpenSSH 9.6  
+plain works  10 logins, mean seconds  0.183
+plain works  ssh to a host not on the key's list  
+plain fails  host now answers with a key the boundary does not know  ['Host key verification failed.']
+plain works  same, with the computer accepting any host key  
+plain works  login to a server reached without crossing the boundary  
+plain works  relay attack: an outsider logs in with the computer's agent  
+plain works  relay attack through a tunnel the computer carries  
+plain works  raw userauth sign request with no bind  
+plain works  git clone and push over SSH  warning: remote HEAD refers to nonexistent ref, unable to checkout
+plain works  git commit -S with gpg.format=ssh  
+plain works  ssh-keygen -Y sign in namespace 'file'  
+plain works  ssh -A: the first login  ['agent=0']
+plain works  ssh -A, then ssh from the server onward  
+plain works  Paramiko client with the agent  
+plain works  asyncssh client with the agent  
+plain works  Go x/crypto/ssh client with the agent  
+plain works  ssh-add -L lists  ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMhe... polarzero@mac
