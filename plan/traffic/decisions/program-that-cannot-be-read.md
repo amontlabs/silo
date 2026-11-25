@@ -25,3 +25,26 @@ host Silo cannot count is denied while a budget covers the computer. The prototy
 request to `api.mistral.ai` from a computer with a budget got 400 in OpenAI's shape, which most
 such hosts copy, with "Silo: api.mistral.ai is a model host Silo cannot count, and a budget covers
 this computer." Without a budget the connection passes.
+
+## A stream that will end with no count (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-spend-budget-edges`. A Chat
+Completions stream that does not set `stream_options.include_usage` ends with no count, on a host
+Silo reads. Its reasoning streams as nothing, so the visible text missed 93% of its cost in the run
+($0.010 counted for $0.157 billed). Counting by time at the model's speed came to $0.161, but only
+because the stand-in's speed was known exactly; a real model's speed varies.
+
+This is the same case as the sentence #364 and #373 propose for this entry, traffic Silo cannot
+count while a budget covers the computer, inside a host Silo reads. The options under a budget:
+
+- Refuse such a stream (recommended). Built: it gets a 400 in OpenAI's shape, "a budget covers
+  this computer, and this stream does not ask for its usage, so Silo could not count it. Set
+  stream_options.include_usage to true." Streams that ask for usage, and calls not streamed, pass.
+  It costs a program that cannot be told to ask for usage.
+- Let it pass, settled on an estimate by time, and marked estimated in the app. It costs a count
+  that can be several times off either way.
+- Add `include_usage` to the request. It changes the request, which `what-silo-changes-in-traffic`
+  rules out, and adds a chunk the program did not ask for.
+
+Not checked: which programs leave `include_usage` unset. Aider, Cline and OpenCode, which #369
+found can be switched to any OpenAI-compatible host, should be captured before this is ruled.

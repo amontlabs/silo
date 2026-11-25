@@ -86,3 +86,42 @@ What the table says:
 Recommended: keep "running calls finish", count a running call's output by time as well as by
 what is visible, and keep the input check. If "never over" matters more than the last 7% to 9% of
 the budget, hold the typical output instead: it was never over in six runs.
+
+## A budget reached in the middle of an answer (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-spend-budget-edges`. The same
+Claude Code run as above (Opus 5.5, 8 subagents, $3), with a fourth way built: cut each call
+under way once what is counted, reasoning included by time, reaches the budget. Three runs each:
+
+| How a call is admitted | Spent, each run | Over the budget, worst | Paid for answers that were cut |
+|---|---|---|---|
+| Running calls finish, output counted by time | $3.71, $4.05, $3.92 | 35% | none |
+| Each running call holds its typical output | $2.74, $2.78, $2.80 | 7% under | none |
+| Cut at the budget | $3.02, $3.03, $2.99 | 1% | $0.52 to $0.92 a run |
+| Hold the typical output, and cut at the budget | $2.75, $2.78, $2.80 | 7% under | none |
+
+When a call was cut, Claude Code retried it within 40 ms, got the 400 refusal, and printed Silo's
+sentence. A cut is paid for: here a sixth to a third of the budget went on answers nobody used.
+
+One case the typical hold does not cover: a single call that reasons far longer than the model's
+usual. With $0.68 left of $1, a call that reasoned 60,000 tokens was admitted under the typical
+hold and ended the budget at $1.52. With the cut as well, it was stopped at $1.00, and the
+program got an error event in the provider's own shape: "Silo: this computer's budget of $1.00
+was reached while this answer was being written ($1.00 spent), so it was stopped."
+
+So a fourth option for the choice above: hold the typical output, and cut only what passes the
+budget anyway. It stopped 7% under the budget like the typical hold in every Claude Code run, and
+held the one long call to the budget. It costs a cut answer in that rare case. Recommended, if
+"never over" is wanted. If the overshoot is accepted, the recommendation above stands.
+
+## The input check after a pause (25 November 2026)
+
+An agent's part, 25 November 2026. The input check prices a call's input before it leaves. Priced
+at the dearest rate, a conversation that reads 63,000 tokens from Anthropic's cache was held at
+$0.51 for an input billed $0.013. Priced as "likely", every earlier token at the cache-read rate,
+the estimate fell to $0.013, and after a pause longer than the cache's 5 minutes it stayed at
+$0.013 while the provider billed $0.316 to write the cache again: 24 times short, the one call the
+check is for. Built and measured: the boundary keeps when each conversation's cache was last
+used, how much of its input the cache held, and its lifetime (5 minutes, or 1 hour when the reply
+wrote a 1-hour cache), and prices that part as a write again once the lifetime has passed. Every
+call of the run was then priced at or above its bill, and no more than the dearest price.
