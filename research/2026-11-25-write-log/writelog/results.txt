@@ -1,0 +1,26 @@
+Run on 25 November 2026 in a Linux cloud container: kernel 6.18.44, 4 processors, no KVM, Zig 0.17.1.
+
+$ zig build test --summary all
+Build Summary: 3/3 steps succeeded; 5/5 tests passed
+
+$ zig test -OReleaseSafe src/writelog.zig   (10 runs)
+     10 All 5 tests passed.
+
+The night simulation with the in-flight rule turned off (remark_in_flight = false in that test),
+5 runs: each failed, as below.
+checkpoint 3 (moment 195): sector 221 holds 80000045000000dd, want 80000061000000dd
+checkpoint 4 (moment 280): sector 109 holds 800000000000006d, want 0
+checkpoint 29 (moment 4173): sector 660 holds 80000f7e00000294, want 80000f8400000294
+checkpoint 3 (moment 64): sector 64 holds 8000000f00000040, want 8000001b00000040
+checkpoint 4 (moment 442): sector 711 holds 800000c4000002c7, want 80000155000002c7
+
+$ zig build bench   (3 runs; a sparse 32 GiB disk, 200,000 calls per case)
+idle     calls  200000  median     34 ns  p99      38 ns  max    35176 ns
+marking  calls  200000  median     44 ns  p99     280 ns  max   445355 ns
+copying  calls  200000  median   1606 ns  p99   22164 ns  max  2885699 ns
+idle     calls  200000  median     37 ns  p99      80 ns  max    39543 ns
+marking  calls  200000  median    107 ns  p99     334 ns  max    48477 ns
+copying  calls  200000  median   1660 ns  p99  107313 ns  max  2242837 ns
+idle     calls  200000  median     40 ns  p99      59 ns  max    43130 ns
+marking  calls  200000  median    107 ns  p99     301 ns  max    99771 ns
+copying  calls  200000  median   1806 ns  p99  122790 ns  max  6265498 ns

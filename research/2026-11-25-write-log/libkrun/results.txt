@@ -1,0 +1,32 @@
+Run on 25 November 2026 in a Linux cloud container: kernel 6.18.44, 4 processors, no KVM,
+Rust 1.97.0. libkrun `main` at 715c1c9857576c7a1e2057abcaf4a782ba527f97 (23 November 2026).
+
+The bug, before the patch. A test that sends one 512-byte write to sector 2^55 of a 1 KiB disk,
+on libkrun's `main` unchanged (src/devices, cargo test --features blk):
+
+$ cargo test --features blk --lib            (debug build)
+test virtio::block::worker::range_tests::write_past_the_end_is_refused ... ok
+test virtio::block::worker::range_tests::write_with_wrapping_sector_is_refused ... FAILED
+thread '...' panicked at src/devices/src/virtio/block/worker.rs:535:53:
+attempt to multiply with overflow
+
+$ cargo test --release --features blk --lib  (release build, as shipped)
+test virtio::block::worker::range_tests::write_with_wrapping_sector_is_refused ... FAILED
+assertion `left == right` failed: a write landed on sector 0
+
+A write past the end with no wrap was already refused, by imago below.
+
+After each commit (src/devices: cargo test --features blk --lib virtio::block; debug and release):
+
+  0001 alone:   11 passed (the 10 already there, and changes_outside_the_disk_are_refused)
+  0001 + 0002:  17 passed (and the 6 of write_hook_tests)
+  src/libkrun, cargo test --features blk --lib block_write_hook: 2 passed
+
+cargo fmt -- --check: clean. cargo clippy -p krun-devices and -p libkrun, --features blk(,ffi)
+--tests -D warnings: nothing in the files the patch touches. The workspace clippy of CI could not
+run here: building init-blob failed in this container, and pre-existing lints in other files of
+libkrun fail with Rust 1.97's clippy.
+
+`make gen-libkrun-bindings BLK=1 NET=1 INPUT=1` regenerated include/libkrun.h and the ffier JSON;
+the only change is the new function (GPU=1 needs virglrenderer, which this container lacks; the
+committed header has no other difference with it off).

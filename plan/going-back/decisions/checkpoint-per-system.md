@@ -171,3 +171,17 @@ the computer: either a copy that shares blocks with the disk, by the same means 
 before each write, where Silo sees the computer's writes." Silo sees them for a Linux computer
 through a hook in libkrun's block device, and for a macOS computer only if its disk is served over
 NBD.
+
+## The write in flight at a checkpoint's moment
+
+An agent's part, 25 November 2026, from [the write log's research](../../../research/2026-11-25-write-log/README.md).
+For the `delta` checkpoint above, option B's specs put the moment "between two requests". libkrun
+calls the hook before a write lands and gives no call after, so the moment can fall between the
+two. A test shows the result: block 3 is written, the checkpoint is taken and copied before the
+write lands, then the write lands. The next checkpoint, taken with nothing written in between, still
+holds the old block 3. The fix keeps the one hook: libkrun changes a disk from one thread, one
+request at a time, so at most one write is in flight, the last range the hook saw, and the moment
+marks that range again for the next checkpoint. A simulated night of 20,000 requests and about 20
+checkpoints failed every time without the rule and passed every time with it. The rule rests on the
+hook's documented promise that no other change happens while it runs; if libkrun ever writes from
+several threads, the hook needs a second call after each write instead.
