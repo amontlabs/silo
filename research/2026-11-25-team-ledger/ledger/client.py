@@ -210,13 +210,17 @@ class Central(Way):
 
 
 class Lease(Way):
-    def __init__(self, http, budget, mac, policy, tps, low=1.0, rtt=0.03, margin=5.0, keep=1.0, rearm=True):
+    def __init__(self, http, budget, mac, policy, tps, low=1.0, rtt=0.03, margin=5.0, keep=1.0, rearm=True, typical=None):
         super().__init__()
         # keep: on a recall, the room this Mac keeps while calls of its own are under way, so they
         # can finish without passing its slice at once. 0 gives back everything not held, as the
         # simulator and #388 did. rearm: an answer that came but left the Mac still over its slice
         # (a grant taken back by a recall) starts the wait again, instead of counting as no answer.
-        self.keep, self.rearm = keep, rearm
+        # typical: with it, `keep` is ignored and a recall keeps, for each call under way, room for
+        # its typical output (`typical` tokens), whatever the policy: under `reserve_typical` that is
+        # what is held already, so a recall gives back exactly what is not held; under `cut` it is
+        # what the call will likely still produce.
+        self.keep, self.rearm, self.typical = keep, rearm, typical
         self.answered_at = 0.0
         self.http, self.budget, self.mac = http, budget, mac
         self.book = Book(0.0, policy, tps, P_OUT)
@@ -305,8 +309,15 @@ class Lease(Way):
         if kind != "recall":
             return
         with self.mu:
-            keep = self.keep if self.book.flight else 0.0
-            r = max(0.0, self.book.limit - self.book.held(time.time()) - keep)
+            now = time.time()
+            if self.typical is not None:
+                b = self.book
+                need = b.settled + sum(b.whole.values()) + sum(
+                    max(b._counted_one(f, now), f[2], f[1] + self.typical * P_OUT) for f in b.flight.values())
+                r = max(0.0, b.limit - max(need, b.held(now)))
+            else:
+                keep = self.keep if self.book.flight else 0.0
+                r = max(0.0, self.book.limit - self.book.held(now) - keep)
             self.book.limit -= r
             if r > 0:
                 self.empty = False

@@ -32,6 +32,7 @@ DEFAULTS = {
     "margin": 5.0,
     "on_down": "hold",
     "keep": 1.0,                 # leases: room a Mac keeps on a recall while its calls run (0: #388's rule)
+    "keep_typical": False,       # leases: a recall keeps each running call's typical output instead of `keep`
     "rearm": True,               # leases: an answer that left the Mac over its slice is not "no answer"
     "seed": 1,
     "kill": None,                # [from, to]: the ledger is dead from `from` to `to`, seconds after the start
@@ -138,6 +139,8 @@ def run(cfg):
             args += ["--ledger-port", str(mports[i])]
         if c["cut"]:
             args.append("--cut")
+        if c.get("keep_typical"):
+            args.append("--keep-typical")
         if not c["rearm"]:
             args.append("--no-rearm")
         if c["batch"] and c["batch"][0] == i:

@@ -2,3 +2,22 @@
 central 30 ms, typical-cut seed 1: billed $14.78 (-1.47%), cut $0.0, waits>10s 0
 one boundary, typical-cut seed 1: billed $14.9064 (-0.62%), cut $0.0, waits>10s 0
 leases 30 ms, typical-cut seed 1: billed $14.4182 (-3.88%), cut $0.0, waits>10s 0
+one boundary, cut seed 1: billed $15.0627 (+0.42%), cut $1.256, waits>10s 0
+central 30 ms, cut seed 1: billed $15.0907 (+0.6%), cut $1.4377, waits>10s 0
+leases 30 ms, cut seed 1: billed $15.1473 (+0.98%), cut $1.916, waits>10s 0
+one boundary, typical-cut seed 2: billed $14.9027 (-0.65%), cut $0.0, waits>10s 0
+leases 30 ms, cut, #388's recall seed 1: billed $15.125 (+0.83%), cut $1.5877, waits>10s 0
+central 30 ms, typical-cut seed 2: billed $14.8389 (-1.07%), cut $0.0, waits>10s 0
+one boundary, cut seed 2: billed $15.0633 (+0.42%), cut $1.312, waits>10s 0
+leases 30 ms, typical-cut seed 2: billed $14.5028 (-3.31%), cut $0.0, waits>10s 0
+central 30 ms, cut seed 2: billed $15.0772 (+0.51%), cut $1.3111, waits>10s 0
+leases 30 ms, cut, #388's recall seed 2: billed $15.1145 (+0.76%), cut $1.38, waits>10s 0
+leases 30 ms, cut seed 2: billed $15.1896 (+1.26%), cut $2.048, waits>10s 0
+one boundary, typical-cut seed 3: billed $14.8136 (-1.24%), cut $0.0, waits>10s 0
+one boundary, cut seed 3: billed $15.1079 (+0.72%), cut $1.6611, waits>10s 0
+central 30 ms, typical-cut seed 3: billed $14.9314 (-0.46%), cut $0.0, waits>10s 0
+leases 30 ms, typical-cut seed 3: billed $14.3004 (-4.66%), cut $0.0, waits>10s 0
+central 30 ms, cut seed 3: billed $15.099 (+0.66%), cut $1.444, waits>10s 0
+leases 30 ms, cut seed 3: billed $15.1661 (+1.11%), cut $1.192, waits>10s 0
+one boundary, typical-cut seed 4: billed $14.7941 (-1.37%), cut $0.0, waits>10s 0
+central 30 ms, typical-cut seed 4: billed $14.7749 (-1.5%), cut $0.0, waits>10s 0
