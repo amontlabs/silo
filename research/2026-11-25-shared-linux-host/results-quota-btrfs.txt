@@ -1,0 +1,9 @@
+empty                              real used   0.01 GiB   counted for A   0.00 GiB
+A: main disk 3 GiB                 real used   3.01 GiB   counted for A   3.00 GiB
+A: checkpoint 1, then 100 MiB written real used   3.11 GiB   counted for A   3.10 GiB
+A: checkpoint 2, then 100 MiB written real used   3.21 GiB   counted for A   3.20 GiB
+A: checkpoint 3, then 100 MiB written real used   3.31 GiB   counted for A   3.29 GiB
+A: checkpoint 4, then 100 MiB written real used   3.40 GiB   counted for A   3.39 GiB
+A writes until refused             real used   6.02 GiB   counted for A   6.00 GiB
+  A refused with: Disk quota exceeded
+  B writes 1 GiB: ok

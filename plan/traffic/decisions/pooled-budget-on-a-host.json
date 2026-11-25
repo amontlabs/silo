@@ -1,0 +1,7 @@
+{
+  "asks": "Can a team on one host hold one budget for everyone on it?",
+  "answer": "Yes. On a host, the engine keeps one count for every computer on it. Before a model call, a person's boundary reserves the call's likely cost against the count, and settles the real cost when the call ends. A team's total is then a limit, exact on that host, next to each person's own budget.",
+  "needs": [
+    "members-on-a-host"
+  ]
+}

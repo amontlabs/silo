@@ -1,0 +1,7 @@
+{
+  "asks": "On a host several people share, what keeps one person's computers apart from another's?",
+  "answer": "Each person is a Unix user of the host. Their computers' processes, their boundary, their records and their disk images run as that user and belong to them. Each person's computers run in a control group of that person's own, with a memory limit, so that running out of memory stops a computer of the person who ran out. The engine's sockets are files in that person's own folder, which other users cannot open.",
+  "needs": [
+    "linux-server-host"
+  ]
+}
