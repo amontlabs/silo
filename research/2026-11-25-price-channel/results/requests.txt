@@ -1,0 +1,31 @@
+== curl
+GET /index.json HTTP/1.1
+Host: <host>
+User-Agent: curl/8.5.0
+Accept: */*
+
+== python urllib, default
+GET /index.json HTTP/1.1
+Accept-Encoding: identity
+Host: <host>
+User-Agent: Python-urllib/3.13
+Connection: close
+
+== node fetch, default
+GET /index.json HTTP/1.1
+host: <host>
+connection: keep-alive
+accept: */*
+accept-language: *
+sec-fetch-mode: cors
+user-agent: node
+accept-encoding: gzip, deflate
+
+== channel Fetcher
+GET /index.json HTTP/1.1
+Host: <host>
+User-Agent: Silo
+Accept: */*
+Accept-Encoding: identity
+Connection: close
+

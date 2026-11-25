@@ -1,0 +1,7 @@
+GET /index.json HTTP/1.1
+Host: <host>
+User-Agent: Silo
+Accept: */*
+Accept-Encoding: identity
+Connection: close
+
