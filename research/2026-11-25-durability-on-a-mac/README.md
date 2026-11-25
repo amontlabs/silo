@@ -6,8 +6,8 @@ and fixed the record's writer. This audits every other prototype that keeps stat
 after a test shows it failing, and adds two Mac kit tests that measure what the fixes cost and
 check them through a power cut. Nothing is built and no entry is taken by it.
 
-The branch is #391's, with #394, #395, #396 and #390 merged on top (plan notes joined where two
-drafts appended to the same entry, `plan check` after each).
+The branch is stacked on #391 by merge (#391's second pass, which holds #390 and #392 to #396);
+`plan check` passes.
 
 ## What was found
 
