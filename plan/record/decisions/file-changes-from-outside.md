@@ -114,3 +114,14 @@ checkpoint would land in the next one. A trial reader that replays the journal i
 the kernel exactly, on those copies and on Ubuntu 26.04's own image (107,853 paths). Proposed
 sentence: "On a filesystem with a journal, such as ext4, the reader replays the journal in memory
 before it reads, as the computer's kernel does at its next boot, and never writes it back."
+
+## Reading only the blocks written, on ext4
+
+An agent's part, 25 November 2026, from [the write log's research](../../../research/2026-11-25-write-log/README.md).
+This answers two of the entry's "to find out" for a Linux computer, measured in a Linux container on
+Ubuntu 26.04's own disk grown to about a million paths. Between two copies of the running disk,
+1,000 files changed: 400 edited, 200 deleted, 100 renamed, 300 created. With the set of blocks
+written between them, which the write log keeps, the comparer read 13 MiB and gave the same 1,362
+lines as a full walk of both copies, which read 533 MiB. The journal of each copy was replayed with
+its checksums checked (24,927 of them). A file rewritten in place, with the same size and extents,
+shows only a changed mtime to a full walk; the write log names it, whatever its times say.

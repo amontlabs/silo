@@ -1,0 +1,44 @@
+Run on 25 November 2026 in a Linux cloud container: kernel 6.18.44, 4 processors, no KVM,
+e2fsprogs 1.47.0, Python 3.13. Blocks read are distinct blocks read from the disk; blocks the
+journal replay already holds in memory are not counted again.
+
+$ sudo python3 -I test_ckptread.py
+test_every_copy_reads_as_the_kernel_reads_it_after_replay (__main__.AgainstTheKernel.test_every_copy_reads_as_the_kernel_reads_it_after_replay) ... 
+  journal blocks replayed over 6 copies: 1231
+test_without_replay_some_copy_reads_wrong (__main__.AgainstTheKernel.test_without_replay_some_copy_reads_wrong) ... ok
+test_across_several_checkpoints_with_the_writes_of_each (__main__.Comparison.test_across_several_checkpoints_with_the_writes_of_each) ... ok
+test_content_written_in_place_is_seen (__main__.Comparison.test_content_written_in_place_is_seen) ... ok
+test_from_the_write_log_equals_a_full_walk_pair_by_pair (__main__.Comparison.test_from_the_write_log_equals_a_full_walk_pair_by_pair) ... 
+  0->1:  3350 lines,  1029 blocks written, read   218 blocks from the set,      9 in a full walk of both
+  1->2:  1961 lines,   142 blocks written, read     7 blocks from the set,      8 in a full walk of both
+  2->3:   111 lines,    18 blocks written, read    10 blocks from the set,      8 in a full walk of both
+  3->4:   716 lines,    51 blocks written, read    10 blocks from the set,      8 in a full walk of both
+  4->5:     0 lines,     0 blocks written, read    10 blocks from the set,      8 in a full walk of both
+test_a_bad_block_is_not_replayed_and_is_named (__main__.JournalFaults.test_a_bad_block_is_not_replayed_and_is_named) ... ok
+test_a_bad_commit_ends_the_log_before_its_transaction (__main__.JournalFaults.test_a_bad_commit_ends_the_log_before_its_transaction) ... ok
+test_a_bad_descriptor_ends_the_log (__main__.JournalFaults.test_a_bad_descriptor_ends_the_log) ... ok
+test_random_flips_in_the_journal_never_crash (__main__.JournalFaults.test_random_flips_in_the_journal_never_crash) ... 
+  150 flips: {'gap': 141, 'refused dirent': 3, 'read': 4, 'refused directory-cycle': 2}
+test_a_checkpoint_read_through_its_deltas_is_the_copy (__main__.ThroughDeltas.test_a_checkpoint_read_through_its_deltas_is_the_copy) ... ok
+test_crc32c (__main__.Units.test_crc32c) ... ok
+test_partition_by_label (__main__.Units.test_partition_by_label) ... ok
+Ran 12 tests in 283.305s
+OK
+
+Ubuntu 26.04's amd64 cloud image (SHA-256 checked against SHA256SUMS), converted to raw with
+#381's proto/qcow2raw.py, grown to 12 GiB and filled with 900,000 files:
+
+$ sudo python3 -I scale.py u.raw WORK
+filled in 44 s
+index of c0: 1002891 inodes, 68046 blocks, 22.6 s
+opening both, superblocks and journals: 24937 blocks read
+journal: c0 replays 11534 blocks, c1 replays 11144, 24927 checksums checked, gaps []
+paths: 1003014 before, 1003115 after; lines 1362 {'changed': 661, 'created': 401, 'deleted': 300}
+blocks written between the two: 3459
+from the write log: read 3534 blocks (13 MiB), 2.1 s
+full walk of both:  read 136573 blocks (533 MiB), 40.3 s
+equal: True
+
+real	4m51.641s
+user	1m22.796s
+sys	1m3.628s

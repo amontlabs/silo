@@ -1,0 +1,771 @@
+From b513525ab90fd5fa2980361db0ee4fd0d0606ce6 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 25 Nov 2026 10:58:21 +0000
+Subject: [PATCH 2/2] virtio/blk: add a hook called before each change to the
+ disk
+
+Let the embedder see every range the guest is about to change, before
+the change, on the block worker's thread. A VMM that keeps checkpoints
+of a running disk can then copy the old bytes of a range before they
+are overwritten (copy-before-write), and keep a bitmap of the blocks
+changed since the last checkpoint, without a second disk layer.
+
+The hook is called before every write, write-zeroes and discard, with a
+byte range already checked to lie inside the disk. Reads, flushes and
+GET_ID do not call it. A hook that returns an error fails the request
+with VIRTIO_BLK_S_IOERR and the disk is left as it was.
+
+In Rust, `Block::set_write_hook` takes an `Arc<dyn BlockWriteHook>`. In
+C, `krun_block_device_set_write_hook(handle, hook, user)` takes a
+function `int32_t (*)(const void *user, uint64_t offset, uint64_t len)`
+that returns 0 to let the change go on.
+
+Assisted-by: Claude Code: claude-opus-5-5
+Signed-off-by: Claude <noreply@anthropic.com>
+---
+ bindings/libkrun-via-libc/ffier-krun.json |  38 +++
+ include/libkrun.h                         |  17 ++
+ src/devices/src/virtio/block/device.rs    |  36 ++-
+ src/devices/src/virtio/block/mod.rs       |   2 +-
+ src/devices/src/virtio/block/worker.rs    | 352 +++++++++++++++++++++-
+ src/devices/src/virtio/mod.rs             |   2 +-
+ src/libkrun/src/api/device_builders.rs    | 102 ++++++-
+ 7 files changed, 544 insertions(+), 5 deletions(-)
+
+diff --git a/bindings/libkrun-via-libc/ffier-krun.json b/bindings/libkrun-via-libc/ffier-krun.json
+index dd848cf6..2977c674 100644
+--- a/bindings/libkrun-via-libc/ffier-krun.json
++++ b/bindings/libkrun-via-libc/ffier-krun.json
+@@ -2550,6 +2550,44 @@
+             "return_kind": "void"
+           },
+           "ffi_name": "krun_block_device_set_read_pool_size"
++        },
++        {
++          "name": "set_write_hook",
++          "doc": [
++            " Call `hook(user, offset, len)` before each change the guest makes to the disk.",
++            "",
++            " The hook runs on the device's worker thread before every write, write-zeroes and",
++            " discard, with a byte range already checked to lie inside the disk. No other change to",
++            " the disk happens while it runs, so the range still holds its old bytes: a hook can copy",
++            " them, for example to keep a checkpoint. A return other than 0 fails the request with",
++            " an I/O error and leaves the disk unchanged. Reads and flushes do not call it.",
++            "",
++            " # Safety",
++            "",
++            " `hook` must be a function of the type",
++            " `int32_t (*)(const void *user, uint64_t offset, uint64_t len)`, and `user` must stay",
++            " valid and usable from another thread for as long as the VM runs."
++          ],
++          "receiver": "mut",
++          "params": [
++            {
++              "name": "hook",
++              "param_kind": "regular",
++              "type": "*const core::ffi::c_void"
++            },
++            {
++              "name": "user",
++              "param_kind": "regular",
++              "type": "*const core::ffi::c_void"
++            }
++          ],
++          "ret": {
++            "return_kind": "result",
++            "ok": null,
++            "err_type": "VmmError",
++            "c_convention": "out_param"
++          },
++          "ffi_name": "krun_block_device_set_write_hook"
+         }
+       ],
+       "cfg": {
+diff --git a/include/libkrun.h b/include/libkrun.h
+index e412d52b..149c245d 100644
+--- a/include/libkrun.h
++++ b/include/libkrun.h
+@@ -765,6 +765,23 @@ typedef void (*krun_block_device_set_parallel_reads_fn)(KrunBlockDevice handle,
+  */
+ void krun_block_device_set_read_pool_size(KrunBlockDevice handle, size_t size);
+ typedef void (*krun_block_device_set_read_pool_size_fn)(KrunBlockDevice handle, size_t size);
++/**
++ * Call `hook(user, offset, len)` before each change the guest makes to the disk.
++ *
++ * The hook runs on the device's worker thread before every write, write-zeroes and
++ * discard, with a byte range already checked to lie inside the disk. No other change to
++ * the disk happens while it runs, so the range still holds its old bytes: a hook can copy
++ * them, for example to keep a checkpoint. A return other than 0 fails the request with
++ * an I/O error and leaves the disk unchanged. Reads and flushes do not call it.
++ *
++ * # Safety
++ *
++ * `hook` must be a function of the type
++ * `int32_t (*)(const void *user, uint64_t offset, uint64_t len)`, and `user` must stay
++ * valid and usable from another thread for as long as the VM runs.
++ */
++KrunResult krun_block_device_set_write_hook(KrunBlockDevice handle, const void* hook, const void* user, KrunError* err_out);
++typedef KrunResult (*krun_block_device_set_write_hook_fn)(KrunBlockDevice handle, const void* hook, const void* user, KrunError* err_out);
+ void krun_block_device_destroy(KrunBlockDevice handle);
+ typedef void (*krun_block_device_destroy_fn)(KrunBlockDevice handle);
+ 
+diff --git a/src/devices/src/virtio/block/device.rs b/src/devices/src/virtio/block/device.rs
+index b4f8ac3e..dcfde466 100644
+--- a/src/devices/src/virtio/block/device.rs
++++ b/src/devices/src/virtio/block/device.rs
+@@ -77,11 +77,22 @@ impl CacheType {
+ }
+ 
+ /// Helper object for setting up all `Block` fields derived from its backing file.
++/// Told of every range of the disk the guest is about to change.
++///
++/// Called on the block worker's thread before each write, write-zeroes and discard, with a
++/// byte range that lies inside the disk. Returning an error fails the request with
++/// `VIRTIO_BLK_S_IOERR` and leaves the disk untouched. While it runs, no other request of this
++/// device changes the disk, so the range still holds the bytes it held before the request.
++pub trait BlockWriteHook: Send + Sync {
++    fn before_write(&self, offset: u64, len: u64) -> io::Result<()>;
++}
++
+ pub(crate) struct DiskProperties {
+     cache_type: CacheType,
+     pub(crate) file: Arc<RwLock<FormatAccess<Box<dyn DynStorage>>>>,
+     nsectors: u64,
+     image_id: Vec<u8>,
++    write_hook: Option<Arc<dyn BlockWriteHook>>,
+ }
+ 
+ impl DiskProperties {
+@@ -106,9 +117,15 @@ impl DiskProperties {
+             nsectors: disk_size >> SECTOR_SHIFT,
+             image_id: disk_image_id,
+             file: disk_image,
++            write_hook: None,
+         })
+     }
+ 
++    pub(crate) fn with_write_hook(mut self, hook: Option<Arc<dyn BlockWriteHook>>) -> Self {
++        self.write_hook = hook;
++        self
++    }
++
+     /// The byte range of `nsectors` sectors from `sector`, if it lies inside the disk.
+     pub(crate) fn checked_range(
+         &self,
+@@ -123,6 +140,15 @@ impl DiskProperties {
+         }
+     }
+ 
++    pub(crate) fn before_write(&self, offset: u64, len: u64) -> Result<(), RequestError> {
++        match &self.write_hook {
++            Some(hook) => hook
++                .before_write(offset, len)
++                .map_err(RequestError::RefusedByWriteHook),
++            None => Ok(()),
++        }
++    }
++
+     pub fn nsectors(&self) -> u64 {
+         self.nsectors
+     }
+@@ -262,6 +288,7 @@ pub struct Block {
+     disk_image_id: Vec<u8>,
+     worker_thread: Option<JoinHandle<()>>,
+     worker_stopfd: EventFd,
++    write_hook: Option<Arc<dyn BlockWriteHook>>,
+     parallel_reads: bool,
+     read_pool_size: Option<NonZeroUsize>,
+ 
+@@ -382,6 +409,7 @@ impl Block {
+             device_state: DeviceState::Inactive,
+             worker_thread: None,
+             worker_stopfd: EventFd::new(EFD_NONBLOCK)?,
++            write_hook: None,
+             parallel_reads,
+             read_pool_size,
+         })
+@@ -397,6 +425,11 @@ impl Block {
+         self.partuuid.as_ref()
+     }
+ 
++    /// Tells `hook` of every range the guest is about to change, before the change.
++    pub fn set_write_hook(&mut self, hook: Arc<dyn BlockWriteHook>) {
++        self.write_hook = Some(hook);
++    }
++
+     /// Specifies if this block device is read only.
+     pub fn is_read_only(&self) -> bool {
+         self.avail_features & (1u64 << VIRTIO_BLK_F_RO) != 0
+@@ -477,7 +510,8 @@ impl VirtioDevice for Block {
+                 self.cache_type,
+             )
+             .map_err(|_| ActivateError::BadActivate)?,
+-        };
++        }
++        .with_write_hook(self.write_hook.clone());
+ 
+         let worker = BlockWorker::new(
+             blk_q,
+diff --git a/src/devices/src/virtio/block/mod.rs b/src/devices/src/virtio/block/mod.rs
+index 341e83e1..1eb3e62b 100644
+--- a/src/devices/src/virtio/block/mod.rs
++++ b/src/devices/src/virtio/block/mod.rs
+@@ -7,7 +7,7 @@ pub mod device;
+ mod worker;
+ 
+ #[cfg(feature = "blk")]
+-pub use self::device::{Block, CacheType};
++pub use self::device::{Block, BlockWriteHook, CacheType};
+ 
+ use vm_memory::GuestMemoryError;
+ 
+diff --git a/src/devices/src/virtio/block/worker.rs b/src/devices/src/virtio/block/worker.rs
+index 9e9b7344..023bf72d 100644
+--- a/src/devices/src/virtio/block/worker.rs
++++ b/src/devices/src/virtio/block/worker.rs
+@@ -30,6 +30,7 @@ pub enum RequestError {
+     InvalidDataLength,
+     OutOfRange,
+     ReadingFromDescriptor(io::Error),
++    RefusedByWriteHook(io::Error),
+     WritingToDescriptor(io::Error),
+     WritingZeroes(io::Error),
+     UnknownRequest,
+@@ -532,8 +533,9 @@ impl BlockWorker {
+                 if !data_len.is_multiple_of(512) {
+                     return Err(RequestError::InvalidDataLength);
+                 }
+-                let (offset, _) =
++                let (offset, len) =
+                     disk.checked_range(request_header.sector, data_len as u64 / 512)?;
++                disk.before_write(offset, len)?;
+                 reader
+                     .read_to_at(disk, data_len, offset)
+                     .map_err(RequestError::ReadingFromDescriptor)
+@@ -567,6 +569,7 @@ impl BlockWorker {
+                     discard_write_data.sector,
+                     discard_write_data.num_sectors.into(),
+                 )?;
++                disk.before_write(offset, len)?;
+                 disk.file
+                     .write()
+                     .unwrap()
+@@ -583,6 +586,7 @@ impl BlockWorker {
+                     discard_write_data.sector,
+                     discard_write_data.num_sectors.into(),
+                 )?;
++                disk.before_write(offset, len)?;
+                 let mut diskfile = disk.file.write().unwrap();
+                 if unmap {
+                     diskfile
+@@ -948,3 +952,349 @@ mod tests {
+         }
+     }
+ }
++
++#[cfg(test)]
++mod write_hook_tests {
++    use super::*;
++    use crate::legacy::DummyIrqChip;
++    use crate::virtio::block::device::BlockWriteHook;
++    use crate::virtio::descriptor_utils::{DescriptorType, create_descriptor_chain};
++    use crate::virtio::queue::tests::VirtQueue;
++    use imago::{DynStorage, FormatAccess, Storage, StorageOpenOptions, file::File, raw::Raw};
++    use std::os::unix::fs::FileExt;
++    use std::sync::{Arc, RwLock};
++    use utils::tempfile::TempFile;
++    use vm_memory::Bytes;
++
++    const DISK_SECTORS: u64 = 64;
++
++    enum Body {
++        Data(Vec<u8>),
++        Range {
++            sector: u64,
++            num_sectors: u32,
++            flags: u32,
++        },
++    }
++
++    /// Records each range it is told of, with the bytes the range held at that moment, as a
++    /// copy-before-write checkpoint would.
++    struct Recorder {
++        image: std::fs::File,
++        refuse: bool,
++        seen: Mutex<Vec<(u64, Vec<u8>)>>,
++    }
++
++    impl BlockWriteHook for Recorder {
++        fn before_write(&self, offset: u64, len: u64) -> io::Result<()> {
++            assert!(offset.checked_add(len).unwrap() <= DISK_SECTORS * 512);
++            let mut old = vec![0; len as usize];
++            self.image.read_exact_at(&mut old, offset)?;
++            self.seen.lock().unwrap().push((offset, old));
++            if self.refuse {
++                return Err(io::Error::other("refused"));
++            }
++            Ok(())
++        }
++    }
++
++    struct Fixture {
++        backing: TempFile,
++        hook: Arc<Recorder>,
++        disk: DiskProperties,
++    }
++
++    impl Fixture {
++        fn new(refuse: bool) -> Self {
++            let backing = TempFile::new().unwrap();
++            let content: Vec<u8> = (0..DISK_SECTORS * 512).map(|i| (i / 512) as u8).collect();
++            backing.as_file().write_all_at(&content, 0).unwrap();
++            let file = File::open(
++                StorageOpenOptions::new()
++                    .write(true)
++                    .filename(backing.as_path().to_str().unwrap()),
++            )
++            .unwrap();
++            let raw = Raw::<Box<dyn DynStorage>>::open_image(Box::new(file), true).unwrap();
++            let hook = Arc::new(Recorder {
++                image: backing.as_file().try_clone().unwrap(),
++                refuse,
++                seen: Mutex::new(Vec::new()),
++            });
++            let disk = DiskProperties::new(
++                Arc::new(RwLock::new(FormatAccess::new(raw))),
++                Vec::new(),
++                CacheType::Unsafe,
++            )
++            .unwrap()
++            .with_write_hook(Some(hook.clone()));
++            Self {
++                backing,
++                hook,
++                disk,
++            }
++        }
++
++        fn image(&self) -> Vec<u8> {
++            let mut buf = vec![0; (DISK_SECTORS * 512) as usize];
++            self.backing.as_file().read_exact_at(&mut buf, 0).unwrap();
++            buf
++        }
++
++        fn seen(&self) -> Vec<(u64, u64)> {
++            let seen = self.hook.seen.lock().unwrap();
++            seen.iter().map(|(o, old)| (*o, old.len() as u64)).collect()
++        }
++
++        /// Sends one request through the worker and returns its status byte.
++        fn request(&self, request_type: u32, sector: u64, body: Body) -> u8 {
++            let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x20000)]).unwrap();
++            let queue = VirtQueue::new(GuestAddress(0), &mem, 16);
++            let body_bytes = match body {
++                Body::Data(data) => data,
++                Body::Range {
++                    sector,
++                    num_sectors,
++                    flags,
++                } => DiscardWriteData {
++                    sector,
++                    num_sectors,
++                    flags,
++                }
++                .as_slice()
++                .to_vec(),
++            };
++            let mut descriptors = vec![(DescriptorType::Readable, 16)];
++            if !body_bytes.is_empty() {
++                descriptors.push((DescriptorType::Readable, body_bytes.len() as u32));
++            }
++            descriptors.push((DescriptorType::Writable, 1));
++            let head = create_descriptor_chain(
++                &mem,
++                GuestAddress(0),
++                GuestAddress(0x1000),
++                descriptors,
++                0,
++            )
++            .unwrap();
++            mem.write_obj(
++                RequestHeader {
++                    request_type,
++                    sector,
++                    ..Default::default()
++                },
++                GuestAddress(0x1000),
++            )
++            .unwrap();
++            mem.write_slice(&body_bytes, GuestAddress(0x1010)).unwrap();
++            let status_addr = GuestAddress(0x1010 + body_bytes.len() as u64);
++            mem.write_obj(0xff_u8, status_addr).unwrap();
++            let disk = DiskProperties::new(self.disk.file.clone(), Vec::new(), CacheType::Unsafe)
++                .unwrap()
++                .with_write_hook(Some(self.hook.clone()));
++            let mut worker = BlockWorker::new(
++                DeviceQueue::new(
++                    queue.create_queue(),
++                    Arc::new(EventFd::new(EFD_NONBLOCK).unwrap()),
++                ),
++                InterruptTransport::new(DummyIrqChip::new().into(), "block test".into()).unwrap(),
++                mem.clone(),
++                disk,
++                EventFd::new(EFD_NONBLOCK).unwrap(),
++                false,
++                None,
++            );
++            worker.dispatch_request(&mem, None, head);
++            mem.read_obj::<u8>(status_addr).unwrap()
++        }
++    }
++
++    const OK: u8 = VIRTIO_BLK_S_OK as u8;
++    const IOERR: u8 = VIRTIO_BLK_S_IOERR as u8;
++
++    fn range(sector: u64, num_sectors: u32) -> Body {
++        Body::Range {
++            sector,
++            num_sectors,
++            flags: 0,
++        }
++    }
++
++    #[test]
++    fn hook_sees_each_change_before_it_lands() {
++        let f = Fixture::new(false);
++        assert_eq!(
++            f.request(VIRTIO_BLK_T_OUT, 3, Body::Data(vec![0xaa; 1024])),
++            OK
++        );
++        assert_eq!(f.request(VIRTIO_BLK_T_WRITE_ZEROES, 0, range(10, 2)), OK);
++        assert_eq!(
++            f.request(
++                VIRTIO_BLK_T_WRITE_ZEROES,
++                0,
++                Body::Range {
++                    sector: 20,
++                    num_sectors: 1,
++                    flags: VIRTIO_BLK_WRITE_ZEROES_FLAG_UNMAP
++                }
++            ),
++            OK
++        );
++        assert_eq!(f.request(VIRTIO_BLK_T_DISCARD, 0, range(30, 4)), OK);
++        assert_eq!(
++            f.seen(),
++            [
++                (3 * 512, 1024),
++                (10 * 512, 1024),
++                (20 * 512, 512),
++                (30 * 512, 2048)
++            ]
++        );
++        let seen = f.hook.seen.lock().unwrap();
++        assert!(seen[0].1[..512].iter().all(|b| *b == 3));
++        assert!(seen[0].1[512..].iter().all(|b| *b == 4));
++        assert!(seen[1].1.iter().all(|b| *b == 10 || *b == 11));
++        assert!(f.image()[3 * 512..5 * 512].iter().all(|b| *b == 0xaa));
++        assert!(f.image()[10 * 512..12 * 512].iter().all(|b| *b == 0));
++    }
++
++    #[test]
++    fn reads_flushes_and_ids_do_not_call_the_hook() {
++        let f = Fixture::new(false);
++        let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x4000)]).unwrap();
++        let mut reader = Reader::new(
++            &mem,
++            create_descriptor_chain(
++                &mem,
++                GuestAddress(0),
++                GuestAddress(0x1000),
++                vec![(DescriptorType::Readable, 16)],
++                0,
++            )
++            .unwrap(),
++        )
++        .unwrap();
++        for request_type in [VIRTIO_BLK_T_IN, VIRTIO_BLK_T_FLUSH, VIRTIO_BLK_T_GET_ID] {
++            let chain = create_descriptor_chain(
++                &mem,
++                GuestAddress(0x2000),
++                GuestAddress(0x3000),
++                vec![(DescriptorType::Writable, 512)],
++                0,
++            )
++            .unwrap();
++            let mut writer = Writer::new(&mem, chain).unwrap();
++            let header = RequestHeader {
++                request_type,
++                sector: 0,
++                ..Default::default()
++            };
++            BlockWorker::process_request(header, &mut reader, &mut writer, &f.disk).unwrap();
++        }
++        assert!(f.seen().is_empty());
++    }
++
++    #[test]
++    fn a_refused_change_fails_and_leaves_the_disk() {
++        let f = Fixture::new(true);
++        let before = f.image();
++        assert_eq!(
++            f.request(VIRTIO_BLK_T_OUT, 0, Body::Data(vec![0xaa; 512])),
++            IOERR
++        );
++        assert_eq!(f.request(VIRTIO_BLK_T_WRITE_ZEROES, 0, range(1, 1)), IOERR);
++        assert_eq!(f.request(VIRTIO_BLK_T_DISCARD, 0, range(2, 1)), IOERR);
++        assert_eq!(f.seen().len(), 3);
++        assert_eq!(f.image(), before);
++    }
++
++    #[test]
++    fn changes_outside_the_disk_are_refused_before_the_hook() {
++        let f = Fixture::new(false);
++        let before = f.image();
++        let wrap = u64::MAX / 512 + 1;
++        for (request_type, sector, body) in [
++            (VIRTIO_BLK_T_OUT, DISK_SECTORS, Body::Data(vec![0xaa; 512])),
++            (
++                VIRTIO_BLK_T_OUT,
++                DISK_SECTORS - 1,
++                Body::Data(vec![0xaa; 1024]),
++            ),
++            (VIRTIO_BLK_T_OUT, wrap, Body::Data(vec![0xaa; 512])),
++            (VIRTIO_BLK_T_OUT, u64::MAX, Body::Data(vec![0xaa; 512])),
++            (VIRTIO_BLK_T_WRITE_ZEROES, 0, range(wrap, 1)),
++            (VIRTIO_BLK_T_WRITE_ZEROES, 0, range(u64::MAX, u32::MAX)),
++            (VIRTIO_BLK_T_WRITE_ZEROES, 0, range(DISK_SECTORS - 1, 2)),
++            (VIRTIO_BLK_T_DISCARD, 0, range(wrap, 1)),
++            (VIRTIO_BLK_T_DISCARD, 0, range(0, u32::MAX)),
++        ] {
++            assert_eq!(f.request(request_type, sector, body), IOERR);
++        }
++        assert!(f.seen().is_empty());
++        assert_eq!(f.image(), before);
++    }
++
++    #[test]
++    fn empty_changes_inside_the_disk_reach_the_hook() {
++        let f = Fixture::new(false);
++        assert_eq!(
++            f.request(VIRTIO_BLK_T_DISCARD, 0, range(DISK_SECTORS, 0)),
++            OK
++        );
++        assert_eq!(f.seen(), [(DISK_SECTORS * 512, 0)]);
++    }
++
++    /// Random requests against a model of the disk: every byte that changes lies in a range the
++    /// hook was told of, before the change, and no range leaves the disk.
++    #[test]
++    fn random_requests_change_only_what_the_hook_was_told() {
++        let mut state: u64 = 0x9e3779b97f4a7c15;
++        let mut next = move || {
++            state ^= state << 13;
++            state ^= state >> 7;
++            state ^= state << 17;
++            state
++        };
++        let f = Fixture::new(false);
++        let mut statuses = [0; 2];
++        for _ in 0..2000 {
++            let before = f.image();
++            let seen_before = f.seen().len();
++            let near = |n: u64| match n % 4 {
++                0 => n,
++                1 => n % (DISK_SECTORS + 2),
++                2 => u64::MAX - n % 4,
++                _ => DISK_SECTORS - 1 + n % 3,
++            };
++            let sector = near(next());
++            let num_sectors = (near(next()) % 6) as u32;
++            let status = match next() % 3 {
++                0 => {
++                    let len = 512 * (1 + next() % 4) as usize;
++                    f.request(
++                        VIRTIO_BLK_T_OUT,
++                        sector,
++                        Body::Data(vec![next() as u8; len]),
++                    )
++                }
++                1 => f.request(VIRTIO_BLK_T_WRITE_ZEROES, 0, range(sector, num_sectors)),
++                _ => f.request(VIRTIO_BLK_T_DISCARD, 0, range(sector, num_sectors)),
++            };
++            statuses[usize::from(status != OK)] += 1;
++            let after = f.image();
++            let seen = f.seen();
++            let told = &seen[seen_before..];
++            assert!(told.len() <= 1);
++            if status != OK {
++                assert_eq!(after, before);
++            }
++            for (i, (a, b)) in before.iter().zip(&after).enumerate() {
++                if a != b {
++                    let i = i as u64;
++                    assert!(told.iter().any(|(o, l)| *o <= i && i < o + l));
++                }
++            }
++        }
++        assert!(statuses[0] > 200 && statuses[1] > 200, "{statuses:?}");
++    }
++}
+diff --git a/src/devices/src/virtio/mod.rs b/src/devices/src/virtio/mod.rs
+index d65e4e51..70297ba5 100644
+--- a/src/devices/src/virtio/mod.rs
++++ b/src/devices/src/virtio/mod.rs
+@@ -43,7 +43,7 @@ pub mod vsock;
+ #[cfg(not(feature = "tee"))]
+ pub use self::balloon::*;
+ #[cfg(feature = "blk")]
+-pub use self::block::{Block, CacheType};
++pub use self::block::{Block, BlockWriteHook, CacheType};
+ pub use self::console::*;
+ pub use self::device::*;
+ #[cfg(not(any(feature = "tee", feature = "aws-nitro")))]
+diff --git a/src/libkrun/src/api/device_builders.rs b/src/libkrun/src/api/device_builders.rs
+index 24af039d..96fc4be6 100644
+--- a/src/libkrun/src/api/device_builders.rs
++++ b/src/libkrun/src/api/device_builders.rs
+@@ -1589,6 +1589,31 @@ pub struct BlockDevice {
+     sync_mode: SyncMode,
+     parallel_reads: bool,
+     read_pool_size: Option<NonZeroUsize>,
++    write_hook: Option<Arc<dyn devices::virtio::BlockWriteHook>>,
++}
++
++/// The C form of a write hook: `hook(user, offset, len)` returns 0 to let the change go on.
++#[cfg(feature = "blk")]
++struct CBlockWriteHook {
++    hook: unsafe extern "C" fn(*const std::ffi::c_void, u64, u64) -> i32,
++    user: *const std::ffi::c_void,
++}
++
++// The caller of `BlockDevice::set_write_hook` promises that `user` may be used from the block
++// worker's thread.
++#[cfg(feature = "blk")]
++unsafe impl Send for CBlockWriteHook {}
++#[cfg(feature = "blk")]
++unsafe impl Sync for CBlockWriteHook {}
++
++#[cfg(feature = "blk")]
++impl devices::virtio::BlockWriteHook for CBlockWriteHook {
++    fn before_write(&self, offset: u64, len: u64) -> std::io::Result<()> {
++        match unsafe { (self.hook)(self.user, offset, len) } {
++            0 => Ok(()),
++            code => Err(std::io::Error::other(format!("write hook returned {code}"))),
++        }
++    }
+ }
+ 
+ #[cfg_attr(feature = "ffi", ffier::export(send, cfg = "feature = \"blk\""))]
+@@ -1608,6 +1633,7 @@ impl BlockDevice {
+             sync_mode: SyncMode::default(),
+             parallel_reads: false,
+             read_pool_size: None,
++            write_hook: None,
+         })
+     }
+ 
+@@ -1645,6 +1671,37 @@ impl BlockDevice {
+     pub fn set_read_pool_size(&mut self, size: usize) {
+         self.read_pool_size = NonZeroUsize::new(size);
+     }
++
++    /// Call `hook(user, offset, len)` before each change the guest makes to the disk.
++    ///
++    /// The hook runs on the device's worker thread before every write, write-zeroes and
++    /// discard, with a byte range already checked to lie inside the disk. No other change to
++    /// the disk happens while it runs, so the range still holds its old bytes: a hook can copy
++    /// them, for example to keep a checkpoint. A return other than 0 fails the request with
++    /// an I/O error and leaves the disk unchanged. Reads and flushes do not call it.
++    ///
++    /// # Safety
++    ///
++    /// `hook` must be a function of the type
++    /// `int32_t (*)(const void *user, uint64_t offset, uint64_t len)`, and `user` must stay
++    /// valid and usable from another thread for as long as the VM runs.
++    pub unsafe fn set_write_hook(
++        &mut self,
++        hook: *const std::ffi::c_void,
++        user: *const std::ffi::c_void,
++    ) -> Result<(), VmmError> {
++        if hook.is_null() {
++            return Err(VmmError::InvalidParam());
++        }
++        let hook = unsafe {
++            std::mem::transmute::<
++                *const std::ffi::c_void,
++                unsafe extern "C" fn(*const std::ffi::c_void, u64, u64) -> i32,
++            >(hook)
++        };
++        self.write_hook = Some(Arc::new(CBlockWriteHook { hook, user }));
++        Ok(())
++    }
+ }
+ 
+ #[cfg_attr(feature = "ffi", ffier::export(cfg = "feature = \"blk\""))]
+@@ -1654,7 +1711,7 @@ impl<'a> AttachDevice<'a> for BlockDevice {
+     fn attach(self: Box<Self>, ctx: &mut AttachContext) -> Result<(), VmmError> {
+         use devices::virtio::CacheType;
+ 
+-        let block = devices::virtio::Block::new(
++        let mut block = devices::virtio::Block::new(
+             self.id,
+             None,
+             CacheType::auto(&self.disk_image_path),
+@@ -1667,6 +1724,9 @@ impl<'a> AttachDevice<'a> for BlockDevice {
+             self.read_pool_size,
+         )
+         .map_err(|e| VmmError::Internal(format!("block: {e}")))?;
++        if let Some(hook) = self.write_hook {
++            block.set_write_hook(hook);
++        }
+ 
+         let inner = Arc::new(Mutex::new(block));
+         let id = inner.lock().unwrap().id().to_string();
+@@ -2316,3 +2376,43 @@ mod tests {
+         assert!(!balloon.requirements().replaces_guest_ram);
+     }
+ }
++
++#[cfg(all(test, feature = "blk"))]
++mod block_write_hook_tests {
++    use super::*;
++    use std::ffi::c_void;
++    use std::sync::atomic::{AtomicU64, Ordering};
++
++    unsafe extern "C" fn refuse_odd_offsets(user: *const c_void, offset: u64, len: u64) -> i32 {
++        let calls = unsafe { &*(user as *const AtomicU64) };
++        calls.fetch_add(len, Ordering::Relaxed);
++        if offset.is_multiple_of(2) { 0 } else { 5 }
++    }
++
++    #[test]
++    fn c_hook_is_called_with_its_user_pointer_and_its_return_is_kept() {
++        let calls = AtomicU64::new(0);
++        let mut device = BlockDevice::new("d", "/nonexistent", DiskFormat::Raw).unwrap();
++        unsafe {
++            device
++                .set_write_hook(
++                    refuse_odd_offsets as *const c_void,
++                    &calls as *const AtomicU64 as *const c_void,
++                )
++                .unwrap();
++        }
++        let hook = device.write_hook.unwrap();
++        assert!(hook.before_write(512, 4096).is_ok());
++        let err = hook.before_write(513, 8).unwrap_err();
++        assert!(err.to_string().contains('5'));
++        assert_eq!(calls.load(Ordering::Relaxed), 4104);
++    }
++
++    #[test]
++    fn null_hook_is_refused() {
++        let mut device = BlockDevice::new("d", "/nonexistent", DiskFormat::Raw).unwrap();
++        let result = unsafe { device.set_write_hook(std::ptr::null(), std::ptr::null()) };
++        assert!(result.is_err());
++        assert!(device.write_hook.is_none());
++    }
++}
+-- 
+2.43.0
+

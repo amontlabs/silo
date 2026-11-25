@@ -1,0 +1,203 @@
+From f7dc69a1ed32ebda1d9aee9c29d89f79ef58b997 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 25 Nov 2026 10:57:52 +0000
+Subject: [PATCH 1/2] virtio/blk: refuse writes, discards and write-zeroes
+ outside the disk
+
+The write, discard and write-zeroes paths computed their byte offset as
+`sector * 512` unchecked. A guest sector of 2^55 or more makes that
+multiplication overflow: a debug build panics on the block worker's
+thread, and a release build wraps, so a write to sector 2^55 lands on
+sector 0 and completes with VIRTIO_BLK_S_OK.
+
+Check the request's sector range against the disk's size with checked
+arithmetic before any change, and fail it with VIRTIO_BLK_S_IOERR when
+it does not lie inside the disk, as the read path already does for its
+offset.
+
+Assisted-by: Claude Code: claude-opus-5-5
+Signed-off-by: Claude <noreply@anthropic.com>
+---
+ src/devices/src/virtio/block/device.rs | 16 ++++-
+ src/devices/src/virtio/block/worker.rs | 95 +++++++++++++++++++++-----
+ 2 files changed, 93 insertions(+), 18 deletions(-)
+
+diff --git a/src/devices/src/virtio/block/device.rs b/src/devices/src/virtio/block/device.rs
+index 0016c546..b4f8ac3e 100644
+--- a/src/devices/src/virtio/block/device.rs
++++ b/src/devices/src/virtio/block/device.rs
+@@ -40,7 +40,7 @@ use windows_sys::Win32::Storage::FileSystem::{
+     BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+ };
+ 
+-use super::worker::BlockWorker;
++use super::worker::{BlockWorker, RequestError};
+ use super::{
+     super::{ActivateResult, DeviceQueue, DeviceState, QueueConfig, TYPE_BLOCK, VirtioDevice},
+     Error, NUM_QUEUES, QUEUE_CONFIG, SECTOR_SHIFT, SECTOR_SIZE,
+@@ -109,6 +109,20 @@ impl DiskProperties {
+         })
+     }
+ 
++    /// The byte range of `nsectors` sectors from `sector`, if it lies inside the disk.
++    pub(crate) fn checked_range(
++        &self,
++        sector: u64,
++        nsectors: u64,
++    ) -> Result<(u64, u64), RequestError> {
++        match sector.checked_add(nsectors) {
++            Some(end) if end <= self.nsectors => {
++                Ok((sector << SECTOR_SHIFT, nsectors << SECTOR_SHIFT))
++            }
++            _ => Err(RequestError::OutOfRange),
++        }
++    }
++
+     pub fn nsectors(&self) -> u64 {
+         self.nsectors
+     }
+diff --git a/src/devices/src/virtio/block/worker.rs b/src/devices/src/virtio/block/worker.rs
+index 889bcf02..9e9b7344 100644
+--- a/src/devices/src/virtio/block/worker.rs
++++ b/src/devices/src/virtio/block/worker.rs
+@@ -28,6 +28,7 @@ pub enum RequestError {
+     DiscardingToZero(io::Error),
+     FlushingToDisk(io::Error),
+     InvalidDataLength,
++    OutOfRange,
+     ReadingFromDescriptor(io::Error),
+     WritingToDescriptor(io::Error),
+     WritingZeroes(io::Error),
+@@ -529,12 +530,13 @@ impl BlockWorker {
+             VIRTIO_BLK_T_OUT => {
+                 let data_len = reader.available_bytes();
+                 if !data_len.is_multiple_of(512) {
+-                    Err(RequestError::InvalidDataLength)
+-                } else {
+-                    reader
+-                        .read_to_at(disk, data_len, request_header.sector * 512)
+-                        .map_err(RequestError::ReadingFromDescriptor)
++                    return Err(RequestError::InvalidDataLength);
+                 }
++                let (offset, _) =
++                    disk.checked_range(request_header.sector, data_len as u64 / 512)?;
++                reader
++                    .read_to_at(disk, data_len, offset)
++                    .map_err(RequestError::ReadingFromDescriptor)
+             }
+             VIRTIO_BLK_T_FLUSH => match disk.cache_type() {
+                 CacheType::Writeback => {
+@@ -561,13 +563,14 @@ impl BlockWorker {
+                 let discard_write_data: DiscardWriteData = reader
+                     .read_obj()
+                     .map_err(RequestError::ReadingFromDescriptor)?;
++                let (offset, len) = disk.checked_range(
++                    discard_write_data.sector,
++                    discard_write_data.num_sectors.into(),
++                )?;
+                 disk.file
+                     .write()
+                     .unwrap()
+-                    .discard_to_any(
+-                        discard_write_data.sector * 512,
+-                        discard_write_data.num_sectors as u64 * 512,
+-                    )
++                    .discard_to_any(offset, len)
+                     .map_err(RequestError::Discarding)?;
+                 Ok(0)
+             }
+@@ -576,20 +579,18 @@ impl BlockWorker {
+                     .read_obj()
+                     .map_err(RequestError::ReadingFromDescriptor)?;
+                 let unmap = (discard_write_data.flags & VIRTIO_BLK_WRITE_ZEROES_FLAG_UNMAP) != 0;
++                let (offset, len) = disk.checked_range(
++                    discard_write_data.sector,
++                    discard_write_data.num_sectors.into(),
++                )?;
+                 let mut diskfile = disk.file.write().unwrap();
+                 if unmap {
+                     diskfile
+-                        .discard_to_zero(
+-                            discard_write_data.sector * 512,
+-                            discard_write_data.num_sectors as u64 * 512,
+-                        )
++                        .discard_to_zero(offset, len)
+                         .map_err(RequestError::DiscardingToZero)?;
+                 } else {
+                     diskfile
+-                        .write_zeroes(
+-                            discard_write_data.sector * 512,
+-                            discard_write_data.num_sectors as u64 * 512,
+-                        )
++                        .write_zeroes(offset, len)
+                         .map_err(RequestError::WritingZeroes)?;
+                 }
+                 Ok(0)
+@@ -886,4 +887,64 @@ mod tests {
+         mem.read_slice(&mut status, GuestAddress(0x10c)).unwrap();
+         assert_eq!(status, [VIRTIO_BLK_S_IOERR as u8]);
+     }
++
++    #[test]
++    fn changes_outside_the_disk_are_refused() {
++        let wrap = u64::MAX / 512 + 1;
++        let range = |sector, num_sectors| {
++            DiscardWriteData {
++                sector,
++                num_sectors,
++                flags: 0,
++            }
++            .as_slice()
++            .to_vec()
++        };
++        for (request_type, sector, body) in [
++            (VIRTIO_BLK_T_OUT, 2, vec![0xaa; 512]),
++            (VIRTIO_BLK_T_OUT, wrap, vec![0xaa; 512]),
++            (VIRTIO_BLK_T_WRITE_ZEROES, 0, range(wrap, 1)),
++            (VIRTIO_BLK_T_DISCARD, 0, range(1, 2)),
++        ] {
++            let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x4000)]).unwrap();
++            let head = create_descriptor_chain(
++                &mem,
++                GuestAddress(0),
++                GuestAddress(0x1000),
++                vec![
++                    (DescriptorType::Readable, 16),
++                    (DescriptorType::Readable, body.len() as u32),
++                ],
++                0,
++            )
++            .unwrap();
++            let header = RequestHeader {
++                request_type,
++                sector,
++                ..Default::default()
++            };
++            mem.write_obj(header, GuestAddress(0x1000)).unwrap();
++            mem.write_slice(&body, GuestAddress(0x1010)).unwrap();
++            let mut reader = Reader::new(&mem, head).unwrap();
++            reader.read_obj::<RequestHeader>().unwrap();
++            let status = create_descriptor_chain(
++                &mem,
++                GuestAddress(0x2000),
++                GuestAddress(0x3000),
++                vec![(DescriptorType::Writable, 1)],
++                0,
++            )
++            .unwrap();
++            let mut writer = Writer::new(&mem, status).unwrap();
++            let disk = test_disk(false);
++            assert!(matches!(
++                BlockWorker::process_request(header, &mut reader, &mut writer, &disk),
++                Err(RequestError::OutOfRange)
++            ));
++            let mut content = [0u8; 1024];
++            disk.file.read().unwrap().read(&mut content[..], 0).unwrap();
++            assert!(content[..512].iter().all(|b| *b == 0x11));
++            assert!(content[512..].iter().all(|b| *b == 0x22));
++        }
++    }
+ }
+-- 
+2.43.0
+
