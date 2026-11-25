@@ -28,3 +28,27 @@ An agent's part, from drafting the feature `minimum-package-age` on 21 November 
 the age of packages is enforced at the boundary (`package-age-at-the-boundary`), and the age of a
 package is in what a registry answers. `ending-the-encrypted-connection` says how the boundary
 reads model traffic. No decision says it reads the traffic to registries.
+
+## Which package managers trust the computer's own store (24 November 2026)
+
+An agent's part, 24 November 2026. A test server answered for the registry hosts with a
+certificate from a test authority found only in the system's store (Ubuntu, the
+`ca-certificates` bundle). Each manager ran with no certificate setting of its own.
+
+| Trusts the system store as it is | Keeps its own store |
+| --- | --- |
+| curl, Python `urllib`, pip 26.2 and Ubuntu's pip 24.0, cargo, go, gem, bun 1.4.4, yarn 1.22 | node 22 `fetch`, npm 10.9.9, pnpm 10.28: Node's bundled store |
+| maven, through Java's own store, which Ubuntu fills from the system's | uv: its own bundled roots |
+
+- Node, npm and pnpm take the system store with `NODE_OPTIONS=--use-system-ca`, or a file with
+  `NODE_EXTRA_CA_CERTS`. Both worked.
+- uv takes it with `UV_NATIVE_TLS=1`. Its own hint names the flag `--system-certs`.
+- pip trusts the system store since 24.2, through `truststore`. Ubuntu's older pip is patched to do
+  the same, and an unpatched pip before 24.2 would not.
+- Java keeps its own store everywhere. Ubuntu copies the system's authorities into it, and a Java
+  installed by hand, such as one from a tarball, does not get them.
+- yarn 1.22 refused a certificate from an authority outside the system store, so it does check.
+
+So a computer needs Silo's certificate in three places: the system store, Node's (by the
+environment), and uv's (by the environment). A Java installed outside the distribution also needs
+it in its own store.

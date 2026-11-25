@@ -33,3 +33,134 @@ whose `Host` is not the name in the handshake, or whose target is an absolute UR
 takes the host from an absolute URL over the `Host` header, so a request sent under
 `api.anthropic.com` could be served as `attacker.example`. A suggestion for the answer: each request
 on a connection Silo ends names the host of the handshake, and is refused otherwise.
+
+## Containers inside a computer do not trust Silo's certificate (24 November 2026)
+
+An agent's part, 24 November 2026. Tried on Linux with Docker 29.9.3 and `node:22-alpine`. A fake
+host presented a certificate from a test authority that the machine's own store trusts, as the
+computer would trust Silo's.
+
+- From a container, Node refused: `SELF_SIGNED_CERT_IN_CHAIN`. `wget`, which reads the image's own
+  store, refused too.
+- `docker build` of a `RUN wget …` step failed the build: "certificate verify failed".
+- With the authority mounted into the container and `NODE_EXTRA_CA_CERTS` pointing at it, Node
+  passed.
+
+A container brings its own list of authorities, so whatever the computer trusts stops at its edge.
+`docker build` with `npm install` or `pip install` inside is common work for an agent, and those
+registries are hosts Silo reads for the age rule (`registry-traffic-read`). Every such build then
+fails, with an error that names a certificate and not Silo.
+
+What I would add to the answer:
+
+- **Fail closed, and say why.** A client that refuses Silo's certificate must not get the host
+  unread instead, or any agent gets around a rule by using a client that does not trust Silo. The
+  record says that a program in the computer refused Silo's certificate for that host, and the app
+  shows it beside the failed command.
+- **Make the fix one line.** Silo keeps its authority at a fixed path in every computer and tells
+  the agent how to use it in a build: copy it into the image and run `update-ca-certificates`, or
+  pass it as `NODE_EXTRA_CA_CERTS`, `PIP_CERT`, `SSL_CERT_FILE`. Whether a container runtime in the
+  computer can add it to every container by itself is to find out.
+
+Tried the same day: it can, for containers that run. A 20-line wrapper around runc, set as Docker's
+default runtime in the computer, adds the computer's bundle of authorities over the image's own,
+read-only, and the variables that point libraries at it, unless the container sets them itself.
+With it, Node's `fetch` and `wget` in `node:22-alpine` trusted Silo's certificate, a public host
+still worked, and nothing changed in the image or the command. `docker build` is not covered: its
+default builder (BuildKit) runs build steps without Docker's default runtime, and a `RUN wget` in a
+build still refused the certificate. So containers can be made to trust Silo by Silo itself, and
+image builds still need the line above. The wrapper is in the project files,
+`research/2026-11-24-container-trust`.
+
+Docker itself trusts the computer's store: a registry whose certificate came from an authority
+found only in Ubuntu's system store took `docker push` and `docker pull` (Docker 29.9), and
+`docker build` fetched its `FROM` image from it, with no setting. So on a registry host Silo
+reads, pulling images works as it is; only the commands that run inside a container or a build
+step need Silo's authority given to them.
+
+## Libraries and browsers that keep their own store (24 November 2026)
+
+An agent's part, 24 November 2026. `registry-traffic-read` found which package managers trust
+the computer's own store. Agents also run their own code and browsers through Silo, so the same
+test was run on the libraries that code uses: a server with a certificate from an authority found
+only in Ubuntu's system store, and each client with no certificate setting.
+
+| Trusts the system store | Refuses Silo's certificate | What makes it trust the system store |
+|---|---|---|
+| Python `urllib` and `aiohttp` 3.14; the OpenAI 3.58 and Anthropic 2.13 SDKs, through `truststore` | Python `requests` 2.34 and `httpx` 0.28: their own bundle (`certifi`) | `REQUESTS_CA_BUNDLE`, and `SSL_CERT_FILE` for httpx, set to the system bundle |
+| Ruby `net/http`, PHP, Java (Ubuntu fills its store), curl | boto3 1.44 | `AWS_CA_BUNDLE` |
+| | Node 22 `fetch`, `https`, axios | `--use-system-ca`, as already found |
+| | Chromium 158 from Playwright, and Google Chrome: `ERR_CERT_AUTHORITY_INVALID` | the authority added to the user's `~/.pki/nssdb`, the store Chrome reads on Linux |
+
+What this changes:
+
+- **An agent's own Python script breaks in the most common way.** `requests` is the HTTP library
+  Python code reaches for first, and an agent that writes a script with it gets "certificate
+  verify failed" on every host Silo reads. Each variable above replaces the library's bundle with
+  the file it names, so it must name the whole system bundle, not Silo's authority alone, or
+  every other host fails instead.
+- **A browser the agent drives does not read the system store.** Agents test web apps with
+  Playwright; on a host Silo reads, Chromium refuses the page until Silo's authority is in the
+  NSS store of the user that runs it. Added there, both Chromium and Chrome trusted it.
+- So the list of places a computer needs Silo's authority grows to: the system store, Node's (by
+  the environment), uv's, `requests`, `httpx` and boto3's (by the environment), and each user's NSS
+  store for browsers. Silo can set all of these when it makes a computer; what it cannot set is a
+  library that ships its own roots and reads no setting, and that program then fails on the hosts
+  Silo reads, as a container does above. Stripe's Python SDK is one: only a line of code changes
+  its list (`secret-placeholder`, "Where twelve services' secrets travel").
+
+All of it together was tried from a fresh home folder: six variables pointing at the system
+bundle (`NODE_OPTIONS=--use-system-ca`, `UV_NATIVE_TLS=1`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`,
+`AWS_CA_BUNDLE`, `CURL_CA_BUNDLE`) and Silo's authority added to the user's NSS store. Every
+client above then trusted Silo's certificate, Chromium and Chrome included, and a real public
+host still worked. That is a short, fixed list Silo can apply when it makes a computer.
+
+The scripts are in the project files, `research/2026-11-24-trust-libraries` (`kit.sh` for the
+list).
+
+The agent programs themselves, for their own model traffic, tried the same day against a stand-in
+for each provider's host with a certificate from an authority only the system store held:
+Claude Code 2.1.331 (built on Bun) and opencode 1.19.6 (Bun 1.4.4) trusted it, as Codex 0.172.0
+already had. Gemini CLI 0.71.1, which runs on Node, refused it, and said only "fetch failed
+sending request", twice with retries, nothing about a certificate. With
+`NODE_OPTIONS=--use-system-ca`, the first line of the list above, it reached the stand-in. So the
+list covers every agent program tried, and without it Gemini CLI fails in a way that names
+neither the certificate nor Silo.
+
+## What a certificate Silo makes must hold (24 November 2026)
+
+An agent's part, 24 November 2026. The answer has Silo present "a certificate it makes for that
+host" and says the settings "are written down and tested, not left to defaults". The spike used
+one certificate for every host. Certificates were made per host with Python's `cryptography` in
+five shapes, under one test authority, and four clients connected to each, trusting only that
+authority:
+
+| Leaf certificate | Python 3.13 | Node 22 | curl 8.5 | Go 1.24 |
+|---|---|---|---|---|
+| ECDSA P-256 key, the host in `subjectAltName`, Authority Key Identifier | ok | ok | ok | ok |
+| The same without Authority Key Identifier | refused: "Missing Authority Key Identifier" | ok | ok | ok |
+| The host only in the common name, no `subjectAltName` | ok | ok | ok | refused: "relies on legacy Common Name field" |
+| An RSA 2048 key | ok | ok | ok | ok |
+| Valid for 800 days | ok | ok | ok | ok |
+
+- **Python 3.13 checks strictly by default.** Its default context sets `VERIFY_X509_STRICT`, so a
+  leaf without the Authority Key Identifier extension fails every Python program of 3.13 or later
+  with "certificate verify failed", whatever store it trusts. A library that makes certificates
+  may leave that extension out unless asked, and Node, curl and Go would not notice, so only a
+  test with a recent Python catches it.
+- **The host goes in `subjectAltName`.** Go refuses a certificate that names its host only in the
+  common name, as Chrome does (Chrome not tried here). gh, kubectl, terraform and docker are Go.
+- **Making one costs nothing with an elliptic-curve key.** A leaf with a new P-256 key took
+  0.27 ms to make and sign; with a new RSA 2048 key, 70 ms, nearly all of it making the key. So
+  Silo can make each host's certificate at the first connection to it, with no cache to keep
+  warm, if its keys are elliptic-curve.
+
+Python 3.13's strict check reaches the authority too: an authority made by `openssl req -x509`
+with no key usage extension was refused ("CA cert does not include key usage extension"), found
+while trying a client certificate (`secret-placeholder`, the Kubernetes section).
+
+What I would add to the answer: Silo's authority has `basicConstraints` and `keyUsage`, marked
+critical; each certificate Silo makes has an ECDSA P-256 key, the host in
+`subjectAltName`, and the Authority Key Identifier and Subject Key Identifier extensions, and a
+test connects Python 3.13, Node, curl and Go to it, since each refuses a different omission. The
+script is in the project files, `research/2026-11-24-trust-libraries/mint`.

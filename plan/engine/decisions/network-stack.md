@@ -72,3 +72,15 @@ The scripts are in `research/2026-11-24-linux-host/`.
   faster at MTU 65520. Silo's stack should take large frames from the start.
 - These are a floor for Silo's stack, which also reads HTTP. Measured on a Linux container, not on
   a Mac.
+
+## vmnet networks on macOS 27 (24 November 2026)
+
+An agent's part, 24 November 2026. Read, not tried. Since macOS 26 a `vmnet` network object can be
+made by an app, and on macOS 27 attached to a virtual machine with
+`VZVmnetNetworkDeviceAttachment` ([session 224](https://developer.apple.com/videos/play/wwdc2026/224/)).
+The app can "configure the DHCP settings for the network, or add rules to forward TCP or UDP host
+ports to specific virtual machines", and pass the network to another process over XPC. So each
+computer can have a network of its own, and a port of main can reach your Mac, without Apple's
+shared NAT. It is still Apple's network, and the session shows no way for Silo to read or refuse a
+packet on it, so it does not replace the stack this answer is about for the boundary. It could
+carry a computer whose network is open and unread, or Silo's own way in to a computer.

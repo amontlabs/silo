@@ -57,3 +57,30 @@ the browser are on different machines.
   browser.
 - Bad paths to design: you say no. No answer comes from the provider. The program gave up waiting
   before the answer arrived. Two sign-ins wait on the same port number in two computers.
+
+## How Silo learns the link and the port (24 November 2026)
+
+An agent's part, 24 November 2026. Tried on Linux with a fake MCP server that signs in with OAuth
+(dynamic registration, a code with PKCE, then tokens), and `mcp login` in Claude Code 2.1.331 and
+Codex 0.172.0. `BROWSER` pointed at a small script standing in for Silo: it logged the link it was
+given, followed the server's redirect, and called the address it was sent to, as your browser
+would after your yes.
+
+- **Both open the link through `BROWSER`.** Each ran the script with the link as its one argument.
+  So a command of Silo's in the computer, named by `BROWSER` in its environment, learns every link
+  a program opens, with no change to the program. `xdg-open` reads the same variable.
+- **The port is in the link.** Each link carried `redirect_uri=http://localhost:50946/callback`
+  (Claude Code) or `http://127.0.0.1:37285/callback/<id>` (Codex), a new port each time. Silo reads
+  it there before it opens anything.
+- **Both finished.** The script's call to that address got a 200, and each program saved its
+  tokens: "Authenticated with "fake"" and "Successfully logged in to MCP server 'fake'".
+- **Claude Code also takes the answer pasted.** In a terminal it shows "Or paste the redirect URL
+  here", so the answer can reach it as text. Without a terminal it refuses: "this isn't an
+  interactive terminal". Codex has `--no-browser`, which prints the link and takes the answer the
+  same way.
+
+So the two crossings of the notes are known before they happen: Silo gets the link from its
+`BROWSER` command, opens it on your Mac with your yes, and listens on the port named in the link,
+on your Mac, only until that one answer comes, then passes it to the same port in the computer.
+Two computers that pick the same port at once is the case left: Silo can refuse the second until
+the first is done. The scripts are in the project files, `research/2026-11-24-mcp-oauth`.

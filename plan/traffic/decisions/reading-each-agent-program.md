@@ -199,3 +199,99 @@ forwards the sign-in inside each request and stores it nowhere (`logins`).
   and OpenAI's help-centre articles.
 - This is a reading of the terms, not legal advice. No lawyer has read it, and neither vendor was
   asked.
+
+## Trust from the system's store alone, on Linux (24 November 2026)
+
+An agent's part, 24 November 2026. This answers one of the points still to find out above, on
+Linux only.
+
+A test authority was made, and a certificate signed by it for `api.anthropic.com`,
+`api.openai.com` and `chatgpt.com`. A fake provider presented it on port 443 of the same machine,
+and `/etc/hosts` sent those names there, so each program reached it as it would reach a boundary
+that ends the connection. Each program ran with an empty environment apart from its API key, so
+no setting of the machine or of this session told it about the authority. Ubuntu 24.04, Claude
+Code 2.1.331, Codex 0.172.0 with an API key.
+
+| Where the authority was | Claude Code | Codex |
+|---|---|---|
+| Nowhere | Refuses: "Self-signed certificate detected (SELF_SIGNED_CERT_IN_CHAIN) … set NODE_EXTRA_CA_CERTS to that CA bundle, or add it to the system certificate store" | Refuses: its WebSocket fails at the stage `Tls`, and it keeps retrying |
+| Only in the system's store (`update-ca-certificates`) | Works: one tool call, one answer | Works: one tool call, one answer |
+| Only in the program's setting (`NODE_EXTRA_CA_CERTS`, `CODEX_CA_CERTIFICATE` or `SSL_CERT_FILE`) | Works | Works, with either setting |
+
+So on Linux the computer's trust store is enough for both programs, and no setting in the program
+is needed. The Mac, and Codex signed in with ChatGPT, are still to test.
+
+On the Mac, read from the programs' own code (not run on a Mac):
+
+- Claude Code 2.1.331 trusts two lists unless told otherwise: the authorities it carries and the
+  system's. `CLAUDE_CODE_CERT_STORE` set to `bundled` alone drops the system's. Its runtime reads
+  the system's list through the operating system, which on a Mac is the keychain.
+  `NODE_EXTRA_CA_CERTS` only adds to the two.
+- Codex 0.172.0 logs "using system root certificates because no CA override environment variable
+  was selected", and its HTTP client uses native-tls, which on a Mac asks the keychain. With
+  `CODEX_CA_CERTIFICATE` or `SSL_CERT_FILE` set it builds a second client with that file as its
+  list. Its Bedrock client is a separate one, from the AWS SDK.
+
+So an authority Silo adds to the computer's keychain should be enough on a Mac too, for the
+model requests of both. What stays to try on a Mac: that the keychain entry is enough for Codex's
+Bedrock client and for its side connection to `github.com`, and that a program with its own
+setting set by the user does not drop the keychain.
+
+Three more things were seen in the same runs:
+
+- **Claude Code compresses its requests.** To `api.anthropic.com` it sent each request body
+  compressed with gzip (`content-encoding: gzip`). To a provider address set by
+  `ANTHROPIC_BASE_URL` it did not. The boundary reads a decompressed copy and forwards the
+  compressed bytes, as `forwarded-byte-for-byte` already says.
+- **Codex falls back from its WebSocket.** With an API key, Codex 0.172.0 first opened a WebSocket
+  to `api.openai.com/v1/responses`. When that failed (the fake provider did not speak WebSocket),
+  it tried seven times and then sent plain requests with a stream of events. So a boundary that
+  refused the WebSocket would still read Codex, through the fallback. Whether the fallback stays in
+  later versions is not known.
+- **Claude Code calls two more addresses on the same host** before its first model request:
+  `GET /api/claude_code/settings` and `GET /api/claude_code/policy_limits`.
+
+## Codex's WebSocket, read through a spike of the boundary (24 November 2026)
+
+An agent's part, 24 November 2026. The spike of the boundary described in `forwarded-byte-for-byte`
+was taught WebSocket: frames, masks, fragmented messages and compression (permessage-deflate,
+with its state kept from message to message). It was then put in front of a fake provider that
+speaks WebSocket, with and without compression. Codex 0.172.0 used it on its own: with an API key,
+it asked for compression and opened `wss://api.openai.com/v1/responses`.
+
+- The spike read every message both ways, with and without compression. It held a reply's frames
+  while a tool call was open, and a denied `exec_command` failed through the probe as over plain
+  requests. The next call ran.
+- Each message from Codex is a `response.create` carrying what a plain request's body would. Each
+  message from the host is one event, the same JSON as an event of the stream.
+- **On a socket, Codex sends only what is new.** Its first message is a warm-up with
+  `"generate": false` and no input. Its second carries the whole conversation and names the
+  warm-up's reply in `previous_response_id`. After that, each message carries only the new items,
+  such as the result of the last call, and names the previous reply. This held with
+  `"store": false`. A conversation resumed later opened a new socket and sent the whole
+  conversation again.
+
+So for Codex on a socket, the boundary cannot read a conversation from one message. It has to
+follow `previous_response_id` from reply to reply within the connection, as
+`recognising-a-conversation` already allows. Whether OpenAI's own server accepts compression, and
+whether Codex signed in with ChatGPT behaves the same, is not known.
+
+## Claude Code on Amazon Bedrock (24 November 2026)
+
+An agent's part, 24 November 2026. Claude Code 2.1.331 with `CLAUDE_CODE_USE_BEDROCK=1`, against a
+stand-in for Bedrock. What the boundary reads differs from Anthropic's API in four ways:
+
+- The address names the model: `POST /model/<model id>/invoke-with-response-stream` for the
+  conversation, `/invoke` for short calls. The body is Anthropic's request with
+  `anthropic_version: "bedrock-2023-05-31"`, and the betas move from a header into the body
+  (`anthropic_beta`).
+- The body is sent uncompressed, since its hash is part of the signature
+  (`x-amz-content-sha256`).
+- The reply is not a stream of server-sent events. It is AWS's binary event stream
+  (`application/vnd.amazon.eventstream`): frames with a length, headers and a CRC, each carrying a
+  JSON object whose `bytes` holds one of Anthropic's events, base64-encoded. The reader needs this
+  framing too, and the probe of `denied-tool-call-mechanism` must see a tool call inside it.
+- At start, Claude Code lists the region's inference profiles and sends a short request to three
+  models before the conversation begins. `x-claude-code-session-id` is sent here too.
+
+The scripts are in the project files, `research/2026-11-24-bedrock`.

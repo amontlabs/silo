@@ -29,3 +29,24 @@ To find out, for each program.
 
 - In the test of 19 November 2026, Claude Code's own report matched the boundary on every request: the same request id, the same model, the same token counts. The request id joins the two accounts.
 - Still to find out: the same for Codex and the other programs.
+
+## Codex 0.172.0 against the boundary (24 November 2026)
+
+An agent's part, 24 November 2026. Codex ran a conversation of four replies over its WebSocket,
+through the spike of the boundary (`forwarded-byte-for-byte`), in front of a fake provider. The
+fake provider gave each reply different, random token counts.
+
+- Codex writes its own account in its session file (`~/.codex/sessions/…/rollout-*.jsonl`), as one
+  `token_usage_record` per reply. Each record carries the reply's `response_id`, so the two
+  accounts can be joined on it. `codex exec --json` also prints the turn's total.
+- For the three replies that answered the conversation, Codex's counts were the same as the
+  provider's, on every field: input, cached input, output, reasoning, total.
+- **Codex leaves its warm-up out.** The first message on each socket is a warm-up
+  (`"generate": false`, see `reading-each-agent-program`). The fake provider gave its reply token
+  counts too, and Codex's account has no record of that reply. Whether OpenAI counts anything for a
+  warm-up is not known.
+
+This bears on the answer, which offers the check only when every request of the run matched: as
+written, Codex fails it on the first reply of every socket. If a warm-up costs nothing, the check
+could leave out replies to `"generate": false` and still mean what it should. That is for whoever
+writes the check, once a warm-up's real cost is known.
