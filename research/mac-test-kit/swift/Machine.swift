@@ -494,12 +494,6 @@ func emit(_ event: String, _ fields: [(String, J)]) {
   printJSON([("event", .s(event))] + fields)
 }
 
-/// One `silovm run`. Everything runs on the main queue, which the framework requires for a machine
-/// made with VZVirtualMachine(configuration:). Runner does not conform to NSWindowDelegate: that
-/// protocol is @MainActor, and in Swift 5 mode a class conforming to it is inferred @MainActor,
-/// which would make the calls from cmdRun and the control socket's handler cross-actor calls. The
-/// window's closing is observed through NotificationCenter instead.
-@available(macOS 14, *)
 /// The vsock bridges of `silovm run` (VsockBridgeSpec in Core.swift). Every connection is one
 /// "vsock" event when it opens and one when it ends, with the bytes each way. The framework's
 /// calls are made on the main queue, the machine's queue.
@@ -584,6 +578,12 @@ final class VsockBridges: NSObject, VZVirtioSocketListenerDelegate {
   }
 }
 
+/// One `silovm run`. Everything runs on the main queue, which the framework requires for a machine
+/// made with VZVirtualMachine(configuration:). Runner does not conform to NSWindowDelegate: that
+/// protocol is @MainActor, and in Swift 5 mode a class conforming to it is inferred @MainActor,
+/// which would make the calls from cmdRun and the control socket's handler cross-actor calls. The
+/// window's closing is observed through NotificationCenter instead.
+@available(macOS 14, *)
 final class Runner: NSObject, VZVirtualMachineDelegate {
   let bundle: VMBundle
   let vm: VZVirtualMachine

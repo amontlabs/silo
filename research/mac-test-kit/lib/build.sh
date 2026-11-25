@@ -40,5 +40,18 @@ if [ "$(uname -s)" = Darwin ]; then
   else
     echo "FAILED silovm: see $BIN/silovm.build.log" >&2; cat "$BIN/silovm.build.log" >&2; fail=1
   fi
+  # krun-boot, for tests 47 to 49 (option B, #381), only when Homebrew's libkrun is installed.
+  kp="$(brew --prefix libkrun 2>/dev/null || true)"
+  if [ -n "$kp" ] && [ -f "$kp/include/libkrun.h" ]; then
+    if cc -O2 -Wall -I "$kp/include" -L "$kp/lib" -o "$BIN/krun-boot" "$KIT_ROOT/krun/krun-boot.c" -lkrun 2> "$BIN/krun-boot.build.log" \
+       && codesign --force --sign - --entitlements "$KIT_ROOT/krun/krun.entitlements" "$BIN/krun-boot" 2>> "$BIN/krun-boot.build.log"; then
+      echo "built krun-boot" >&2
+    else
+      echo "FAILED krun-boot: see $BIN/krun-boot.build.log" >&2; cat "$BIN/krun-boot.build.log" >&2; fail=1
+    fi
+  else
+    echo "krun-boot not built: Homebrew's libkrun is not installed (tests 47 to 49 will skip;" >&2
+    echo "brew tap slp/krun && brew install libkrun, then ./kit build again)." >&2
+  fi
 fi
 exit $fail

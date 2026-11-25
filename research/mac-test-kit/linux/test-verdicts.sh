@@ -25,7 +25,7 @@ import kitreport
 root, tmp = sys.argv[1], sys.argv[2]
 want = {
     # run 2's sealed-leaks is newer than run 1's sealed-holds
-    "network-stack": ("answered", "configured-gvproxy"),
+    "network-stack": ("leaning", "configured-gvproxy"),  # 40 to 42 have not answered
     # 37 says the framework holds it awake, 16 says it does not
     "mac-kept-awake": ("conflict", None),
     # 07 and 35 answered and narrow nothing here; 00 01 13 not (01 inconclusive)
