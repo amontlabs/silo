@@ -163,3 +163,34 @@ Recommended: #385's fourth option. It is the only measured policy that is never 
 With #385's cut, every way that shares one count stopped a team of five within 0.6% over $15,
 and paid $1.40 to $1.90 a run for cut answers. Under leases, where each Mac cuts on its own slice,
 `typical-cut` cut $0.09 a run against $1.85 for plain `cut`.
+
+## A model with no price, a third option (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-model-prices`. The second case above
+asks what a budget does with a model Silo has no price for. Two options were given: deny its
+calls, or let them pass uncounted. The research measured a third.
+
+- Count it at a bound. The call leaves, and is counted at the dearest price any model of the same
+  provider and tier has in Silo's table, times a margin of 2. The app shows the call as counted at
+  a bound until the model's price arrives. It costs a budget that runs out early while that lasts.
+
+What was measured. Under a budget of $1, five calls to a model that was in no table were admitted
+at a bound of $16 and $80 per million input and output tokens (twice Fable 5.2's price). The
+stand-in billed them at $6 and $30. The budget stopped the agent after $0.46 had really been spent,
+when the bound had counted $1.22. Under "deny", the same agent stopped at its first call.
+
+How safe the bound is. Of 100 models Anthropic, OpenAI and Google released since January 2025, 7
+cost more than the dearest model their provider already sold. The largest gap was 1.6 times
+(OpenRouter's catalogue; models retired since are missing from it, so the gap can be larger). A
+margin of 2 covered all of them. Pricing a new model like the previous model of its family would
+have counted too little for 19 of 55, by up to 8 times.
+
+Why it matters now. Agent programs change their default model when they update, often on the day
+the model is released. With "deny", every budgeted computer stops on that day until Silo's table
+has the price. LiteLLM's table had a price for a new model of these providers on the day it was
+listed for half of them, and within 3 days for 9 in 10 (`where-prices-come-from` proposes a table
+of Silo's own).
+
+Recommended: count it at a bound. A budget still holds, since the bound is above what the provider
+charges, and a new model does not stop work. This would replace the sentence of the answer on a
+model Silo has no price for. The answer is left as it is for polarzero to choose.

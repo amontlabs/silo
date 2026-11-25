@@ -31,6 +31,15 @@ pub const Person = struct { name: []const u8, limits: budget.Limits = .{} };
 pub const Config = struct {
     policy: []const u8 = "finish",
     prices: []const u8 = "prices.json",
+    /// With keys, the price table must be a release signed by one of them, newer than every one
+    /// taken before (research/2026-11-25-model-prices).
+    price_keys: []prices.Key = &.{},
+    /// The user's own rows and multipliers, unsigned, which win over the release.
+    local_prices: ?[]const u8 = null,
+    /// A model with no price, under a budget. "refuse" (#374). "bound": admitted and counted at
+    /// the dearest row of its provider and tier, times `unknown_margin`, marked as a bound.
+    unknown_model: []const u8 = "refuse",
+    unknown_margin: f64 = 2,
     /// On a host Silo reads, a request whose credential is not one this computer was given is
     /// refused (#351's first recommendation).
     deny_unknown_credentials: bool = true,
@@ -128,6 +137,8 @@ pub const Request = struct {
     previous_response_id: ?[]u8 = null,
     conversation: ?[]u8 = null,
     background: bool = false,
+    /// What the request asks that changes its price by a multiplier: "inference_geo=us".
+    asked: []const []const u8 = &.{},
     /// A hash of the conversation up to each of its items (messages, input items, contents), in
     /// order. A later request of the same conversation starts with the same items, so the last
     /// one of an earlier request is one of these. Markers of the prompt cache, which move from
@@ -147,6 +158,8 @@ pub const Request = struct {
     }
 };
 
+const geo_us = [_][]const u8{"inference_geo=us"};
+
 pub fn readRequest(gpa: Allocator, format: usage.Format, path: []const u8, body: []const u8) !Request {
     var parsed = try std.json.parseFromSlice(std.json.Value, gpa, body, .{});
     defer parsed.deinit();
@@ -161,10 +174,12 @@ pub fn readRequest(gpa: Allocator, format: usage.Format, path: []const u8, body:
     var prev: ?[]const u8 = null;
     var conv: ?[]const u8 = null;
     var background = false;
+    var asked: []const []const u8 = &.{};
     switch (format) {
         .anthropic => {
             max = usage.int(o.get("max_tokens"));
             if (eq(usage.str(o.get("speed")) orelse "", "fast")) tier = "fast";
+            if (eq(usage.str(o.get("inference_geo")) orelse "", "us")) asked = &geo_us;
             items = usage.arr(o.get("messages"));
         },
         .responses => {
@@ -218,6 +233,7 @@ pub fn readRequest(gpa: Allocator, format: usage.Format, path: []const u8, body:
         .previous_response_id = if (prev) |x| try gpa.dupe(u8, x) else null,
         .conversation = if (conv) |x| try gpa.dupe(u8, x) else null,
         .background = background,
+        .asked = asked,
         .prefixes = try prefixes.toOwnedSlice(gpa),
     };
 }
@@ -349,17 +365,17 @@ pub fn providerKey(format: usage.Format) []const u8 {
 
 /// The cost of a call's counts, each attempt at its own model's price. Null when a model of it
 /// has no price.
-pub fn costOf(table: *prices.Table, provider: []const u8, m: *const usage.Meter, day: []const u8) ?f64 {
+pub fn costOf(table: *prices.Table, provider: []const u8, m: *const usage.Meter, asked: []const []const u8, day: []const u8) ?f64 {
     const tier = tierFromReply(m);
     if (m.parts.items.len > 0) {
         var total: f64 = 0;
         for (m.parts.items) |p| {
-            const r = table.find(provider, p.model, tier, day) orelse return null;
+            const r = table.findFor(provider, p.model, tier, asked, day) orelse return null;
             total += prices.cost(r, p.counts);
         }
         return total;
     }
-    const r = table.find(provider, m.model orelse return null, tier, day) orelse return null;
+    const r = table.findFor(provider, m.model orelse return null, tier, asked, day) orelse return null;
     return prices.cost(r, m.counts);
 }
 

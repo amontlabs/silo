@@ -1,0 +1,16 @@
+prices_release: billed $0.062, counted $0.063
+  PASS  v1: Opus is admitted  
+  PASS  v1: a model with no row is refused under a budget  said=Silo: there is no price for claude-opus-6-0 (standard) yet, and a budget covers this computer, so its calls cannot be counted.
+  PASS  a table edited by hand is refused for its signature  events=['loaded', 'bad_signature', 'loaded', 'rolled_back']
+  PASS  the call after the edit is priced at the signed table, not the edited one  first=0.010328 after_edit=0.010328
+  PASS  v2 is taken and its new model admitted  
+  PASS  an older signed release is refused  
+  PASS  US-only inference counted at 1.1x  ratio=1.1
+  PASS  counted equals the bill, plus the 10% of the US-only call  counted=0.063 expected=0.063033
+OK
+unknown_bound: billed $0.4588, counted $1.2234
+  PASS  the model with no row is admitted at a bound  bound_input=16.0 bound_output=80.0
+  PASS  what is counted is at least what was billed  counted=1.2234 billed=0.4588
+  PASS  the budget of $1 holds: spend stops  said=["Silo: this computer's budget of $1.00 is reached ($1.22 spent). Raise it in the Silo app to go on."]
+  PASS  billed stays within the budget  billed=0.4588
+OK

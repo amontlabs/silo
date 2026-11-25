@@ -61,3 +61,13 @@ An agent's part, 25 November 2026, from `research/2026-11-25-spend-budget-edges`
 - **A reply that says the work goes on.** A response with `background: true` answers `queued` with
   no usage. Read as a whole reply, it counted $0; its counts come from `GET /v1/responses/{id}`
   later. See `budget-and-work-out-of-sight`.
+
+## The model that really answered, for its price (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-model-prices`. The price of a call
+follows the model that answered it, which this answer already records. Two current cases show the
+request's model is not enough. `gemini-flash-latest` and `gemini-pro-latest` point at whichever
+model Google moves them to; LiteLLM's table kept the old models' prices for them for 7 to 12
+months after a move. And from 3 December 2026, Google sends every request for
+`gemini-omni-1.1-flash` to `gemini-omni-1.2-flash` and bills it at that model's price. The
+research's boundary prices the settled call by the model the reply names.

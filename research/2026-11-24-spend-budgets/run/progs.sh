@@ -14,4 +14,4 @@ P_gem="127.0.0.6|$NODE_TRUST NODE_USE_SYSTEM_CA=1 GEMINI_API_KEY=AIzaFakeGeminiK
 P_script="127.0.0.7|SSL_CERT_FILE=$TLS/store-with-silo.crt|python3 $R/client.py"
 P_big="127.0.0.7|SSL_CERT_FILE=$TLS/store-with-silo.crt|python3 $R/bigcall.py"
 # The edge cases of run/edges.py play the computer at 127.0.0.7 and, for a fork, 127.0.0.8.
-P_edge="127.0.0.7|SSL_CERT_FILE=$TLS/store-with-silo.crt CASE=${CASE:-}|python3 $R/edges.py"
+P_edge="127.0.0.7|SSL_CERT_FILE=$TLS/store-with-silo.crt CASE=${CASE:-} PRICES_DIR=${PRICES_DIR:-}|python3 $R/edges.py"
