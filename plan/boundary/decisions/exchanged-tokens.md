@@ -39,3 +39,25 @@ repository.
 - This changes a token's way back, not the request. `what-silo-changes-in-traffic` allows one
   change, the swap; this would be a second, made on a reply. It has to be named there if it is
   taken.
+
+## Measured
+
+An agent's part, 25 November 2026, in `research/2026-11-25-credential-brokering/` of this
+repository. A prototype rewrote the answers of Google's and Microsoft's token endpoints, run
+against `google-auth`, `azure-identity` and `msal` with stand-ins for the two clouds.
+
+- It works. A Google `authorized_user` file holding a placeholder refresh token, and an Azure
+  client secret held as a placeholder, both got placeholder access tokens that worked on the
+  clouds' hosts. Nothing real reached the computer.
+- Microsoft rotates refresh tokens: each refresh returns a new one and spends the old. With the
+  answer rewritten, the computer refreshed three times with one placeholder that never changed, and
+  Silo kept each new real token.
+- A challenge to the fallback, "a token from an endpoint Silo does not know reaches the computer as
+  it is". With the answer passed through, the computer's first refresh put the new real refresh
+  token in its home directory, and the refresh token Silo held was spent (HTTP 400). The computer
+  then held the only live credential, valid for months, and Silo's secret no longer worked.
+  Proposed: Silo swaps a placeholder into a `refresh_token` field only at an endpoint it knows.
+  At any other host, that request is held with an ask that says the answer will reach the computer.
+- Google's refresh answer carries an ID token too. It is a JWT, so its placeholder must be one:
+  the real header and claims, with another signature.
+

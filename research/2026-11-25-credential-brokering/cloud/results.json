@@ -1,0 +1,439 @@
+{
+ "results": [
+  {
+   "case": "metadata_ssrf_guards",
+   "ok": true,
+   "no_header": 403,
+   "forwarded": 403,
+   "azure_no_header": 400,
+   "outside": [],
+   "mode": "real-tokens"
+  },
+  {
+   "case": "google_metadata_storage",
+   "ok": true,
+   "credential_type": "google.auth.compute_engine.credentials.Credentials",
+   "project": "silo-demo",
+   "outside": [
+    "storage.googleapis.com"
+   ],
+   "mode": "real-tokens"
+  },
+  {
+   "case": "google_id_token_cloud_run",
+   "ok": true,
+   "status": 200,
+   "outside": [
+    "hello-abc.a.run.app"
+   ],
+   "mode": "real-tokens"
+  },
+  {
+   "case": "google_id_token_decode",
+   "ok": true,
+   "email": "deployer@silo-demo.iam.gserviceaccount.com",
+   "outside": [
+    "hello-abc.a.run.app"
+   ],
+   "mode": "real-tokens"
+  },
+  {
+   "case": "gcloud storage ls",
+   "ok": true,
+   "error": "",
+   "outside": [],
+   "mode": "real-tokens"
+  },
+  {
+   "case": "gcloud auth print-access-token",
+   "ok": true,
+   "error": "",
+   "outside": [
+    "storage.googleapis.com"
+   ],
+   "mode": "real-tokens"
+  },
+  {
+   "case": "google_authorized_user_exchange",
+   "ok": true,
+   "credential_type": "Credentials",
+   "outside": [
+    "storage.googleapis.com",
+    false
+   ],
+   "mode": "real-tokens"
+  },
+  {
+   "case": "azure_managed_identity",
+   "ok": true,
+   "outside": [
+    "management.azure.com"
+   ],
+   "mode": "real-tokens"
+  },
+  {
+   "case": "azure_default_credential",
+   "ok": true,
+   "outside": [
+    "management.azure.com"
+   ],
+   "mode": "real-tokens"
+  },
+  {
+   "case": "az login --identity",
+   "ok": true,
+   "error": "",
+   "outside": [],
+   "mode": "real-tokens"
+  },
+  {
+   "case": "az group list",
+   "ok": true,
+   "error": "",
+   "outside": [],
+   "mode": "real-tokens"
+  },
+  {
+   "case": "az account get-access-token",
+   "ok": true,
+   "error": "",
+   "outside": [
+    "management.azure.com"
+   ],
+   "mode": "real-tokens"
+  },
+  {
+   "case": "azure_client_secret_exchange",
+   "ok": true,
+   "outside": [
+    "management.azure.com"
+   ],
+   "mode": "real-tokens"
+  },
+  {
+   "case": "azure_refresh_rotation",
+   "ok": true,
+   "refresh_tokens_seen": 3,
+   "outside": [
+    "management.azure.com",
+    "management.azure.com",
+    "management.azure.com",
+    false,
+    false,
+    false
+   ],
+   "mode": "real-tokens"
+  },
+  {
+   "case": "exfiltrate",
+   "ok": true,
+   "files": 27,
+   "outside": [],
+   "mode": "real-tokens"
+  },
+  {
+   "mode": "real-tokens",
+   "case": "mac_refresh_token_after",
+   "status": 400
+  },
+  {
+   "case": "metadata_ssrf_guards",
+   "ok": true,
+   "no_header": 403,
+   "forwarded": 403,
+   "azure_no_header": 400,
+   "outside": [],
+   "mode": "placeholders"
+  },
+  {
+   "case": "google_metadata_storage",
+   "ok": true,
+   "credential_type": "google.auth.compute_engine.credentials.Credentials",
+   "project": "silo-demo",
+   "outside": [
+    false
+   ],
+   "mode": "placeholders"
+  },
+  {
+   "case": "google_id_token_cloud_run",
+   "ok": true,
+   "status": 200,
+   "outside": [
+    false
+   ],
+   "mode": "placeholders"
+  },
+  {
+   "case": "google_id_token_decode",
+   "ok": true,
+   "email": "deployer@silo-demo.iam.gserviceaccount.com",
+   "outside": [
+    false
+   ],
+   "mode": "placeholders"
+  },
+  {
+   "case": "gcloud storage ls",
+   "ok": true,
+   "error": "",
+   "outside": [],
+   "mode": "placeholders"
+  },
+  {
+   "case": "gcloud auth print-access-token",
+   "ok": true,
+   "error": "",
+   "outside": [
+    false
+   ],
+   "mode": "placeholders"
+  },
+  {
+   "case": "google_authorized_user_exchange",
+   "ok": true,
+   "credential_type": "Credentials",
+   "outside": [
+    false,
+    false
+   ],
+   "mode": "placeholders"
+  },
+  {
+   "case": "azure_managed_identity",
+   "ok": true,
+   "outside": [
+    false
+   ],
+   "mode": "placeholders"
+  },
+  {
+   "case": "azure_default_credential",
+   "ok": true,
+   "outside": [
+    false
+   ],
+   "mode": "placeholders"
+  },
+  {
+   "case": "az login --identity",
+   "ok": true,
+   "error": "",
+   "outside": [],
+   "mode": "placeholders"
+  },
+  {
+   "case": "az group list",
+   "ok": true,
+   "error": "",
+   "outside": [],
+   "mode": "placeholders"
+  },
+  {
+   "case": "az account get-access-token",
+   "ok": true,
+   "error": "",
+   "outside": [
+    false
+   ],
+   "mode": "placeholders"
+  },
+  {
+   "case": "azure_client_secret_exchange",
+   "ok": true,
+   "outside": [
+    false
+   ],
+   "mode": "placeholders"
+  },
+  {
+   "case": "azure_refresh_rotation",
+   "ok": true,
+   "refresh_tokens_seen": 1,
+   "outside": [
+    false,
+    false,
+    false,
+    false,
+    false,
+    false
+   ],
+   "mode": "placeholders"
+  },
+  {
+   "case": "exfiltrate",
+   "ok": true,
+   "files": 27,
+   "outside": [],
+   "mode": "placeholders"
+  },
+  {
+   "mode": "placeholders",
+   "case": "mac_refresh_token_after",
+   "status": 400
+  },
+  {
+   "case": "metadata_ssrf_guards",
+   "ok": true,
+   "no_header": 403,
+   "forwarded": 403,
+   "azure_no_header": 400,
+   "outside": [],
+   "mode": "opaque-placeholders"
+  },
+  {
+   "case": "google_metadata_storage",
+   "ok": true,
+   "credential_type": "google.auth.compute_engine.credentials.Credentials",
+   "project": "silo-demo",
+   "outside": [
+    false
+   ],
+   "mode": "opaque-placeholders"
+  },
+  {
+   "case": "google_id_token_cloud_run",
+   "ok": false,
+   "error": "MalformedError: Wrong number of segments in token: b'eyJsiloPH_3UZ4_MCUBoQDSJ1LY-8bvVDYdG_6WACuhi5XC7xuqypYynmXDcJus4EPxOKHE4h-nrenv_K5Jjqr0cjcxzNMYK2I9TRKBsjc3aQ3ZQ6C6aD697M5u1ITkdIPEDeMgEPiG1gs-nWOXIxPN0dDeWxxf2PXKuEjZX_qlvUri0T_-_4kLQJTU7AbPYEAEv4wKGsvjBPszeJBdSArWbi-N-cYGsGnQ-QKBDb06Y8gv0OkpbX-U5tOoRNab8qCd6-Xe",
+   "where": "        \"Wrong number of segments in token: {0}\".format(token)",
+   "outside": [],
+   "mode": "opaque-placeholders"
+  },
+  {
+   "case": "google_id_token_decode",
+   "ok": false,
+   "error": "MalformedError: Wrong number of segments in token: b'eyJsiloPH_3UZ4_MCUBoQDSJ1LY-8bvVDYdG_6WACuhi5XC7xuqypYynmXDcJus4EPxOKHE4h-nrenv_K5Jjqr0cjcxzNMYK2I9TRKBsjc3aQ3ZQ6C6aD697M5u1ITkdIPEDeMgEPiG1gs-nWOXIxPN0dDeWxxf2PXKuEjZX_qlvUri0T_-_4kLQJTU7AbPYEAEv4wKGsvjBPszeJBdSArWbi-N-cYGsGnQ-QKBDb06Y8gv0OkpbX-U5tOoRNab8qCd6-Xe",
+   "where": "        \"Wrong number of segments in token: {0}\".format(token)",
+   "outside": [],
+   "mode": "opaque-placeholders"
+  },
+  {
+   "case": "gcloud storage ls",
+   "ok": true,
+   "error": "",
+   "outside": [],
+   "mode": "opaque-placeholders"
+  },
+  {
+   "case": "gcloud auth print-access-token",
+   "ok": true,
+   "error": "",
+   "outside": [
+    false
+   ],
+   "mode": "opaque-placeholders"
+  },
+  {
+   "case": "google_authorized_user_exchange",
+   "ok": true,
+   "credential_type": "Credentials",
+   "outside": [
+    false,
+    false
+   ],
+   "mode": "opaque-placeholders"
+  },
+  {
+   "case": "azure_managed_identity",
+   "ok": true,
+   "outside": [
+    false
+   ],
+   "mode": "opaque-placeholders"
+  },
+  {
+   "case": "azure_default_credential",
+   "ok": true,
+   "outside": [
+    false
+   ],
+   "mode": "opaque-placeholders"
+  },
+  {
+   "case": "az login --identity",
+   "ok": false,
+   "error": "ERROR: The command failed with an unexpected error. Here is the traceback: | ERROR: Not enough segments | ValueError: not enough values to unpack (expected 2, got 1) |     raise DecodeError(\"Not enough segments\") from err | jwt.exceptions.DecodeError: Not enough segments",
+   "outside": [],
+   "mode": "opaque-placeholders"
+  },
+  {
+   "case": "az group list",
+   "ok": false,
+   "error": "ERROR: Please run 'az login' to setup account.",
+   "outside": [],
+   "mode": "opaque-placeholders"
+  },
+  {
+   "case": "az account get-access-token",
+   "ok": false,
+   "error": "ERROR: Please run 'az login' to setup account.",
+   "outside": [],
+   "mode": "opaque-placeholders"
+  },
+  {
+   "case": "azure_client_secret_exchange",
+   "ok": true,
+   "outside": [
+    false
+   ],
+   "mode": "opaque-placeholders"
+  },
+  {
+   "case": "azure_refresh_rotation",
+   "ok": true,
+   "refresh_tokens_seen": 1,
+   "outside": [
+    false,
+    false,
+    false,
+    false,
+    false,
+    false
+   ],
+   "mode": "opaque-placeholders"
+  },
+  {
+   "case": "exfiltrate",
+   "ok": true,
+   "files": 26,
+   "outside": [],
+   "mode": "opaque-placeholders"
+  },
+  {
+   "mode": "opaque-placeholders",
+   "case": "mac_refresh_token_after",
+   "status": 400
+  }
+ ],
+ "leaks": {
+  "real-tokens": {
+   "bytes sent into the computer": {
+    "google_access": 3,
+    "google_id": 3,
+    "azure_access": 7,
+    "azure_refresh": 3
+   },
+   "files in the computer's home": {
+    "google_access": 1,
+    "google_id": 1,
+    "azure_refresh": 1
+   },
+   "what the outsider collected": {
+    "google_access": 2,
+    "google_id": 1,
+    "azure_access": 4,
+    "azure_refresh": 1
+   }
+  },
+  "placeholders": {
+   "bytes sent into the computer": {},
+   "files in the computer's home": {},
+   "what the outsider collected": {}
+  },
+  "opaque-placeholders": {
+   "bytes sent into the computer": {},
+   "files in the computer's home": {},
+   "what the outsider collected": {}
+  }
+ }
+}

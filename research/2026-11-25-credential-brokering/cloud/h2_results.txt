@@ -1,0 +1,6 @@
+python grpcio  bytes  {"calls": 3, "placeholder_bytes_seen_in_stream": 3, "server_got_real": 3, "server_got_placeholder": 0}
+python grpcio  hpack  {"calls": 3, "placeholder_bytes_seen_in_stream": 3, "server_got_real": 3, "server_got_placeholder": 0}
+Go grpc        bytes  {"calls": 3, "placeholder_bytes_seen_in_stream": 0, "server_got_real": 0, "server_got_placeholder": 3}
+Go grpc        hpack  {"calls": 3, "placeholder_bytes_seen_in_stream": 0, "server_got_real": 3, "server_got_placeholder": 0}
+Node grpc-js   bytes  {"calls": 3, "placeholder_bytes_seen_in_stream": 0, "server_got_real": 0, "server_got_placeholder": 3}
+Node grpc-js   hpack  {"calls": 3, "placeholder_bytes_seen_in_stream": 0, "server_got_real": 3, "server_got_placeholder": 0}
