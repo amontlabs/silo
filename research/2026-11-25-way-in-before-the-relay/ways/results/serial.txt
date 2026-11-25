@@ -1,0 +1,20 @@
+# way: serial
+way-in yes
+way-in-wait-s 0.1
+copy-2MB intact 37.1s
+
+host-loopback-tcp blocked
+host-own-address-tcp blocked
+lan-neighbour-tcp blocked
+lan-neighbour-udp blocked
+lan-neighbour-ping blocked
+host-own-address-ping blocked
+metadata-tcp blocked
+zero-net-tcp blocked
+internet-tcp blocked
+internet-udp blocked
+internet-ping blocked
+dns-name none
+dns-exfil none
+ports-on none no router
+dns-exfil-seen-by nobody

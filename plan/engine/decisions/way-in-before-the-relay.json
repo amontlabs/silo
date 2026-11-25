@@ -1,6 +1,6 @@
 {
   "asks": "How does the first run reach a new macOS computer before Silo's relay is in it?",
-  "answer": "The first start, with Apple's provisioning, is on Apple's NAT. Silo reaches the computer over SSH only to install its relay, which carries SSH and the proxy over vsock, and to turn on the proxy settings. Then Silo stops the computer and starts it again with a network card that leads only to Silo, before any installer or agent program runs. The record says when the computer was on Apple's NAT, and that nothing but Apple's setup and Silo's relay ran in it then.",
+  "answer": "The first start, with Apple's provisioning, is on the network card that leads only to Silo. Main gets no address from Silo and gives itself a link-local one. Silo's end of that card opens one TCP connection to main's SSH port, and nothing else from main reaches anything. Over it, Silo installs its relay, which carries SSH and the proxy over vsock, and turns on the proxy settings. Then Silo reaches main only through the relay, before any installer or agent program runs.",
   "needs": [
     "network-stack"
   ]
