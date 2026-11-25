@@ -1,0 +1,2 @@
+{"case": "settled", "calls_before": 23, "after_restart": {"status": 200, "silo": null}, "verdict": "admitted: the budget was forgotten"}
+{"case": "inflight", "calls_before": 1, "after_restart": {"status": 200, "silo": null}, "verdict": "admitted: the budget was forgotten"}

@@ -9,7 +9,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const wf = b.addWriteFiles();
     const from374 = "../../2026-11-24-spend-budgets/boundary/src/";
-    inline for (.{ "usage.zig", "prices.zig", "budget.zig", "spend.zig", "stream.zig", "ws.zig" }) |f| _ = wf.addCopyFile(b.path(from374 ++ f), f);
+    inline for (.{ "usage.zig", "prices.zig", "budget.zig", "journal.zig", "spend.zig", "stream.zig", "ws.zig" }) |f| _ = wf.addCopyFile(b.path(from374 ++ f), f);
     inline for (.{ "main.zig", "entry.zig", "mint.zig", "swap.zig", "source.zig", "dns.zig", "conf.zig" }) |f| _ = wf.addCopyFile(b.path("src/" ++ f), f);
     const root = wf.getDirectory();
     const mod = b.createModule(.{ .root_source_file = root.path(b, "main.zig"), .target = target, .optimize = optimize, .link_libc = true });

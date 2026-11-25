@@ -31,6 +31,9 @@ pub const Person = struct { name: []const u8, limits: budget.Limits = .{} };
 pub const Config = struct {
     policy: []const u8 = "finish",
     prices: []const u8 = "prices.json",
+    /// Where what each budget spent is kept, so that it holds across a restart, a crash or a
+    /// power cut (journal.zig). Unset, the ledgers live in memory and start at zero.
+    journal: ?[]const u8 = null,
     /// With keys, the price table must be a release signed by one of them, newer than every one
     /// taken before (research/2026-11-25-model-prices).
     price_keys: []prices.Key = &.{},

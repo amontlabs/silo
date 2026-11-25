@@ -3,6 +3,7 @@
 //! streams, and settled on the provider's final count. Pure: the boundary passes the time in.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+pub const journal = @import("journal.zig");
 
 pub const Policy = enum {
     /// The plan today: a call leaves while what is counted is under the limit. Calls under way
@@ -101,6 +102,9 @@ pub const Book = struct {
     ledgers: std.ArrayList(Ledger) = .empty,
     plans: std.StringHashMapUnmanaged(PlanReading) = .empty,
     mu: std.Thread.Mutex = .{},
+    /// When set, every call that leaves and every settlement is on disk before the call goes on,
+    /// and a ledger added starts at what the journal says it spent (journal.zig).
+    journal: ?*journal.Journal = null,
 
     pub fn deinit(self: *Book) void {
         for (self.ledgers.items) |*l| {
@@ -117,7 +121,20 @@ pub const Book = struct {
         self.mu.lock();
         defer self.mu.unlock();
         try self.ledgers.append(self.gpa, .{ .name = name, .limits = limits });
+        try self.carryOver(&self.ledgers.items[self.ledgers.items.len - 1]);
         return self.ledgers.items.len - 1;
+    }
+
+    /// What the journal kept for this ledger, from before the boundary last started.
+    fn carryOver(self: *Book, l: *Ledger) !void {
+        const j = self.journal orelse return;
+        const c = j.carried.get(l.name) orelse return;
+        l.settled += c.settled;
+        l.calls += c.calls;
+        for (c.history.items) |e| try l.history.append(self.gpa, .{ .t = e.t, .cost = e.cost });
+        if (l.limits.total) |total| if (l.settled >= total) {
+            l.reached_at = if (c.history.items.len > 0) c.history.items[c.history.items.len - 1].t else 0;
+        };
     }
 
     /// A new ledger that starts at what another has counted now: a fork's copy of a conversation
@@ -127,6 +144,7 @@ pub const Book = struct {
         defer self.mu.unlock();
         const begin = self.ledgers.items[from].counted();
         try self.ledgers.append(self.gpa, .{ .name = name, .limits = limits, .settled = begin });
+        try self.carryOver(&self.ledgers.items[self.ledgers.items.len - 1]);
         return self.ledgers.items.len - 1;
     }
 
@@ -209,6 +227,14 @@ pub const Book = struct {
     pub fn start(self: *Book, which: []const usize, id: u64, reserve: f64) !void {
         self.mu.lock();
         defer self.mu.unlock();
+        if (self.journal) |j| {
+            // On disk before the call leaves: a boundary stopped while it runs counts it at its
+            // reserve when it starts again. A journal that cannot be written stops the call.
+            var names: [16][]const u8 = undefined;
+            const n = @min(which.len, names.len);
+            for (which[0..n], 0..) |i, k| names[k] = self.ledgers.items[i].name;
+            try j.started(id, reserve, @as(f64, @floatFromInt(std.time.milliTimestamp())) / 1000, names[0..n]);
+        }
         for (which) |i| try self.ledgers.items[i].inflight.put(self.gpa, id, .{ .counted = 0, .reserved = reserve });
     }
 
@@ -229,6 +255,7 @@ pub const Book = struct {
         self.mu.lock();
         defer self.mu.unlock();
         var out: Settled = .{};
+        if (self.journal) |j| try j.settled(id, cost, now);
         for (which) |i| {
             const l = &self.ledgers.items[i];
             _ = l.inflight.remove(id);

@@ -170,6 +170,11 @@ fn loadState(path: []const u8) !*State {
     const st = try gpa.create(State);
     st.* = .{ .cfg = parsed.value, .book = .{ .gpa = gpa }, .table = .{ .gpa = gpa, .path = parsed.value.prices, .keys = parsed.value.price_keys, .local_path = parsed.value.local_prices, .on_event = priceEvent } };
     st.book.policy = std.meta.stringToEnum(budget.Policy, parsed.value.policy) orelse return error.UnknownPolicy;
+    if (st.cfg.journal) |jp| {
+        st.book.journal = try budget.journal.Journal.open(gpa, jp, budget.journal.flushFromEnv());
+        const jn = st.book.journal.?;
+        record("\"kind\":\"journal\",\"boot\":{d},\"ledgers\":{d},\"interrupted\":{d},\"cut_bytes\":{d}", .{ jn.boot, jn.carried.count(), jn.interrupted, jn.cut });
+    }
     const n = st.cfg.computers.len;
     st.covers = try gpa.alloc([]usize, n);
     st.budgeted = try gpa.alloc(bool, n);
