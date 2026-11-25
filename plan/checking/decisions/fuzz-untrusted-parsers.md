@@ -16,3 +16,11 @@ whoever builds it.
 - **Rejection paths are tested.** Test that verification rejects tampered, truncated and missing
   input, not only that it accepts good input.
   ([source](https://github.com/evmts/guillotine/blob/dbdf61bd7902c726cdfb4cf80d60ed0e02da5663/src/trie/REVIEW_SUMMARY.md?plain=1#L151))
+
+## The disk reader, fuzzed
+
+Agent, 25 November 2026, from `research/2026-11-25-main-disk-from-outside/`. This answer's fuzzing
+found 8 faults in #390's APFS content reader in 69,696 inputs, and a read past the end of the
+input in Apple's open-source lzfse decoder. The reader must also read what macOS reads: a
+corrupted LZVN block decodes to wrong bytes of the right size, which no crash shows. That is the
+case for the sentence `parsers-fuzzed-and-compared` adds (#376).
