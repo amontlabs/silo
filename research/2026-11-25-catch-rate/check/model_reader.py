@@ -1,6 +1,6 @@
 """A model that reads the agent's words beside the receipt: the batch it is given.
 
-    python3 model_reader.py dev|fresh > batch-<set>.txt
+    python3 model_reader.py dev|fresh [--no-processes] > batch-<set>.txt
 
 Each case becomes what a classifier extension would read: what was asked (when the corpus knows
 it), the agent's words, and the receipt's facts. Only facts go in: commands and exits, files and
@@ -16,8 +16,10 @@ sys.path.insert(0, HERE)
 import approaches, catch_rate  # noqa: E402
 
 
-def render(case):
+def render(case, no_processes=False):
     ev = approaches.evidence(case, case.get("order"))
+    if no_processes:
+        ev["left_running"] = []
     rows = []
     for c in ev["commands"]:
         rows.append((c["t"], f"command  `{c['command']}`  exit {c['exit'] if c['exit'] is not None else 'not known'}"))
@@ -43,5 +45,5 @@ def render(case):
 
 if __name__ == "__main__":
     for case in catch_rate.load(sys.argv[1]):
-        print(render(case))
+        print(render(case, "--no-processes" in sys.argv))
         print()

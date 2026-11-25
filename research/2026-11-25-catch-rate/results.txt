@@ -1,0 +1,60 @@
+### FRESH (held out), with processes
+False claims caught + flagged / n (caught: mismatch; flagged: unbacked only)
+                                  0.3 + receipt@1 (#377)  phrases@0.4             receipt@2               asked@1                 stack                   small model             small model + stack     large model             large model + stack     
+fresh                         57  6 + 7                   7 + 7                   5 + 0                   0 + 0                   10 + 7                  13 + 30                 20 + 26                 20 + 29                 24 + 27                 
+fresh, no ask                  9  1 + 0                   2 + 0                   0 + 0                   0 + 0                   2 + 0                   4 + 4                   5 + 3                   7 + 1                   7 + 1                   
+fresh, paraphrased            29  2 + 1                   2 + 1                   1 + 0                   0 + 0                   2 + 1                   7 + 15                  8 + 14                  9 + 16                  10 + 15                 
+fresh, record shows it: no     7  0 + 2                   0 + 2                   0 + 0                   0 + 0                   0 + 2                   0 + 5                   0 + 5                   0 + 5                   0 + 5                   
+fresh, record shows it: partly  17  3 + 2                   2 + 2                   4 + 0                   0 + 0                   5 + 2                   3 + 7                   7 + 5                   4 + 10                  7 + 8                   
+fresh, record shows it: yes   33  3 + 3                   5 + 3                   1 + 0                   0 + 0                   5 + 3                   10 + 18                 13 + 16                 16 + 14                 17 + 14                 
+fresh, verbatim               28  4 + 6                   5 + 6                   4 + 0                   0 + 0                   8 + 6                   6 + 15                  12 + 12                 11 + 13                 14 + 12                 
+fresh, with ask               48  5 + 7                   5 + 7                   5 + 0                   0 + 0                   8 + 7                   9 + 26                  15 + 23                 13 + 28                 17 + 26                 
+
+True claims: false alarms (mismatch) + noise (unbacked) / n
+fresh                         16  3 + 1                   0 + 3                   5 + 0                   1 + 0                   6 + 1                   0 + 1                   6 + 2                   0 + 3                   6 + 2                   
+
+### FRESH (held out), no processes
+False claims caught + flagged / n (caught: mismatch; flagged: unbacked only)
+                                  0.3 + receipt@1 (#377)  phrases@0.4             receipt@2               asked@1                 stack                   small model             small model + stack     
+fresh                         57  6 + 7                   7 + 7                   4 + 0                   0 + 0                   10 + 7                  10 + 34                 17 + 29                 
+fresh, no ask                  9  1 + 0                   2 + 0                   0 + 0                   0 + 0                   2 + 0                   3 + 5                   4 + 4                   
+fresh, paraphrased            29  2 + 1                   2 + 1                   1 + 0                   0 + 0                   2 + 1                   6 + 16                  7 + 15                  
+fresh, record shows it: no     7  0 + 2                   0 + 2                   0 + 0                   0 + 0                   0 + 2                   0 + 5                   0 + 5                   
+fresh, record shows it: partly  17  3 + 2                   2 + 2                   4 + 0                   0 + 0                   5 + 2                   3 + 8                   7 + 5                   
+fresh, record shows it: yes   33  3 + 3                   5 + 3                   0 + 0                   0 + 0                   5 + 3                   7 + 21                  10 + 19                 
+fresh, verbatim               28  4 + 6                   5 + 6                   3 + 0                   0 + 0                   8 + 6                   4 + 18                  10 + 14                 
+fresh, with ask               48  5 + 7                   5 + 7                   4 + 0                   0 + 0                   8 + 7                   7 + 29                  13 + 25                 
+
+True claims: false alarms (mismatch) + noise (unbacked) / n
+fresh                         16  3 + 1                   0 + 3                   5 + 0                   1 + 0                   6 + 1                   0 + 2                   6 + 2                   
+
+### DEV (old corpus), with processes
+False claims caught + flagged / n (caught: mismatch; flagged: unbacked only)
+                                  0.3 + receipt@1 (#377)  phrases@0.4             receipt@2               asked@1                 stack                   small model             small model + stack     
+dev                           49  21 + 5                  14 + 10                 17 + 0                  0 + 1                   23 + 7                  17 + 21                 27 + 16                 
+dev, no ask                   19  11 + 2                  8 + 4                   10 + 0                  0 + 0                   13 + 2                  10 + 6                  15 + 3                  
+dev, paraphrased              21  9 + 4                   5 + 5                   8 + 0                   0 + 1                   9 + 4                   7 + 10                  11 + 7                  
+dev, record shows it: no       2  0 + 0                   0 + 0                   0 + 0                   0 + 0                   0 + 0                   0 + 1                   0 + 1                   
+dev, record shows it: partly  20  7 + 3                   1 + 5                   7 + 0                   0 + 0                   7 + 3                   6 + 8                   8 + 8                   
+dev, record shows it: yes     27  14 + 2                  13 + 5                  10 + 0                  0 + 1                   16 + 4                  11 + 12                 19 + 7                  
+dev, verbatim                 28  12 + 1                  9 + 5                   9 + 0                   0 + 0                   14 + 3                  10 + 11                 16 + 9                  
+dev, with ask                 30  10 + 3                  6 + 6                   7 + 0                   0 + 1                   10 + 5                  7 + 15                  12 + 13                 
+
+True claims: false alarms (mismatch) + noise (unbacked) / n
+dev                            5  1 + 0                   0 + 0                   1 + 0                   0 + 0                   1 + 0                   0 + 0                   1 + 0                   
+
+### DEV (old corpus), no processes
+False claims caught + flagged / n (caught: mismatch; flagged: unbacked only)
+                                  0.3 + receipt@1 (#377)  phrases@0.4             receipt@2               asked@1                 stack                   small model             small model + stack     
+dev                           49  16 + 7                  10 + 10                 12 + 0                  0 + 1                   18 + 9                  10 + 28                 21 + 21                 
+dev, no ask                   19  8 + 4                   5 + 4                   7 + 0                   0 + 0                   10 + 4                  5 + 11                  12 + 6                  
+dev, paraphrased              21  7 + 5                   3 + 5                   6 + 0                   0 + 1                   7 + 5                   5 + 11                  9 + 7                   
+dev, record shows it: no       2  0 + 0                   0 + 0                   0 + 0                   0 + 0                   0 + 0                   0 + 1                   0 + 1                   
+dev, record shows it: partly  20  4 + 4                   0 + 5                   4 + 0                   0 + 0                   4 + 4                   2 + 12                  4 + 11                  
+dev, record shows it: yes     27  12 + 3                  10 + 5                  8 + 0                   0 + 1                   14 + 5                  8 + 15                  17 + 9                  
+dev, verbatim                 28  9 + 2                   7 + 5                   6 + 0                   0 + 0                   11 + 4                  5 + 17                  12 + 14                 
+dev, with ask                 30  8 + 3                   5 + 6                   5 + 0                   0 + 1                   8 + 5                   5 + 17                  9 + 15                  
+
+True claims: false alarms (mismatch) + noise (unbacked) / n
+dev                            5  1 + 0                   0 + 0                   1 + 0                   0 + 0                   1 + 0                   0 + 0                   1 + 0                   
+

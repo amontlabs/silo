@@ -42,3 +42,10 @@ all. So the agent's words beside the receipt are worth keeping, and the receipt'
 matter more than the claim checker: a reader who skips the words still sees most of what the words
 hide. A checker of fixed phrases will not grow much further; reading claims in free text takes a
 model, which in this plan is a classifier run as an extension (`extension-ships-a-computer`).
+
+An agent's part, 25 November 2026, from `research/2026-11-25-catch-rate`. On 57 new false claims
+from public incidents, gathered after every checker was written, #377's checker and the receipt's
+lines caught or flagged 13. A model reading the summary beside the receipt caught or flagged 43 to
+49, and said mismatch on none of 16 true claims. How the summary is checked is now its own entry,
+`agent-summary-checked`. Showing the summary beside the receipt is what makes that check worth
+doing: without the words there is nothing to check.
