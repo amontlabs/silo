@@ -61,3 +61,7 @@ over counting visible output, 15% counting output by time, and from 0.4% over to
 holding each call's typical output, through a ledger or leases. Twelve members under $36: at most 13% over counting output by time.
 Where the count is kept (one boundary, a ledger 150 ms away, leases) moved these by a point or
 two at most.
+
+With #385's cut, every way that shares one count stopped a team of five within 0.6% over $15,
+and paid $1.40 to $1.90 a run for cut answers. Under leases, where each Mac cuts on its own slice,
+`typical-cut` cut $0.09 a run against $1.85 for plain `cut`.
