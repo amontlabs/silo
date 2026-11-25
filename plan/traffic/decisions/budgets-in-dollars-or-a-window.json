@@ -1,0 +1,7 @@
+{
+  "asks": "Is a budget a rule or a precaution?",
+  "answer": "A budget in dollars on a computer, and one on a conversation, are rules: the boundary sees both, so they are exact. A budget counted in a share of a plan's window is a rule when it is a reserve: it stops a computer's calls once the provider reports the account's window used to a level you set. A share of a window for one computer is estimated, since the providers report windows only for the whole account, so that budget is a precaution. A budget on a run rests on an opinion (which run a call belongs to), so it is a precaution: it can be wrong and it takes only protective actions.",
+  "replaces": [
+    "budget-rule-or-precaution"
+  ]
+}

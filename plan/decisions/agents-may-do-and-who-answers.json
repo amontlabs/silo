@@ -1,0 +1,7 @@
+{
+  "asks": "What may an agent inside a computer do?",
+  "answer": "Agents inside a computer get every tool, scoped by where they are: anything the user could do in the app. A computer cannot get more than it has, and anything that would grant it more asks the user, who answers in Silo's app or with Touch ID, never by a command.",
+  "replaces": [
+    "what-an-agent-inside-may-do"
+  ]
+}

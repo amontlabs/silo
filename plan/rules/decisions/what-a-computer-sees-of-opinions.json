@@ -1,0 +1,7 @@
+{
+  "asks": "What may a computer see of the opinions and precautions about it?",
+  "answer": "A precaution is kept outside the computer, and a computer sees nothing of the precautions about it: not what they are, not what they raised, and not which opinions they read. By default a computer may see the opinions that ship with Silo to describe its own record, such as which run changed a file, and no other opinion.",
+  "replaces": [
+    "where-precautions-live"
+  ]
+}

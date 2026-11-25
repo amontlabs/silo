@@ -2,6 +2,25 @@
 
 ## The choice
 
+An agent's part, 25 November 2026, from the challenge of #348.
+
+The case: the first build has no app. `silo` is its only surface, and it lists what changed in main
+last night. This feature needs `now-in-the-app`, so under the earlier text the command line waits for
+the app's Now place to be built first.
+
+The options:
+
+- Drop the need on `now-in-the-app`, and let a view reach the command line first (recommended). It is
+  what `silo-command-reads-the-app`, which polarzero took, already allows, and what #348's
+  `silo-command` builds. It costs a view whose text format is set before the app shows it.
+- Keep the need, as the earlier text says. It costs the first build its only surface.
+
+Recommended: let a view reach the command line first.
+
+## The earlier choice
+
+The choice as it stood before 25 November 2026. The answer it recommended is now an option of the choice above.
+
 An agent's part, 22 November 2026. An agent in main wants to know what its last run changed before
 it carries on. It uses Silo's command and reads that run's receipt.
 

@@ -41,3 +41,7 @@ whoever builds it.
 - **Fixed seeds for random tests.** Seed every randomized test so a failure replays. The simulator's
   trial replays from a seed. This makes it the rule for every randomized test.
   ([source](https://github.com/evmts/guillotine/blob/dbdf61bd7902c726cdfb4cf80d60ed0e02da5663/src/trie/README.md?plain=1#L330))
+
+## Challenged, 25 November 2026
+
+An agent's part. #352 challenge this answer on one case: crashes happen in the loop that feeds the core, not in the core, and a liveness property cannot hold after every step while faults keep coming. The replacement is `core-and-its-loop-simulated`, which names this decision in `replaces`, for polarzero to take or drop. Until then this answer stays in force. The reasons are in `research/2026-11-25-challenged-decisions/README.md`.

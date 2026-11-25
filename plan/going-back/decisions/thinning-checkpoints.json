@@ -1,6 +1,6 @@
 {
   "asks": "How are old automatic checkpoints thinned?",
-  "answer": "A rule that ships with Silo, which you can change, thins automatic checkpoints by age. It keeps every one from the last 2 hours, one per hour for the last 2 days and one per day for the last 30 days, and removes the others. If checkpoints still take more disk than a limit you can set, the oldest go first and Silo alerts you. The default limit is to find out by measuring. Age and disk space are facts, so a rule may remove a checkpoint, which is destructive. Removing a checkpoint frees the space that only it held.",
+  "answer": "A rule that ships with Silo, which you can change, thins automatic checkpoints by age. It keeps every one from the last 24 hours, the first of each hour for the last 2 days and the first of each day for the last 30 days, and removes the others. Whatever their age, it never removes the save before a restore until you set it aside, a checkpoint an open alert points to, or a checkpoint whose comparison with the one before is not written yet. If checkpoints still take more disk than a limit you can set, the oldest go first, and Silo alerts you when that removes one younger than 30 days. The default limit is a share of the free space, set by measuring. The Timeline shows how far back the kept checkpoints reach. Age and disk space are facts, so a rule may remove a checkpoint, which is destructive. Removing a checkpoint frees the space that only it held.",
   "needs": [
     "automatic-checkpoints"
   ]

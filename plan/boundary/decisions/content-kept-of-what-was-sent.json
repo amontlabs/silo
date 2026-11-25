@@ -1,6 +1,6 @@
 {
   "asks": "Of what goes to an allowed host, where does the record keep the content and where only the size?",
-  "answer": "An allowed host is still a way out. The record keeps what was sent in the model traffic Silo reads. For everything else it keeps only the sizes, also where Silo puts a secret in.",
+  "answer": "An allowed host is still a way out. The record keeps what was sent in the model traffic Silo reads. Of every other request Silo reads, it keeps the method, the host and the path without the query string, of which it keeps only the length, and for a push the branches it moved. Of everything else it keeps only the sizes, also where Silo puts a secret in.",
   "replaces": [
     "what-was-sent-to-a-host"
   ],
@@ -8,7 +8,7 @@
     {
       "in": "boundary/properties",
       "id": "record-shows-what-was-sent",
-      "says": "The record shows what was sent for the model traffic Silo reads, and the sizes for everything else, not only which hosts were reached.",
+      "says": "The record shows what was sent for the model traffic Silo reads, the method, host and path of every other request it reads, and the sizes for everything else, not only which hosts were reached.",
       "kind": "safety",
       "check": [
         "live check"

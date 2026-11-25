@@ -1,0 +1,7 @@
+{
+  "asks": "Where do computers run?",
+  "answer": "Silo is not limited to devices the user owns. Computers run on the user's own machine first, then on a shared server or in a cloud, and Silo will probably offer a cloud of its own. In a cloud, a macOS computer runs only on a whole Mac leased to one user, as Apple's licence allows; a cloud shared by several users runs Linux computers.",
+  "replaces": [
+    "where-it-runs"
+  ]
+}

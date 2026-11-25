@@ -57,3 +57,7 @@ discuss it, then implement in the actual code."
 
 polarzero added the same day that this has not started yet. It is how polarzero plans to work, and
 no part has been built this way so far.
+
+## Challenged, 25 November 2026
+
+An agent's part. #348 challenge this answer on one case: the first build grants almost nothing, so the model's tables would be shaped before any real grant exists and redone when secrets arrive. The replacement is `model-of-access-on-real-grants`, which names this decision in `replaces`, for polarzero to take or drop. Until then this answer stays in force. The reasons are in `research/2026-11-25-challenged-decisions/README.md`.

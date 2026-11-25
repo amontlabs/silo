@@ -1,0 +1,7 @@
+{
+  "asks": "How do you go back on a main shared by several agents?",
+  "answer": "On a main shared by several agents you do not restore the whole computer. You put back the paths you name, after a checkpoint of now, or you fork from the moment. The past is read-only, main loses nothing, and the result of a fork leaves it through Git.",
+  "replaces": [
+    "fork-from-the-moment"
+  ]
+}
