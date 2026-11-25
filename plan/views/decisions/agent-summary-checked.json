@@ -1,0 +1,8 @@
+{
+  "asks": "How is the agent's own summary held against the record?",
+  "answer": "A classifier that a model runs reads the agent's summary beside the facts of its receipt, and gives one opinion on it: matched, mismatch, or nothing in the record shows it. It is an extension, in a computer of its own, and its only tool is the one that gives the opinion. The opinion shows beside the summary, marked as that classifier's, and the line of the receipt it rests on is named. The receipt's own lines need no classifier: a failed last test run, code changed after the last test run, files deleted or outside the folder, and a process left running show in every receipt, whatever the summary says. Silo ships no list of fixed phrases that marks a summary matched.",
+  "needs": [
+    "agent-summary-beside-receipt",
+    "extension-gives-an-opinion"
+  ]
+}
