@@ -1,0 +1,19 @@
+# way: nat
+way-in yes
+way-in-wait-s 0.7
+copy-2MB intact 0.27s
+host-loopback-tcp blocked
+host-own-address-tcp reached
+lan-neighbour-tcp reached
+lan-neighbour-udp reached
+lan-neighbour-ping reached
+host-own-address-ping reached
+metadata-tcp blocked
+zero-net-tcp blocked
+internet-tcp reached
+internet-udp reached
+internet-ping reached
+dns-name 203.0.113.10
+dns-exfil 203.0.113.10
+ports-on 192.168.64.1 2024,7778
+dns-exfil-seen-by host-resolver
