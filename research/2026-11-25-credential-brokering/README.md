@@ -113,8 +113,8 @@ The cloud prototype edits `/etc/hosts` for the cloud names and puts it back, and
 
 - No real Google or Azure account. The stand-ins answer like the real servers for the calls these
   programs made, as read from their traffic. The real servers may check more.
-- Programs not run: the Java, Go, Node and .NET cloud libraries, Terraform, `gsutil`, `bq`,
-  Google's credential helper for Docker (`gcloud auth configure-docker`). It sends the access token as the
+- Programs not run: the Java, Go, Node and .NET cloud libraries, Terraform, `gsutil`, `bq`, Google's
+  credential helper for Docker (`gcloud auth configure-docker`). It sends the access token as the
   password of Basic auth, a slot the swap must cover.
 - SSH: only ed25519 keys at the agent; RSA and ECDSA host keys are checked by the code but were not
   exercised. JGit was not run. OpenSSH before 8.9 was not run; it sends no bind, so it takes the

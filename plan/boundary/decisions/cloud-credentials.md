@@ -68,6 +68,7 @@ swapped placeholders on the clouds' hosts. Stand-ins played Google and Microsoft
 - Google's ID tokens are JWTs, like Azure's tokens. With an opaque placeholder,
   `fetch_id_token` and `az login --identity` failed. A placeholder with the real header and claims
   and another signature worked for both.
-- Google's credential helper for Docker (`gcloud auth configure-docker`) sends the access token as the password of Basic
-  auth. The token's hosts then include `*.pkg.dev` and `gcr.io`, with that slot. Not run.
+- Google's credential helper for Docker (`gcloud auth configure-docker`) sends the access token as
+  the password of Basic auth. The token's hosts then include `*.pkg.dev` and `gcr.io`, with that
+  slot. Not run.
 
