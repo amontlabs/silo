@@ -24,3 +24,15 @@ of #370 (a header, then frames of length, CRC-32C and one JSON line) hold #371's
 lines in 1.55 MB, 268 KB with zstd at level 3, and a modelled night of three agents for 8 hours in
 34.9 MB, 7.0 MB with zstd. A closed segment can be compressed as a new file, since the hashes are
 over the uncompressed lines.
+
+## The flush on a Mac
+
+An agent's part, 25 November 2026, from [the record's head off the Mac](../../../research/2026-11-25-record-head-off-the-mac/README.md).
+On a Mac, `fsync(2)` hands the data to the drive, which may keep it in its cache and write it out of
+order; only `fcntl(F_FULLFSYNC)` makes it durable. Zig's `std.posix.fsync`, `fdatasync` and
+`File.sync` call plain `fsync` on macOS (Go and Rust issue `F_FULLFSYNC`), so a writer built on them
+keeps nothing through a power cut: in a simulation of 4,100 power cuts, acknowledged lines were lost
+in 394 states and the record could not start again in 3,376. The writer calls `F_FULLFSYNC` itself,
+and `fsync` on a volume that refuses it. `F_FULLFSYNC` before each acknowledgement and
+`F_BARRIERFSYNC` for the writes before it lost nothing either; what each costs on a Mac is #359's
+test 06.

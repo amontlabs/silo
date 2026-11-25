@@ -2,6 +2,7 @@
 //! head, redaction. It is the only writer of its folder (`processes`: only the recorder writes the
 //! record), so it needs no lock and never counts again behind another writer.
 const std = @import("std");
+const builtin = @import("builtin");
 const format = @import("format.zig");
 const crash = @import("crash.zig");
 const Redactor = @import("redact.zig").Redactor;
@@ -31,6 +32,38 @@ pub const Line = struct {
 
 pub const Appended = enum { written, duplicate };
 
+/// Makes a file's data and size, or a folder's entries, survive a power cut before it returns.
+/// On a Mac, fsync(2) only hands the data to the drive, which may keep it in its cache and write it
+/// out of order; F_FULLFSYNC flushes that cache. Zig's std.posix.fsync, fdatasync and File.sync
+/// call plain fsync on macOS, so the writer asks for F_FULLFSYNC itself. A volume that does not
+/// support it (SMB) falls back to fsync, as Go's File.Sync does.
+pub fn durable(fd: std.posix.fd_t) !void {
+    if (comptime builtin.os.tag.isDarwin()) return fullFsync(fd);
+    try std.posix.fsync(fd);
+}
+
+/// The same for a segment's appended lines: on Linux the size and the data, not the times.
+pub fn durableData(fd: std.posix.fd_t) !void {
+    if (comptime builtin.os.tag.isDarwin()) return fullFsync(fd);
+    try std.posix.fdatasync(fd);
+}
+
+fn fullFsync(fd: std.posix.fd_t) !void {
+    const rc = std.c.fcntl(fd, std.c.F.FULLFSYNC);
+    if (rc == 0) return;
+    switch (std.posix.errno(rc)) {
+        .OPNOTSUPP, .INVAL => try std.posix.fsync(fd),
+        else => |e| return std.posix.unexpectedErrno(e),
+    }
+}
+
+/// What the start cuts from the last segment (power-cut test). `torn_only` is #386's rule: only a
+/// last frame cut short, or one whose end is the end of the file. `after_head` also cuts at the
+/// first bad frame, or unreadable line, that comes after the line the head names: a power cut can
+/// leave a batch that was never acknowledged half on disk, with zeros or an older sector inside it.
+pub const StartRule = enum { torn_only, after_head };
+pub var start_rule: StartRule = .torn_only;
+
 const SourcePos = struct { count: []u8, n: u64 };
 
 pub const Writer = struct {
@@ -50,6 +83,8 @@ pub const Writer = struct {
     flushed_seq: u64,
     flushed_hash: [32]u8,
     lines_since_head: u64 = 0,
+    /// The line the head on disk names, read at start; 0 when there is no head.
+    head_seq: u64 = 0,
     sources: std.StringHashMapUnmanaged(SourcePos) = .empty,
     /// What the start found and did, for the line it writes about it.
     cut: ?struct { segment: u32, offset: u64, bytes: u64 } = null,
@@ -85,6 +120,13 @@ pub const Writer = struct {
             .flushed_hash = format.zero_hash,
         };
         errdefer w.freeMemory();
+        if (dir.readFileAlloc(gpa, "head", 4096)) |hb| {
+            defer gpa.free(hb);
+            if (std.json.parseFromSlice(struct { seq: u64 }, gpa, hb, .{ .ignore_unknown_fields = true })) |p| {
+                w.head_seq = p.value.seq;
+                p.deinit();
+            } else |_| {}
+        } else |_| {}
 
         var segs = @import("verify.zig").readSegments(gpa, dir) catch return error.RecordDamaged;
         defer {
@@ -105,8 +147,8 @@ pub const Writer = struct {
                 const cname = std.fmt.bufPrint(&cb, "{d:0>6}.cut-{d}", .{ c.segment, c.offset }) catch unreachable;
                 try dir.writeFile(.{ .sub_path = cname, .data = last[c.offset..] });
                 try w.seg.setEndPos(c.offset);
-                try w.seg.sync();
-                try std.posix.fsync(dir.fd);
+                try durable(w.seg.handle);
+                try durable(dir.fd);
             }
             w.seg_size = try w.seg.getEndPos();
         }
@@ -231,7 +273,7 @@ pub const Writer = struct {
         crash.point();
         try crash.write(w.seg, w.pending.items, w.seg_size);
         crash.point();
-        try std.posix.fdatasync(w.seg.handle);
+        try durableData(w.seg.handle);
         crash.point();
         w.seg_size += w.pending.items.len;
         w.pending.clearRetainingCapacity();
@@ -256,10 +298,10 @@ pub const Writer = struct {
         crash.point();
         const f = try w.dir.createFile(tmp, .{ .read = true, .exclusive = true, .mode = 0o600 });
         try crash.write(f, &h.encode(), 0);
-        try f.sync();
+        try durable(f.handle);
         crash.point();
         try w.dir.rename(tmp, name);
-        try std.posix.fsync(w.dir.fd);
+        try durable(w.dir.fd);
         crash.point();
         w.seg = f;
         w.seg_number = n;
@@ -303,11 +345,11 @@ pub const Writer = struct {
         const f = try sub.createFile(tmp, .{ .mode = 0o600 });
         defer f.close();
         try crash.write(f, bytes, 0);
-        try f.sync();
+        try durable(f.handle);
         crash.point();
         try sub.rename(tmp, hx);
-        try std.posix.fsync(sub.fd);
-        try std.posix.fsync(w.blobs.fd);
+        try durable(sub.fd);
+        try durable(w.blobs.fd);
         crash.point();
         return ref;
     }
@@ -324,16 +366,16 @@ pub const Writer = struct {
             const f = try w.dir.createFile("head", .{ .mode = 0o600 });
             defer f.close();
             try crash.write(f, s, 0);
-            try f.sync();
+            try durable(f.handle);
         } else {
             crash.point();
             const f = try w.dir.createFile("head.tmp", .{ .mode = 0o600 });
             defer f.close();
             try crash.write(f, s, 0);
-            try f.sync();
+            try durable(f.handle);
             crash.point();
             try w.dir.rename("head.tmp", "head");
-            try std.posix.fsync(w.dir.fd);
+            try durable(w.dir.fd);
         }
         crash.point();
         w.lines_since_head = 0;
@@ -354,6 +396,10 @@ pub const Writer = struct {
     /// Reads one segment at start: the chain's last line, and each source's last number, which the
     /// recorder needs to write a line sent again only once. The recorder keeps these in the
     /// segment's index; the prototype reads them from the lines.
+    fn afterHead(w: *const Writer) bool {
+        return start_rule == .after_head and w.next_seq > w.head_seq;
+    }
+
     fn scan(w: *Writer, bytes: []const u8, n: u32, last: bool) !void {
         if (bytes.len < format.header_size) {
             // A segment whose header was never whole is only possible as `.tmp`, removed above.
@@ -365,7 +411,7 @@ pub const Writer = struct {
         while (true) switch (frames.next()) {
             .end => break,
             .bad => |b| {
-                if (last and (b.torn or crash.mutant == .cut_any_bad_frame)) {
+                if (last and (b.torn or crash.mutant == .cut_any_bad_frame or w.afterHead())) {
                     w.cut = .{ .segment = n, .offset = b.off, .bytes = bytes.len - b.off };
                     break;
                 }
@@ -374,11 +420,23 @@ pub const Writer = struct {
             .line => |l| {
                 var arena = std.heap.ArenaAllocator.init(w.gpa);
                 defer arena.deinit();
-                const v = std.json.parseFromSliceLeaky(std.json.Value, arena.allocator(), l.payload, .{}) catch return error.RecordDamaged;
-                if (v != .object) return error.RecordDamaged;
-                const seq = v.object.get("seq") orelse return error.RecordDamaged;
-                if (seq != .integer or seq.integer != w.next_seq) return error.RecordDamaged;
-                if (v.object.get("source")) |s| if (s == .object) {
+                const v = std.json.parseFromSliceLeaky(std.json.Value, arena.allocator(), l.payload, .{}) catch null;
+                const seq = if (v != null and v.? == .object) v.?.object.get("seq") else null;
+                const prev = if (v != null and v.? == .object) v.?.object.get("prev") else null;
+                const want_prev = format.hex(w.last_hash);
+                // #386's start reads only `seq`; the after-head rule also asks that `prev` follows.
+                const fits = seq != null and seq.? == .integer and seq.?.integer == w.next_seq and
+                    (start_rule != .after_head or (prev != null and prev.? == .string and std.mem.eql(u8, prev.?.string, &want_prev)));
+                if (!fits) {
+                    // A frame whose CRC holds but whose line does not follow: zeros read as an
+                    // empty frame, or an older sector. After the head, a power cut can leave it.
+                    if (last and w.afterHead()) {
+                        w.cut = .{ .segment = n, .offset = l.off, .bytes = bytes.len - l.off };
+                        break;
+                    }
+                    return error.RecordDamaged;
+                }
+                if (v.?.object.get("source")) |s| if (s == .object) {
                     const id = s.object.get("id");
                     const count = s.object.get("count");
                     const num = s.object.get("n");
@@ -401,7 +459,7 @@ fn removeTmp(gpa: std.mem.Allocator, dir: std.fs.Dir) !void {
     var it = dir.iterate();
     while (try it.next()) |e| if (e.kind == .file and std.mem.endsWith(u8, e.name, ".tmp")) try names.append(gpa, try gpa.dupe(u8, e.name));
     for (names.items) |x| try dir.deleteFile(x);
-    if (names.items.len > 0) try std.posix.fsync(dir.fd);
+    if (names.items.len > 0) try durable(dir.fd);
 }
 
 fn removeTmpBlobs(gpa: std.mem.Allocator, blobs: std.fs.Dir) !void {
