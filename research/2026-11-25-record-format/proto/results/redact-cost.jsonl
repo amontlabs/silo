@@ -1,0 +1,5 @@
+{"secrets":0,"lines":3570,"bytes":1221891,"ns_per_line":1197,"mb_per_s":285.9}
+{"secrets":10,"lines":3570,"bytes":1221891,"ns_per_line":1267,"mb_per_s":270.1}
+{"secrets":50,"lines":3570,"bytes":1221891,"ns_per_line":1519,"mb_per_s":225.2}
+{"secrets":200,"lines":3570,"bytes":1221891,"ns_per_line":2405,"mb_per_s":142.3}
+{"secrets":1000,"lines":3570,"bytes":1221891,"ns_per_line":60017,"mb_per_s":5.7}

@@ -32,3 +32,13 @@ here put the Mac to sleep. The specs write the author `device` for what the Mac 
 other ways are the author `silo` with the cause `mac-sleep`, which says Silo did what it did not, or
 a new kind of line, which `kinds-of-lines` keeps fixed. Every control fact made by you also names
 your person, as #362's `person-in-a-control-fact` proposes.
+
+## The author `device`, tried
+
+An agent's part, 25 November 2026, from [the record's format](../../../research/2026-11-25-record-format/format.md). The format
+writes `author` as `{"by":…,"person":…}`, with `by` one of you, rule, precaution, extension,
+silo and `device`, and `person` required when `by` is you (#362's `person-in-a-control-fact`).
+The prototype's verifier refuses a control fact with no author, an author outside the six, or "you"
+with no person. Recommended: add `device` to this entry's answer and to the property
+`every-control-fact-has-its-author`, as "you, a rule, a precaution, an extension, Silo, or the Mac
+itself". Without it, the Mac going to sleep is written as Silo's doing.

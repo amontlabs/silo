@@ -238,6 +238,7 @@
         "record-size-limit",
         "record-disk-size",
         "record-full-after-bulk",
+        "record-damaged-at-start",
         "record-under-a-flood",
         "record-fakes",
         "login-handling",

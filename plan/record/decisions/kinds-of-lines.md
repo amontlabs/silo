@@ -58,3 +58,11 @@ computer, each line carrying the hash of the line before, held for a night of 3,
 thing to keep: more than one writer. The engine and `silo putback` (a control fact, by you) wrote
 the same file, and the next check named the broken line. Each writer has to take the file's lock
 and count again when another wrote since.
+
+## One writer
+
+An agent's part, 25 November 2026, from [the record's format](../../../research/2026-11-25-record-format/format.md). #371's
+prototype broke its chain with two writers, the engine and `silo putback`. In the format, the
+recorder is the only writer: a put-back is an engine operation, so its control fact reaches the
+recorder as an engine event, like every other. No lock and no second count are needed. The format
+holds the nine kinds and its verifier refuses any other.
