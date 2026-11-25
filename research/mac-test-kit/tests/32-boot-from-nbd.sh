@@ -4,6 +4,7 @@
 # tier: vm
 # time: about 45 minutes (five starts of a computer)
 # needs: the base computer of test 00 (raw disk), 40 GB free, no sudo; the prototype's server if test 31 built it (~/SiloKit/bin/ckpt), else only the kit's Python server
+# step: 4
 # decides: checkpoint-per-system (whether a macOS computer's checkpoint can be taken from Silo's own log of writes: cbw or delta behind an NBD server), checkpoint-at-each-turn, research 2026-11-24-checkpoint-engine ("Who can keep the bitmap")
 # question: Does a macOS guest boot from its disk served over NBD (VZNetworkBlockDeviceStorageDeviceAttachment, macOS 14) by Silo's prototype server, what does a small flushed write cost inside it against the same disk attached as a file, and does a checkpoint taken through the server while the guest writes hold every flushed write and boot?
 # outcome boots-cheap: The guest booted from the NBD disk within 1.5 times the file's time to SSH, a flushed 4 KiB write cost at most twice the file's,

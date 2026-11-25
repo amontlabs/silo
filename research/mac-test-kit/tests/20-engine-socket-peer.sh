@@ -4,6 +4,7 @@
 # tier: quick
 # time: about 2 minutes
 # needs: ./kit build (c/peercred.c), no VM, no download; sudo only with --allow-sudo, for the other-user half (otherwise skipped)
+# step: 1
 # decides: who-can-call-the-engine, reaching-a-computer
 # question: What does a Unix socket server on the Mac learn about the process that connected (user, pid, audit token, the parent chain up to an app), does the audit token's pid version change when that process runs exec, and is a process of another user kept out?
 # outcome identity-holds: the caller's user and pid are right in every look, the audit token's pid version changes on exec (so a token kept from accept tells an exec'd caller apart), and another user is kept out.

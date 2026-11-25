@@ -24,6 +24,21 @@ _net_gvproxy_asset() {
 }
 NET_GVPROXY="${KIT_WORK_ROOT:-$HOME/SiloKit}/bin/gvproxy-$NET_GVPROXY_TAG"
 
+# #363's sealed gvproxy: the same tag, with net/gvproxy-sealed.patch (a copy of #363's
+# research/2026-11-24-red-team-fixes/network/gvproxy-sealed.patch), built with Go on this machine.
+NET_GVPROXY_COMMIT=6dbb5d4fa0033356c72a201346f8350594229868   # the tag v0.9.0
+NET_GVPROXY_SEALED="${KIT_WORK_ROOT:-$HOME/SiloKit}/bin/gvproxy-$NET_GVPROXY_TAG-sealed"
+NET_GO_VERSION=1.26.0   # what gvisor-tap-vsock v0.9.0's go.mod asks for
+# go.dev/dl's sha256 of each archive, checked on 25 November 2026.
+_net_go_asset() {
+  case "$(uname -s)/$(uname -m)" in
+    Darwin/arm64) echo "go$NET_GO_VERSION.darwin-arm64.tar.gz b1640525dfe68f066d56f200bef7bf4dce955a1a893bd061de6754c211431023" ;;
+    Linux/x86_64) echo "go$NET_GO_VERSION.linux-amd64.tar.gz aac1b08a0fb0c4e0a7c1555beb7b59180b05dfc5a3d62e40e9de90cd42f88235" ;;
+    Linux/aarch64|Linux/arm64) echo "go$NET_GO_VERSION.linux-arm64.tar.gz bd03b743eb6eb4193ea3c3fd3956546bf0e3ca5b7076c8226334afe6b75704cd" ;;
+    *) echo "" ;;
+  esac
+}
+
 # The addresses of gvproxy's default subnet, which the configuration below keeps.
 NET_GATEWAY=192.168.127.1
 NET_GUEST_IP=192.168.127.2
@@ -60,6 +75,48 @@ net_gvproxy_get() {
   chmod 755 "$tmp" && mv "$tmp" "$NET_GVPROXY"
 }
 
+# net_go: a Go of version NET_GO_VERSION: the one on PATH if it is that version, else the pinned
+# archive from go.dev, checked against its sha256 and kept under the kit's bin folder. Prints the
+# path of its go command. The caller asks kit_confirm first.
+net_go() {
+  local asset name want got dir tmp
+  if command -v go >/dev/null 2>&1 && [ "$(go env GOVERSION 2>/dev/null)" = "go$NET_GO_VERSION" ]; then
+    command -v go; return 0
+  fi
+  dir="${KIT_WORK_ROOT:-$HOME/SiloKit}/bin/go-$NET_GO_VERSION"
+  [ -x "$dir/bin/go" ] && { echo "$dir/bin/go"; return 0; }
+  asset="$(_net_go_asset)"
+  [ -n "$asset" ] || { kit_log "no Go archive pinned for $(uname -s)/$(uname -m)"; return 1; }
+  name="${asset%% *}"; want="${asset#* }"
+  tmp="$dir.download"
+  mkdir -p "$(dirname "$dir")"
+  curl -fsSL --retry 2 -o "$tmp" "https://go.dev/dl/$name" || { rm -f "$tmp"; kit_log "download of $name failed"; return 1; }
+  got="$(net_sha256 "$tmp")"
+  [ "$got" = "$want" ] || { rm -f "$tmp"; kit_log "$name's sha256 is $got, go.dev says $want: not used"; return 1; }
+  rm -rf "$dir.x" && mkdir -p "$dir.x" && tar -xzf "$tmp" -C "$dir.x" && mv "$dir.x/go" "$dir" && rm -rf "$dir.x" "$tmp" || return 1
+  echo "$dir/bin/go"
+}
+
+# net_sealed_present: true when the sealed gvproxy is built.
+net_sealed_present() { [ -x "$NET_GVPROXY_SEALED" ] && "$NET_GVPROXY_SEALED" -help 2>&1 | grep -q -- -sealed; }
+
+# net_sealed_build: build gvproxy at NET_GVPROXY_COMMIT with net/gvproxy-sealed.patch into
+# NET_GVPROXY_SEALED. Needs git, and Go (net_go); Go fetches gvproxy's modules from
+# proxy.golang.org, checked against go.sum. The caller asks kit_confirm first.
+net_sealed_build() {
+  net_sealed_present && return 0
+  local go src
+  go="$(net_go)" || return 1
+  src="${KIT_WORK_ROOT:-$HOME/SiloKit}/work/gvproxy-src"
+  rm -rf "$src"
+  git clone -q --depth 1 --branch "$NET_GVPROXY_TAG" https://github.com/containers/gvisor-tap-vsock "$src" || return 1
+  [ "$(git -C "$src" rev-parse HEAD)" = "$NET_GVPROXY_COMMIT" ] || { kit_log "the tag $NET_GVPROXY_TAG is not commit $NET_GVPROXY_COMMIT"; return 1; }
+  git -C "$src" apply "$KIT_ROOT/net/gvproxy-sealed.patch" || { kit_log "the sealed patch does not apply"; return 1; }
+  (cd "$src" && CGO_ENABLED=0 GOTOOLCHAIN=local GOFLAGS=-mod=readonly "$go" build -o "$NET_GVPROXY_SEALED" ./cmd/gvproxy) >&2 || return 1
+  rm -rf "$src"
+  net_sealed_present
+}
+
 # net_mac_norm MAC: lower case, two digits per byte, as gvproxy's DHCP server writes it.
 net_mac_norm() { python3 -c 'import sys; print(":".join("%02x" % int(x, 16) for x in sys.argv[1].split(":")))' "$1"; }
 
@@ -73,6 +130,9 @@ net_bundle_mac() {
 #             use gvproxy's API at 192.168.127.1:80 (open port forwards on the Mac) with no token.
 #   hardened  what research 04 says Silo needs: 192.168.127.254 goes nowhere, and the API inside
 #             needs a token the computer never sees (D/api-token, mode 0600).
+#   sealed    #363's patch (net_gvproxy_start D sealed runs NET_GVPROXY_SEALED): no API inside, no
+#             address mapped to the Mac, no connection to the Mac's addresses or to a private,
+#             link-local, CGNAT or multicast one.
 # Both give the computer 192.168.127.2 (a static lease for MAC) and open no port on the Mac: no
 # forward of 127.0.0.1:2222, which gvproxy's command line adds by default.
 net_gvproxy_config() {
@@ -86,6 +146,7 @@ net_gvproxy_config() {
     echo "  vfkit: unixgram://$d/gv.sock"
     echo "pid-file: $d/gvproxy.pid"
     echo "log-file: $d/gvproxy.log"
+    [ "$mode" = sealed ] && echo "sealed: true"
     if [ "$mode" = hardened ]; then
       (umask 077; python3 -c 'import secrets; print(secrets.token_urlsafe(32))' > "$d/api-token")
       chmod 600 "$d/api-token"
@@ -106,12 +167,14 @@ net_gvproxy_config() {
   } > "$d/gvproxy.yaml"
 }
 
-# net_gvproxy_start D: start gvproxy with D/gvproxy.yaml, wait for its API socket. Prints its pid.
+# net_gvproxy_start D [sealed]: start gvproxy with D/gvproxy.yaml (the sealed build with "sealed"),
+# wait for its API socket. Prints its pid.
 net_gvproxy_start() {
-  local d="$1" i=0 pid
+  local d="$1" i=0 pid bin="$NET_GVPROXY"
+  [ "${2:-}" = sealed ] && bin="$NET_GVPROXY_SEALED"
   rm -f "$d/gv.sock" "$d/api.sock" "$d/ssh.sock" "$d/gvproxy.pid"
   [ "${#d}" -lt 90 ] || { kit_log "socket folder path is ${#d} bytes; a Unix socket path must stay under 104"; return 1; }
-  "$NET_GVPROXY" -config "$d/gvproxy.yaml" > "$d/gvproxy.out" 2>&1 &
+  "$bin" -config "$d/gvproxy.yaml" > "$d/gvproxy.out" 2>&1 &
   pid=$!
   echo "$pid" > "$d/gvproxy.run.pid"
   while [ ! -S "$d/api.sock" ] || [ ! -S "$d/gv.sock" ]; do

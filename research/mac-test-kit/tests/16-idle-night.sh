@@ -4,6 +4,7 @@
 # tier: long
 # time: one night (8 hours by default; KIT_IDLE_HOURS sets it)
 # needs: the installed computer of test 00, macOS 27 on the Mac, the Mac on power and left awake (the test holds a caffeinate assertion while it runs)
+# step: 3
 # decides: own-cost-targets and silo-is-light (the idle reference every cost target is read against), the default filter of silo changes
 # question: Left idle for a night, what does a provisioned macOS computer cost the Mac in processor, memory and disk, and which paths does macOS write inside it by itself?
 # outcome quiet: After the first half hour the computer is quiet: the Virtualization process uses under 5% of

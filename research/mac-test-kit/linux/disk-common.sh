@@ -30,7 +30,7 @@ export KIT_APFS_DATA="${KIT_APFS_DATA:-${TMPDIR:-/tmp}/silo-kit-apfs-data}"
 disk_apfs_data() {
   local n base=https://media.githubusercontent.com/media/fox-it/dissect.apfs/main/tests/_data
   mkdir -p "$KIT_APFS_DATA"
-  for n in snapshot corrupt encrypted; do
+  for n in snapshot corrupt encrypted case_sensitive case_insensitive; do
     [ -s "$KIT_APFS_DATA/$n.bin" ] && continue
     curl -fsSL -o "$KIT_APFS_DATA/$n.bin.gz" "$base/$n.bin.gz" || { echo "cannot fetch dissect.apfs's $n.bin.gz"; return 1; }
     gunzip -f "$KIT_APFS_DATA/$n.bin.gz" || return 1

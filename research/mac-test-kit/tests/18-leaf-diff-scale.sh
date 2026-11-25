@@ -4,6 +4,7 @@
 # tier: long
 # time: about 50 minutes
 # needs: the base computer of test 00 (raw disk), 40 GB free, no sudo on the Mac
+# step: 5
 # decides: file-changes-from-outside ("the time follows the size of the tree"), research 11's estimate of a comparison's cost
 # question: On clones of a real macOS computer's disk with many files, does the leaf-address diff give the same changes as a full walk, and do the blocks it reads follow the changes rather than the tree?
 # outcome follows-changes: The leaf diff matched the full walk every time and read a small part of what the walk read for small changes: research 11's design holds on a real disk; the Python probe's times bound nothing for Silo's reader, which does not exist yet.

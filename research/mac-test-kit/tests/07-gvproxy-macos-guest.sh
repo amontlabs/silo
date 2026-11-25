@@ -4,6 +4,7 @@
 # tier: vm
 # time: about an hour
 # needs: the base computer of test 00, a 27 MB download of gvproxy, about 1 GB downloaded inside the computer (Node, git, npm packages), no sudo; you only for the optional sleep step
+# step: 2
 # decides: network-stack, computers-main-on-a-mac, who-can-call-the-engine
 # blocks: option A of the first build (#373): main is on Silo's network stack from its first start, so this runs before main does
 # question: Does a macOS computer work on gvproxy (DHCP, MTU, ssh through a Unix socket forward, bursts of connections, git clone and npm install, measured against Apple's NAT), and what of the Mac can it reach through each?

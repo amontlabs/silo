@@ -12,12 +12,18 @@ Silo's Mac test kit. Everything it writes is under $KIT_WORK_ROOT (set SILO_KIT_
 
   ./kit list                      the tests, their tier, time and what they need
   ./kit build                     compile the VM helper and the C probes into $KIT_WORK_ROOT/bin
-  ./kit run [options] WHAT...     run tests; WHAT is test ids (03 06) or a tier:
-                                    quick   no VM, no sudo, no download: about 30 minutes
-                                    vm      needs the installed macOS computer of test 00
-                                    guided  needs you at the keyboard (logins, apps)
-                                    long    hours, or a night
-                                    all     every test, in id order
+  ./kit run [options] WHAT...     run tests, in the kit's order (./kit list); WHAT is test ids
+                                  (03 06), a tier, or one of the groups below:
+                                    quick     no VM, no sudo, no download: about 40 minutes
+                                    vm        needs the installed macOS computer of test 00
+                                    guided    needs you at the keyboard (logins, apps)
+                                    long      hours, or a night
+                                    blocking  the tests that block a step of the first build
+                                    step1 ... step6, steplater
+                                              the tests needed for that step of the first build
+                                    all       every test
+  ./kit verdicts [RESULTS_DIR...] one verdict per open decision, from the newest outcome of each
+                                  test in every run kept (or in the runs named)
   ./kit report [RESULTS_DIR]      write summary.md for a run (the last run by default)
   ./kit doc                       rewrite RESULTS.md from the tests' outcome lines
   ./kit pack [RESULTS_DIR]        one .tar.gz of a run's results, to hand back
@@ -35,33 +41,20 @@ EOF
 # Parse the "# key: value" header of a test file.
 header() { sed -n "s/^# $2: //p" "$1" | head -1; }
 
-test_files() {
+cmd_list() { # every test, in the order ./kit run all runs them
   local f
-  for f in "$KIT_ROOT"/tests/[0-9][0-9]-*.sh; do [ -f "$f" ] && echo "$f"; done
-}
-
-cmd_list() {
-  local f
-  printf '%-3s %-7s %-14s %s\n' id tier time title
-  for f in $(test_files); do
-    printf '%-3s %-7s %-14s %s\n' "$(header "$f" id)" "$(header "$f" tier)" "$(header "$f" time | cut -c1-14)" "$(header "$f" title)"
-    printf '            needs: %s\n' "$(header "$f" needs)"
-    [ -n "$(header "$f" blocks)" ] && printf '            BLOCKS: %s\n' "$(header "$f" blocks)"
+  echo "In the order ./kit run all runs them: the base computer, what blocks a step of the first"
+  echo "build, then each step's tests (#370), the cheapest tier first."
+  printf '%-3s %-7s %-5s %-14s %s\n' id tier step time title
+  for f in $(select_tests all); do
+    printf '%-3s %-7s %-5s %-14s %s\n' "$(header "$f" id)" "$(header "$f" tier)" "$(header "$f" step)" "$(header "$f" time | cut -c1-14)" "$(header "$f" title)"
+    printf '                  needs: %s\n' "$(header "$f" needs)"
+    [ -n "$(header "$f" blocks)" ] && printf '                  BLOCKS: %s\n' "$(header "$f" blocks)"
   done
 }
 
-select_tests() { # prints matching files, in id order, no duplicates
-  local w f id tier out=""
-  for w in "$@"; do
-    for f in $(test_files); do
-      id="$(header "$f" id)"; tier="$(header "$f" tier)"
-      case "$w" in
-        all) out="$out $f" ;;
-        "$id"|"$tier") out="$out $f" ;;
-      esac
-    done
-  done
-  for f in $out; do echo "$f"; done | sort -u
+select_tests() { # prints matching files, in the kit's order (py/kitreport.py order_key), no duplicates
+  python3 "$KIT_ROOT/py/kitreport.py" order "$KIT_ROOT" "$@"
 }
 
 host_json() {
@@ -150,6 +143,18 @@ cmd_report() {
 
 cmd_doc() { python3 "$KIT_ROOT/py/kitreport.py" doc "$KIT_ROOT"; }
 
+cmd_verdicts() {
+  local dirs="" d
+  if [ $# -gt 0 ]; then
+    dirs="$*"
+  else
+    for d in "$KIT_WORK_ROOT"/results/[0-9]*; do [ -d "$d" ] && dirs="$dirs $d"; done
+  fi
+  [ -n "$dirs" ] || { echo "no results yet under $KIT_WORK_ROOT/results" >&2; exit 1; }
+  # shellcheck disable=SC2086
+  python3 "$KIT_ROOT/py/kitreport.py" verdicts "$KIT_ROOT" $dirs
+}
+
 cmd_pack() {
   local dir="${1:-$KIT_WORK_ROOT/results/last}"
   dir="$(cd "$dir" && pwd -P)"
@@ -200,6 +205,7 @@ case "${1:-help}" in
   build) cmd_build ;;
   run) shift; cmd_run "$@" ;;
   report) shift; cmd_report "$@" ;;
+  verdicts) shift; cmd_verdicts "$@" ;;
   doc) cmd_doc ;;
   pack) shift; cmd_pack "$@" ;;
   clean) shift; cmd_clean "$@" ;;

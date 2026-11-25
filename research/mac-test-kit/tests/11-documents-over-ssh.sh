@@ -4,6 +4,7 @@
 # tier: vm
 # time: about 10 minutes
 # needs: the installed computer of test 00, macOS 27 on the Mac
+# step: 2
 # decides: computer-reached-over-ssh, unmodified-agent-programs (where agents' work can live over SSH)
 # question: In a provisioned computer reached over SSH, can a command list and write ~/Documents, ~/Desktop and ~/Downloads, or does macOS's privacy protection (TCC) refuse it?
 # outcome open: Every folder can be listed and written over SSH, as the user and as root: agents can work

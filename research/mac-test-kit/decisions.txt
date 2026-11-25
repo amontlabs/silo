@@ -1,0 +1,343 @@
+# Which open entry each test answers, and what each outcome leaves possible.
+#
+# ./kit verdicts and every run's summary.md read this file; ./kit doc writes DECISIONS.md from it;
+# ./kit selftest checks it against the tests' outcome lines and the plan. Nothing else holds these
+# mappings.
+#
+#   decision ID                 an entry of the plan, or of a draft named in its source (#NNN)
+#     asks: ...                 the entry's question, as the first build needs it answered
+#     source: ...               where the entry and its options come from
+#     tests: NN NN              every test that bears on it
+#     option KEY: ...           its options, the recommended one first (#370 and #373 say which)
+#     NN OUTCOME: KEY KEY       the options that outcome of test NN leaves possible
+#     NN fact NAME=VALUE: KEY   the same, for a fact the test records
+#
+# An outcome with no line leaves every option possible: the test gives numbers or facts, not a
+# choice. An inconclusive outcome answers nothing. The verdict on an entry is the first option
+# every answered test still leaves. A decision with no options is measured, not chosen.
+
+# --- What main is, and how it is made ------------------------------------------------------------
+
+decision main-on-macos-first
+  asks: What is main in the first build: a macOS computer behind Silo's stack from its first start, a macOS computer on Apple's NAT first, or a Linux computer?
+  source: plan, open; #373 weighs options A, B and C of the first build and recommends A, with B as the fallback if the Mac kit fails on provisioning or gvproxy
+  tests: 00 01 13 07 35
+  option a-macos-boundary: A: macOS main, on Silo's network stack and behind the boundary from its first start (#373)
+  option c-macos-nat: C: macOS main on Apple's NAT first, as #348 and #370 specify
+  option b-linux: B: a Linux main on the Mac first, and macOS main later (#373)
+  00 install-failed: b-linux
+  01 both-fail: b-linux
+  13 all-failed: b-linux
+  07 gvproxy-fails: c-macos-nat b-linux
+  35 sealed-breaks: c-macos-nat b-linux
+
+decision network-stack
+  asks: What carries main's network in the first build?
+  source: plan, open; #370 assumes Apple's NAT until a patched gvproxy passes test 07; #373 needs a stack from main's first start; #363 seals gvproxy with a 64-line patch
+  tests: 07 35 36
+  option sealed-gvproxy: gvproxy with #363's -sealed patch: nothing of the Mac, its loopback or its network is reached from inside
+  option configured-gvproxy: gvproxy as released, configured as research 04 says (API token, no map to the Mac's 127.0.0.1); the Mac's network stays reachable
+  option nat-first: Apple's NAT until a stack passes; main's network has no boundary and reaches your network (#370)
+  option own-stack: Silo's own stack, written before main runs
+  07 gvproxy-stalls: nat-first own-stack
+  07 gvproxy-fails: nat-first own-stack
+  07 hardening-fails: sealed-gvproxy nat-first own-stack
+  35 sealed-leaks: configured-gvproxy nat-first own-stack
+  35 sealed-breaks: configured-gvproxy nat-first own-stack
+  36 alters: nat-first own-stack
+
+decision mac-silo-needs
+  asks: Which macOS must the Mac run for Silo?
+  source: #348, open; #370 assumes macOS 27 or later for Apple's guest provisioning
+  tests: 00 01 10 13
+  option macos-27: macOS 27 or later: Apple's guest provisioning sets main up with nobody at its screen
+  option macos-26-too: macOS 26 too: main's first start is set up by a keystroke script, or by writing Apple's private formats onto its disk
+  01 both-fail: macos-26-too
+  13 all-failed: macos-26-too
+  10 not-provisioned: macos-27 macos-26-too
+
+decision computer-image
+  asks: What does Silo keep of macOS to make each new computer from?
+  source: plan, open; #352's macOS half, which #370 follows
+  tests: 00 10 13 23
+  option installed-never-started: the installed system, kept before its first start; each computer is provisioned at its own first start
+  option set-up-system: a system already set up; every new computer is a fork of it and needs fork-identity first
+  10 not-provisioned: installed-never-started
+  10 refused-second-start: installed-never-started
+  13 reliable-identity-fails: installed-never-started
+
+decision moving-in-on-macos
+  asks: Does main's user have your own login name and home path?
+  source: plan, open; #370 builds both and lets test 01 pick the default
+  tests: 01
+  option own-name: main's user has your login name, so paths written in settings stay right
+  option another-name: main's user has another name; settings that name your home path are listed or rewritten
+  01 own-name-refused: another-name
+  01 own-name-silent: another-name
+
+decision first-run-time-macos
+  asks: How long does the first run take with a macOS main?
+  source: plan, open: measured, not chosen
+  tests: 00 13 14 23
+
+# --- The engine and its processes ----------------------------------------------------------------
+
+decision engine-saved-state
+  asks: How does the engine save its own state on a Mac?
+  source: plan, open; #370 follows #352 file 02, with #352 file 03 as the other option
+  tests: 06 31
+  option log-and-two-places: a log and two state places, one F_FULLFSYNC per group of writes, a stop on any failed write (#352 file 02)
+  option whole-save: a save of the whole state after each input, no log (#352 file 03)
+  06 full-slow-reserve-needed: log-and-two-places
+  06 full-slow-prealloc-protects: log-and-two-places
+
+decision space-the-engine-keeps
+  asks: How does the engine keep room to write on a full volume?
+  source: #348, open; #370 assumes a reserve file of 4 GiB and a floor of 20 GB until tests 06 and 33 and a full volume measure them
+  tests: 06 33 38
+  option reserve-file: a reserve file the engine makes and frees when the volume fills, and a floor under which checkpoints stop
+  option preallocate: the engine's own files preallocated, no reserve
+  06 full-fast-reserve-needed: reserve-file
+  06 full-slow-reserve-needed: reserve-file
+  38 framework-stops: reserve-file
+  38 guest-damaged: reserve-file
+
+decision low-disk
+  asks: What does Silo do when the disk runs low, given what a full volume does to a running computer?
+  source: plan, open: its levels are measured
+  tests: 06 33 38
+
+decision events-until-the-recorder
+  asks: How large is the engine's table of events waiting for the recorder?
+  source: plan, open: sized from the cost of a flush
+  tests: 06
+
+decision who-can-call-the-engine
+  asks: How does the engine know who called it?
+  source: plan, open; #370 assumes the same user, by getpeereid on a Unix socket
+  tests: 20 07
+  option same-user-socket: the same user, by getpeereid on a Unix socket in a folder only that user reaches
+  option xpc-signature: also Silo's signature, on an XPC path beside the socket
+  20 other-user-not-refused: xpc-signature
+
+decision when-the-engine-stops
+  asks: Do computers outlive the engine?
+  source: plan, open; #370 assumes a helper per computer, a launchd job of its own (finding 4)
+  tests: 09 36
+  option helper-outlives: a helper per computer, a launchd user agent of its own, which outlives the engine
+  option engine-holds: no helper of its own: the engine holds main, and a crash of the engine ends it
+  09 agent-refused: engine-holds
+
+decision what-stop-ends
+  asks: How long does a stop of a busy macOS main take, and does it leak a place?
+  source: plan, open; #370 follows #352 file 05 (30 s after requestStop, then stop)
+  tests: 12
+
+decision neutral-core
+  asks: Is a refused start of a computer a fact the core must take?
+  source: plan, open
+  tests: 12
+
+decision own-cost-targets
+  asks: Against which idle reference and which flush are Silo's own costs set?
+  source: plan, open: measured on polarzero's Mac
+  tests: 06 16 36
+
+decision silo-is-light
+  asks: What does an idle macOS computer cost the Mac?
+  source: plan, open: measured
+  tests: 16
+
+decision record-speed-cost
+  asks: What does keeping the record cost in speed?
+  source: plan, open: measured
+  tests: 06 16
+
+# --- The way in ----------------------------------------------------------------------------------
+
+decision reaching-a-computer
+  asks: How do the programs on your Mac reach main?
+  source: plan, open
+  tests: 08 20
+  option include-file: one Include line in ~/.ssh/config for Silo's own file of entries
+  option host-lines: Silo writes each computer's Host lines into ~/.ssh/config itself
+  08 codex-ignores-include: host-lines
+
+decision computer-reached-over-ssh
+  asks: What works in main over SSH, for you and for agent programs?
+  source: plan, open
+  tests: 02 08 11 14
+
+decision unmodified-agent-programs
+  asks: Where in main can agents work when they are reached over SSH?
+  source: plan, open
+  tests: 11
+
+decision fork-and-sign-in
+  asks: Can a fork leave out an agent program's sign-in on macOS?
+  source: plan, open
+  tests: 02
+  option leave-out-files: a fork leaves out the sign-ins agent programs keep in files, as written
+  option says-copied: a login kept in main's keychain is copied into a fork, and Silo says so
+  02 lasts-in-keychain: says-copied
+
+decision runs-outlive-the-terminal
+  asks: Does a run started in a session that outlives its terminal keep working, signed in, through the night?
+  source: #348, open; #370 assumes `ssh main.keep` opens tmux in main
+  tests: 02 37
+
+# --- A night ----------------------------------------------------------------------------------
+
+decision mac-kept-awake
+  asks: Does Silo hold the Mac awake while main runs, and when?
+  source: #348, open; #370 assumes on power only, and asks whether Apple's framework already holds it awake
+  tests: 37 16
+  option on-power-only: Silo holds the Mac awake while main runs, on power only, and says what a closed lid does
+  option on-battery-too: Silo holds the Mac awake on battery too
+  option framework-holds: Apple's framework already holds the Mac awake while a computer runs; Silo adds no assertion, and says what battery and a closed lid do
+  37 fact vm_holds_awake=yes: framework-holds
+  37 fact vm_holds_awake=no: on-power-only on-battery-too
+  16 fact vz_holds_assertion=yes: framework-holds
+  16 fact vz_holds_assertion=no: on-power-only on-battery-too
+
+decision who-made-each-change
+  asks: What does the record say about a sleep of the Mac, and can its length be measured from main's helper?
+  source: plan, open; #370 writes a sleep with author `device` and measures it with mach_continuous_time
+  tests: 37
+
+# --- The way back --------------------------------------------------------------------------------
+
+decision checkpoint-per-system
+  asks: How is a checkpoint of a running macOS main taken?
+  source: plan, open; #370 assumes an APFS clone while main runs if test 04 holds, #365's delta behind NBD otherwise
+  tests: 03 04 15 31 32 33
+  option clone-running: an APFS clone of the image and the auxiliary storage, taken while main runs
+  option clone-paused: an APFS clone, with main paused for it
+  option delta-nbd: #365's delta: main's disk served by Silo over NBD, each checkpoint the blocks it copied
+  option stopped-only: no checkpoint of a running macOS main, only of a stopped one, until another way is found
+  03 stall-grows: delta-nbd stopped-only
+  04 none-hold: delta-nbd stopped-only
+  15 waits-grow: delta-nbd stopped-only
+  15 restore-broken: clone-paused delta-nbd stopped-only
+  31 shared-clone-free: delta-nbd stopped-only
+  31 shared-clone-waits: delta-nbd stopped-only
+  31 shared-clone-stalls: delta-nbd stopped-only
+  31 not-a-moment: clone-running clone-paused stopped-only
+  32 checkpoint-broke: clone-running clone-paused stopped-only
+  32 no-boot: clone-running clone-paused stopped-only
+
+decision checkpoint-at-each-turn
+  asks: What does a checkpoint at each turn cost a macOS main?
+  source: plan, open: measured
+  tests: 03 31 32
+
+decision thinning-checkpoints
+  asks: What does a macOS main's checkpoint keep, and what does dropping one cost?
+  source: plan, open; #370 and #365 propose new ages
+  tests: 31 33
+
+decision checkpoint-storage
+  asks: How much disk do a macOS main's checkpoints keep, and what happens when the volume fills?
+  source: plan, open
+  tests: 33 38
+
+decision restore-to-a-checkpoint
+  asks: Does a macOS main restored from a checkpoint of a running disk boot clean?
+  source: plan, open (a feature)
+  tests: 15 04
+
+# --- The record ----------------------------------------------------------------------------------
+
+decision file-changes-from-outside
+  asks: How does Silo read main's file changes from outside?
+  source: plan, open; #370 follows #352 file 09: Silo's own reader, never a mount, a gap for what it cannot read
+  tests: 05 14 17 18 19 39
+  option own-reader: Silo's own APFS reader, from outside, a gap for what it cannot read
+  option mounted-clone: the macOS kernel's APFS, on a mounted clone of the checkpoint
+  18 wrong: mounted-clone
+
+decision putting-back-a-path
+  asks: Can `look` and `put-back` read the contents of a path in a macOS main's checkpoint from outside?
+  source: #348, open; #370 finding 6 gives the reader a second mode for contents, with APFS compression
+  tests: 39
+  option reader-reads-contents: Silo's reader reads the contents of the paths named, decmpfs compression included
+  option mounted-clone: look and put-back read a mounted clone of the checkpoint
+  39 reads-wrong: mounted-clone
+
+decision macos-ships-facts-first
+  asks: What can be read of a macOS main, from outside and from inside?
+  source: plan, open
+  tests: 19 22
+
+# --- Model traffic (option A of #373) -------------------------------------------------------------
+
+decision reading-each-agent-program
+  asks: How does main's first run make Claude Code and Codex trust Silo's authority?
+  source: plan, open; #373 step 2 adds the authority to main's System keychain if test 21 allows it
+  tests: 21 34
+  option keychain-authority: Silo's authority in main's System keychain, added over SSH by the first run
+  option per-program-settings: each program's own setting (NODE_EXTRA_CA_CERTS, CODEX_CA_CERTIFICATE) in its environment
+  21 claude-only-keychain: per-program-settings
+  21 codex-only-keychain: per-program-settings
+  21 neither-keychain: per-program-settings
+  21 keychain-needs-a-person: per-program-settings
+
+decision recognising-a-conversation
+  asks: How is a conversation recognised in Claude Code's and Codex's traffic?
+  source: plan, open; #373 proposes the session id each program sends
+  tests: 34
+  option by-session: by the conversation id each program sends with every call (#373)
+  option by-content: by content, as the entry is written
+  34 conversations-split: by-content
+
+decision provider-sees-silos-connection
+  asks: Do the providers treat a subscription's night differently through Silo's boundary?
+  source: plan, open: found out over real use
+  tests: 34
+
+decision model-traffic-read
+  asks: Can a night of Claude Code and Codex on their plans be read whole through the boundary, in a macOS main?
+  source: plan, open (a feature); #373 makes it part of the first build
+  tests: 34 21 35
+
+# --- After the first build: Mac and iOS developers, a probe inside -------------------------------
+
+decision denied-tool-call-mechanism
+  asks: Can a probe inside a macOS computer use Endpoint Security?
+  source: plan, open (second build)
+  tests: 22
+
+decision xcode-in-a-computer
+  asks: Can Xcode be copied into a computer and set up over SSH?
+  source: #361, open
+  tests: 23 29
+
+decision computers-macos-screen
+  asks: Does main need its user logged in on its own screen, for simulators and for Xcode's agent bridge?
+  source: plan, open (a feature)
+  tests: 24 29
+
+decision simulators-for-parallel-agents
+  asks: How many simulators does one computer run, and does each need Silo's certificate?
+  source: #361, open
+  tests: 24 25 27
+
+decision apple-keys-in-a-computer
+  asks: Can a development identity and App Store Connect key serve agents with nobody at the screen?
+  source: #361, open
+  tests: 26 28
+
+decision registry-traffic-read
+  asks: Do simulators trust the authority the computer trusts?
+  source: plan, open
+  tests: 27
+
+decision builds-on-your-iphone
+  asks: Can an agent's build reach your iPhone from inside a computer?
+  source: #361, open
+  tests: 30
+
+decision sizing-target
+  asks: How much memory does main need for an iOS developer?
+  source: plan, open
+  tests: 25

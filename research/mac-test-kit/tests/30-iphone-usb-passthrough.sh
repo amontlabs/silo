@@ -4,6 +4,7 @@
 # tier: guided
 # time: about 20 minutes, with you at the keyboard to plug in and unlock the iPhone and tap Trust
 # needs: the Xcode computer of test 23, macOS 27 on the Mac, an iPhone and its cable, and a VM helper with --usb-device (VZUSBPassthroughDevice), which ./kit build does not make yet; while the computer runs, the iPhone is the computer's and not the Mac's
+# step: later
 # decides: builds-on-your-iphone (whether an agent's build reaches your iPhone from inside the computer, or leaves it for the Mac)
 # question: On macOS 27, does an iPhone given to a computer with USB passthrough show in the computer, pair with Xcode's device tools there, and take an install from it?
 # outcome attaches-and-installs: The computer saw the iPhone, devicectl paired with it, and an

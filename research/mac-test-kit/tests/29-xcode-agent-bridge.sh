@@ -4,6 +4,7 @@
 # tier: guided
 # time: about 25 minutes, with you at the computer's window for one or two clicks
 # needs: the Xcode computer of test 23 with Xcode 26.3 or later, macOS 27 on the Mac
+# step: later
 # decides: computers-macos-screen (whether main's screen must carry Xcode for agents), agents-drive-the-screen, xcode-in-a-computer (a step Silo's setup takes)
 # question: With Xcode open on the computer's screen, can an agent reached over SSH use `xcrun mcpbridge` (Xcode's tools for outside agents), and when Xcode asks to allow it, can a script inside the computer answer, or only a person, and is the answer kept for the next agent process?
 # outcome works-no-prompt: mcpbridge listed Xcode's tools over SSH with nothing to approve: agents

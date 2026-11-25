@@ -4,6 +4,7 @@
 # tier: guided
 # time: about 45 minutes, with you at the keyboard for the sign-ins (about 5 minutes)
 # needs: the installed computer of test 00, macOS 27 on the Mac, network, a Claude subscription or Console account and a ChatGPT account (either one is enough)
+# step: 2
 # decides: fork-and-sign-in (where each login lands), whether the first build's "ssh main, start Claude Code, go to bed" holds, agent-programs-logins-kept-out-of-copies
 # question: Signed in over SSH inside a macOS computer, where does each program keep its login (a file or the keychain), and does the login still work after a reconnect, a restart of the computer, in a copy restored from a checkpoint and in a fork with a new identity?
 # outcome lasts-in-files: Both logins landed in files (~/.claude/.credentials.json, ~/.codex/auth.json)

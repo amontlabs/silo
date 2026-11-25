@@ -4,6 +4,7 @@
 # tier: long
 # time: about 10 hours: 8 through the boundary (KIT_34_HOURS), 1 without it (KIT_34_CONTROL_HOURS), and the set-up with you at the keyboard for the sign-ins (about 10 minutes)
 # needs: the installed computer of test 00, macOS 27 on the Mac, network, Claude Code signed in with a Claude plan (Max) and Codex with a ChatGPT plan (either one is enough), you at the keyboard at the start, the Mac on power and left awake (the test holds a caffeinate assertion); test 21's outcome, when it ran, chooses how the programs trust the boundary
+# step: 6
 # decides: model-traffic-read, recognising-a-conversation, provider-sees-silos-connection, reading-each-agent-program (the night it leaves to find out)
 # blocks: option A of the first build (#373): its step 6 is done when a night through the boundary is clean, and this is that night with a stand-in for Silo's boundary
 # question: Signed in with their plans in a macOS computer and left to work for a whole night through a boundary on the Mac that ends TLS and reads every call, are both programs' conversations recognised whole, are the plan's headers read, is every reply that is not a normal one kept as a fact, does no sign-in reach a file, and do the programs fare as well as in an hour without the boundary?
