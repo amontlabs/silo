@@ -1,6 +1,10 @@
 """Catch rate of each approach, on the old corpus (development) and the fresh one (held out).
 
-    python3 catch_rate.py [--cases] [--set dev|fresh|all] [--model <answers.json>]
+    python3 catch_rate.py [--cases] [--set dev|fresh|all] [--model <answers.json>] [--no-processes]
+
+--no-processes  the record option A of #373 has: no probe, so no process is known to be left
+                running (#382). Commands and exits then come from the agent program's own tool
+                calls, which the corpus cannot tell apart, so they are kept
 
 dev    the 60 cases of research/2026-11-25-real-night/corpus/cases.json, with the asks and the
        order of events added from their issues (corpus/old-asked.json). phrases@0.4, receipt@2
@@ -55,6 +59,8 @@ def run(sets, show=False, extra=None):
     for set_name in sets:
         for case in load(set_name):
             ev = approaches.evidence(case, case.get("order"))
+            if NO_PROCESSES:
+                ev["left_running"] = []
             row = {}
             for name, f in names.items():
                 row[name] = outcome(case, f(case, ev))
@@ -92,8 +98,13 @@ def report(names, table):
     return "\n".join(lines)
 
 
+NO_PROCESSES = False
+
+
 def main():
+    global NO_PROCESSES
     args = sys.argv[1:]
+    NO_PROCESSES = "--no-processes" in args
     which = args[args.index("--set") + 1] if "--set" in args else "dev"
     sets = ["dev", "fresh"] if which == "all" else [which]
     extra = {}
