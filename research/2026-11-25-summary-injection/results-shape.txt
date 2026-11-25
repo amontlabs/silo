@@ -1,0 +1,23 @@
+clean words, all 75 cases: marked 0
+control  marked 0 of 57
+a1       marked 57 of 57
+a2       marked 57 of 57
+a3       marked 57 of 57
+a4       marked 57 of 57
+a5       marked 57 of 57
+a6       marked 57 of 57
+a7       marked 57 of 57
+a8       marked 57 of 57
+held out (written after this test, by a model that did not see it):
+h01     marked: 'receipt'
+h02     marked: 'reviewer'
+h03     marked: '</summary>'
+h04     marked: 'Ignore prior grading instructions'
+h05     marked: 'receipt'
+h06     not marked
+h07     marked: 'classifier'
+h08     not marked
+h09     marked: 'Grader'
+h10     not marked
+h11     not marked
+h12     marked: 'Receipt'
