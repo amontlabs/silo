@@ -1,0 +1,41 @@
+{"agents": 4, "booted_max": 1, "lease": "session", "uses": 60, "wait_mean_s": 1415.3, "wait_p95_s": 1408.1, "wait_max_s": 28734.0, "boots": 1, "share_of_agent_time_waiting": 0.737, "starved_agents": 3}
+{"agents": 4, "booted_max": 1, "lease": "use", "uses": 168, "wait_mean_s": 97.6, "wait_p95_s": 327.6, "wait_max_s": 690.5, "boots": 153, "share_of_agent_time_waiting": 0.142, "starved_agents": 0}
+{"agents": 4, "booted_max": 2, "lease": "session", "uses": 108, "wait_mean_s": 523.0, "wait_p95_s": 0.0, "wait_max_s": 28606.9, "boots": 2, "share_of_agent_time_waiting": 0.49, "starved_agents": 2}
+{"agents": 4, "booted_max": 2, "lease": "use", "uses": 191, "wait_mean_s": 22.5, "wait_p95_s": 54.5, "wait_max_s": 206.8, "boots": 130, "share_of_agent_time_waiting": 0.037, "starved_agents": 0}
+{"agents": 4, "booted_max": 3, "lease": "session", "uses": 147, "wait_mean_s": 189.8, "wait_p95_s": 0.0, "wait_max_s": 27832.4, "boots": 3, "share_of_agent_time_waiting": 0.242, "starved_agents": 1}
+{"agents": 4, "booted_max": 3, "lease": "use", "uses": 194, "wait_mean_s": 9.1, "wait_p95_s": 25.0, "wait_max_s": 48.7, "boots": 69, "share_of_agent_time_waiting": 0.015, "starved_agents": 0}
+{"agents": 4, "booted_max": 4, "lease": "session", "uses": 207, "wait_mean_s": 0.5, "wait_p95_s": 0.0, "wait_max_s": 25.0, "boots": 4, "share_of_agent_time_waiting": 0.001, "starved_agents": 0}
+{"agents": 4, "booted_max": 4, "lease": "use", "uses": 207, "wait_mean_s": 0.5, "wait_p95_s": 0.0, "wait_max_s": 25.0, "boots": 4, "share_of_agent_time_waiting": 0.001, "starved_agents": 0}
+{"agents": 8, "booted_max": 1, "lease": "session", "uses": 63, "wait_mean_s": 3138.3, "wait_p95_s": 28558.0, "wait_max_s": 28734.0, "boots": 1, "share_of_agent_time_waiting": 0.858, "starved_agents": 7}
+{"agents": 8, "booted_max": 1, "lease": "use", "uses": 240, "wait_mean_s": 382.2, "wait_p95_s": 898.2, "wait_max_s": 1288.5, "boots": 235, "share_of_agent_time_waiting": 0.398, "starved_agents": 3}
+{"agents": 8, "booted_max": 2, "lease": "session", "uses": 112, "wait_mean_s": 1514.2, "wait_p95_s": 12456.6, "wait_max_s": 28710.2, "boots": 2, "share_of_agent_time_waiting": 0.736, "starved_agents": 6}
+{"agents": 8, "booted_max": 2, "lease": "use", "uses": 386, "wait_mean_s": 70.9, "wait_p95_s": 217.6, "wait_max_s": 405.1, "boots": 361, "share_of_agent_time_waiting": 0.119, "starved_agents": 1}
+{"agents": 8, "booted_max": 3, "lease": "session", "uses": 156, "wait_mean_s": 896.0, "wait_p95_s": 6.2, "wait_max_s": 28700.7, "boots": 3, "share_of_agent_time_waiting": 0.607, "starved_agents": 5}
+{"agents": 8, "booted_max": 3, "lease": "use", "uses": 404, "wait_mean_s": 27.4, "wait_p95_s": 71.4, "wait_max_s": 235.9, "boots": 331, "share_of_agent_time_waiting": 0.048, "starved_agents": 0}
+{"agents": 8, "booted_max": 4, "lease": "session", "uses": 215, "wait_mean_s": 513.9, "wait_p95_s": 0.0, "wait_max_s": 28145.8, "boots": 4, "share_of_agent_time_waiting": 0.48, "starved_agents": 4}
+{"agents": 8, "booted_max": 4, "lease": "use", "uses": 392, "wait_mean_s": 18.2, "wait_p95_s": 25.0, "wait_max_s": 111.0, "boots": 266, "share_of_agent_time_waiting": 0.031, "starved_agents": 0}
+{"agents": 8, "booted_max": 6, "lease": "session", "uses": 316, "wait_mean_s": 175.8, "wait_p95_s": 0.0, "wait_max_s": 27788.0, "boots": 6, "share_of_agent_time_waiting": 0.241, "starved_agents": 2}
+{"agents": 8, "booted_max": 6, "lease": "use", "uses": 418, "wait_mean_s": 8.7, "wait_p95_s": 25.0, "wait_max_s": 25.0, "boots": 145, "share_of_agent_time_waiting": 0.016, "starved_agents": 0}
+{"agents": 8, "booted_max": 8, "lease": "session", "uses": 421, "wait_mean_s": 0.5, "wait_p95_s": 0.0, "wait_max_s": 25.0, "boots": 8, "share_of_agent_time_waiting": 0.001, "starved_agents": 0}
+{"agents": 8, "booted_max": 8, "lease": "use", "uses": 421, "wait_mean_s": 0.5, "wait_p95_s": 0.0, "wait_max_s": 25.0, "boots": 8, "share_of_agent_time_waiting": 0.001, "starved_agents": 0}
+{"agents": 16, "booted_max": 1, "lease": "session", "uses": 68, "wait_mean_s": 6241.1, "wait_p95_s": 28495.7, "wait_max_s": 28779.2, "boots": 1, "share_of_agent_time_waiting": 0.921, "starved_agents": 15}
+{"agents": 16, "booted_max": 1, "lease": "use", "uses": 267, "wait_mean_s": 1162.4, "wait_p95_s": 1781.8, "wait_max_s": 2016.5, "boots": 257, "share_of_agent_time_waiting": 0.674, "starved_agents": 10}
+{"agents": 16, "booted_max": 2, "lease": "session", "uses": 117, "wait_mean_s": 3384.6, "wait_p95_s": 28428.6, "wait_max_s": 28776.8, "boots": 2, "share_of_agent_time_waiting": 0.859, "starved_agents": 14}
+{"agents": 16, "booted_max": 2, "lease": "use", "uses": 488, "wait_mean_s": 396.9, "wait_p95_s": 729.5, "wait_max_s": 917.8, "boots": 483, "share_of_agent_time_waiting": 0.42, "starved_agents": 4}
+{"agents": 16, "booted_max": 3, "lease": "session", "uses": 161, "wait_mean_s": 2276.0, "wait_p95_s": 28195.3, "wait_max_s": 28662.5, "boots": 3, "share_of_agent_time_waiting": 0.795, "starved_agents": 13}
+{"agents": 16, "booted_max": 3, "lease": "use", "uses": 710, "wait_mean_s": 103.0, "wait_p95_s": 259.7, "wait_max_s": 354.3, "boots": 700, "share_of_agent_time_waiting": 0.159, "starved_agents": 5}
+{"agents": 16, "booted_max": 4, "lease": "session", "uses": 219, "wait_mean_s": 1541.8, "wait_p95_s": 27141.0, "wait_max_s": 28588.4, "boots": 4, "share_of_agent_time_waiting": 0.733, "starved_agents": 12}
+{"agents": 16, "booted_max": 4, "lease": "use", "uses": 767, "wait_mean_s": 39.7, "wait_p95_s": 108.3, "wait_max_s": 222.3, "boots": 736, "share_of_agent_time_waiting": 0.066, "starved_agents": 0}
+{"agents": 16, "booted_max": 6, "lease": "session", "uses": 335, "wait_mean_s": 837.0, "wait_p95_s": 0.0, "wait_max_s": 28476.0, "boots": 6, "share_of_agent_time_waiting": 0.608, "starved_agents": 10}
+{"agents": 16, "booted_max": 6, "lease": "use", "uses": 796, "wait_mean_s": 21.6, "wait_p95_s": 27.3, "wait_max_s": 104.8, "boots": 653, "share_of_agent_time_waiting": 0.037, "starved_agents": 0}
+{"agents": 16, "booted_max": 8, "lease": "session", "uses": 431, "wait_mean_s": 519.0, "wait_p95_s": 0.0, "wait_max_s": 28372.4, "boots": 8, "share_of_agent_time_waiting": 0.485, "starved_agents": 8}
+{"agents": 16, "booted_max": 8, "lease": "use", "uses": 799, "wait_mean_s": 17.4, "wait_p95_s": 25.0, "wait_max_s": 59.1, "boots": 553, "share_of_agent_time_waiting": 0.03, "starved_agents": 0}
+{"agents": 16, "booted_max": 2, "lease": "use", "uses": 526, "wait_mean_s": 558.6, "wait_p95_s": 917.8, "wait_max_s": 1162.2, "boots": 517, "share_of_agent_time_waiting": 0.638, "starved_agents": 9, "p_use": 1.0}
+{"agents": 16, "booted_max": 4, "lease": "use", "uses": 998, "wait_mean_s": 134.8, "wait_p95_s": 283.9, "wait_max_s": 528.7, "boots": 992, "share_of_agent_time_waiting": 0.292, "starved_agents": 4, "p_use": 1.0}
+{"agents": 16, "booted_max": 6, "lease": "use", "uses": 1264, "wait_mean_s": 39.4, "wait_p95_s": 96.6, "wait_max_s": 167.3, "boots": 1219, "share_of_agent_time_waiting": 0.108, "starved_agents": 0, "p_use": 1.0}
+{"agents": 16, "booted_max": 2, "lease": "use", "uses": 191, "wait_mean_s": 1663.3, "wait_p95_s": 2637.7, "wait_max_s": 2990.7, "boots": 180, "share_of_agent_time_waiting": 0.689, "starved_agents": 11, "use": 300.0}
+{"agents": 16, "booted_max": 4, "lease": "use", "uses": 379, "wait_mean_s": 472.5, "wait_p95_s": 982.5, "wait_max_s": 1606.3, "boots": 371, "share_of_agent_time_waiting": 0.389, "starved_agents": 8, "use": 300.0}
+{"agents": 16, "booted_max": 6, "lease": "use", "uses": 519, "wait_mean_s": 120.4, "wait_p95_s": 361.4, "wait_max_s": 699.2, "boots": 501, "share_of_agent_time_waiting": 0.136, "starved_agents": 0, "use": 300.0}
+{"agents": 16, "booted_max": 2, "lease": "use", "uses": 524, "wait_mean_s": 564.8, "wait_p95_s": 884.1, "wait_max_s": 1109.3, "boots": 514, "share_of_agent_time_waiting": 0.642, "starved_agents": 10, "think": 60.0}
+{"agents": 16, "booted_max": 4, "lease": "use", "uses": 982, "wait_mean_s": 135.4, "wait_p95_s": 297.3, "wait_max_s": 411.5, "boots": 972, "share_of_agent_time_waiting": 0.289, "starved_agents": 5, "think": 60.0}
+{"agents": 16, "booted_max": 6, "lease": "use", "uses": 1248, "wait_mean_s": 39.2, "wait_p95_s": 98.8, "wait_max_s": 176.9, "boots": 1166, "share_of_agent_time_waiting": 0.106, "starved_agents": 0, "think": 60.0}
