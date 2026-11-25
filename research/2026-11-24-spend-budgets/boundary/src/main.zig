@@ -16,6 +16,7 @@ const usage = @import("usage.zig");
 const prices = @import("prices.zig");
 const budget = @import("budget.zig");
 const spend = @import("spend.zig");
+const outside = @import("outside.zig");
 const c = @cImport({
     @cInclude("openssl/ssl.h");
     @cInclude("openssl/err.h");
@@ -86,19 +87,57 @@ const State = struct {
     cfg: spend.Config,
     book: budget.Book,
     table: prices.Table,
-    /// Per conversation: the size of its last request and the input the provider counted for it.
-    memory: std.AutoHashMapUnmanaged(u64, struct { bytes: usize, tokens: i64 }) = .empty,
+    /// Per conversation: the size of its last request and the input the provider counted for it,
+    /// how much of that input the prompt cache held, and when and for how long.
+    memory: std.AutoHashMapUnmanaged(u64, Mem) = .empty,
+    /// The context an OpenAI response or conversation holds at the provider, by its id: what a
+    /// request that names it is billed for besides its own new input.
+    stored: std.StringHashMapUnmanaged(i64) = .empty,
     memory_mu: std.Thread.Mutex = .{},
-    /// For each computer of the config: the ledgers that cover its calls (its own, its person's).
-    covers: [][2]usize = &.{},
-    covers_len: []usize = &.{},
+    /// For each computer of the config: the ledgers that cover its calls (its own, its person's,
+    /// and its parent's when it is a fork with no limits of its own).
+    covers: [][]usize = &.{},
     budgeted: []bool = &.{},
+    /// For each computer: its parent's index if it is a fork, the total of each of its
+    /// conversations, and its conversations, by the hash of their last request.
+    parent: []?usize = &.{},
+    conv_total: []?f64 = &.{},
+    convs: []std.AutoHashMapUnmanaged(u64, usize) = &.{},
+    next_conv: u32 = 1,
+    /// Work at the provider the boundary holds a bound for, by the provider's id for it.
+    held: std.StringHashMapUnmanaged(*Held) = .empty,
+    /// OpenAI batch input files seen uploading, by file id, and result files, by file id.
+    batch_files: std.StringHashMapUnmanaged(outside.Bound) = .empty,
+    result_files: std.StringHashMapUnmanaged([]u8) = .empty,
+    held_mu: std.Thread.Mutex = .{},
     next_call: std.atomic.Value(u64) = .init(1),
     /// The calls under way, so an admission can bring their counts up to the moment.
     live: std.ArrayList(*Call) = .empty,
     /// The output of the last settled calls, per model, for `reserve_typical`.
     outputs: std.StringHashMapUnmanaged(std.ArrayList(i64)) = .empty,
     live_mu: std.Thread.Mutex = .{},
+};
+
+const Mem = struct { bytes: usize, tokens: i64, cached: i64 = 0, t: f64 = 0, ttl_s: f64 = 0 };
+
+/// Work that runs at the provider out of the boundary's sight, held at its bound until its result
+/// passes the boundary: a background response, a batch, a Gemini cache's storage.
+const Held = struct {
+    id: u64,
+    key: []u8,
+    which: []usize,
+    computer: usize,
+    kind: []const u8,
+    provider: []const u8,
+    model: []u8,
+    bound: f64,
+    t0: f64,
+    /// A background response: the call it started, settled from the response once it ends.
+    call: ?*Call = null,
+    /// A cache: its tokens, its price per token-hour, its lifetime in seconds from `t0`.
+    tokens: i64 = 0,
+    per_token_hour: f64 = 0,
+    ttl_s: f64 = 0,
 };
 
 fn typicalOutput(st: *State, model: []const u8) i64 {
@@ -132,22 +171,39 @@ fn loadState(path: []const u8) !*State {
     st.* = .{ .cfg = parsed.value, .book = .{ .gpa = gpa }, .table = .{ .gpa = gpa, .path = parsed.value.prices } };
     st.book.policy = std.meta.stringToEnum(budget.Policy, parsed.value.policy) orelse return error.UnknownPolicy;
     const n = st.cfg.computers.len;
-    st.covers = try gpa.alloc([2]usize, n);
-    st.covers_len = try gpa.alloc(usize, n);
+    st.covers = try gpa.alloc([]usize, n);
     st.budgeted = try gpa.alloc(bool, n);
+    st.parent = try gpa.alloc(?usize, n);
+    st.conv_total = try gpa.alloc(?f64, n);
+    st.convs = try gpa.alloc(std.AutoHashMapUnmanaged(u64, usize), n);
     for (st.cfg.people) |p| _ = try st.book.add(try std.fmt.allocPrint(gpa, "person:{s}", .{p.name}), p.limits);
+    var own_ledger = try gpa.alloc(usize, n);
     for (st.cfg.computers, 0..) |cp, i| {
-        const own = try st.book.add(cp.name, cp.limits);
-        st.covers[i][0] = own;
-        st.covers_len[i] = 1;
+        own_ledger[i] = try st.book.add(cp.name, cp.limits);
+        st.convs[i] = .empty;
+        st.parent[i] = null;
+        if (cp.fork_of) |pn| for (st.cfg.computers, 0..) |q, k| if (std.mem.eql(u8, q.name, pn)) {
+            st.parent[i] = k;
+        };
+    }
+    for (st.cfg.computers, 0..) |cp, i| {
+        var list: std.ArrayList(usize) = .empty;
+        try list.append(gpa, own_ledger[i]);
         st.budgeted[i] = hasLimits(cp.limits);
+        st.conv_total[i] = cp.limits.conversation_total;
         if (cp.person) |pn| {
             for (st.cfg.people, 0..) |p, k| if (std.mem.eql(u8, p.name, pn)) {
-                st.covers[i][1] = k;
-                st.covers_len[i] = 2;
+                try list.append(gpa, k);
                 if (hasLimits(p.limits)) st.budgeted[i] = true;
             };
         }
+        // A fork with no limits of its own spends from its parent's budget (`budget-of-a-fork`).
+        if (st.parent[i]) |pi| if (!hasLimits(cp.limits)) {
+            try list.append(gpa, own_ledger[pi]);
+            if (hasLimits(st.cfg.computers[pi].limits)) st.budgeted[i] = true;
+            st.conv_total[i] = st.cfg.computers[pi].limits.conversation_total;
+        };
+        st.covers[i] = try list.toOwnedSlice(gpa);
     }
     st.table.refresh();
     if (st.table.parsed == null) return error.NoPriceTable;
@@ -155,7 +211,7 @@ fn loadState(path: []const u8) !*State {
 }
 
 fn hasLimits(l: budget.Limits) bool {
-    return l.total != null or l.rate != null or l.plan_5h_max != null or l.plan_7d_max != null;
+    return l.total != null or l.rate != null or l.plan_5h_max != null or l.plan_7d_max != null or l.conversation_total != null;
 }
 
 fn computerOf(fd: posix.fd_t) ?usize {
@@ -175,7 +231,9 @@ const Call = struct {
     id: u64,
     conn: u32,
     computer: usize,
-    which: []const usize,
+    /// The ledgers this call counts in: its computer's covers, and its conversation's. Owned.
+    which: []usize,
+    conv: ?usize = null,
     format: usage.Format,
     req: spend.Request,
     row: ?prices.Row,
@@ -191,6 +249,11 @@ const Call = struct {
     t0: f64,
     last_events: u32 = 0,
     settled: bool = false,
+    /// The connection to the provider, so a budget reached mid-stream can end it.
+    up_fd: posix.fd_t = -1,
+    cut: bool = false,
+    /// The call went on at the provider in the background: a `Held` owns it now.
+    kept: bool = false,
 
     /// What the call has cost so far, as the boundary sees it while it runs: its input (the
     /// provider's count once given, else the estimate), and its visible output at four
@@ -202,8 +265,8 @@ const Call = struct {
         k.output = @max(k.output, @as(i64, @intCast(self.meter.visible_chars / 4)));
         const tps = state.?.cfg.output_tps;
         if (tps > 0) {
-            const by_time: i64 = @intFromFloat((now_ms() - self.t0) / 1000 * tps);
-            k.output = @max(k.output, @min(by_time, self.req.max_tokens));
+            const by_time: i64 = @intFromFloat((now_ms() - self.t0) / 1000 * tps * @as(f64, @floatFromInt(self.req.n)));
+            k.output = @max(k.output, @min(by_time, self.req.max_tokens * self.req.n));
         }
         return prices.cost(r, k);
     }
@@ -223,12 +286,13 @@ const Call = struct {
         self.meter.deinit();
         self.req.deinit(gpa);
         self.body.deinit(gpa);
+        gpa.free(self.which);
     }
 };
 
 /// The sentence the program shows, in the provider's error shape.
 fn refusalMessage(r: budget.Refusal, buf: []u8) []const u8 {
-    const who = if (std.mem.startsWith(u8, r.ledger, "person:")) r.ledger[7..] else "this computer";
+    const who = ledgerWho(r.ledger);
     return switch (r.why) {
         .total => std.fmt.bufPrint(buf, "Silo: {s}'s budget of ${d:.2} is reached (${d:.2} spent). Raise it in the Silo app to go on.", .{ who, r.limit, r.counted }) catch "Silo: the budget is reached.",
         .input => std.fmt.bufPrint(buf, "Silo: this request's input alone costs up to ${d:.2}, and {s}'s budget of ${d:.2} has ${d:.2} left. Raise it in the Silo app to go on.", .{ r.needed, who, r.limit, @max(0, r.limit - r.counted) }) catch "Silo: the call does not fit in the budget.",
@@ -248,9 +312,33 @@ fn now_s() f64 {
 
 const Begin = union(enum) { pass, refuse: []const u8, wait: struct { msg: []const u8, secs: u64 }, call: *Call };
 
+/// The conversation a request belongs to on its computer, as a ledger: the one whose last request
+/// this one continues, or a new one. A fork's first request that continues one of its parent's
+/// conversations starts a new one at zero, at the parent's spend, or in the parent's own, as
+/// `fork_conversations` says. Null when no conversation budget covers the computer.
+fn conversationOf(st: *State, comp: usize, req: *const spend.Request) !?usize {
+    const total = st.conv_total[comp] orelse return null;
+    st.memory_mu.lock();
+    defer st.memory_mu.unlock();
+    var k = req.prefixes.len;
+    while (k > 0) : (k -= 1) if (st.convs[comp].get(req.prefixes[k - 1])) |l| return l;
+    const limits: budget.Limits = .{ .total = total };
+    const name = try std.fmt.allocPrint(gpa, "conversation:{d}", .{st.next_conv});
+    st.next_conv += 1;
+    if (st.parent[comp]) |pc| {
+        const mode = st.cfg.fork_conversations;
+        k = req.prefixes.len;
+        while (k > 0) : (k -= 1) if (st.convs[pc].get(req.prefixes[k - 1])) |l| {
+            if (std.mem.eql(u8, mode, "shared")) return l;
+            if (std.mem.eql(u8, mode, "carry")) return try st.book.addFrom(name, limits, l);
+            break;
+        };
+    }
+    return try st.book.add(name, limits);
+}
+
 /// Decides whether a model request leaves, before a byte of it does.
 fn beginCall(st: *State, comp: usize, conn: u32, format: usage.Format, path: []const u8, head: []const u8, body: []const u8, msg_buf: []u8) !Begin {
-    const which = st.covers[comp][0..st.covers_len[comp]];
     var req = spend.readRequest(gpa, format, path, body) catch {
         record("\"conn\":{d},\"kind\":\"unreadable-request\"", .{conn});
         if (st.budgeted[comp]) return .{ .refuse = "Silo: this model request cannot be read, and a budget covers this computer." };
@@ -267,6 +355,14 @@ fn beginCall(st: *State, comp: usize, conn: u32, format: usage.Format, path: []c
         req.deinit(gpa);
         return .{ .refuse = m };
     }
+    // A stream that will end with no count, under a budget.
+    if (format == .chat and req.stream and !req.include_usage and st.budgeted[comp] and std.mem.eql(u8, st.cfg.chat_without_usage, "deny")) {
+        record("\"conn\":{d},\"kind\":\"refused\",\"why\":\"no-usage\",\"model\":{f}", .{ conn, j(req.model) });
+        req.deinit(gpa);
+        return .{ .refuse = "Silo: a budget covers this computer, and this stream does not ask for its usage, so Silo could not count it. Set stream_options.include_usage to true." };
+    }
+    // Work that would run on at the provider with nothing for the boundary to see.
+    const out_of_sight = req.background and std.mem.eql(u8, st.cfg.out_of_sight, "hold");
     // The credential's kind and the plan account it names, if any.
     var kind: []const u8 = "unknown";
     var account: ?[]const u8 = null;
@@ -277,9 +373,11 @@ fn beginCall(st: *State, comp: usize, conn: u32, format: usage.Format, path: []c
         };
     }
     // The input, estimated before it leaves: from the conversation's last reply when there is
-    // one, else from the body's size.
+    // one, from the context the provider keeps for an id the request names, else from the body's
+    // size. `cached` is the part of it the last reply's prompt cache held, while it lives.
     var est: i64 = 0;
     var continued: i64 = 0;
+    var cached: i64 = 0;
     var from: []const u8 = "cold";
     {
         st.memory_mu.lock();
@@ -293,8 +391,21 @@ fn beginCall(st: *State, comp: usize, conn: u32, format: usage.Format, path: []c
             const grown: f64 = @floatFromInt(@as(i64, @intCast(req.body_len)) - @as(i64, @intCast(m.bytes)));
             est = m.tokens + @as(i64, @intFromFloat(@max(0, grown) / bpt));
             continued = m.tokens;
+            cached = @min(m.cached, m.tokens);
+            const ttl = m.ttl_s * st.cfg.provider_time_scale;
+            if (st.cfg.cache_ttl_aware and now_s() - m.t > ttl) cached = 0;
             from = "conversation";
             break;
+        }
+        if (std.mem.eql(u8, from, "cold")) {
+            const key: ?[]const u8 = req.previous_response_id orelse req.conversation;
+            if (key) |kk| if (st.stored.get(kk)) |tokens| {
+                // The provider bills the stored context again as input (OpenAI's guide to
+                // conversation state), and the request sends only what is new.
+                est = tokens + @as(i64, @intFromFloat(@as(f64, @floatFromInt(req.body_len)) / st.cfg.cold_bytes_per_token));
+                continued = tokens;
+                from = if (req.previous_response_id != null) "previous_response" else "conversation_id";
+            };
         }
     }
     if (std.mem.eql(u8, from, "cold")) est = @intFromFloat(@as(f64, @floatFromInt(req.body_len)) / st.cfg.cold_bytes_per_token);
@@ -308,19 +419,32 @@ fn beginCall(st: *State, comp: usize, conn: u32, format: usage.Format, path: []c
     if (row) |r| {
         input_cost = @as(f64, @floatFromInt(est)) * prices.dearestInput(r, est) / 1e6;
         if (std.mem.eql(u8, st.cfg.input_price, "likely") and continued > 0) {
-            const fresh = est - continued;
-            input_cost = (@as(f64, @floatFromInt(continued)) * r.cache_read + @as(f64, @floatFromInt(fresh)) * prices.dearestInput(r, est)) / 1e6;
+            // The part the cache holds at the read rate; the rest, and a cache that is gone, at
+            // the dearest. Without `cache_ttl_aware` every continued token is taken as cached.
+            const in_cache = if (st.cfg.cache_ttl_aware) cached else continued;
+            const fresh = est - in_cache;
+            input_cost = (@as(f64, @floatFromInt(in_cache)) * r.cache_read + @as(f64, @floatFromInt(fresh)) * prices.dearestInput(r, est)) / 1e6;
         }
-        const out_held: i64 = if (st.book.policy == .reserve_typical) @min(req.max_tokens, typicalOutput(st, req.model)) else req.max_tokens;
-        reserve = input_cost + @as(f64, @floatFromInt(out_held)) * prices.outputRate(r, est) / 1e6;
+        const out_held: i64 = if (st.book.policy == .reserve_typical and !out_of_sight) @min(req.max_tokens, typicalOutput(st, req.model)) else req.max_tokens;
+        reserve = input_cost + @as(f64, @floatFromInt(out_held * req.n)) * prices.outputRate(r, est) / 1e6;
     }
-    if (st.book.admit(which, input_cost, reserve, account, now_s())) |r| {
-        record("\"conn\":{d},\"kind\":\"refused\",\"why\":\"{s}\",\"ledger\":{f},\"limit\":{d:.4},\"counted\":{d:.4},\"input_cost\":{d:.4},\"est_tokens\":{d},\"model\":{f}", .{ conn, @tagName(r.why), j(r.ledger), r.limit, r.counted, input_cost, est, j(req.model) });
+    // The ledgers it counts in: its computer's, and its conversation's.
+    const covers = st.covers[comp];
+    const conv = try conversationOf(st, comp, &req);
+    const which = try gpa.alloc(usize, covers.len + @as(usize, if (conv != null) 1 else 0));
+    errdefer gpa.free(which);
+    @memcpy(which[0..covers.len], covers);
+    if (conv) |cv| which[covers.len] = cv;
+    const refused = if (out_of_sight) st.book.admitWhole(which, reserve) else st.book.admit(which, input_cost, reserve, account, now_s());
+    if (refused) |r| {
+        record("\"conn\":{d},\"kind\":\"refused\",\"why\":\"{s}\",\"ledger\":{f},\"limit\":{d:.4},\"counted\":{d:.4},\"input_cost\":{d:.4},\"est_tokens\":{d},\"model\":{f},\"background\":{}", .{ conn, @tagName(r.why), j(r.ledger), r.limit, r.counted, input_cost, est, j(req.model), req.background });
         req.deinit(gpa);
+        gpa.free(which);
         if (r.why == .rate and std.mem.eql(u8, st.cfg.rate_refusal, "429")) {
             const secs: u64 = if (r.passes_again_at) |t| @intFromFloat(@ceil(@max(1, t - now_s()))) else 60;
             return .{ .wait = .{ .msg = refusalMessage(r, msg_buf), .secs = secs } };
         }
+        if (out_of_sight) return .{ .refuse = std.fmt.bufPrint(msg_buf, "Silo: this background response may cost up to ${d:.2}, which it holds until it ends, and {s} has ${d:.2} left of ${d:.2}. Raise the budget in the Silo app to go on.", .{ r.needed, ledgerWho(r.ledger), @max(0, r.limit - r.counted), r.limit }) catch "Silo: the background response does not fit in the budget." };
         return .{ .refuse = refusalMessage(r, msg_buf) };
     }
     const call = try gpa.create(Call);
@@ -329,6 +453,7 @@ fn beginCall(st: *State, comp: usize, conn: u32, format: usage.Format, path: []c
         .conn = conn,
         .computer = comp,
         .which = which,
+        .conv = conv,
         .format = format,
         .req = req,
         .row = row,
@@ -343,6 +468,7 @@ fn beginCall(st: *State, comp: usize, conn: u32, format: usage.Format, path: []c
     };
     if (format == .gemini) call.meter.setModel(req.model);
     try st.book.start(which, call.id, reserve);
+    if (out_of_sight) st.book.progress(which, call.id, reserve);
     {
         st.live_mu.lock();
         defer st.live_mu.unlock();
@@ -351,7 +477,23 @@ fn beginCall(st: *State, comp: usize, conn: u32, format: usage.Format, path: []c
     return .{ .call = call };
 }
 
-/// The call ended, whole or not: settle it on the provider's count, or on an estimate.
+fn ledgerWho(name: []const u8) []const u8 {
+    if (std.mem.startsWith(u8, name, "person:")) return name[7..];
+    if (std.mem.startsWith(u8, name, "conversation:")) return "this conversation";
+    return "this computer";
+}
+
+/// The cost of a meter's counts at the call's own model and tier.
+fn costOfMeter(st: *State, call: *Call) struct { cost: f64, priced: bool } {
+    var day_buf: [10]u8 = undefined;
+    const day = prices.today(&day_buf);
+    if (spend.costOf(&st.table, spend.providerKey(call.format), &call.meter, day)) |v| return .{ .cost = v, .priced = true };
+    if (call.row) |r| return .{ .cost = prices.cost(r, call.meter.billed()), .priced = false };
+    return .{ .cost = 0, .priced = false };
+}
+
+/// The call ended, whole or not: settle it on the provider's count, or on an estimate. A
+/// background response that goes on at the provider is held instead, until it is fetched.
 fn endCall(st: *State, call: *Call, how: []const u8) void {
     if (call.settled) return;
     call.settled = true;
@@ -364,9 +506,25 @@ fn endCall(st: *State, call: *Call, how: []const u8) void {
         };
     }
     if (call.body.items.len > 0) call.meter.onBody(call.body.items) catch {};
-    var day_buf: [10]u8 = undefined;
-    const day = prices.today(&day_buf);
-    const provider = spend.providerKey(call.format);
+    if (call.meter.pending() and std.mem.eql(u8, st.cfg.out_of_sight, "hold")) if (call.meter.resp_id) |rid| {
+        holdCall(st, call, rid) catch {};
+        return;
+    };
+    settleCall(st, call, how, null);
+}
+
+fn holdCall(st: *State, call: *Call, rid: []const u8) !void {
+    const h = try gpa.create(Held);
+    h.* = .{ .id = call.id, .key = try gpa.dupe(u8, rid), .which = try gpa.dupe(usize, call.which), .computer = call.computer, .kind = "background", .provider = "openai", .model = try gpa.dupe(u8, call.req.model), .bound = call.reserve, .t0 = now_s(), .call = call };
+    call.kept = true;
+    st.book.progress(call.which, call.id, call.reserve);
+    st.held_mu.lock();
+    defer st.held_mu.unlock();
+    try st.held.put(gpa, h.key, h);
+    record("\"conn\":{d},\"kind\":\"held\",\"id\":{f},\"what\":\"background\",\"computer\":{f},\"bound\":{d:.6}", .{ call.conn, j(rid), j(st.cfg.computers[call.computer].name), call.reserve });
+}
+
+fn settleCall(st: *State, call: *Call, how: []const u8, provider_id: ?[]const u8) void {
     var cost: f64 = 0;
     var estimated = false;
     var priced = true;
@@ -375,16 +533,20 @@ fn endCall(st: *State, call: *Call, how: []const u8) void {
         // An error reply: nothing generated, nothing billed.
         cost = 0;
     } else if (call.meter.final) {
-        if (spend.costOf(&st.table, provider, &call.meter, day)) |v| cost = v else {
-            priced = false;
-            if (call.row) |r| cost = prices.cost(r, billed);
-        }
+        const v = costOfMeter(st, call);
+        cost = v.cost;
+        priced = v.priced;
     } else if (call.row) |r| {
-        // No final count: the input as counted or estimated, and the visible output, at four
-        // characters a token. Hidden reasoning is missed: this is a floor.
+        // No final count: the input as counted or estimated, and the output: the visible part at
+        // four characters a token, or with `output_tps` the time it ran at the model's speed,
+        // which takes in hidden reasoning. Either is an estimate.
         var c2 = call.meter.counts;
         if (!call.meter.input_known) c2 = .{ .input = call.est_tokens };
         c2.output = @max(c2.output, @as(i64, @intCast(call.meter.visible_chars / 4)));
+        if (st.cfg.output_tps > 0) {
+            const by_time: i64 = @intFromFloat((now_ms() - call.t0) / 1000 * st.cfg.output_tps * @as(f64, @floatFromInt(call.req.n)));
+            c2.output = @max(c2.output, @min(by_time, call.req.max_tokens * call.req.n));
+        }
         cost = prices.cost(r, c2);
         estimated = true;
     }
@@ -397,21 +559,350 @@ fn endCall(st: *State, call: *Call, how: []const u8) void {
         st.memory_mu.lock();
         defer st.memory_mu.unlock();
         if (st.memory.count() > 1 << 16) st.memory.clearRetainingCapacity();
-        st.memory.put(gpa, call.req.whole(), .{ .bytes = call.req.body_len, .tokens = context }) catch {};
+        const top = call.meter.counts;
+        const ttl: f64 = switch (call.format) {
+            .anthropic => if (top.cache_write_long > 0) 3600 else 300,
+            .responses, .chat => st.cfg.openai_cache_ttl_s,
+            .gemini => 300,
+        };
+        st.memory.put(gpa, call.req.whole(), .{ .bytes = call.req.body_len, .tokens = context, .cached = top.cache_read + top.cache_write_short + top.cache_write_long, .t = now_s(), .ttl_s = ttl }) catch {};
+        if (call.conv) |cv| st.convs[call.computer].put(gpa, call.req.whole(), cv) catch {};
+        // What the provider keeps for this response, and for its conversation: this turn's input
+        // and its output. Reasoning is left out, which may make the next estimate short.
+        if (call.format == .responses) {
+            const kept: i64 = context + billed.output - billed.reasoning;
+            if (call.meter.resp_id) |rid| putStored(st, rid, kept);
+            if (call.req.conversation) |cid| putStored(st, cid, kept);
+        }
     }
-    const l0 = &st.book.ledgers.items[call.which[0]];
-    const lp: ?*budget.Ledger = if (call.which.len > 1) &st.book.ledgers.items[call.which[1]] else null;
-    record("\"conn\":{d},\"kind\":\"call\",\"call\":{d},\"computer\":{f},\"format\":\"{s}\",\"model\":{f},\"reply_model\":{f},\"tier\":{f},\"credential\":{f},\"status\":{d},\"end\":{f},\"final\":{},\"estimated\":{},\"priced\":{},\"est_tokens\":{d},\"context\":{d},\"est_from\":\"{s}\",\"input_cost_bound\":{d:.6},\"reserve\":{d:.6},\"input\":{d},\"cache_read\":{d},\"cache_write_short\":{d},\"cache_write_long\":{d},\"output\":{d},\"reasoning\":{d},\"parts\":{d},\"visible_chars\":{d},\"cost\":{d:.6},\"max_tokens\":{d},\"ms\":{d:.1}", .{
-            call.conn,                          call.id,                         j(st.cfg.computers[call.computer].name), @tagName(call.format), j(call.req.model),
-            j(call.meter.model orelse ""),      j(call.meter.tier orelse call.req.tier), j(call.cred_kind),             call.status,          j(how),
-            call.meter.final,                   estimated,                       priced,                                  call.est_tokens,      context,              call.est_from,
-            call.input_cost,                    call.reserve,                    billed.input,                            billed.cache_read,    billed.cache_write_short,
-            billed.cache_write_long,            billed.output,                   billed.reasoning,                        call.meter.parts.items.len, call.meter.visible_chars,
-            cost,                               call.req.max_tokens,             now_ms() - call.t0,
-        });
-    record("\"conn\":{d},\"kind\":\"ledgers\",\"call\":{d},\"computer_spent\":{d:.6},\"person_spent\":{d:.6},\"plan_5h_moved\":{d:.4},\"plan_7d_moved\":{d:.4}", .{ call.conn, call.id, l0.settled, if (lp) |p| p.settled else 0, l0.plan_5h_moved, l0.plan_7d_moved });
-    if (s.alert) |n| record("\"kind\":\"alert\",\"ledger\":{f},\"spent\":{d:.4}", .{ j(n), l0.settled });
+    const conv_name: []const u8 = if (call.conv) |cv| st.book.spent(cv).name else "";
+    var tail_buf: [512]u8 = undefined;
+    const tail = std.fmt.bufPrint(&tail_buf, "\"web_searches\":{d},\"n\":{d},\"conversation\":{f},\"provider_id\":{f},\"cut\":{}", .{ billed.web_searches, call.req.n, j(conv_name), j(provider_id orelse ""), call.cut }) catch "\"tail\":null";
+    record("\"conn\":{d},\"kind\":\"call\",\"call\":{d},\"computer\":{f},\"format\":\"{s}\",\"model\":{f},\"reply_model\":{f},\"tier\":{f},\"credential\":{f},\"status\":{d},\"end\":{f},\"final\":{},\"estimated\":{},\"priced\":{},\"est_tokens\":{d},\"context\":{d},\"est_from\":\"{s}\",\"input_cost_bound\":{d:.6},\"reserve\":{d:.6},\"input\":{d},\"cache_read\":{d},\"cache_write_short\":{d},\"cache_write_long\":{d},\"output\":{d},\"reasoning\":{d},\"parts\":{d},\"visible_chars\":{d},\"cost\":{d:.6},\"max_tokens\":{d},\"ms\":{d:.1},{s}", .{
+        call.conn,                          call.id,                         j(st.cfg.computers[call.computer].name), @tagName(call.format), j(call.req.model),
+        j(call.meter.model orelse ""),      j(call.meter.tier orelse call.req.tier), j(call.cred_kind),             call.status,          j(how),
+        call.meter.final,                   estimated,                       priced,                                  call.est_tokens,      context,              call.est_from,
+        call.input_cost,                    call.reserve,                    billed.input,                            billed.cache_read,    billed.cache_write_short,
+        billed.cache_write_long,            billed.output,                   billed.reasoning,                        call.meter.parts.items.len,
+        call.meter.visible_chars,           cost,                            call.req.max_tokens,                     now_ms() - call.t0,
+        tail,
+    });
+    recordLedgers(st, call.conn, call.id, call.which, call.computer);
+    if (s.alert) |n| record("\"kind\":\"alert\",\"ledger\":{f}", .{j(n)});
     if (s.reached) |n| record("\"kind\":\"reached\",\"ledger\":{f}", .{j(n)});
+}
+
+fn putStored(st: *State, key: []const u8, tokens: i64) void {
+    const gop = st.stored.getOrPut(gpa, key) catch return;
+    if (!gop.found_existing) gop.key_ptr.* = gpa.dupe(u8, key) catch {
+        _ = st.stored.remove(key);
+        return;
+    };
+    gop.value_ptr.* = tokens;
+}
+
+/// What each ledger of a call has spent, after it settled. `root_spent` is the computer's own
+/// ledger, or its parent's for a fork that spends from it.
+fn recordLedgers(st: *State, conn: u32, id: u64, which: []const usize, comp: usize) void {
+    const own = st.book.spent(which[0]);
+    const root = st.book.spent(st.covers[st.parent[comp] orelse comp][0]);
+    const person: f64 = if (st.cfg.computers[comp].person != null and which.len > 1) st.book.spent(which[1]).settled else 0;
+    record("\"conn\":{d},\"kind\":\"ledgers\",\"call\":{d},\"computer_spent\":{d:.6},\"person_spent\":{d:.6},\"parent_spent\":{d:.6}", .{ conn, id, own.settled, person, root.settled });
+}
+
+/// A held background response was fetched: settle it if it ended.
+fn fetchedResponse(st: *State, rid: []const u8, body: []const u8) void {
+    st.held_mu.lock();
+    const h = st.held.get(rid) orelse {
+        st.held_mu.unlock();
+        return;
+    };
+    const call = h.call orelse {
+        st.held_mu.unlock();
+        return;
+    };
+    var m = usage.Meter.init(gpa, .responses);
+    m.onBody(body) catch {};
+    if (!m.final) {
+        m.deinit();
+        st.held_mu.unlock();
+        return;
+    }
+    _ = st.held.remove(rid);
+    st.held_mu.unlock();
+    call.meter.deinit();
+    call.meter = m;
+    call.status = 200;
+    settleCall(st, call, if (std.mem.eql(u8, m.status orelse "", "completed")) "fetched" else "fetched-ended", rid);
+    freeHeld(h);
+}
+
+fn freeHeld(h: *Held) void {
+    if (h.call) |cl| {
+        cl.deinit();
+        gpa.destroy(cl);
+    }
+    gpa.free(h.key);
+    gpa.free(h.which);
+    gpa.free(h.model);
+    gpa.destroy(h);
+}
+
+/// Starts holding work at the provider: a batch or a cache.
+fn holdWork(st: *State, comp: usize, conn: u32, key: []const u8, what: []const u8, provider: []const u8, model: []const u8, bound: f64, tokens: i64, per_token_hour: f64, ttl_s: f64) !void {
+    const covers = st.covers[comp];
+    const h = try gpa.create(Held);
+    h.* = .{ .id = st.next_call.fetchAdd(1, .monotonic), .key = try gpa.dupe(u8, key), .which = try gpa.dupe(usize, covers), .computer = comp, .kind = what, .provider = provider, .model = try gpa.dupe(u8, model), .bound = bound, .t0 = now_s(), .tokens = tokens, .per_token_hour = per_token_hour, .ttl_s = ttl_s };
+    try st.book.start(h.which, h.id, bound);
+    st.book.progress(h.which, h.id, bound);
+    st.held_mu.lock();
+    defer st.held_mu.unlock();
+    try st.held.put(gpa, h.key, h);
+    record("\"conn\":{d},\"kind\":\"held\",\"id\":{f},\"what\":\"{s}\",\"computer\":{f},\"bound\":{d:.6}", .{ conn, j(key), what, j(st.cfg.computers[comp].name), bound });
+}
+
+/// Ends holding work: settles it at what it cost.
+fn settleWork(st: *State, key: []const u8, cost: f64, how: []const u8) void {
+    st.held_mu.lock();
+    const kv = st.held.fetchRemove(key) orelse {
+        st.held_mu.unlock();
+        return;
+    };
+    st.held_mu.unlock();
+    const h = kv.value;
+    _ = st.book.settle(h.which, h.id, cost, false, now_s()) catch {};
+    record("\"kind\":\"call\",\"call\":{d},\"computer\":{f},\"format\":\"{s}\",\"model\":{f},\"end\":{f},\"final\":true,\"estimated\":false,\"est_from\":\"held\",\"est_tokens\":0,\"input\":0,\"cache_read\":0,\"cache_write_short\":0,\"cache_write_long\":0,\"output\":0,\"cost\":{d:.6},\"bound\":{d:.6},\"ms\":{d:.1},\"provider_id\":{f},\"held_id\":{f}", .{ h.id, j(st.cfg.computers[h.computer].name), h.kind, j(h.model), j(how), cost, h.bound, (now_s() - h.t0) * 1000, j(h.key), j(h.key) });
+    recordLedgers(st, 0, h.id, h.which, h.computer);
+    freeHeld(h);
+}
+
+/// A cache's storage up to now, or to its end, in dollars.
+fn storageCost(st: *State, h: *const Held, until: f64) f64 {
+    const hours = @min(until - h.t0, h.ttl_s * st.cfg.provider_time_scale) / st.cfg.provider_time_scale / 3600;
+    return @as(f64, @floatFromInt(h.tokens)) * hours * h.per_token_hour / 1e6;
+}
+
+// ---- work out of sight: batches, background responses, cache storage ----
+
+fn holdsWork(st: *State) bool {
+    return std.mem.eql(u8, st.cfg.out_of_sight, "hold");
+}
+
+fn jsonField(gpa_: std.mem.Allocator, body: []const u8, path: []const []const u8) ?std.json.Parsed(std.json.Value) {
+    _ = path;
+    return std.json.parseFromSlice(std.json.Value, gpa_, body, .{}) catch null;
+}
+
+fn strAt(v: std.json.Value, a: []const u8, b: ?[]const u8) ?[]const u8 {
+    if (v != .object) return null;
+    if (b) |bb| {
+        const o = usage.obj(v.object.get(a)) orelse return null;
+        return usage.str(o.get(bb));
+    }
+    return usage.str(v.object.get(a));
+}
+
+/// Before work out of sight leaves: it may start only if its whole bound fits. Returns the
+/// refusal, or null to let it go.
+fn admitWork(st: *State, comp: usize, conn: u32, kind: outside.Kind, path: []const u8, head: []const u8, body: []const u8, msg_buf: []u8) ?[]const u8 {
+    _ = head;
+    if (!holdsWork(st) or !st.budgeted[comp]) return null;
+    var day_buf: [10]u8 = undefined;
+    const day = prices.today(&day_buf);
+    const which = st.covers[comp];
+    var bound: f64 = 0;
+    var what: []const u8 = "";
+    var requests: u32 = 0;
+    switch (kind) {
+        .openai_batch_create, .anthropic_batch_create => {
+            var b: outside.Bound = .{};
+            if (kind == .openai_batch_create) {
+                var p = jsonField(gpa, body, &.{}) orelse return "Silo: this batch request cannot be read, and a budget covers this computer.";
+                defer p.deinit();
+                const fid = strAt(p.value, "input_file_id", null) orelse "";
+                st.held_mu.lock();
+                const known = st.batch_files.get(fid);
+                st.held_mu.unlock();
+                b = known orelse {
+                    record("\"conn\":{d},\"kind\":\"refused\",\"why\":\"batch-file-unseen\",\"file\":{f}", .{ conn, j(fid) });
+                    return "Silo: this batch's input file was not uploaded through Silo, so Silo cannot count what the batch will cost, and a budget covers this computer.";
+                };
+            } else b = outside.boundOfAnthropicBatch(&st.table, body, day, st.cfg.cold_bytes_per_token);
+            if (b.unpriced > 0) {
+                record("\"conn\":{d},\"kind\":\"refused\",\"why\":\"batch-no-price\",\"unpriced\":{d}", .{ conn, b.unpriced });
+                return "Silo: some requests of this batch use a model with no batch price yet, and a budget covers this computer, so the batch cannot be counted.";
+            }
+            bound = b.bound;
+            requests = b.requests;
+            what = "batch";
+        },
+        .gemini_cache_create => {
+            var p = jsonField(gpa, body, &.{}) orelse return null;
+            defer p.deinit();
+            const model_full = strAt(p.value, "model", null) orelse "";
+            const model = if (std.mem.lastIndexOfScalar(u8, model_full, '/')) |i| model_full[i + 1 ..] else model_full;
+            const r = st.table.find("google", model, "standard", day);
+            const rate = if (r) |rr| rr.cache_storage_per_hour else 0;
+            if (rate == 0) return "Silo: there is no storage price for this model's cache yet, and a budget covers this computer, so the cache cannot be counted.";
+            const tokens = @as(f64, @floatFromInt(body.len)) / st.cfg.cold_bytes_per_token;
+            bound = tokens * outside.ttlSeconds(strAt(p.value, "ttl", null)) / 3600 * rate / 1e6;
+            what = "cache";
+        },
+        .gemini_cache_patch => {
+            var p = jsonField(gpa, body, &.{}) orelse return null;
+            defer p.deinit();
+            var kb: [256]u8 = undefined;
+            const key = std.fmt.bufPrint(&kb, "cachedContents/{s}", .{outside.pathPart(path, 2) orelse ""}) catch return null;
+            st.held_mu.lock();
+            const h = st.held.get(key);
+            st.held_mu.unlock();
+            const hh = h orelse return null;
+            const elapsed = (now_s() - hh.t0) / st.cfg.provider_time_scale;
+            const new_ttl = elapsed + outside.ttlSeconds(strAt(p.value, "ttl", null));
+            bound = @as(f64, @floatFromInt(hh.tokens)) * @max(0, new_ttl - hh.ttl_s) / 3600 * hh.per_token_hour / 1e6;
+            what = "cache";
+        },
+        else => return null,
+    }
+    if (st.book.admitWhole(which, bound)) |r| {
+        record("\"conn\":{d},\"kind\":\"refused\",\"why\":\"out-of-sight\",\"what\":\"{s}\",\"bound\":{d:.6},\"ledger\":{f},\"counted\":{d:.6}", .{ conn, what, bound, j(r.ledger), r.counted });
+        const left = @max(0, r.limit - r.counted);
+        if (std.mem.eql(u8, what, "batch")) return std.fmt.bufPrint(msg_buf, "Silo: this batch of {d} requests may cost up to ${d:.2}, which it holds until its results are read, and {s} has ${d:.2} left of ${d:.2}. Raise the budget in the Silo app to go on.", .{ requests, bound, ledgerWho(r.ledger), left, r.limit }) catch "Silo: the batch does not fit in the budget.";
+        return std.fmt.bufPrint(msg_buf, "Silo: keeping this cache for its lifetime may cost up to ${d:.2}, and {s} has ${d:.2} left of ${d:.2}. Raise the budget in the Silo app, or ask for a shorter ttl.", .{ bound, ledgerWho(r.ledger), left, r.limit }) catch "Silo: the cache does not fit in the budget.";
+    }
+    return null;
+}
+
+/// After work out of sight was answered: hold it, follow it, or settle it.
+fn workReply(st: *State, comp: usize, conn: u32, kind: outside.Kind, path: []const u8, head: []const u8, body: []const u8, status: u16, reply: []const u8) void {
+    if (!holdsWork(st) or status != 200) return;
+    var day_buf: [10]u8 = undefined;
+    const day = prices.today(&day_buf);
+    var p = jsonField(gpa, reply, &.{});
+    defer if (p) |*pp| pp.deinit();
+    const rv: std.json.Value = if (p) |pp| pp.value else .null;
+    switch (kind) {
+        .openai_file_upload => {
+            const ct = spend.header(head, "content-type") orelse return;
+            const file = outside.batchFile(body, ct) orelse return;
+            const b = outside.boundOfOpenAIFile(&st.table, file, day, st.cfg.cold_bytes_per_token);
+            const id = strAt(rv, "id", null) orelse return;
+            st.held_mu.lock();
+            defer st.held_mu.unlock();
+            st.batch_files.put(gpa, gpa.dupe(u8, id) catch return, b) catch {};
+            record("\"conn\":{d},\"kind\":\"batch-file\",\"id\":{f},\"requests\":{d},\"bound\":{d:.6},\"unpriced\":{d}", .{ conn, j(id), b.requests, b.bound, b.unpriced });
+        },
+        .openai_batch_create, .anthropic_batch_create => {
+            const id = strAt(rv, "id", null) orelse return;
+            var b: outside.Bound = .{};
+            if (kind == .openai_batch_create) {
+                var q = jsonField(gpa, body, &.{}) orelse return;
+                defer q.deinit();
+                st.held_mu.lock();
+                b = st.batch_files.get(strAt(q.value, "input_file_id", null) orelse "") orelse outside.Bound{};
+                st.held_mu.unlock();
+            } else b = outside.boundOfAnthropicBatch(&st.table, body, day, st.cfg.cold_bytes_per_token);
+            holdWork(st, comp, conn, id, "batch", if (kind == .openai_batch_create) "openai" else "anthropic", "", b.bound, 0, 0, 0) catch {};
+        },
+        .openai_batch_get => {
+            const id = strAt(rv, "id", null) orelse return;
+            const ofid = strAt(rv, "output_file_id", null) orelse return;
+            st.held_mu.lock();
+            defer st.held_mu.unlock();
+            if (st.held.get(id) == null or st.result_files.get(ofid) != null) return;
+            st.result_files.put(gpa, gpa.dupe(u8, ofid) catch return, gpa.dupe(u8, id) catch return) catch {};
+        },
+        .openai_file_content, .anthropic_batch_results => {
+            var bid: []const u8 = undefined;
+            if (kind == .openai_file_content) {
+                st.held_mu.lock();
+                const b = st.result_files.get(outside.pathPart(path, 2) orelse "");
+                st.held_mu.unlock();
+                bid = b orelse return;
+            } else bid = outside.pathPart(path, 3) orelse return;
+            const s = outside.costOfResults(gpa, &st.table, if (kind == .openai_file_content) "openai" else "anthropic", reply, day);
+            record("\"conn\":{d},\"kind\":\"batch-results\",\"id\":{f},\"lines\":{d},\"unpriced\":{d},\"cost\":{d:.6}", .{ conn, j(bid), s.lines, s.unpriced, s.cost });
+            settleWork(st, bid, s.cost, "results-read");
+        },
+        .response_get, .response_cancel => fetchedResponse(st, outside.pathPart(path, 2) orelse return, reply),
+        .gemini_cache_create => {
+            const name = strAt(rv, "name", null) orelse return;
+            const tokens = if (rv == .object) usage.int((usage.obj(rv.object.get("usageMetadata")) orelse return).get("totalTokenCount")) orelse 0 else 0;
+            var q = jsonField(gpa, body, &.{}) orelse return;
+            defer q.deinit();
+            const model_full = strAt(q.value, "model", null) orelse "";
+            const model = if (std.mem.lastIndexOfScalar(u8, model_full, '/')) |i| model_full[i + 1 ..] else model_full;
+            const rate = if (st.table.find("google", model, "standard", day)) |r| r.cache_storage_per_hour else 0;
+            const ttl = outside.ttlSeconds(strAt(q.value, "ttl", null));
+            holdWork(st, comp, conn, name, "cache-storage", "google", model, @as(f64, @floatFromInt(tokens)) * ttl / 3600 * rate / 1e6, tokens, rate, ttl) catch {};
+        },
+        .gemini_cache_patch => {
+            var kb: [256]u8 = undefined;
+            const key = std.fmt.bufPrint(&kb, "cachedContents/{s}", .{outside.pathPart(path, 2) orelse ""}) catch return;
+            var q = jsonField(gpa, body, &.{}) orelse return;
+            defer q.deinit();
+            st.held_mu.lock();
+            defer st.held_mu.unlock();
+            const h = st.held.get(key) orelse return;
+            h.ttl_s = (now_s() - h.t0) / st.cfg.provider_time_scale + outside.ttlSeconds(strAt(q.value, "ttl", null));
+            h.bound = @as(f64, @floatFromInt(h.tokens)) * h.ttl_s / 3600 * h.per_token_hour / 1e6;
+            st.book.progress(h.which, h.id, h.bound);
+            record("\"conn\":{d},\"kind\":\"held\",\"id\":{f},\"what\":\"cache-storage\",\"bound\":{d:.6},\"extended\":true", .{ conn, j(key), h.bound });
+        },
+        .gemini_cache_delete => {
+            var kb: [256]u8 = undefined;
+            const key = std.fmt.bufPrint(&kb, "cachedContents/{s}", .{outside.pathPart(path, 2) orelse ""}) catch return;
+            st.held_mu.lock();
+            const h = st.held.get(key);
+            st.held_mu.unlock();
+            const hh = h orelse return;
+            settleWork(st, key, storageCost(st, hh, now_s()), "deleted");
+        },
+        .none => {},
+    }
+}
+
+/// Every 50 ms: settles caches whose lifetime ended, and with `mid_stream` "cut", ends each call
+/// under way that a total it counts in has passed.
+fn watchdog() void {
+    const st = state orelse return;
+    while (true) {
+        std.Thread.sleep(50 * std.time.ns_per_ms);
+        var expired: std.ArrayList([]u8) = .empty;
+        defer expired.deinit(gpa);
+        {
+            st.held_mu.lock();
+            defer st.held_mu.unlock();
+            var it = st.held.valueIterator();
+            while (it.next()) |h| if (std.mem.eql(u8, h.*.kind, "cache-storage") and now_s() - h.*.t0 >= h.*.ttl_s * st.cfg.provider_time_scale) {
+                expired.append(gpa, gpa.dupe(u8, h.*.key) catch continue) catch {};
+            };
+        }
+        for (expired.items) |k| {
+            st.held_mu.lock();
+            const h = st.held.get(k);
+            st.held_mu.unlock();
+            if (h) |hh| settleWork(st, k, storageCost(st, hh, now_s()), "expired");
+            gpa.free(k);
+        }
+        if (!std.mem.eql(u8, st.cfg.mid_stream, "cut")) continue;
+        st.live_mu.lock();
+        defer st.live_mu.unlock();
+        for (st.live.items) |cl| cl.refresh();
+        for (st.live.items) |cl| {
+            if (cl.cut or cl.up_fd < 0 or cl.req.background) continue;
+            for (cl.which) |i| {
+                const sp = st.book.spent(i);
+                const total = sp.total orelse continue;
+                if (sp.counted >= st.cfg.cut_share * total) {
+                    cl.cut = true;
+                    record("\"kind\":\"cutting\",\"call\":{d},\"ledger\":{f},\"counted\":{d:.6}", .{ cl.id, j(sp.name), sp.counted });
+                    posix.shutdown(cl.up_fd, .both) catch {};
+                    break;
+                }
+            }
+        }
+    }
 }
 
 // ---- the probe ----
@@ -694,6 +1185,12 @@ const RespCtx = struct {
     held_ms_total: f64 = 0,
     messages: u32 = 0,
     call: ?*Call = null,
+    /// A reply the boundary reads whole after it passed: the result of work out of sight.
+    capture: bool = false,
+    captured: std.ArrayList(u8) = .empty,
+    /// The raw bytes of a captured reply, passed on unchanged once the boundary has read it, so
+    /// that the program's next request finds the work already followed.
+    later: std.ArrayList(u8) = .empty,
 
     /// Each event goes to the tool-call watcher and to the meter.
     pub fn onEvent(self: *RespCtx, ev: stream.Sse.Event) !void {
@@ -714,6 +1211,10 @@ const RespCtx = struct {
             };
         } else if (self.call) |cl| {
             if (cl.body.items.len < 64 << 20) try cl.body.appendSlice(gpa, decoded.items);
+        } else if (self.capture) {
+            try self.captured.appendSlice(gpa, decoded.items);
+            try self.later.appendSlice(gpa, raw);
+            return;
         }
         try self.release(raw, finished);
     }
@@ -987,6 +1488,7 @@ fn handleInner(fd: posix.fd_t, id: u32) !void {
 
         // ---- budgets: before a byte of the request leaves ----
         var call: ?*Call = null;
+        var work: outside.Kind = .none;
         var msg_buf: [512]u8 = undefined;
         var parts = std.mem.splitScalar(u8, req.first, ' ');
         const method = parts.next() orelse "";
@@ -1003,6 +1505,13 @@ fn handleInner(fd: posix.fd_t, id: u32) !void {
                     continue;
                 }
             };
+            if (fmt == null and provider != null) {
+                work = outside.classify(provider.?, method, path);
+                if (work != .none) if (admitWork(st, k, id, work, path, req.raw, rc.body.items, &msg_buf)) |m| {
+                    try writeRefusal(client, defaultFormat(provider), m);
+                    continue;
+                };
+            }
             if (fmt) |f| switch (try beginCall(st, k, id, f, path, req.raw, rc.body.items, &msg_buf)) {
                 .pass => {},
                 .refuse => |m| {
@@ -1020,9 +1529,12 @@ fn handleInner(fd: posix.fd_t, id: u32) !void {
         };
         defer if (call) |cl| {
             endCall(state.?, cl, "connection-ended");
-            cl.deinit();
-            gpa.destroy(cl);
+            if (!cl.kept) {
+                cl.deinit();
+                gpa.destroy(cl);
+            }
         };
+        if (call) |cl| cl.up_fd = up.fd;
 
         // The program answered a call Silo denied: disarm first, and wait for the probe.
         var results = try stream.toolResultIds(gpa, watcherProvider(provider orelse .openai), rc.body.items);
@@ -1057,14 +1569,41 @@ fn handleInner(fd: posix.fd_t, id: u32) !void {
         }
         try client.writeAll(resp.raw);
         if (resp.status == 101) return wsRelay(client, up, watcherProvider(provider orelse .openai), id, &resp, cextra.items, uextra.items);
-        var ctx: RespCtx = .{ .to = client, .provider = watcherProvider(provider orelse .openai), .conn = id, .watcher = stream.Watcher.init(gpa, watcherProvider(provider orelse .openai)), .event_stream = resp.event_stream, .call = call };
+        var ctx: RespCtx = .{ .to = client, .provider = watcherProvider(provider orelse .openai), .conn = id, .watcher = stream.Watcher.init(gpa, watcherProvider(provider orelse .openai)), .event_stream = resp.event_stream, .call = call, .capture = work != .none };
         defer ctx.watcher.deinit();
         defer ctx.sse.deinit(gpa);
         defer ctx.held.deinit(gpa);
+        defer ctx.captured.deinit(gpa);
+        defer ctx.later.deinit(gpa);
         ctx.raw_hash.update(resp.raw);
-        const keep = try pumpBody(up, &resp, &uextra, &ctx);
+        const keep = pumpBody(up, &resp, &uextra, &ctx) catch |e| blk: {
+            if (call) |cl| if (cl.cut) break :blk false;
+            return e;
+        };
         const t_end = now_ms();
+        if (call) |cl| if (cl.cut) {
+            // The budget was reached while this call streamed: the program is told why its answer
+            // stopped, in the provider's own error event, and the connection ends.
+            endCall(state.?, cl, "cut");
+            var mb: [512]u8 = undefined;
+            const spent_now = state.?.book.spent(cl.which[0]);
+            const m = std.fmt.bufPrint(&mb, "Silo: this computer's budget of ${d:.2} was reached while this answer was being written (${d:.2} spent), so it was stopped. Raise the budget in the Silo app to go on.", .{ spent_now.total orelse 0, spent_now.settled }) catch "Silo: the budget was reached during this answer.";
+            const ev = try spend.cutEvent(gpa, cl.format, m);
+            defer gpa.free(ev);
+            if (resp.chunked) {
+                var hb: [32]u8 = undefined;
+                client.writeAll(std.fmt.bufPrint(&hb, "{x}\r\n", .{ev.len}) catch "") catch {};
+                client.writeAll(ev) catch {};
+                client.writeAll("\r\n0\r\n\r\n") catch {};
+            } else client.writeAll(ev) catch {};
+            record("\"conn\":{d},\"kind\":\"cut\",\"call\":{d}", .{ id, cl.id });
+            return;
+        };
         if (call) |cl| endCall(state.?, cl, if (keep) "whole" else "host-closed");
+        if (work != .none) {
+            if (state) |st| if (comp) |k| workReply(st, k, id, work, path, req.raw, rc.body.items, resp.status, ctx.captured.items);
+            try client.writeAll(ctx.later.items);
+        }
         var d: [32]u8 = undefined;
         ctx.raw_hash.final(&d);
         record("\"conn\":{d},\"kind\":\"reply\",\"status\":{d},\"bytes\":{d},\"raw_sha256\":\"{s}\",\"events\":{d},\"tool_calls\":{d},\"model\":{f},\"head_ms\":{d:.2},\"total_ms\":{d:.2},\"holds\":{d},\"held_ms\":{d:.2},\"malformed\":{d}", .{
@@ -1093,6 +1632,7 @@ pub fn main() !void {
     };
     record_fd = try posix.open(cfg.record, .{ .ACCMODE = .WRONLY, .CREAT = true, .APPEND = true }, 0o644);
     if (env("SILO_CONFIG")) |p| state = try loadState(p);
+    if (state != null) (try std.Thread.spawn(.{}, watchdog, .{})).detach();
     if (cfg.probe_ctl) |p| probe_ctl_fd = try posix.open(p, .{ .ACCMODE = .RDWR }, 0);
     if (cfg.probe_ack) |p| probe_ack_fd = try posix.open(p, .{ .ACCMODE = .RDWR, .NONBLOCK = true }, 0);
 

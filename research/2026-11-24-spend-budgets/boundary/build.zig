@@ -12,7 +12,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(exe);
 
     const test_step = b.step("test", "Run the unit tests");
-    inline for (.{ "src/stream.zig", "src/usage.zig", "src/prices.zig", "src/budget.zig" }) |f| {
+    inline for (.{ "src/stream.zig", "src/usage.zig", "src/prices.zig", "src/budget.zig", "src/spend.zig", "src/outside.zig" }) |f| {
         const tm = b.createModule(.{ .root_source_file = b.path(f), .target = target, .optimize = optimize, .link_libc = true });
         tm.linkSystemLibrary("z", .{});
         const t = b.addTest(.{ .root_module = tm });
