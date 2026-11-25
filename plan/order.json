@@ -331,6 +331,7 @@
         "registry-traffic-read",
         "adapters-follow-providers",
         "program-that-cannot-be-read",
+        "program-reports-its-own-spend",
         "what-silo-changes-in-traffic",
         "forwarded-byte-for-byte",
         "anthropic-reads-intermediate",

@@ -17,3 +17,11 @@ The options:
 
 Recommended: what Silo sees, and no more. A few providers carry nearly all model traffic, so reading
 a new provider covers every program that uses it, where a reader of files covers one program.
+
+## The program's own report (25 November 2026)
+
+An agent's part, from `research/2026-11-25-plan-windows`. Claude Code exports, over
+OpenTelemetry, one event per model call with its tokens, model and price, and matched the
+provider's bill call for call on a plan sign-in. That is not reading the program's files: the
+program sends it, in one format other programs share. Whether Silo may count it for traffic it
+passes unread is asked in `program-reports-its-own-spend`.
