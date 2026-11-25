@@ -50,6 +50,8 @@ cases = [
     ("lan-neighbour-udp", lambda: udp(E["NEIGHBOUR"], int(E["UDP_PORT"]))),
     ("lan-neighbour-ping", lambda: ping(E["NEIGHBOUR"])),
     ("host-own-address-ping", lambda: ping(E["HOST_LAN"])),
+    ("public-lan-neighbour-tcp", lambda: tcp(E["PUB_NEIGHBOUR"], int(E["LAN_PORT"]))),
+    ("public-lan-neighbour-ping", lambda: ping(E["PUB_NEIGHBOUR"])),
     ("metadata-tcp", lambda: tcp("169.254.169.254", 80)),
     ("zero-net-tcp", lambda: tcp("0.0.0.1", int(E["LAN_PORT"]))),
     ("internet-tcp", lambda: tcp(E["INTERNET"], int(E["NET_PORT"]))),

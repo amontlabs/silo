@@ -1,0 +1,15 @@
+stock mtu=1500 run=1 up_gbps=1.49 down_gbps=1.14 rtt_p50_us=229 rtt_p99_us=401 conns_per_s=1226 gvproxy_rss_kb=31028
+stock mtu=1500 run=2 up_gbps=1.53 down_gbps=1.13 rtt_p50_us=202 rtt_p99_us=350 conns_per_s=1454 gvproxy_rss_kb=40884
+stock mtu=1500 run=3 up_gbps=1.48 down_gbps=1.14 rtt_p50_us=228 rtt_p99_us=458 conns_per_s=1419 gvproxy_rss_kb=31160
+sealed mtu=1500 run=1 up_gbps=1.47 down_gbps=0.98 rtt_p50_us=266 rtt_p99_us=485 conns_per_s=972 gvproxy_rss_kb=32804
+sealed mtu=1500 run=2 up_gbps=1.53 down_gbps=1.1 rtt_p50_us=200 rtt_p99_us=396 conns_per_s=1385 gvproxy_rss_kb=30716
+sealed mtu=1500 run=3 up_gbps=1.49 down_gbps=1.15 rtt_p50_us=234 rtt_p99_us=392 conns_per_s=1124 gvproxy_rss_kb=30980
+sealed mtu=65520 run=1 up_gbps=4.74 down_gbps=2.91 rtt_p50_us=217 rtt_p99_us=340 conns_per_s=1202 gvproxy_rss_kb=29964
+sealed mtu=65520 run=2 up_gbps=4.14 down_gbps=2.86 rtt_p50_us=173 rtt_p99_us=397 conns_per_s=1548 gvproxy_rss_kb=30148
+sealed mtu=65520 run=3 up_gbps=4.32 down_gbps=3.04 rtt_p50_us=183 rtt_p99_us=327 conns_per_s=1323 gvproxy_rss_kb=30292
+handoff mtu=1500 run=1 up_gbps=1.6 down_gbps=1.29 rtt_p50_us=327 rtt_p99_us=526 conns_per_s=1056 gvproxy_rss_kb=32192
+handoff mtu=1500 run=2 up_gbps=1.4 down_gbps=1.08 rtt_p50_us=298 rtt_p99_us=471 conns_per_s=993 gvproxy_rss_kb=31156
+handoff mtu=1500 run=3 up_gbps=1.25 down_gbps=1.12 rtt_p50_us=346 rtt_p99_us=582 conns_per_s=1046 gvproxy_rss_kb=31108
+handoff mtu=65520 run=1 up_gbps=3.95 down_gbps=3.3 rtt_p50_us=315 rtt_p99_us=500 conns_per_s=1211 gvproxy_rss_kb=30804
+handoff mtu=65520 run=2 up_gbps=4.17 down_gbps=2.77 rtt_p50_us=396 rtt_p99_us=679 conns_per_s=882 gvproxy_rss_kb=30412
+handoff mtu=65520 run=3 up_gbps=3.78 down_gbps=2.8 rtt_p50_us=298 rtt_p99_us=462 conns_per_s=1167 gvproxy_rss_kb=30244
