@@ -1,0 +1,13 @@
+#!/bin/sh
+# A stand-in for macOS's tmutil, for linux/test-46.sh: a "local snapshot" is a hard link of every
+# file under FAKE_TM_DATA, so deleting the files frees nothing until the snapshot is deleted.
+s="$FAKE_TM_DATA/../.snapshots"
+case "$1" in
+  localsnapshot)
+    [ "${FAKE_TM_REFUSE:-0}" = 1 ] && { echo "Failed to create local snapshot" >&2; exit 1; }
+    d="$(date -u +%Y-%m-%d-%H%M%S)"; mkdir -p "$s/$d" && cp -al "$FAKE_TM_DATA/." "$s/$d/" &&
+      echo "Created local snapshot with date: $d" ;;
+  listlocalsnapshots) ls "$s" 2>/dev/null | sed 's/^/com.apple.TimeMachine./' ;;
+  deletelocalsnapshots) rm -rf "${s:?}/$2" ;;
+  *) exit 1 ;;
+esac
