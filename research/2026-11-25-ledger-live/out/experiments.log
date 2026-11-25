@@ -1,0 +1,4 @@
+74 runs
+central 30 ms, typical-cut seed 1: billed $14.78 (-1.47%), cut $0.0, waits>10s 0
+one boundary, typical-cut seed 1: billed $14.9064 (-0.62%), cut $0.0, waits>10s 0
+leases 30 ms, typical-cut seed 1: billed $14.4182 (-3.88%), cut $0.0, waits>10s 0

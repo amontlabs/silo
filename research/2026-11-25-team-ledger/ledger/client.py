@@ -210,8 +210,14 @@ class Central(Way):
 
 
 class Lease(Way):
-    def __init__(self, http, budget, mac, policy, tps, low=1.0, rtt=0.03, margin=5.0):
+    def __init__(self, http, budget, mac, policy, tps, low=1.0, rtt=0.03, margin=5.0, keep=1.0, rearm=True):
         super().__init__()
+        # keep: on a recall, the room this Mac keeps while calls of its own are under way, so they
+        # can finish without passing its slice at once. 0 gives back everything not held, as the
+        # simulator and #388 did. rearm: an answer that came but left the Mac still over its slice
+        # (a grant taken back by a recall) starts the wait again, instead of counting as no answer.
+        self.keep, self.rearm = keep, rearm
+        self.answered_at = 0.0
         self.http, self.budget, self.mac = http, budget, mac
         self.book = Book(0.0, policy, tps, P_OUT)
         self.low, self.rtt, self.margin = low, rtt, margin
@@ -240,7 +246,10 @@ class Lease(Way):
         self.expires = sent_at + self.ttl if self.ttl else None
 
     def _ask(self, want=0.0, renew=False):
+        q = time.time()
         with self.talk:
+            if time.time() - q > 0.1:
+                self.trace.append({"t": round(q, 3), "queued": round(time.time() - q, 3), "ask": want})
             req = uuid.uuid4().hex
             with self.mu:
                 now = time.time()
@@ -250,6 +259,7 @@ class Lease(Way):
             r = self.http.until("POST", "/lease", body)
             with self.mu:
                 self._apply(r, sent)
+                self.answered_at = time.time()
                 self.trace.append({"t": round(sent, 3), "took": round(time.time() - sent, 3), "ask": "renew" if renew else want,
                                    "granted": r.get("granted"), "slice": r["slice"], "held": round(body["held"], 4)})
                 if renew:
@@ -277,7 +287,10 @@ class Lease(Way):
         return ev
 
     def _give(self, amount):
+        q = time.time()
         with self.talk:
+            if time.time() - q > 0.1:
+                self.trace.append({"t": round(q, 3), "queued": round(time.time() - q, 3), "give": round(amount, 4)})
             with self.mu:
                 body = {"budget": self.budget, "mac": self.mac, "amount": amount, "spent": self.book.settled,
                         "held": self.book.held(time.time()), "req": uuid.uuid4().hex}
@@ -286,12 +299,14 @@ class Lease(Way):
             with self.mu:
                 self._apply(r, sent)
                 self.gives += 1
+                self.trace.append({"t": round(sent, 3), "took": round(time.time() - sent, 3), "give": round(amount, 4), "slice": r["slice"]})
 
     def _news(self, kind):
         if kind != "recall":
             return
         with self.mu:
-            r = max(0.0, self.book.limit - self.book.held(time.time()))
+            keep = self.keep if self.book.flight else 0.0
+            r = max(0.0, self.book.limit - self.book.held(time.time()) - keep)
             self.book.limit -= r
             if r > 0:
                 self.empty = False
@@ -373,6 +388,8 @@ class Lease(Way):
             if self.book.counted(now) < self.book.limit and not self._lapsed(now):
                 self.over_since = None
                 return False
+            if self.over_since is not None and self.rearm and not self.empty and self.answered_at > self.over_since and self.pending is None:
+                self.over_since = None  # answered, yet still over: ask again rather than cut
             if self.over_since is None:
                 self.over_since = now
                 self.empty = False

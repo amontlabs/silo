@@ -18,12 +18,14 @@ def git(cwd, *args, input=None):
 
 
 class GitLedger:
-    def __init__(self, clone, mac, chunk=2.0):
-        self.clone, self.mac, self.chunk = clone, mac, chunk
+    def __init__(self, clone, mac, chunk=2.0, branch=BRANCH):
+        self.clone, self.mac, self.chunk, self.branch = clone, mac, chunk, branch
         self.tries = 0
+        self.refused = 0
+        self.timing = []  # (seconds to read, seconds to push, pushed)
 
     def _read(self):
-        rc, _, _ = git(self.clone, "fetch", "-q", "origin", f"+{BRANCH}:refs/remotes/origin/ledger")
+        rc, _, _ = git(self.clone, "fetch", "-q", "origin", f"+{self.branch}:refs/remotes/origin/ledger")
         rc, head, _ = git(self.clone, "rev-parse", "refs/remotes/origin/ledger")
         _, text, _ = git(self.clone, "show", f"{head}:ledger.json")
         return head, json.loads(text)
@@ -32,14 +34,18 @@ class GitLedger:
         _, blob, _ = git(self.clone, "hash-object", "-w", "--stdin", input=json.dumps(state, indent=1, sort_keys=True) + "\n")
         _, tree, _ = git(self.clone, "mktree", input=f"100644 blob {blob}\tledger.json\n")
         _, commit, _ = git(self.clone, "commit-tree", tree, "-p", parent, "-m", msg)
-        rc, _, err = git(self.clone, "push", "-q", "origin", f"{commit}:{BRANCH}")
+        rc, _, err = git(self.clone, "push", "-q", "origin", f"{commit}:{self.branch}")
+        if rc != 0:
+            self.refused += 1
         return rc == 0
 
     def lease(self, spent):
         """Ask for a slice. Returns the dollars granted, 0 when nothing is left."""
         while True:
             self.tries += 1
+            t0 = time.perf_counter()
             head, st = self._read()
+            t1 = time.perf_counter()
             me = st["macs"].setdefault(self.mac, {"granted": 0.0, "given": 0.0, "reported": 0.0, "asked": 0})
             me["reported"] = max(me["reported"], spent)
             now = time.time()
@@ -49,7 +55,9 @@ class GitLedger:
             active = sum(1 for m in st["macs"].values() if now - m["asked"] < 60)
             g = min(free, max(self.chunk, free / (2 * max(1, active))))
             me["granted"] += g
-            if self._write(head, st, f"lease {self.mac} {g:.4f}"):
+            ok = self._write(head, st, f"lease {self.mac} {g:.4f}")
+            self.timing.append((t1 - t0, time.perf_counter() - t1, ok))
+            if ok:
                 return g
 
 

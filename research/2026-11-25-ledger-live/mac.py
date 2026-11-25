@@ -78,7 +78,7 @@ class Mac:
             if a.way == "central":
                 self.way = ways.Central(h, "team", f"m{a.mac}", on_down=a.on_down)
             else:
-                self.way = ways.Lease(h, "team", f"m{a.mac}", policy, a.tps, rtt=a.rtt, margin=a.margin)
+                self.way = ways.Lease(h, "team", f"m{a.mac}", policy, a.tps, rtt=a.rtt, margin=a.margin, keep=a.keep, rearm=not a.no_rearm)
         self.way.on_cut = self.cut_all
         self.book_rule = Book(0, policy, a.tps, P_OUT)  # only for reserve_for
 
@@ -319,6 +319,8 @@ def main():
     ap.add_argument("--timeout", type=float, default=2.0)
     ap.add_argument("--margin", type=float, default=5.0)
     ap.add_argument("--on-down", default="hold")
+    ap.add_argument("--keep", type=float, default=1.0, help="leases: room kept on a recall while calls run")
+    ap.add_argument("--no-rearm", action="store_true", help="leases: the simulator's cut rule as it was")
     ap.add_argument("--ledger-port", type=int)
     ap.add_argument("--provider-port", type=int, required=True)
     ap.add_argument("--cafile", required=True)

@@ -31,6 +31,8 @@ DEFAULTS = {
     "ttl": 0.0,
     "margin": 5.0,
     "on_down": "hold",
+    "keep": 1.0,                 # leases: room a Mac keeps on a recall while its calls run (0: #388's rule)
+    "rearm": True,               # leases: an answer that left the Mac over its slice is not "no answer"
     "seed": 1,
     "kill": None,                # [from, to]: the ledger is dead from `from` to `to`, seconds after the start
     "partition": None,           # [from, to, [mac, ...]]: those Macs cannot reach the ledger
@@ -77,7 +79,7 @@ def price(rec):
 def run(cfg):
     c = dict(DEFAULTS, **cfg)
     name = c.get("name") or f"{c['way']}-{c['seed']}"
-    d = tempfile.mkdtemp(prefix=f"{name}-", dir=os.path.join(OUT, "runs") if os.path.isdir(os.path.join(OUT, "runs")) else None)
+    d = tempfile.mkdtemp(prefix=name.replace("/", " per ") + "-", dir=os.path.join(OUT, "runs") if os.path.isdir(os.path.join(OUT, "runs")) else None)
     os.makedirs(d, exist_ok=True)
     crt, key = cert()
     procs = []
@@ -130,12 +132,14 @@ def run(cfg):
         outs.append(o)
         args = [sys.executable, os.path.join(HERE, "mac.py"), "--mac", str(i), "--members", ",".join(ms), "--way", c["way"],
                 "--policy", c["policy"], "--budget", str(c["budget"]), "--tps", str(c["tps"]), "--rtt", str(c["rtt_ms"] / 1000),
-                "--margin", str(c["margin"]), "--on-down", c["on_down"], "--provider-port", str(pport), "--cafile", crt,
+                "--margin", str(c["margin"]), "--on-down", c["on_down"], "--keep", str(c["keep"]), "--provider-port", str(pport), "--cafile", crt,
                 "--seed", str(c["seed"]), "--t0", str(t0), "--out", o]
         if mports:
             args += ["--ledger-port", str(mports[i])]
         if c["cut"]:
             args.append("--cut")
+        if not c["rearm"]:
+            args.append("--no-rearm")
         if c["batch"] and c["batch"][0] == i:
             args += ["--batch", json.dumps(c["batch"][1:])]
         mprocs.append(subprocess.Popen(args, stderr=open(os.path.join(d, f"mac{i}.err"), "w")))
