@@ -1,0 +1,468 @@
+{
+  "format": 1,
+  "about": "Rules for the destructive-call detector. Each api names its hosts, what an unknown request does there, and rules. A rule matches one way (rest, graphql, sql, mcp, git) and says what a yes would let pass. Templates: {name} is one path segment, {name+} the rest of the path, a segment with * is a glob. Paths are matched lower-cased after percent-decoding, removing ;params, empty and dot segments.",
+  "apis": [
+    {
+      "id": "railway",
+      "name": "Railway",
+      "hosts": ["backboard.railway.com", "backboard.railway.app"],
+      "unknown": "hold",
+      "graphql": {"paths": ["/graphql/v2", "/graphql/internal"], "known_mutations": "schemas/railway_mutations.json", "persisted": {}},
+      "rules": [
+        {"id": "railway.volumeDelete", "match": {"graphql": {"type": "mutation", "field": "volumeDelete"}}, "outcome": "gone", "say": "deletes the Railway volume {volumeId}, with the backups stored on it"},
+        {"id": "railway.serviceDelete", "match": {"graphql": {"type": "mutation", "field": "serviceDelete"}}, "outcome": "gone", "say": "deletes the Railway service {id} (environment {environmentId})"},
+        {"id": "railway.environmentDelete", "match": {"graphql": {"type": "mutation", "field": "environmentDelete"}}, "outcome": "gone", "say": "deletes the Railway environment {id} and every service and volume in it"},
+        {"id": "railway.projectDelete", "match": {"graphql": {"type": "mutation", "field": "projectDelete"}}, "outcome": "gone", "say": "deletes the Railway project {id} and everything in it"},
+        {"id": "railway.projectScheduleDeleteForce", "match": {"graphql": {"type": "mutation", "field": "projectScheduleDeleteForce"}}, "outcome": "gone", "say": "deletes the Railway project {id} now, skipping the scheduled delay"},
+        {"id": "railway.volumeInstanceBackupDelete", "match": {"graphql": {"type": "mutation", "field": "volumeInstanceBackupDelete"}}, "outcome": "gone", "say": "deletes the Railway volume backup {volumeInstanceBackupId}"},
+        {"id": "railway.volumeInstanceBackupRestore", "match": {"graphql": {"type": "mutation", "field": "volumeInstanceBackupRestore"}}, "outcome": "gone", "say": "overwrites the Railway volume instance {volumeInstanceId} with the backup {volumeInstanceBackupId}; what is on it now is lost"},
+        {"id": "railway.workspaceDelete", "match": {"graphql": {"type": "mutation", "field": "workspaceDelete"}}, "outcome": "gone", "say": "deletes the Railway workspace {id} and all its projects"},
+        {"id": "railway.variableDelete", "match": {"graphql": {"type": "mutation", "field": "variableDelete"}}, "outcome": "outage", "say": "deletes the Railway variable {input.name} of service {input.serviceId}"},
+        {"id": "railway.environmentPatchCommit-delete", "match": {"graphql": {"type": "mutation", "field": "environmentPatchCommit", "arg": {"patch.*.isDeleted": [true]}}}, "outcome": "gone", "say": "applies a patch to the Railway environment {environmentId} that deletes {matched}"},
+        {"id": "railway.environmentStageChanges-delete", "match": {"graphql": {"type": "mutation", "field": "environmentStageChanges", "arg": {"input.*.isDeleted": [true]}}}, "outcome": "gone", "say": "stages a change to the Railway environment {environmentId} that deletes {matched}"},
+        {"id": "railway.environmentPatchCommitStaged", "match": {"graphql": {"type": "mutation", "field": "environmentPatchCommitStaged"}}, "outcome": null, "say": "commits the changes staged earlier in the Railway environment {environmentId}; the request does not show what they delete"},
+        {"id": "railway.environmentApplyChangeSet", "match": {"graphql": {"type": "mutation", "field": "environmentApplyChangeSet"}}, "outcome": null, "say": "applies a change set to a Railway environment; the request does not show what it deletes"},
+        {"id": "railway.any-destructive", "fallback": true, "outcome": null, "match": {"graphql": {"type": "mutation", "field_glob": ["*Delete", "*DeleteForce", "*Destroy", "*Remove", "*RemoveAll", "*Reset", "*Restore", "*Rollback", "*Transfer*", "*Clear", "*Stop", "*Disconnect", "*Detach", "*Leave", "*Revoke", "*Cancel"]}}, "say": "runs the Railway mutation {field}, whose name says it removes or stops something"}
+      ]
+    },
+    {
+      "id": "github",
+      "name": "GitHub",
+      "hosts": ["api.github.com"],
+      "unknown": "hold",
+      "graphql": {"paths": ["/graphql"]},
+      "rules": [
+        {"id": "github.repo-delete", "match": {"rest": {"method": "DELETE", "path": "/repos/{owner}/{repo}"}}, "outcome": "gone", "say": "deletes the GitHub repository {owner}/{repo}"},
+        {"id": "github.org-delete", "match": {"rest": {"method": "DELETE", "path": "/orgs/{org}"}}, "outcome": "gone", "say": "deletes the GitHub organization {org} and its repositories"},
+        {"id": "github.ref-delete", "match": {"rest": {"method": "DELETE", "path": "/repos/{owner}/{repo}/git/refs/{ref+}"}}, "outcome": "recoverable", "say": "deletes {ref} of {owner}/{repo}"},
+        {"id": "github.ref-force", "match": {"rest": {"method": "PATCH", "path": "/repos/{owner}/{repo}/git/refs/{ref+}", "body": {"field": "force", "in": [true, "true"]}}}, "outcome": "recoverable", "say": "force-moves {ref} of {owner}/{repo} to {body.sha}; commits only on the old {ref} drop out of it"},
+        {"id": "github.protection-delete", "match": {"rest": {"method": "DELETE", "path": "/repos/{owner}/{repo}/branches/{branch}/protection"}}, "outcome": "outage", "say": "removes the branch protection of {branch} in {owner}/{repo}"},
+        {"id": "github.ruleset-delete", "match": {"rest": {"method": "DELETE", "path": "/repos/{owner}/{repo}/rulesets/{ruleset_id}"}}, "outcome": "outage", "say": "deletes the ruleset {ruleset_id} of {owner}/{repo}"},
+        {"id": "github.make-public", "match": {"rest": {"method": "PATCH", "path": "/repos/{owner}/{repo}", "body": {"field": "visibility", "in": ["public"]}}}, "outcome": null, "say": "makes the repository {owner}/{repo} public"},
+        {"id": "github.make-public-private-flag", "match": {"rest": {"method": "PATCH", "path": "/repos/{owner}/{repo}", "body": {"field": "private", "in": [false, "false"]}}}, "outcome": null, "say": "makes the repository {owner}/{repo} public"},
+        {"id": "github.archive", "match": {"rest": {"method": "PATCH", "path": "/repos/{owner}/{repo}", "body": {"field": "archived", "in": [true, "true"]}}}, "outcome": "outage", "say": "archives {owner}/{repo}, which makes it read-only"},
+        {"id": "github.transfer", "match": {"rest": {"method": "POST", "path": "/repos/{owner}/{repo}/transfer"}}, "outcome": null, "say": "transfers {owner}/{repo} to {body.new_owner}"},
+        {"id": "github.gql-updateRefs-delete", "match": {"graphql": {"type": "mutation", "field": "updateRefs", "arg": {"input.refUpdates.*.afterOid": ["0000000000000000000000000000000000000000"]}}}, "outcome": "recoverable", "say": "deletes refs of the repository {input.repositoryId} (updateRefs to the zero commit)"},
+        {"id": "github.repo-any-delete", "fallback": true, "match": {"rest": {"method": "DELETE", "path": "/repos/{owner}/{repo}/{rest+}"}}, "outcome": null, "say": "sends DELETE /repos/{owner}/{repo}/{rest} to GitHub"},
+        {"id": "github.gql-updateRef-force", "match": {"graphql": {"type": "mutation", "field": "updateRef", "arg": {"input.force": [true]}}}, "outcome": "recoverable", "say": "force-moves the ref {input.refId} to {input.oid}"},
+        {"id": "github.gql-updateRefs-force", "match": {"graphql": {"type": "mutation", "field": "updateRefs", "arg": {"input.refUpdates.*.force": [true]}}}, "outcome": "recoverable", "say": "force-moves refs of the repository {input.repositoryId}"},
+        {"id": "github.gql-list", "match": {"graphql": {"type": "mutation", "field_from": {"file": "../github_graphql_destructive.json", "kinds": ["delete", "remove", "revoke", "archive", "transfer", "disable"]}}}, "outcome": null, "say": "runs the GitHub mutation {field}"}
+      ]
+    },
+    {
+      "id": "github-git",
+      "name": "GitHub (git push)",
+      "hosts": ["github.com"],
+      "unknown": "hold",
+      "rules": [
+        {"id": "github.push-delete-branch", "match": {"git": {"path": "/{owner}/{repo}/git-receive-pack", "ref_change": "delete"}}, "outcome": "recoverable", "say": "deletes {ref} of {owner}/{repo} (git push)"}
+      ]
+    },
+    {
+      "id": "vercel",
+      "name": "Vercel",
+      "hosts": ["api.vercel.com", "vercel.com"],
+      "unknown": "hold",
+      "rules": [
+        {"id": "vercel.project-delete", "match": {"rest": {"method": "DELETE", "path": ["/v*/projects/{project}", "/projects/{project}", "/api/v*/projects/{project}"]}}, "outcome": "gone", "say": "deletes the Vercel project {project} (team {query.teamId}) with its deployments"},
+        {"id": "vercel.deployment-delete", "match": {"rest": {"method": "DELETE", "path": ["/v*/deployments/{id}", "/api/v*/deployments/{id}"]}}, "outcome": "outage", "say": "deletes the Vercel deployment {id}"},
+        {"id": "vercel.env-delete", "match": {"rest": {"method": "DELETE", "path": ["/v*/projects/{project}/env/{id}", "/api/v*/projects/{project}/env/{id}"]}}, "outcome": "outage", "say": "deletes the environment variable {id} of the Vercel project {project}"},
+        {"id": "vercel.dns-record-delete", "match": {"rest": {"method": "DELETE", "path": ["/v*/domains/{domain}/records/{record}", "/api/v*/domains/{domain}/records/{record}"]}}, "outcome": "outage", "say": "deletes the DNS record {record} of {domain}"},
+        {"id": "vercel.domain-delete", "match": {"rest": {"method": "DELETE", "path": ["/v*/domains/{domain}", "/api/v*/domains/{domain}"]}}, "outcome": "outage", "say": "removes the domain {domain} from Vercel"},
+        {"id": "vercel.team-delete", "match": {"rest": {"method": "DELETE", "path": ["/v*/teams/{team}", "/api/v*/teams/{team}"]}}, "outcome": "gone", "say": "deletes the Vercel team {team}"},
+        {"id": "vercel.blob-store-delete", "match": {"rest": {"method": "DELETE", "path": "/storage/stores/blob/{id}"}}, "outcome": "gone", "say": "deletes the Vercel storage store {id}"},
+        {"id": "vercel.global-config-delete", "match": {"rest": {"method": "DELETE", "path": ["/v1/global-config/{id}", "/v1/edge-config/{id}"]}}, "outcome": "gone", "say": "deletes the Vercel Global Config store {id} with all its items"},
+        {"id": "vercel.global-config-items-delete", "match": {"rest": {"method": "PATCH", "path": ["/v1/global-config/{id}/items", "/v1/edge-config/{id}/items"], "body": {"field": "items.*.operation", "in": ["delete"]}}}, "outcome": "gone", "say": "deletes items of the Vercel Global Config store {id}"},
+        {"id": "vercel.any-delete", "fallback": true, "match": {"rest": {"method": "DELETE", "path": "/{rest+}"}}, "outcome": null, "say": "sends DELETE /{rest} to Vercel"}
+      ]
+    },
+    {
+      "id": "fly",
+      "name": "Fly.io",
+      "hosts": ["api.machines.dev", "api.fly.io"],
+      "unknown": "hold",
+      "graphql": {"paths": ["/graphql"], "known_mutations": "schemas/fly_mutations.json"},
+      "rules": [
+        {"id": "fly.app-delete", "match": {"rest": {"method": "DELETE", "path": "/v1/apps/{app}"}}, "outcome": "gone", "say": "deletes the Fly app {app} with its machines and volumes"},
+        {"id": "fly.volume-delete", "match": {"rest": {"method": "DELETE", "path": "/v1/apps/{app}/volumes/{volume}"}}, "outcome": "recoverable", "say": "deletes the Fly volume {volume} of the app {app}"},
+        {"id": "fly.machine-delete", "match": {"rest": {"method": "DELETE", "path": "/v1/apps/{app}/machines/{machine}"}}, "outcome": "outage", "say": "destroys the Fly machine {machine} of the app {app}"},
+        {"id": "fly.secret-delete", "match": {"rest": {"method": "DELETE", "path": "/v1/apps/{app}/secrets/{name}"}}, "outcome": "outage", "say": "deletes the secret {name} of the Fly app {app}"},
+        {"id": "fly.any-delete", "fallback": true, "match": {"rest": {"method": "DELETE", "path": "/v1/{rest+}"}}, "outcome": null, "say": "sends DELETE /v1/{rest} to Fly"},
+        {"id": "fly.gql-deleteApp", "match": {"graphql": {"type": "mutation", "field": "deleteApp"}}, "outcome": "gone", "say": "deletes the Fly app {appId} with its machines and volumes"},
+        {"id": "fly.gql-any", "fallback": true, "match": {"graphql": {"type": "mutation", "field_glob": ["delete*", "remove*", "release*", "detach*", "revoke*", "unset*", "reset*", "cancel*"]}}, "outcome": null, "say": "runs the Fly mutation {field}"}
+      ]
+    },
+    {
+      "id": "heroku",
+      "name": "Heroku",
+      "hosts": ["api.heroku.com"],
+      "unknown": "hold",
+      "method_override_verified": "X-HTTP-Method-Override header and _method form field, on POST only (probe 2026-11-24)",
+      "rules": [
+        {"id": "heroku.dyno-restart", "action": "allow", "match": {"rest": {"method": "DELETE", "path": ["/apps/{app}/dynos", "/apps/{app}/dynos/{dyno}", "/apps/{app}/formations/{type}"]}}, "outcome": null, "say": "restarts dynos of the Heroku app {app} (a DELETE that removes nothing)"},
+        {"id": "heroku.app-delete", "match": {"rest": {"method": "DELETE", "path": "/apps/{app}"}}, "outcome": "gone", "say": "deletes the Heroku app {app} with its add-ons"},
+        {"id": "heroku.addon-delete", "match": {"rest": {"method": "DELETE", "path": "/apps/{app}/addons/{addon}"}}, "outcome": "gone", "say": "deletes the Heroku add-on {addon} (a database add-on takes its data with it)"},
+        {"id": "heroku.domain-delete", "match": {"rest": {"method": "DELETE", "path": "/apps/{app}/domains/{domain}"}}, "outcome": "outage", "say": "removes the domain {domain} from the Heroku app {app}"},
+        {"id": "heroku.scale-zero", "match": {"rest": {"method": "PATCH", "path": ["/apps/{app}/formation", "/apps/{app}/formation/{type}"], "body": {"field": "*quantity", "in": [0, "0"]}}}, "outcome": "outage", "say": "scales the Heroku app {app} to zero dynos"},
+        {"id": "heroku.space-pipeline-team-delete", "match": {"rest": {"method": "DELETE", "path": ["/spaces/{id}", "/pipelines/{id}", "/teams/{id}"]}}, "outcome": "gone", "say": "deletes the Heroku {path}"},
+        {"id": "heroku.any-delete", "fallback": true, "match": {"rest": {"method": "DELETE", "path": "/{rest+}"}}, "outcome": null, "say": "sends DELETE /{rest} to Heroku"}
+      ]
+    },
+    {
+      "id": "cloudflare",
+      "name": "Cloudflare",
+      "hosts": ["api.cloudflare.com"],
+      "unknown": "hold",
+      "rules": [
+        {"id": "cloudflare.zone-delete", "match": {"rest": {"method": "DELETE", "path": "/client/v4/zones/{zone}"}}, "outcome": "outage", "say": "deletes the Cloudflare zone {zone} with all its DNS records"},
+        {"id": "cloudflare.dns-delete", "match": {"rest": {"method": "DELETE", "path": "/client/v4/zones/{zone}/dns_records/{record}"}}, "outcome": "outage", "say": "deletes the DNS record {record} in the zone {zone}"},
+        {"id": "cloudflare.r2-delete", "match": {"rest": {"method": "DELETE", "path": "/client/v4/accounts/{account}/r2/buckets/{bucket}"}}, "outcome": "gone", "say": "deletes the R2 bucket {bucket}"},
+        {"id": "cloudflare.worker-delete", "match": {"rest": {"method": "DELETE", "path": "/client/v4/accounts/{account}/workers/scripts/{script}"}}, "outcome": "outage", "say": "deletes the Worker {script}"},
+        {"id": "cloudflare.d1-delete", "match": {"rest": {"method": "DELETE", "path": "/client/v4/accounts/{account}/d1/database/{db}"}}, "outcome": "gone", "say": "deletes the D1 database {db}"},
+        {"id": "cloudflare.kv-delete", "match": {"rest": {"method": "DELETE", "path": "/client/v4/accounts/{account}/storage/kv/namespaces/{ns}"}}, "outcome": "gone", "say": "deletes the Workers KV namespace {ns}"},
+        {"id": "cloudflare.pages-delete", "match": {"rest": {"method": "DELETE", "path": "/client/v4/accounts/{account}/pages/projects/{project}"}}, "outcome": "outage", "say": "deletes the Pages project {project}"},
+        {"id": "cloudflare.account-delete", "match": {"rest": {"method": "DELETE", "path": "/client/v4/accounts/{account}"}}, "outcome": "gone", "say": "deletes the Cloudflare account {account}"},
+        {"id": "cloudflare.d1-sql", "match": {"sql": {"path": ["/client/v4/accounts/{account}/d1/database/{db}/query"], "shape": "d1", "dialect": "sqlite"}}, "outcome": "gone", "say": "runs {sql_kind} on {objects} in the D1 database {db}"},
+        {"id": "cloudflare.d1-sql-raw", "match": {"sql": {"path": ["/client/v4/accounts/{account}/d1/database/{db}/raw"], "shape": "d1", "dialect": "sqlite"}}, "outcome": "gone", "say": "runs {sql_kind} on {objects} in the D1 database {db}"},
+        {"id": "cloudflare.worker-service-delete", "match": {"rest": {"method": "DELETE", "path": "/client/v4/accounts/{account}/workers/services/{script}"}}, "outcome": "outage", "say": "deletes the Worker {script} (wrangler delete)"},
+        {"id": "cloudflare.kv-bulk-delete", "match": {"rest": {"method": "DELETE", "path": "/client/v4/accounts/{account}/storage/kv/namespaces/{ns}/bulk"}}, "outcome": "gone", "say": "deletes keys from the Workers KV namespace {ns}"},
+        {"id": "cloudflare.kv-bulk-delete-post", "match": {"rest": {"method": "POST", "path": "/client/v4/accounts/{account}/storage/kv/namespaces/{ns}/bulk/delete"}}, "outcome": "gone", "say": "deletes keys from the Workers KV namespace {ns}"},
+        {"id": "cloudflare.any-delete", "fallback": true, "match": {"rest": {"method": "DELETE", "path": "/client/v4/{rest+}"}}, "outcome": null, "say": "sends DELETE /client/v4/{rest} to Cloudflare"}
+      ]
+    },
+    {
+      "id": "stripe",
+      "name": "Stripe",
+      "hosts": ["api.stripe.com"],
+      "unknown": "hold",
+      "about": "Stripe rules hold only with a live key, or when Silo cannot tell which key was used. The boundary passes facts.secret.prefix when it swapped the key in; otherwise the detector reads the prefix of a key the computer sent itself.",
+      "rules": [
+        {"id": "stripe.refund", "when": {"key_mode": ["live", "absent"]}, "match": {"rest": {"method": "POST", "path": "/v1/refunds"}}, "outcome": "money", "say": "refunds {body.amount} of {body.charge|body.payment_intent} with the live Stripe key"},
+        {"id": "stripe.payout", "when": {"key_mode": ["live", "absent"]}, "match": {"rest": {"method": "POST", "path": "/v1/payouts"}}, "outcome": "money", "say": "pays out {body.amount} {body.currency} from the Stripe balance"},
+        {"id": "stripe.transfer", "when": {"key_mode": ["live", "absent"]}, "match": {"rest": {"method": "POST", "path": "/v1/transfers"}}, "outcome": "money", "say": "transfers {body.amount} {body.currency} to {body.destination}"},
+        {"id": "stripe.charge", "when": {"key_mode": ["live", "absent"]}, "match": {"rest": {"method": "POST", "path": "/v1/charges"}}, "outcome": "money", "say": "charges {body.amount} {body.currency} to {body.customer}"},
+        {"id": "stripe.pi-confirm", "when": {"key_mode": ["live", "absent"]}, "match": {"rest": {"method": "POST", "path": "/v1/payment_intents/{intent}/confirm"}}, "outcome": "money", "say": "confirms the payment {intent}, which charges the customer"},
+        {"id": "stripe.pi-create-confirm", "when": {"key_mode": ["live", "absent"]}, "match": {"rest": {"method": "POST", "path": "/v1/payment_intents", "body": {"field": "confirm", "in": [true, "true"]}}}, "outcome": "money", "say": "charges {body.amount} {body.currency} to {body.customer}"},
+        {"id": "stripe.invoice-pay-send", "when": {"key_mode": ["live", "absent"]}, "match": {"rest": {"method": "POST", "path": ["/v1/invoices/{invoice}/pay", "/v1/invoices/{invoice}/send"]}}, "outcome": "money", "say": "pays or sends the invoice {invoice}"},
+        {"id": "stripe.customer-delete", "when": {"key_mode": ["live", "absent"]}, "match": {"rest": {"method": "DELETE", "path": "/v1/customers/{customer}"}}, "outcome": "gone", "say": "deletes the Stripe customer {customer} and cancels their subscriptions"},
+        {"id": "stripe.subscription-cancel", "when": {"key_mode": ["live", "absent"]}, "match": {"rest": {"method": "DELETE", "path": "/v1/subscriptions/{sub}"}}, "outcome": "money", "say": "cancels the subscription {sub}"},
+        {"id": "stripe.account-delete", "when": {"key_mode": ["live", "absent"]}, "match": {"rest": {"method": "DELETE", "path": "/v1/accounts/{account}"}}, "outcome": "gone", "say": "deletes the connected account {account}"},
+        {"id": "stripe.account-reject", "when": {"key_mode": ["live", "absent"]}, "match": {"rest": {"method": "POST", "path": "/v1/accounts/{account}/reject"}}, "outcome": "gone", "say": "rejects the connected account {account}"},
+        {"id": "stripe.webhook-delete", "when": {"key_mode": ["live", "absent"]}, "match": {"rest": {"method": "DELETE", "path": "/v1/webhook_endpoints/{id}"}}, "outcome": "outage", "say": "deletes the webhook endpoint {id}, so events stop reaching it"},
+        {"id": "stripe.any-delete", "fallback": true, "when": {"key_mode": ["live", "absent"]}, "match": {"rest": {"method": "DELETE", "path": "/v1/{rest+}"}}, "outcome": null, "say": "sends DELETE /v1/{rest} to Stripe with the live key"}
+      ]
+    },
+    {
+      "id": "supabase",
+      "name": "Supabase",
+      "hosts": ["api.supabase.com", "api.supabase.io"],
+      "unknown": "hold",
+      "rules": [
+        {"id": "supabase.project-delete", "match": {"rest": {"method": "DELETE", "path": "/v1/projects/{ref}"}}, "outcome": "gone", "say": "deletes the Supabase project {ref} with its database"},
+        {"id": "supabase.project-pause", "match": {"rest": {"method": "POST", "path": "/v1/projects/{ref}/pause"}}, "outcome": "outage", "say": "pauses the Supabase project {ref}"},
+        {"id": "supabase.branch-delete", "match": {"rest": {"method": "DELETE", "path": ["/v1/branches/{branch}", "/v1/projects/{ref}/branches"]}}, "outcome": "gone", "say": "deletes the Supabase branch {branch|ref}"},
+        {"id": "supabase.branch-reset", "match": {"rest": {"method": "POST", "path": "/v1/branches/{branch}/reset"}}, "outcome": "gone", "say": "resets the Supabase branch {branch}, which wipes its data"},
+        {"id": "supabase.migrations-rollback", "match": {"rest": {"method": "DELETE", "path": "/v1/projects/{ref}/database/migrations"}}, "outcome": "gone", "say": "rolls back migrations of the Supabase project {ref}"},
+        {"id": "supabase.sql", "match": {"sql": {"path": ["/v1/projects/{ref}/database/query", "/v1/projects/{ref}/database/migrations"], "shape": "supabase", "dialect": "postgres"}}, "outcome": "gone", "say": "runs {sql_kind} on {objects} in the database of the Supabase project {ref}"},
+        {"id": "supabase.any-delete", "fallback": true, "match": {"rest": {"method": "DELETE", "path": "/v1/{rest+}"}}, "outcome": null, "say": "sends DELETE /v1/{rest} to Supabase"}
+      ]
+    },
+    {
+      "id": "supabase-data",
+      "name": "Supabase data API",
+      "hosts": ["*.supabase.co"],
+      "unknown": "allow",
+      "rules": [
+        {"id": "supabase.rest-delete-all", "match": {"rest": {"method": "DELETE", "path": "/rest/v1/{table}", "no_filter": ["select", "order", "limit", "offset", "columns", "on_conflict"]}}, "outcome": "gone", "say": "deletes every row of the table {table} (no filter in the request)"},
+        {"id": "supabase.rest-update-all", "match": {"rest": {"method": "PATCH", "path": "/rest/v1/{table}", "no_filter": ["select", "order", "limit", "offset", "columns", "on_conflict"]}}, "outcome": "gone", "say": "overwrites every row of the table {table} (no filter in the request)"},
+        {"id": "supabase.storage-bucket-delete", "match": {"rest": {"method": ["DELETE", "POST"], "path": ["/storage/v1/bucket/{bucket}", "/storage/v1/bucket/{bucket}/empty"]}}, "outcome": "gone", "say": "deletes or empties the storage bucket {bucket}"}
+      ]
+    },
+    {
+      "id": "supabase-mcp",
+      "name": "Supabase MCP",
+      "hosts": ["mcp.supabase.com"],
+      "unknown": "hold",
+      "rules": [
+        {"id": "supabase-mcp.branch", "match": {"mcp": {"paths": ["/mcp"], "tool": ["delete_branch", "reset_branch", "pause_project", "merge_branch", "rebase_branch"]}}, "outcome": "gone", "say": "calls the Supabase MCP tool {tool} on {branch_id|project_id}"},
+        {"id": "supabase-mcp.sql", "match": {"mcp": {"paths": ["/mcp"], "tool": ["execute_sql", "apply_migration"], "sql_arg": "query"}}, "outcome": "gone", "say": "runs {sql_kind} on {objects} in the Supabase project {project_id} (MCP tool {tool})"}
+      ]
+    },
+    {
+      "id": "neon",
+      "name": "Neon",
+      "hosts": ["console.neon.tech"],
+      "unknown": "hold",
+      "rules": [
+        {"id": "neon.project-delete", "match": {"rest": {"method": "DELETE", "path": "/api/v2/projects/{project}"}}, "outcome": "gone", "say": "deletes the Neon project {project} with all its branches"},
+        {"id": "neon.branch-delete", "match": {"rest": {"method": "DELETE", "path": "/api/v2/projects/{project}/branches/{branch}"}}, "outcome": "gone", "say": "deletes the Neon branch {branch} of the project {project}"},
+        {"id": "neon.database-delete", "match": {"rest": {"method": "DELETE", "path": "/api/v2/projects/{project}/branches/{branch}/databases/{database}"}}, "outcome": "gone", "say": "deletes the database {database} on the Neon branch {branch}"},
+        {"id": "neon.branch-restore", "match": {"rest": {"method": "POST", "path": ["/api/v2/projects/{project}/branches/{branch}/restore", "/api/v2/projects/{project}/snapshots/{snapshot}/restore"]}}, "outcome": "recoverable", "say": "overwrites the Neon branch {branch|snapshot} with an earlier state"},
+        {"id": "neon.any-delete", "fallback": true, "match": {"rest": {"method": "DELETE", "path": "/api/v2/{rest+}"}}, "outcome": null, "say": "sends DELETE /api/v2/{rest} to Neon"}
+      ]
+    },
+    {
+      "id": "neon-sql",
+      "name": "Neon SQL over HTTP",
+      "hosts": ["*.neon.tech"],
+      "unknown": "hold",
+      "rules": [
+        {"id": "neon.sql", "match": {"sql": {"path": ["/sql"], "shape": "neon", "dialect": "postgres"}}, "outcome": "gone", "say": "runs {sql_kind} on {objects} in the Neon database {database}"}
+      ]
+    },
+    {
+      "id": "turso",
+      "name": "Turso",
+      "hosts": ["*.turso.io", "api.turso.tech"],
+      "unknown": "hold",
+      "rules": [
+        {"id": "turso.sql", "match": {"sql": {"path": ["/v2/pipeline", "/v3/pipeline"], "shape": "hrana", "dialect": "sqlite"}}, "outcome": "gone", "say": "runs {sql_kind} on {objects} in the Turso database {host}"},
+        {"id": "turso.db-delete", "match": {"rest": {"method": "DELETE", "path": "/v1/organizations/{org}/databases/{db}"}}, "outcome": "gone", "say": "deletes the Turso database {db} of {org}"},
+        {"id": "turso.any-delete", "fallback": true, "match": {"rest": {"method": "DELETE", "path": "/v1/organizations/{org}/{rest+}"}}, "outcome": null, "say": "sends DELETE /v1/organizations/{org}/{rest} to Turso"}
+      ]
+    },
+    {
+      "id": "gmail",
+      "name": "Gmail",
+      "hosts": ["gmail.googleapis.com", "www.googleapis.com"],
+      "unknown": "hold",
+      "rules": [
+        {"id": "gmail.batchDelete", "match": {"rest": {"method": "POST", "path": "/gmail/v1/users/{user}/messages/batchDelete"}}, "outcome": "gone", "say": "deletes {count.ids} messages of {user} for good (they skip the Trash)"},
+        {"id": "gmail.batchModify-trash", "match": {"rest": {"method": "POST", "path": "/gmail/v1/users/{user}/messages/batchModify", "body": {"field": "addLabelIds.*", "in": ["TRASH"]}}}, "outcome": "recoverable", "say": "moves {count.ids} messages of {user} to the Trash (kept 30 days)"},
+        {"id": "gmail.trash", "match": {"rest": {"method": "POST", "path": ["/gmail/v1/users/{user}/messages/{id}/trash", "/gmail/v1/users/{user}/threads/{id}/trash"]}}, "outcome": "recoverable", "say": "moves the message or thread {id} of {user} to the Trash"},
+        {"id": "gmail.delete", "match": {"rest": {"method": "DELETE", "path": ["/gmail/v1/users/{user}/messages/{id}", "/gmail/v1/users/{user}/threads/{id}"]}}, "outcome": "gone", "say": "deletes the message or thread {id} of {user} for good"},
+        {"id": "gmail.batch-http", "action": "unknown", "match": {"rest": {"method": "POST", "path": ["/batch/{rest+}", "/batch"]}}, "outcome": null, "say": "a Google batch request: it carries other HTTP requests inside, which this prototype does not read"}
+      ]
+    },
+    {
+      "id": "aws",
+      "name": "AWS",
+      "hosts": ["*.amazonaws.com", "*.amazonaws.com.cn", "*.api.aws", "*.r2.cloudflarestorage.com"],
+      "unknown": "hold",
+      "aws": {
+        "catalogue": "../aws_destructive.json",
+        "hand_ops": [
+          {
+            "service": "dynamodb",
+            "operation": "DeleteTable",
+            "outcome": "gone",
+            "match": {
+              "json": {
+                "header": {
+                  "X-Amz-Target": "DynamoDB_20120810.DeleteTable"
+                }
+              }
+            }
+          },
+          {
+            "service": "rds",
+            "operation": "DeleteDBInstance",
+            "outcome": "gone",
+            "match": {
+              "query": {}
+            }
+          },
+          {
+            "service": "s3",
+            "operation": "DeleteBucket",
+            "outcome": "outage",
+            "match": {
+              "rest-xml": {
+                "method": "DELETE",
+                "path_template": "/{Bucket}",
+                "virtual_hosted": {
+                  "path_template": "/"
+                }
+              }
+            }
+          },
+          {
+            "service": "s3",
+            "operation": "DeleteObjects",
+            "outcome": "gone",
+            "match": {
+              "rest-xml": {
+                "method": "POST",
+                "path_template": "/{Bucket}",
+                "required_query_key": "delete",
+                "virtual_hosted": {
+                  "path_template": "/"
+                }
+              }
+            }
+          },
+          {
+            "service": "ec2",
+            "operation": "TerminateInstances",
+            "outcome": "gone",
+            "match": {
+              "ec2": {}
+            }
+          },
+          {
+            "service": "lambda",
+            "operation": "DeleteFunction",
+            "outcome": "outage",
+            "match": {
+              "rest-json": {
+                "method": "DELETE",
+                "path_template": "/2015-03-31/functions/{FunctionName}"
+              }
+            }
+          }
+        ],
+        "params": [
+          {
+            "service": "rds",
+            "operation": "ModifyDBInstance",
+            "wire_name": "DeletionProtection",
+            "values": [
+              "false"
+            ],
+            "outcome": "outage",
+            "say": "turns off deletion protection on the RDS instance {DBInstanceIdentifier}"
+          },
+          {
+            "service": "rds",
+            "operation": "ModifyDBInstance",
+            "wire_name": "BackupRetentionPeriod",
+            "values": [
+              "0"
+            ],
+            "outcome": "gone",
+            "say": "turns off automated backups of the RDS instance {DBInstanceIdentifier}, which deletes them"
+          },
+          {
+            "service": "rds",
+            "operation": "ModifyDBCluster",
+            "wire_name": "DeletionProtection",
+            "values": [
+              "false"
+            ],
+            "outcome": "outage",
+            "say": "turns off deletion protection on the RDS cluster {DBClusterIdentifier}"
+          },
+          {
+            "service": "dynamodb",
+            "operation": "UpdateTable",
+            "wire_name": "DeletionProtectionEnabled",
+            "values": [
+              "false"
+            ],
+            "outcome": "outage",
+            "say": "turns off deletion protection on the DynamoDB table {TableName}"
+          },
+          {
+            "service": "dynamodb",
+            "operation": "UpdateContinuousBackups",
+            "wire_name": "PointInTimeRecoverySpecification.PointInTimeRecoveryEnabled",
+            "values": [
+              "false"
+            ],
+            "outcome": "gone",
+            "say": "turns off point-in-time recovery on the DynamoDB table {TableName}"
+          },
+          {
+            "service": "dynamodb",
+            "operation": "BatchWriteItem",
+            "contains": "\"DeleteRequest\"",
+            "outcome": "gone",
+            "say": "deletes items from DynamoDB tables (BatchWriteItem with DeleteRequest)"
+          },
+          {
+            "service": "ec2",
+            "operation": "ModifyInstanceAttribute",
+            "wire_name": "DisableApiTermination.Value",
+            "values": [
+              "false"
+            ],
+            "outcome": "outage",
+            "say": "turns off termination protection on the EC2 instance {InstanceId}"
+          },
+          {
+            "service": "cloudformation",
+            "operation": "UpdateTerminationProtection",
+            "wire_name": "EnableTerminationProtection",
+            "values": [
+              "false"
+            ],
+            "outcome": "outage",
+            "say": "turns off termination protection on the stack {StackName}"
+          },
+          {
+            "service": "cloudformation",
+            "operation": "ExecuteChangeSet",
+            "contains": "",
+            "action": "unknown",
+            "say": "runs the CloudFormation change set {ChangeSetName}; it may delete resources and Silo cannot see which"
+          },
+          {
+            "service": "cloudformation",
+            "operation": "UpdateStack",
+            "contains": "",
+            "action": "unknown",
+            "say": "updates the CloudFormation stack {StackName}; the new template may delete resources and Silo cannot see which"
+          },
+          {
+            "service": "ecs",
+            "operation": "UpdateService",
+            "wire_name": "desiredCount",
+            "values": [
+              "0"
+            ],
+            "outcome": "outage",
+            "say": "scales the ECS service {service} to zero tasks"
+          },
+          {
+            "service": "autoscaling",
+            "operation": "UpdateAutoScalingGroup",
+            "wire_name": "DesiredCapacity",
+            "values": [
+              "0"
+            ],
+            "outcome": "outage",
+            "say": "scales the Auto Scaling group {AutoScalingGroupName} to zero"
+          },
+          {
+            "service": "s3",
+            "operation": "PutBucketVersioning",
+            "rest": {
+              "method": "PUT",
+              "path": "/{Bucket}",
+              "query_key": "versioning"
+            },
+            "contains": "Suspended",
+            "outcome": "gone",
+            "say": "suspends versioning on an S3 bucket, so later deletes cannot be undone"
+          },
+          {
+            "service": "route53",
+            "operation": "ChangeResourceRecordSets",
+            "rest": {
+              "method": "POST",
+              "path": "/2013-04-01/hostedzone/{Id}/rrset"
+            },
+            "contains": "<Action>DELETE</Action>",
+            "outcome": "outage",
+            "say": "deletes DNS records in a Route 53 hosted zone"
+          }
+        ]
+      },
+      "rules": [
+
+      ]
+    },
+    {
+      "id": "mcp-any",
+      "name": "an MCP server",
+      "hosts": ["*"],
+      "unknown": "allow",
+      "mcp_sniff": true,
+      "rules": [
+        {"id": "mcp.tool-name", "match": {"mcp": {"tool": ["delete*", "*_delete*", "*-delete*", "drop*", "*_drop*", "destroy*", "*_destroy*", "remove_*", "*_remove*", "purge*", "truncate*", "wipe*", "reset_*", "terminate*", "*_terminate*"]}}, "outcome": null, "say": "calls the MCP tool {tool} on {host}; its name says it removes something"},
+        {"id": "mcp.sql-query", "match": {"mcp": {"tool": ["execute_sql", "run_sql", "*_sql", "sql", "query"], "sql_arg": "query"}}, "outcome": "gone", "say": "runs {sql_kind} on {objects} through the MCP tool {tool} on {host}"},
+        {"id": "mcp.sql-sql", "match": {"mcp": {"tool": ["execute_sql", "run_sql", "*_sql", "sql", "query"], "sql_arg": "sql"}}, "outcome": "gone", "say": "runs {sql_kind} on {objects} through the MCP tool {tool} on {host}"}
+      ]
+    }
+  ]
+}

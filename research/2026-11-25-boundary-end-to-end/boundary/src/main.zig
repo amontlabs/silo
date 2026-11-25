@@ -31,6 +31,8 @@ const source = @import("source.zig");
 const dns = @import("dns.zig");
 const conf = @import("conf.zig");
 const outside = @import("outside.zig");
+const keyplan = @import("keyplan.zig");
+const hold = @import("hold.zig");
 const c = mint.c;
 const posix = std.posix;
 const gpa = std.heap.c_allocator;
@@ -1630,12 +1632,15 @@ fn handleInner(fd: posix.fd_t, comp: usize, way: Way, id: u32) !void {
     const name = host.?;
     if ((std.net.Address.parseIp(name, 0) catch null) != null) return refuseConn(fd, comp, way, id, name, port, "address-not-name", "Silo connects to names, not addresses.");
     const h = mayReach(comp, name, port) orelse return refuseConn(fd, comp, way, id, name, port, "not-allowed", "this computer may not reach this host.");
-    const read_mode = std.mem.eql(u8, h.mode, "read");
-    decide(comp, "connection", "\"what\":\"opened\",\"decision\":\"allowed\",\"decided_by\":\"rule\",\"way\":\"{s}\",\"host\":{f},\"port\":{d},\"mode\":\"{s}\",\"asked\":{f}", .{ @tagName(way), j(name), port, h.mode, j(asked_s) }) catch {
+    // A computer set for a plan: Anthropic is passed through unread (#393).
+    const plan_pass = std.ascii.eqlIgnoreCase(name, "api.anthropic.com") and keyplan.modeOf(bcfg.computers[comp].anthropic) == .plan;
+    const read_mode = std.mem.eql(u8, h.mode, "read") and !plan_pass;
+    const mode_s: []const u8 = if (plan_pass) "pass-set-for-a-plan" else h.mode;
+    decide(comp, "connection", "\"what\":\"opened\",\"decision\":\"allowed\",\"decided_by\":\"rule\",\"way\":\"{s}\",\"host\":{f},\"port\":{d},\"mode\":\"{s}\",\"asked\":{f}", .{ @tagName(way), j(name), port, mode_s, j(asked_s) }) catch {
         return refuseConn(fd, comp, way, id, name, port, "no-room-in-record", "Silo cannot record this connection now.");
     };
     if (way == .connect) try sendAll(fd, "HTTP/1.1 200 Connection established\r\n\r\n");
-    record("\"conn\":{d},\"kind\":\"entry\",\"way\":\"{s}\",\"host\":{f},\"port\":{d},\"asked\":{f},\"mode\":\"{s}\",\"entry_ms\":{d:.3}", .{ id, @tagName(way), j(name), port, j(asked_s), h.mode, now_ms() - t0 });
+    record("\"conn\":{d},\"kind\":\"entry\",\"way\":\"{s}\",\"host\":{f},\"port\":{d},\"asked\":{f},\"mode\":\"{s}\",\"entry_ms\":{d:.3}", .{ id, @tagName(way), j(name), port, j(asked_s), mode_s, now_ms() - t0 });
     if (read_mode) return readHost(fd, comp, way, id, name, port, t0);
     return passHost(fd, comp, way, id, name, port, &sni_buf, t0);
 }
@@ -1794,6 +1799,18 @@ fn readHost(fd: posix.fd_t, comp: usize, way: Way, id: u32, name: []const u8, po
         const shape = fmt orelse defaultFormat(provider);
         const rline = swap.lineForRecord(req.first);
 
+        // ---- key or plan (#393): a plan's sign-in does not leave a computer set for a key ----
+        if (provider == .anthropic and keyplan.modeOf(bcfg.computers[comp].anthropic) == .key and keyplan.signInOf(req.raw) == .plan) {
+            decide(comp, "model-call", "\"what\":\"refused\",\"decision\":\"refused\",\"decided_by\":\"rule\",\"host\":{f},\"line\":{f},\"why\":\"plan-in-a-computer-set-for-a-key\"", .{ j(name), j(rline) }) catch {};
+            try writeRefusal(client, .anthropic, "Silo: this computer is set for Claude with an API key, and Claude Code is signed in with a plan here. Sign in with an API key (ANTHROPIC_API_KEY), or set this computer for a plan, whose traffic Silo does not read.");
+            continue;
+        }
+
+        // ---- a destructive call is held for a person (#353, #383), before any secret is in ----
+        if (provider == null and bcfg.precaution != null and !std.mem.eql(u8, bcfg.computers[comp].destructive, "off")) {
+            if (try precaution(client, comp, id, name, rline, req.raw, rc.body.items)) continue;
+        }
+
         // ---- placeholders: out of the head, values in, only to their hosts ----
         const sw = try swap.swapHead(gpa, req.raw, name, secrets);
         const out_head = switch (sw) {
@@ -1942,6 +1959,62 @@ fn readHost(fd: posix.fd_t, comp: usize, way: Way, id: u32, name: []const u8, po
         });
         if (!keep) return;
     }
+}
+
+const HoldCtx = struct { comp: usize, name: []const u8, rline: []const u8, t0: f64 };
+
+fn onHold(ctx: *anyopaque, op: hold.Opinion) anyerror!void {
+    const h: *HoldCtx = @ptrCast(@alignCast(ctx));
+    try decide(h.comp, "connection", "\"what\":\"held\",\"decision\":\"held\",\"decided_by\":\"precaution\",\"precaution\":\"destructive-calls\",\"host\":{f},\"line\":{f},\"verdict\":{f},\"says\":{f},\"classify_ms\":{d:.2}", .{ j(h.name), j(h.rline), j(op.verdict), std.json.fmt(op.says, .{}), now_ms() - h.t0 });
+}
+
+/// Asks the precaution about a request and holds it when the precaution says so. True when the
+/// request was refused here and must not go on.
+fn precaution(client: Side, comp: usize, id: u32, name: []const u8, rline: []const u8, head: []const u8, body: []const u8) !bool {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var hc: HoldCtx = .{ .comp = comp, .name = name, .rline = rline, .t0 = now_ms() };
+    const out = hold.ask(arena.allocator(), .{ .sock = bcfg.precaution.?, .classify_ms = bcfg.classify_limit_ms, .hold_ms = bcfg.hold_limit_ms, .on_hold = onHold, .ctx = &hc }, bcfg.computers[comp].id, name, head, body);
+    const ms = now_ms() - hc.t0;
+    switch (out) {
+        .allow => |op| {
+            record("\"conn\":{d},\"kind\":\"precaution\",\"verdict\":{f},\"ms\":{d:.2}", .{ id, j(op.verdict), ms });
+            return false;
+        },
+        .yes => {
+            try decide(comp, "connection", "\"what\":\"hold-ended\",\"decision\":\"allowed\",\"decided_by\":\"person\",\"host\":{f},\"line\":{f},\"held_ms\":{d:.0}", .{ j(name), j(rline), ms });
+            return false;
+        },
+        .no, .unanswered => |op| {
+            const answered = out == .no;
+            decide(comp, "connection", "\"what\":\"hold-ended\",\"decision\":\"refused\",\"decided_by\":\"{s}\",\"host\":{f},\"line\":{f},\"held_ms\":{d:.0}", .{ if (answered) "person" else "hold-limit", j(name), j(rline), ms }) catch {};
+            var mb: [600]u8 = undefined;
+            const what = if (op.says.len > 0) op.says[0] else "changes something that cannot be undone";
+            const m = if (answered)
+                std.fmt.bufPrint(&mb, "Silo: this request {s}. It was held for a person, who said no.", .{what}) catch "Silo: this request was held and refused."
+            else
+                std.fmt.bufPrint(&mb, "Silo: this request {s}. It was held for a person and not answered in {d} s, so it did not leave. Nobody said no: it can be tried again later.", .{ what, bcfg.hold_limit_ms / 1000 }) catch "Silo: this request was held and not answered.";
+            try writeHeld(client, m);
+            return true;
+        },
+        .no_opinion => |why| {
+            const deny = !std.mem.eql(u8, bcfg.on_no_opinion, "rules");
+            decide(comp, "connection", "\"what\":\"no-opinion\",\"decision\":\"{s}\",\"decided_by\":\"classifier-limit\",\"host\":{f},\"line\":{f},\"why\":{f},\"ms\":{d:.0}", .{ if (deny) "refused" else "allowed", j(name), j(rline), j(why), ms }) catch {};
+            if (!deny) return false;
+            try writeHeld(client, "Silo: this request could not be checked for a destructive change in time, so it did not leave. It can be tried again.");
+            return true;
+        },
+    }
+}
+
+/// A hold refused: 403, which the usual programs do not retry by themselves (`how-a-hold-ends`).
+fn writeHeld(client: Side, msg: []const u8) !void {
+    var body: std.Io.Writer.Allocating = .init(gpa);
+    defer body.deinit();
+    try body.writer.print("{{\"error\":{{\"type\":\"silo_held\",\"message\":{f}}}}}", .{j(msg)});
+    var hb: [160]u8 = undefined;
+    try client.writeAll(try std.fmt.bufPrint(&hb, "HTTP/1.1 403 Forbidden\r\ncontent-type: application/json\r\ncontent-length: {d}\r\n\r\n", .{body.written().len}));
+    try client.writeAll(body.written());
 }
 
 fn usedNames(secrets: []const conf.Secret, used: u32, buf: []u8) []const u8 {

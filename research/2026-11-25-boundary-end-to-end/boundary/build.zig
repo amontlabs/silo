@@ -10,7 +10,7 @@ pub fn build(b: *std.Build) void {
     const wf = b.addWriteFiles();
     const from374 = "../../2026-11-24-spend-budgets/boundary/src/";
     inline for (.{ "usage.zig", "prices.zig", "budget.zig", "spend.zig", "stream.zig", "ws.zig", "outside.zig" }) |f| _ = wf.addCopyFile(b.path(from374 ++ f), f);
-    inline for (.{ "main.zig", "entry.zig", "mint.zig", "swap.zig", "source.zig", "dns.zig", "conf.zig" }) |f| _ = wf.addCopyFile(b.path("src/" ++ f), f);
+    inline for (.{ "main.zig", "entry.zig", "mint.zig", "swap.zig", "source.zig", "dns.zig", "conf.zig", "keyplan.zig", "hold.zig" }) |f| _ = wf.addCopyFile(b.path("src/" ++ f), f);
     const root = wf.getDirectory();
     const mod = b.createModule(.{ .root_source_file = root.path(b, "main.zig"), .target = target, .optimize = optimize, .link_libc = true });
     inline for (.{ "ssl", "crypto", "z", "zstd" }) |l| mod.linkSystemLibrary(l, .{});
@@ -18,7 +18,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(exe);
 
     const test_step = b.step("test", "Run the unit tests");
-    inline for (.{ "entry.zig", "swap.zig", "dns.zig", "source.zig" }) |f| {
+    inline for (.{ "entry.zig", "swap.zig", "dns.zig", "source.zig", "keyplan.zig", "hold.zig" }) |f| {
         const tm = b.createModule(.{ .root_source_file = root.path(b, f), .target = target, .optimize = optimize, .link_libc = true });
         const t = b.addTest(.{ .root_module = tm });
         test_step.dependOn(&b.addRunArtifact(t).step);
