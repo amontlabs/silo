@@ -30,3 +30,14 @@ configuration is not on this machine.
 polarzero accepts that this research belongs to the Workshop stage, with one direction for it: as
 many facts as possible, which cannot be tampered with, and as few reports as possible. A report is
 used only for what can be known only from inside the computer.
+
+## In a first build with a Linux main
+
+An agent's part, 25 November 2026, from [option B's specs](../../../research/2026-11-25-linux-main/README.md). Its step 7 builds the probe as this answer says, on a
+kernel of Silo's own configuration (eBPF on tracepoints, BTF, the process connector; no modules,
+no kexec, no `/dev/mem`). Under polarzero's direction of 20 November, it proposes one sentence
+more: "Before the probe is relied on, a report of each exec and exit made by Silo's own kernel
+through a call to the helper is measured against the same target; it cannot be stopped by root
+inside without a kernel exploit, and where it meets the target it replaces the probe for starts and
+exits." The case: an agent with root stops the probe, then deletes a folder; the record has a
+silent source and file facts with no process behind them.

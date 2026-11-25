@@ -59,3 +59,16 @@ how the code reaches it.
 
 `linux-beside-a-macos-main`, `containers-on-macos`, `record-halves-per-system`,
 `macos-ships-facts-first`, `x86-linux-computers`, `neutral-core`.
+
+## Option B specified
+
+An agent's part, 25 November 2026, from [option B's specs](../../../research/2026-11-25-linux-main/README.md). B, a Linux main on the Mac, is now specified at the
+level of #370 for a macOS main, in steps 2 to 7, with a test kit for a Linux host with KVM. Under
+B this entry's answer would read "Main is a Linux computer first. Its forks are Linux. A macOS
+computer comes later, as a computer of its own beside main", and `linux-never-copies-macos-main`
+stays as it is. Three things the notes above do not weigh: B's Linux computer is the one
+`computers-linux-beside-main` needs anyway, so building it first loses nothing under this answer;
+a macOS main has more ways to fail before the first night (macOS 27, provisioning, gvproxy with a
+macOS computer, the Keychain over SSH); and B's first morning holds processes and Docker. The
+recommendation stays this answer, with an order of building that leaves the choice open until the
+Mac's tests have run.

@@ -318,3 +318,15 @@ whoever builds it.
   parameter set, and check it when it is fetched. Kernels, base images and libkrun builds that make
   a computer are checked by hash before use.
   ([source](https://github.com/evmts/guillotine-mini/blob/edafd394bc0aa48a9691b037da36b6f36525121a/build.zig.md?plain=1#L494))
+
+## If main is a Linux computer
+
+An agent's part, 25 November 2026, from [option B's specs](../../../research/2026-11-25-linux-main/README.md). Each of the five measurements above is a test of the
+kit written for a Linux host with KVM (K01, K06, K02) or for the Mac (L2, L3), with the outcome that
+keeps or reopens the choice. Read again on 25 November 2026: libkrun's `main` is still the untagged
+2.0 interface, which has pause and resume, an orderly stop on an arm64 Mac, an external kernel and
+a generic vhost-user device (Linux only); the newest release is 1.19.8, which has no pause. A
+helper for a Linux main would pin a commit of `main`. One patch is proposed on top: a hook in the
+block device before each write, from which Silo keeps a log of the blocks written, for cheap
+checkpoints and exact file facts. It is the first entry for `libkrun-patches` and
+`engine-patch-review`.

@@ -42,3 +42,12 @@ This is a lean, not a verdict. The answer is written from these words.
   copy of it either.
 - Placed in the stage "Later", before `linux-server-host`, so that it comes after the work on the
   Mac.
+
+## Specified, 25 November 2026
+
+An agent's part, from [option B's specs](../../../research/2026-11-25-linux-main/README.md). The fallback above is now specified: the feature
+`computers-linux-main-on-a-mac`, placed after this entry. If it is taken for the first build, the
+answer's last sentence becomes "Silo starts with a Linux main on a Mac", and this entry moves to
+the first build's block of the order with it. Counted on #348's tree, that first build needs 96
+open decisions, not the 94 the comparison above gave: `files-through-a-channel` and
+`mac-silo-needs` are needed by a Linux main too.

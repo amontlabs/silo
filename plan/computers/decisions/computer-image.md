@@ -28,3 +28,12 @@ The answer above is these two cells, written as one text.
 
 Apple forbids shipping a pre-installed macOS image. Each Mac downloads and installs its own, so
 the first run takes longer than with a Linux image (`first-run-time-macos`).
+
+## Ubuntu's image as it is
+
+An agent's part, 25 November 2026, from [option B's specs](../../../research/2026-11-25-linux-main/README.md). Read on that day: Ubuntu 26.04's cloud image for arm64
+is a qcow2 file of 943 MB, checked against Ubuntu's `SHA256SUMS`, with 95 % of its clusters
+compressed; root in partition 1, `/boot` in 13, EFI in 15. A computer boots a raw disk, so the copy
+Silo keeps is the converted raw disk, and its hash can be pinned too: proposed words after "checks
+it against Ubuntu's published checksum and keeps it": "converted to a raw disk whose checksum Silo
+also pins,".

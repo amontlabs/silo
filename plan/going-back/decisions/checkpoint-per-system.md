@@ -31,3 +31,16 @@ notes:
 | Checkpoint | A snapshot of the disk. Memory later. | A clone of the disk. A memory state can be saved, and is refused after some updates of the host. |
 
 A checkpoint that keeps memory is the later feature `checkpoints-with-memory`.
+
+## A checkpoint that does not share blocks
+
+An agent's part, 25 November 2026, from [option B's specs](../../../research/2026-11-25-linux-main/README.md). #365 measured its `delta` way best: the blocks the
+computer overwrites after the checkpoint's moment, copied just before each write, so nothing is
+cloned while the computer runs and its writes do not wait. That is not "a copy of the computer's
+disk that shares blocks with it", so the answer as written excludes it. Proposed first sentence:
+"On every system, a checkpoint is a copy of the computer's disk at one moment, taken from outside
+the computer: either a copy that shares blocks with the disk, by the same means as a fork's disk
+(`fork-shares-disk-blocks`), or the blocks the computer overwrites after that moment, copied just
+before each write, where Silo sees the computer's writes." Silo sees them for a Linux computer
+through a hook in libkrun's block device, and for a macOS computer only if its disk is served over
+NBD.
