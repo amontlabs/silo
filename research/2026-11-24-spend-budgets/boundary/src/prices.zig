@@ -25,6 +25,8 @@ pub const Row = struct {
     long_input_mult: f64 = 1,
     long_output_mult: f64 = 1,
     web_search_per_1k: f64 = 0,
+    /// Gemini's explicit cache: dollars per million tokens per hour it is kept.
+    cache_storage_per_hour: f64 = 0,
 };
 
 const File = struct { rows: []Row };

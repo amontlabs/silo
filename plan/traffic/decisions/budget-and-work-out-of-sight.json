@@ -1,0 +1,7 @@
+{
+  "asks": "How does a budget count model work that the provider runs after the program's call has ended: background responses, batches, and a cache kept for a time?",
+  "answer": "Under a budget, such work leaves only if its whole bound fits in what is left: every request's input at the dearest rate it can incur and its whole output limit, at the provider's batch price for a batch, and a cache's storage for its whole lifetime. It holds that bound until its result passes the boundary, and is then counted at what the provider reports. Work whose result never passes the boundary keeps its bound, and the app shows it as held. Under a budget, a batch whose requests Silo did not see is refused, since its cost cannot be bounded.",
+  "needs": [
+    "what-a-budget-promises"
+  ]
+}

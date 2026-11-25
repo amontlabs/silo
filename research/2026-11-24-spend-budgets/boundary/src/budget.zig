@@ -31,6 +31,9 @@ pub const Limits = struct {
     /// account to, from 0 to 1, as the provider's headers report it for the whole account.
     plan_5h_max: ?f64 = null,
     plan_7d_max: ?f64 = null,
+    /// Dollars each conversation on this computer may spend. The boundary keeps one ledger per
+    /// conversation it recognises, with this as its total.
+    conversation_total: ?f64 = null,
 };
 
 const Spent = struct { t: f64, cost: f64 };
@@ -111,8 +114,45 @@ pub const Book = struct {
     }
 
     pub fn add(self: *Book, name: []const u8, limits: Limits) !usize {
+        self.mu.lock();
+        defer self.mu.unlock();
         try self.ledgers.append(self.gpa, .{ .name = name, .limits = limits });
         return self.ledgers.items.len - 1;
+    }
+
+    /// A new ledger that starts at what another has counted now: a fork's copy of a conversation
+    /// that carries its spend.
+    pub fn addFrom(self: *Book, name: []const u8, limits: Limits, from: usize) !usize {
+        self.mu.lock();
+        defer self.mu.unlock();
+        const begin = self.ledgers.items[from].counted();
+        try self.ledgers.append(self.gpa, .{ .name = name, .limits = limits, .settled = begin });
+        return self.ledgers.items.len - 1;
+    }
+
+    /// What a ledger has settled, and counts now with its calls under way.
+    pub fn spent(self: *Book, i: usize) struct { settled: f64, counted: f64, total: ?f64, name: []const u8 } {
+        self.mu.lock();
+        defer self.mu.unlock();
+        const l = &self.ledgers.items[i];
+        return .{ .settled = l.settled, .counted = l.counted(), .total = l.limits.total, .name = l.name };
+    }
+
+    /// Whether work that runs out of the boundary's sight may start: its whole bound must fit
+    /// under every total, whatever the policy, since nothing can stop it once it has left.
+    pub fn admitWhole(self: *Book, which: []const usize, bound: f64) ?Refusal {
+        self.mu.lock();
+        defer self.mu.unlock();
+        for (which) |i| {
+            const l = &self.ledgers.items[i];
+            const total = l.limits.total orelse continue;
+            const now_held = l.held();
+            if (now_held + bound > total) {
+                l.refused += 1;
+                return .{ .ledger = l.name, .why = if (l.counted() >= total) .total else .input, .limit = total, .counted = now_held, .needed = bound };
+            }
+        }
+        return null;
     }
 
     pub fn find(self: *Book, name: []const u8) ?usize {
@@ -308,4 +348,26 @@ test "a plan window refuses from the account's reading, and the computer's share
     try b.planReading(&w, "acct", 0.51, 0.13, 3);
     try std.testing.expect(b.admit(&w, 0, 0, "acct", 4).?.why == .plan_5h);
     try std.testing.expectApproxEqAbs(@as(f64, 0.21), b.ledgers.items[c].plan_5h_moved, 1e-9);
+}
+
+test "work out of sight is admitted only if its whole bound fits, and holds it" {
+    var b: Book = .{ .gpa = std.testing.allocator };
+    defer b.deinit();
+    const c = try b.add("main", .{ .total = 1.0 });
+    const w = [_]usize{c};
+    try std.testing.expect(b.admitWhole(&w, 0.6) == null);
+    try b.start(&w, 1, 0.6);
+    b.progress(&w, 1, 0.6);
+    try std.testing.expect(b.admitWhole(&w, 0.5) != null);
+    _ = try b.settle(&w, 1, 0.2, false, 1);
+    try std.testing.expect(b.admitWhole(&w, 0.5) == null);
+}
+
+test "a carried ledger starts at what the other one counted" {
+    var b: Book = .{ .gpa = std.testing.allocator };
+    defer b.deinit();
+    const a = try b.add("conv:1", .{ .total = 1.0 });
+    _ = try b.settle(&[_]usize{a}, 1, 0.7, false, 0);
+    const f = try b.addFrom("conv:2", .{ .total = 1.0 }, a);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.7), b.spent(f).settled, 1e-9);
 }

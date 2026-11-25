@@ -10,10 +10,14 @@ POLICIES=(
   'admit-input|"policy": "admit_input", "output_tps": 500'
   'reserve-typical|"policy": "reserve_typical", "output_tps": 500'
   'reserve-max|"policy": "reserve_max"'
+  'cut|"policy": "finish", "output_tps": 500, "mid_stream": "cut"'
+  'typical-cut|"policy": "reserve_typical", "output_tps": 500, "mid_stream": "cut"'
 )
 for seed in "$@"; do
   for pol in "${POLICIES[@]}"; do
     name=${pol%%|*}; frag=${pol#*|}; n=over-$MODEL-$name-$seed
+    # ONLY="finish-time cut" runs those policies alone.
+    [ -n "${ONLY:-}" ] && [[ " $ONLY " != *" $name "* ]] && continue
     python3 - $E/run/scenarios/overshoot.json $seed > $E/out/cfg/$n.scen.json <<'P'
 import json,sys; s=json.load(open(sys.argv[1])); s["seed"]=int(sys.argv[2]); print(json.dumps(s))
 P

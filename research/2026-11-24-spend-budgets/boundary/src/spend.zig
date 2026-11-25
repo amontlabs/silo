@@ -19,6 +19,9 @@ pub const Computer = struct {
     /// computer's /etc/hosts points the providers' hosts at its own loopback address.
     address: []const u8,
     person: ?[]const u8 = null,
+    /// The computer this one was forked from. With no limits of its own, a fork spends from its
+    /// parent's budget (`budget-of-a-fork`), and its conversations follow `fork_conversations`.
+    fork_of: ?[]const u8 = null,
     credentials: []Credential = &.{},
     limits: budget.Limits = .{},
 };
@@ -50,6 +53,31 @@ pub const Config = struct {
     rate_refusal: []const u8 = "400",
     /// Known model hosts the boundary cannot count. Refused while a budget covers the computer.
     uncountable_hosts: [][]const u8 = &.{},
+    /// A streamed Chat Completions call that does not ask for its usage
+    /// (`stream_options.include_usage`) ends with no count. "estimate": it leaves and is settled
+    /// on an estimate. "deny": under a budget it is refused, and the refusal says what to set.
+    chat_without_usage: []const u8 = "estimate",
+    /// Work that runs at the provider after the connection ends: background responses, batches
+    /// and Gemini's cache storage. "pass": as #374, nothing is counted for it. "hold": it is
+    /// admitted only if its bound fits, and holds that bound until its result passes the boundary.
+    out_of_sight: []const u8 = "pass",
+    /// A budget reached while calls stream. "finish": they finish. "cut": once what is counted
+    /// passes `cut_share` of a total, each call it covers is ended, and the program gets an error
+    /// event in the provider's shape.
+    mid_stream: []const u8 = "finish",
+    cut_share: f64 = 1.0,
+    /// With `input_price` "likely": an earlier request's cache is taken as gone once its lifetime
+    /// has passed, and its part is priced as a write again.
+    cache_ttl_aware: bool = false,
+    /// OpenAI's prompt cache lifetime, which its replies do not say. 5 minutes is the least.
+    openai_cache_ttl_s: f64 = 300,
+    /// The stand-in providers run their clocks faster, so that an hour of cache passes in seconds.
+    /// The boundary multiplies the providers' lifetimes by this. 1 for real providers.
+    provider_time_scale: f64 = 1,
+    /// A fork's first request that continues one of its parent's conversations: "fresh" starts a
+    /// conversation at zero (#373's text), "carry" starts it at what the parent's had spent, and
+    /// "shared" spends from the parent's conversation itself.
+    fork_conversations: []const u8 = "fresh",
     computers: []Computer = &.{},
     people: []Person = &.{},
 };
@@ -90,6 +118,16 @@ pub const Request = struct {
     max_tokens: i64,
     tier: []const u8,
     body_len: usize,
+    stream: bool = false,
+    /// Chat Completions: the request asks for the usage chunk at the end of its stream.
+    include_usage: bool = false,
+    /// Chat Completions: the number of choices, each written and billed in full.
+    n: i64 = 1,
+    /// OpenAI Responses: the state at the provider this request continues, and whether it runs
+    /// in the background.
+    previous_response_id: ?[]u8 = null,
+    conversation: ?[]u8 = null,
+    background: bool = false,
     /// A hash of the conversation up to each of its items (messages, input items, contents), in
     /// order. A later request of the same conversation starts with the same items, so the last
     /// one of an earlier request is one of these. Markers of the prompt cache, which move from
@@ -99,6 +137,8 @@ pub const Request = struct {
     pub fn deinit(self: *Request, gpa: Allocator) void {
         gpa.free(self.model);
         gpa.free(self.prefixes);
+        if (self.previous_response_id) |x| gpa.free(x);
+        if (self.conversation) |x| gpa.free(x);
     }
 
     /// The hash of the whole conversation this request sends.
@@ -116,6 +156,11 @@ pub fn readRequest(gpa: Allocator, format: usage.Format, path: []const u8, body:
     var max: ?i64 = null;
     var tier: []const u8 = "standard";
     var items: ?std.json.Array = null;
+    var n: i64 = 1;
+    var include_usage = false;
+    var prev: ?[]const u8 = null;
+    var conv: ?[]const u8 = null;
+    var background = false;
     switch (format) {
         .anthropic => {
             max = usage.int(o.get("max_tokens"));
@@ -124,11 +169,17 @@ pub fn readRequest(gpa: Allocator, format: usage.Format, path: []const u8, body:
         },
         .responses => {
             max = usage.int(o.get("max_output_tokens"));
+            if (usage.str(o.get("previous_response_id"))) |x| prev = x;
+            if (usage.str(o.get("conversation"))) |x| conv = x;
+            if (usage.obj(o.get("conversation"))) |co| conv = usage.str(co.get("id"));
+            background = boolOf(o.get("background"));
             tier = tierOf(usage.str(o.get("service_tier")));
             items = usage.arr(o.get("input"));
         },
         .chat => {
             max = usage.int(o.get("max_completion_tokens")) orelse usage.int(o.get("max_tokens"));
+            n = usage.int(o.get("n")) orelse 1;
+            if (usage.obj(o.get("stream_options"))) |so| include_usage = boolOf(so.get("include_usage"));
             tier = tierOf(usage.str(o.get("service_tier")));
             items = usage.arr(o.get("messages"));
         },
@@ -161,8 +212,19 @@ pub fn readRequest(gpa: Allocator, format: usage.Format, path: []const u8, body:
         .max_tokens = max orelse 64000,
         .tier = tier,
         .body_len = body.len,
+        .stream = boolOf(o.get("stream")),
+        .include_usage = include_usage,
+        .n = @max(1, n),
+        .previous_response_id = if (prev) |x| try gpa.dupe(u8, x) else null,
+        .conversation = if (conv) |x| try gpa.dupe(u8, x) else null,
+        .background = background,
         .prefixes = try prefixes.toOwnedSlice(gpa),
     };
+}
+
+fn boolOf(v: ?std.json.Value) bool {
+    const x = v orelse return false;
+    return x == .bool and x.bool;
 }
 
 fn tierOf(s: ?[]const u8) []const u8 {
@@ -267,6 +329,16 @@ pub fn wait(gpa: Allocator, format: usage.Format, message: []const u8, secs: u64
     return std.fmt.allocPrint(gpa, "HTTP/1.1 429 Too Many Requests\r\ncontent-type: application/json\r\ncontent-length: {d}\r\nretry-after: {d}\r\nx-silo-refused: rate\r\n\r\n{s}", .{ body.len, secs, body });
 }
 
+/// The event that ends a stream Silo cut, in the provider's own shape, so the program shows why.
+pub fn cutEvent(gpa: Allocator, format: usage.Format, message: []const u8) ![]u8 {
+    return switch (format) {
+        .anthropic => std.fmt.allocPrint(gpa, "event: error\ndata: {{\"type\":\"error\",\"error\":{{\"type\":\"invalid_request_error\",\"message\":{f}}}}}\n\n", .{std.json.fmt(message, .{})}),
+        .responses => std.fmt.allocPrint(gpa, "event: error\ndata: {{\"type\":\"error\",\"code\":\"silo_budget_reached\",\"message\":{f},\"param\":null}}\n\n", .{std.json.fmt(message, .{})}),
+        .chat => std.fmt.allocPrint(gpa, "data: {{\"error\":{{\"message\":{f},\"type\":\"invalid_request_error\",\"code\":\"silo_budget_reached\"}}}}\n\n", .{std.json.fmt(message, .{})}),
+        .gemini => std.fmt.allocPrint(gpa, "data: {{\"error\":{{\"code\":400,\"message\":{f},\"status\":\"INVALID_ARGUMENT\"}}}}\n\n", .{std.json.fmt(message, .{})}),
+    };
+}
+
 pub fn providerKey(format: usage.Format) []const u8 {
     return switch (format) {
         .anthropic => "anthropic",
@@ -335,6 +407,19 @@ test "request: model, limit, tier and a conversation name that survives growth" 
     defer g.deinit(gpa);
     try std.testing.expectEqualStrings("gemini-3.8-flash", g.model);
     try std.testing.expectEqual(@as(i64, 100), g.max_tokens);
+}
+
+test "request: chat usage and choices, responses state and background" {
+    const gpa = std.testing.allocator;
+    var a = try readRequest(gpa, .chat, "/v1/chat/completions", "{\"model\":\"m\",\"stream\":true,\"n\":4,\"stream_options\":{\"include_usage\":true},\"messages\":[]}");
+    defer a.deinit(gpa);
+    try std.testing.expect(a.stream and a.include_usage);
+    try std.testing.expectEqual(@as(i64, 4), a.n);
+    var b = try readRequest(gpa, .responses, "/v1/responses", "{\"model\":\"m\",\"background\":true,\"previous_response_id\":\"resp_9\",\"conversation\":{\"id\":\"conv_1\"},\"input\":[]}");
+    defer b.deinit(gpa);
+    try std.testing.expect(b.background);
+    try std.testing.expectEqualStrings("resp_9", b.previous_response_id.?);
+    try std.testing.expectEqualStrings("conv_1", b.conversation.?);
 }
 
 test "refusal in each provider's shape" {

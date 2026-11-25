@@ -1,0 +1,72 @@
+prev_id under prev_id: billed $0.4003, counted $0.4003, refused {}
+  PASS  counted equals billed  counted=0.4003 billed=0.4003
+  FAIL  input of each chained call estimated within 10% of the provider's count  errors=[] cold_first_calls=[0.267, -0.999, -0.999, -0.999, 0.267, -0.999, -0.999]
+  1 failed
+background under background: billed $1.0631, counted $0.0, refused {}
+  FAIL  counted equals billed  counted=0.0 billed=1.0631
+  PASS  spend stays within the budget  spent=0.0 budget=1.5
+  FAIL  a background call is refused once held calls fill the budget  said=[None]
+  2 failed
+websearch under websearch: billed $0.1035, counted $0.0175, refused {}
+  FAIL  counted equals billed  counted=0.0175 billed=0.1035
+  FAIL  searches counted  counted_searches=0
+  2 failed
+chat under chat-deny: billed $0.4088, counted $0.2623, refused {}
+  FAIL  streams that do not ask for usage are refused, the others pass  refused=[]
+  FAIL  counted equals billed  counted=0.2623 billed=0.4088
+  2 failed
+chat under chat-estimate: billed $0.4088, counted $0.2623, refused {}
+  PASS  calls without usage settled on an estimate  estimated=2
+        estimated: counted $0.0103 against billed $0.1569
+  ok
+cache_expiry under cache_expiry: billed $1.0114, counted $1.0114, refused {}
+  PASS  counted equals billed  counted=1.0114 billed=1.0114
+  FAIL  the input priced before each call is not under what the provider billed for it  before_vs_billed=[(0.6407, 0.3159), (0.0128, 0.0128), (0.0128, 0.0129), (0.0128, 0.3161), (0.0128, 0.013), (0.0128, 0.3163)]
+  1 failed
+gcache under gcache: billed $5.5236, counted $0.0037, refused {}
+  FAIL  storage counted within 1% of its bill (each side times the cache's life)  counted=0.0037 billed=5.5236
+  FAIL  a day of storage that does not fit is refused  said=None
+  2 failed
+batch under batch: billed $4.4682, counted $0, refused {}
+  PASS  batches whose results were read are counted at their bill  settled=0 billed_read=-3e-05
+  FAIL  a batch that does not fit is refused  said=[None]
+  FAIL  a batch never read stays held at its bound  open_holds=[] unread_billed=4.46823
+  2 failed
+midstream under midstream-finish: billed $1.5206, counted $1.5206, refused {'total': 1}
+        long call: whole=True secs=30.3 said=None
+  PASS  the long call finishes, past the budget  billed=1.5206 budget=1
+  ok
+midstream under midstream-cut: billed $1.5206, counted $1.5206, refused {'total': 1}
+        long call: whole=True secs=30.3 said=None
+  FAIL  spend ends within 5% of the budget  billed=1.5206 budget=1
+  FAIL  the program is told why its answer stopped  said=None
+  PASS  the cut call, settled on an estimate, is counted within 10% of its bill  counted=1.5206 billed=1.5206
+  2 failed
+midstream under midstream-typical-finish: billed $1.5206, counted $1.5206, refused {'total': 1}
+        long call: whole=True secs=30.4 said=None
+  PASS  the long call finishes, past the budget  billed=1.5206 budget=1
+  ok
+midstream under midstream-typical-cut: billed $1.5206, counted $1.5206, refused {'total': 1}
+        long call: whole=True secs=30.3 said=None
+  FAIL  spend ends within 5% of the budget  billed=1.5206 budget=1
+  FAIL  the program is told why its answer stopped  said=None
+  PASS  the cut call, settled on an estimate, is counted within 10% of its bill  counted=1.5206 billed=1.5206
+  2 failed
+fork under fork-fresh: billed $1.1046, counted $1.1046, refused {}
+        turns: main turn 0:200, main turn 1:200, main turn 2:200, fork turn 0:200, fork turn 1:200, fork turn 2:200, fork turn 3:200, fork turn 4:200, fork turn 5:200, main turn 3:200, main turn 4:200, main turn 5:200
+        by conversation: ?: script=0.0917 script=0.0918 script=0.0919 fork=0.092 fork=0.0921 fork=0.0921 fork=0.0922 fork=0.0923 fork=0.0924 script=0.092 script=0.0921 script=0.0921 (sum 1.1047)
+  PASS  counted equals billed  counted=1.1046 billed=1.1046
+  FAIL  the fork's spend counts in main's computer budget  fork=0.5531
+  1 failed
+fork under fork-carry: billed $1.1046, counted $1.1046, refused {}
+        turns: main turn 0:200, main turn 1:200, main turn 2:200, fork turn 0:200, fork turn 1:200, fork turn 2:200, fork turn 3:200, fork turn 4:200, fork turn 5:200, main turn 3:200, main turn 4:200, main turn 5:200
+        by conversation: ?: script=0.0917 script=0.0918 script=0.0919 fork=0.092 fork=0.0921 fork=0.0921 fork=0.0922 fork=0.0923 fork=0.0924 script=0.092 script=0.0921 script=0.0921 (sum 1.1047)
+  PASS  counted equals billed  counted=1.1046 billed=1.1046
+  FAIL  the fork's spend counts in main's computer budget  fork=0.5531
+  1 failed
+fork under fork-shared: billed $1.1046, counted $1.1046, refused {}
+        turns: main turn 0:200, main turn 1:200, main turn 2:200, fork turn 0:200, fork turn 1:200, fork turn 2:200, fork turn 3:200, fork turn 4:200, fork turn 5:200, main turn 3:200, main turn 4:200, main turn 5:200
+        by conversation: ?: script=0.0917 script=0.0918 script=0.0919 fork=0.092 fork=0.0921 fork=0.0921 fork=0.0922 fork=0.0923 fork=0.0924 script=0.092 script=0.0921 script=0.0921 (sum 1.1047)
+  PASS  counted equals billed  counted=1.1046 billed=1.1046
+  FAIL  the fork's spend counts in main's computer budget  fork=0.5531
+  1 failed

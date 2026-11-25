@@ -26,16 +26,21 @@ def cost(r, c):
     tin = c.get("input", 0) + c.get("cache_read", 0) + c.get("cache_write_short", 0) + c.get("cache_write_long", 0)
     long = r.get("long_above") is not None and tin > r["long_above"]
     im = r.get("long_input_mult", 1) if long else 1; om = r.get("long_output_mult", 1) if long else 1
-    return 1e-6 * (im * (c.get("input", 0) * r["input"] + c.get("cache_read", 0) * r.get("cache_read", 0) + c.get("cache_write_short", 0) * r.get("cache_write_short", 0) + c.get("cache_write_long", 0) * r.get("cache_write_long", 0)) + om * c.get("output", 0) * r["output"])
+    return c.get("web_searches", 0) * r.get("web_search_per_1k", 0) / 1000 + 1e-6 * (im * (c.get("input", 0) * r["input"] + c.get("cache_read", 0) * r.get("cache_read", 0) + c.get("cache_write_short", 0) * r.get("cache_write_short", 0) + c.get("cache_write_long", 0) * r.get("cache_write_long", 0)) + om * c.get("output", 0) * r["output"])
 
 def truth_cost(rows, rec, day):
-    tier = "fast" if rec.get("speed") == "fast" else "standard"
+    if rec.get("format") == "cache-storage":
+        # Storage: only a cache's last line counts (create, then patch or delete replace it).
+        if rec.get("superseded"): return 0
+        r = find(rows, "google", rec["model"], "standard", day)
+        return None if r is None else rec["tokens"] * rec["hours"] * r.get("cache_storage_per_hour", 0) / 1e6
+    tier = "fast" if rec.get("speed") == "fast" else rec.get("tier", "standard")
     if rec.get("iterations"):
         parts = rec["iterations"]
     else:
         parts = [dict(rec)]
     if not rec["completed"]:
-        parts = [dict(parts[-1], output=rec["billed_output"])]
+        parts = [dict(parts[-1], output=rec["billed_output"], web_searches=rec.get("web_searches", 0))]
     total = 0
     for p in parts:
         r = find(rows, rec["provider"], p.get("model", rec["model"]), tier, day)
@@ -50,6 +55,11 @@ def main():
     day = cfg.get("today", "2026-11-24")
     led_all = load(f"{out}/ledger.jsonl")
     led = [l for l in led_all if "plan" not in l]
+    last = {}
+    for l in led:
+        if l.get("format") == "cache-storage":
+            if l["cache"] in last: last[l["cache"]]["superseded"] = True
+            last[l["cache"]] = l
     plan = [l for l in led_all if "plan" in l]
     rec = load(f"{out}/record.jsonl")
     calls = [r for r in rec if r.get("kind") == "call"]
@@ -123,6 +133,9 @@ def main():
         inflight = sum(cost * (b - cross) / max(b - a, 1e-9) for a, b, cost in cs if a <= cross < b)
         res["decompose_" + name] = {"late_admissions": round(late, 4), "in_flight_at_limit": round(inflight, 4),
                                     "calls_after_limit": sum(1 for a, _, _ in cs if a > cross), "calls_in_flight": sum(1 for a, b, _ in cs if a <= cross < b)}
+    # Batches whose results never passed the boundary: billed, but only held there.
+    read = {c.get("provider_id") for c in calls if c.get("provider_id")}
+    res["unread_billed"] = round(sum(truth_cost(rows, l, day) or 0 for l in led if l.get("batch") and l["batch"] not in read), 6)
     alerts = [r for r in rec if r.get("kind") in ("alert", "reached")]
     res["alerts"] = [(r["kind"], r["ledger"]) for r in alerts]
     if "--json" in sys.argv: print(json.dumps(res))

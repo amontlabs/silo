@@ -20,6 +20,8 @@ RNG = random.Random(SC.get("seed", 1))
 LOCK = threading.RLock()
 LEDGER = open(f"{OUT}/ledger.jsonl", "a"); LOG = open(f"{OUT}/fake.log", "a")
 T0 = time.time()
+# Cache lifetimes are multiplied by this, so a run can wait out a 5-minute cache in seconds.
+TTL_SCALE = SC.get("cache_ttl_scale", 1)
 
 def log(s):
     with LOCK: LOG.write(f"{time.time()-T0:8.2f} {s}\n"); LOG.flush()
@@ -41,6 +43,10 @@ def toks(obj, ratio):
 
 def text_toks(s):
     return toks(s, 3.6)
+
+# ---- state the providers keep: stored responses, conversations, files, batches, caches ----
+
+RESPONSES = {}; CONVERSATIONS = {}; FILES = {}; BATCHES = {}; GCACHES = {}
 
 # ---- prompt caching, one store for all providers ----
 
@@ -68,7 +74,7 @@ def cache_lookup(pieces):
             else: write_short = cum_mark - best_read
         with LOCK:
             for k, c, t in marks:
-                CACHE[k] = (c, now + (3600 if t == "1h" else 300))
+                CACHE[k] = (c, now + TTL_SCALE * (3600 if t == "1h" else 300))
     return best_read, write_short, write_long, cum
 
 # ---- plan windows, for a subscription sign-in ----
@@ -127,7 +133,13 @@ def shell(tool_names, cmd):
     if "run_shell_command" in tool_names: return {"name": "run_shell_command", "input": {"command": cmd}}
     return {"name": sorted(tool_names)[0] if tool_names else "shell", "input": {"command": cmd}}
 
-def think_tokens():
+def think_tokens(body=None):
+    # A request can name its own reasoning length with THINK=<tokens> in its text, for the
+    # edge-case runs that need one long call.
+    if body is not None:
+        import re
+        m = re.search(r"THINK=(\d+)", json.dumps(body)[-4000:])
+        if m: return int(m.group(1))
     return rand(SC.get("think", [500, 4000]))
 
 # ---- HTTP ----
@@ -154,6 +166,8 @@ class H(http.server.BaseHTTPRequestHandler):
         elif enc == "zstd":
             import zstandard; raw = zstandard.ZstdDecompressor().decompress(raw, max_output_size=1 << 28)
         elif enc == "deflate": raw = zlib.decompress(raw)
+        if "multipart/form-data" in (self.headers.get("content-type") or ""):
+            return {"_multipart": raw, "_ctype": self.headers.get("content-type")}
         try: return json.loads(raw)
         except Exception: return {}
 
@@ -173,7 +187,23 @@ class H(http.server.BaseHTTPRequestHandler):
             return self.send_json({"error": {"message": "no websocket here"}}, 404)
         if self.path.startswith("/v1/models"):
             return self.send_json({"data": [], "object": "list"})
+        p = self.path.split("?")[0]; seg = p.strip("/").split("/")
+        if p.startswith("/v1/responses/") and len(seg) == 3: return self.response_get(seg[2])
+        if p.startswith("/v1/batches/") and len(seg) == 3: return self.openai_batch_get(seg[2])
+        if p.startswith("/v1/files/") and p.endswith("/content"): return self.openai_file_content(seg[2])
+        if p.startswith("/v1/messages/batches/") and p.endswith("/results"): return self.anthropic_batch_results(seg[3])
+        if p.startswith("/v1/messages/batches/") and len(seg) == 4: return self.anthropic_batch_get(seg[3])
         return self.send_json({"error": {"type": "not_found_error", "message": "not here"}}, 404)
+
+    def do_DELETE(self):
+        p = self.path.split("?")[0]
+        if p.startswith("/v1beta/cachedContents/"): return self.gcache_delete(p.split("/")[-1])
+        return self.send_json({"error": {"message": "not here"}}, 404)
+
+    def do_PATCH(self):
+        body = self.body(); p = self.path.split("?")[0]
+        if p.startswith("/v1beta/cachedContents/"): return self.gcache_patch(p.split("/")[-1], body)
+        return self.send_json({"error": {"message": "not here"}}, 404)
 
     def do_HEAD(self):
         self.send_response(200); self.send_header("content-length", "0"); self.end_headers()
@@ -185,6 +215,12 @@ class H(http.server.BaseHTTPRequestHandler):
             with LOCK:
                 n = len(os.listdir(OUT)); open(f"{OUT}/req-{n:04d}.json", "w").write(json.dumps({"path": path, "headers": dict(self.headers), "body": body}))
         try:
+            bare = path.split("?")[0]
+            if bare == "/v1/messages/batches": return self.anthropic_batch_create(body)
+            if bare.startswith("/v1/responses/") and bare.endswith("/cancel"): return self.response_cancel(bare.split("/")[3])
+            if bare == "/v1/files": return self.openai_file_upload(body)
+            if bare == "/v1/batches": return self.openai_batch_create(body)
+            if bare == "/v1beta/cachedContents": return self.gcache_create(body)
             if path.startswith("/v1/messages") and "count_tokens" not in path:
                 return self.anthropic(body)
             if path.endswith("/responses"):
@@ -248,7 +284,7 @@ class H(http.server.BaseHTTPRequestHandler):
         read, ws_, wl, total = cache_lookup(pieces)
         uncached = total - read - ws_ - wl
         what, payload = plan_step(kind, step, names)
-        thinking = think_tokens() if kind != "side" else 0
+        thinking = think_tokens(body) if kind != "side" or "THINK=" in json.dumps(body)[-4000:] else 0
         blocks = []
         if thinking: blocks.append({"type": "thinking"})
         if what == "tools":
@@ -295,7 +331,7 @@ class H(http.server.BaseHTTPRequestHandler):
                     ev("content_block_start", {"type": "content_block_start", "index": i, "content_block": {"type": "thinking", "thinking": "", "signature": ""}})
                     left = thinking
                     while left > 0:
-                        step_t = min(left, 400); self.pace(step_t); gen += step_t; left -= step_t
+                        step_t = min(left, 100); self.pace(step_t); gen += step_t; left -= step_t
                         ev("ping", {"type": "ping"})
                     ev("content_block_delta", {"type": "content_block_delta", "index": i, "delta": {"type": "signature_delta", "signature": "sig"}})
                 elif b["type"] == "text":
@@ -321,17 +357,28 @@ class H(http.server.BaseHTTPRequestHandler):
         model = body.get("model", "")
         tools = body.get("tools") or []
         names = {t.get("name") or t.get("type") for t in tools if isinstance(t, dict)}
+        searches = 1 if any(isinstance(t, dict) and str(t.get("type", "")).startswith("web_search") for t in tools) else 0
         inp = body.get("input") or []
         if isinstance(inp, str): inp = [{"type": "message", "role": "user", "content": inp}]
+        # State kept at the provider: the items of an earlier response, or of a conversation, come
+        # first. They are billed again as input (OpenAI's conversation-state guide says so).
+        earlier = []
+        prev = body.get("previous_response_id")
+        conv = body.get("conversation")
+        conv = conv.get("id") if isinstance(conv, dict) else conv
+        with LOCK:
+            if prev and prev in RESPONSES: earlier = list(RESPONSES[prev]["items"])
+            elif conv: earlier = list(CONVERSATIONS.get(conv, []))
         for it in inp:
             if isinstance(it, dict) and it.get("type") == "additional_tools":
                 for ns in it.get("tools") or []:
                     names |= {x.get("name") for x in ns.get("tools") or [] if isinstance(x, dict)}
         tools = tools or [1] if names else tools
         kind = "main" if tools else "side"
-        step = sum(1 for i in inp if isinstance(i, dict) and i.get("type") in ("function_call", "custom_tool_call", "local_shell_call"))
+        allin = earlier + inp
+        step = sum(1 for i in allin if isinstance(i, dict) and i.get("type") in ("function_call", "custom_tool_call", "local_shell_call"))
         pieces = [(json.dumps(tools, sort_keys=True), toks(tools, 3.0) if tools else 0, None), (json.dumps(body.get("instructions", "")), text_toks(body.get("instructions") or " "), None)]
-        for it in inp:
+        for it in allin:
             ratio = 3.0 if isinstance(it, dict) and it.get("type", "").endswith("output") else 3.8
             pieces.append((json.dumps(it, sort_keys=True), toks(it, ratio), None))
         # Automatic caching: any earlier prefix, rounded down to 128 tokens, from 1024 up.
@@ -340,9 +387,11 @@ class H(http.server.BaseHTTPRequestHandler):
         write = max(0, total - read) if SC.get("openai_cache_writes", True) else 0
         uncached = total - read - write
         what, payload = plan_step(kind, step, names)
-        thinking = think_tokens() if kind != "side" else 0
+        thinking = think_tokens(body) if kind != "side" or "THINK=" in json.dumps(body)[-4000:] else 0
         items = []
         if thinking: items.append({"type": "reasoning", "id": "rs_" + uuid.uuid4().hex[:20], "summary": [], "encrypted_content": "x" * 64})
+        for k in range(searches):
+            items.append({"type": "web_search_call", "id": "ws_" + uuid.uuid4().hex[:20], "status": "completed", "action": {"type": "search", "query": "silo"}})
         if what == "tools":
             for c in payload:
                 if c.get("custom"):
@@ -354,9 +403,29 @@ class H(http.server.BaseHTTPRequestHandler):
         visible = sum(toks(i["arguments"], 3.0) + 5 for i in items if i["type"] == "function_call") + sum(toks(i["input"], 3.0) + 5 for i in items if i["type"] == "custom_tool_call") + sum(text_toks(i["content"][0]["text"]) for i in items if i["type"] == "message")
         out_total = thinking + visible
         usage = {"input_tokens": total, "input_tokens_details": {"cached_tokens": read, "cache_write_tokens": write, "cache_write_tokens_details": {"ttl_30m_tokens": write, "ttl_12h_tokens": 0}}, "output_tokens": out_total, "output_tokens_details": {"reasoning_tokens": thinking}, "total_tokens": total + out_total}
-        rec = {"provider": "openai", "format": "responses", "kind": kind, "step": step, "model": model, "input": uncached, "cache_read": read, "cache_write_short": write, "cache_write_long": 0, "output": out_total, "reasoning": thinking, "t": time.time() - T0}
+        tier = "priority" if body.get("service_tier") == "priority" else "standard"
+        rec = {"provider": "openai", "format": "responses", "kind": kind, "step": step, "model": model, "tier": tier, "input": uncached, "cache_read": read, "cache_write_short": write, "cache_write_long": 0, "output": out_total, "reasoning": thinking, "web_searches": searches, "t": time.time() - T0}
         rid = "resp_" + uuid.uuid4().hex[:20]
-        resp = {"id": rid, "object": "response", "model": model, "status": "in_progress", "output": [], "service_tier": "default"}
+        resp = {"id": rid, "object": "response", "model": model, "status": "in_progress", "output": [], "service_tier": "priority" if tier == "priority" else "default"}
+        # What the next turn carries: this turn's input and its output, reasoning left out.
+        kept = allin + [i for i in items if i["type"] != "reasoning"]
+        with LOCK:
+            if body.get("store", True) is not False: RESPONSES[rid] = {"items": kept, "obj": None}
+            if conv: CONVERSATIONS[conv] = kept
+        if body.get("background"):
+            # Answered at once; the model runs on, and the result is fetched by id.
+            obj = dict(resp, status="queued", background=True)
+            with LOCK: RESPONSES.setdefault(rid, {"items": kept})["obj"] = obj
+            def run():
+                t0 = time.time(); time.sleep(out_total / SC.get("tps", 300))
+                with LOCK:
+                    cur = RESPONSES[rid]["obj"]
+                    if cur["status"] in ("cancelled", "canceled"): return
+                    RESPONSES[rid]["obj"] = dict(resp, status="completed", background=True, output=items, usage=usage)
+                self.bill(dict(rec, background=True), out_total, True)
+            with LOCK: RESPONSES[rid]["started"] = time.time(); RESPONSES[rid]["rec"] = rec; RESPONSES[rid]["out_total"] = out_total
+            threading.Thread(target=run, daemon=True).start()
+            return self.send_json(obj)
         if not body.get("stream"):
             time.sleep(out_total / SC.get("tps", 300)); self.bill(rec, out_total, True)
             done = dict(resp, status="completed", output=items, usage=usage); return self.send_json(done)
@@ -373,8 +442,12 @@ class H(http.server.BaseHTTPRequestHandler):
                     ev({"type": "response.output_item.added", "output_index": k, "item": {"type": "reasoning", "id": it["id"], "summary": []}})
                     left = thinking
                     while left > 0:
-                        st = min(left, 400); self.pace(st); gen += st; left -= st
+                        st = min(left, 100); self.pace(st); gen += st; left -= st
                         self.write(b": keep-alive\n\n")
+                    ev({"type": "response.output_item.done", "output_index": k, "item": it})
+                elif it["type"] == "web_search_call":
+                    ev({"type": "response.output_item.added", "output_index": k, "item": dict(it, status="in_progress")})
+                    ev({"type": "response.web_search_call.completed", "output_index": k, "item_id": it["id"]})
                     ev({"type": "response.output_item.done", "output_index": k, "item": it})
                 elif it["type"] == "function_call":
                     ev({"type": "response.output_item.added", "output_index": k, "item": dict(it, arguments="", status="in_progress")})
@@ -400,6 +473,25 @@ class H(http.server.BaseHTTPRequestHandler):
             self.bill(rec, gen, False); raise
         self.bill(rec, out_total, True)
 
+    def response_get(self, rid):
+        with LOCK: r = RESPONSES.get(rid)
+        if not r or not r.get("obj"): return self.send_json({"error": {"message": "No response found", "type": "invalid_request_error"}}, 404)
+        return self.send_json(r["obj"])
+
+    def response_cancel(self, rid):
+        """A background response cancelled before it ends: billed for what was generated until then
+        (OpenAI's docs do not say; the stand-in assumes it), and the object says so in its usage."""
+        with LOCK:
+            r = RESPONSES.get(rid)
+            if not r or not r.get("obj"): return self.send_json({"error": {"message": "No response found"}}, 404)
+            obj = r["obj"]
+            if obj["status"] in ("queued", "in_progress"):
+                gen = min(r["out_total"], int((time.time() - r["started"]) * SC.get("tps", 300)))
+                rec = r["rec"]; u_in = rec["input"] + rec["cache_read"] + rec["cache_write_short"]
+                usage = {"input_tokens": u_in, "input_tokens_details": {"cached_tokens": rec["cache_read"], "cache_write_tokens": rec["cache_write_short"]}, "output_tokens": gen, "output_tokens_details": {"reasoning_tokens": min(gen, rec["reasoning"])}}
+                obj = dict(obj, status="cancelled", usage=usage); r["obj"] = obj
+                self.bill(dict(rec, background=True), gen, False)
+        return self.send_json(obj)
     def auto_cache(self, pieces):
         h = hashlib.sha256(); cum = 0; best = 0; now = time.time(); keys = []
         for mat, n, _ in pieces:
@@ -407,7 +499,7 @@ class H(http.server.BaseHTTPRequestHandler):
             with LOCK: hit = CACHE.get(k)
             if hit and hit[1] > now and hit[0] == cum: best = cum
         with LOCK:
-            for k, c in keys: CACHE[k] = (c, now + 1800)
+            for k, c in keys: CACHE[k] = (c, now + TTL_SCALE * 1800)
         best = (best // 128) * 128
         return best if best >= 1024 else 0
 
@@ -416,8 +508,10 @@ class H(http.server.BaseHTTPRequestHandler):
         model = body.get("model", ""); msgs = body.get("messages") or []
         pieces = [(json.dumps(m, sort_keys=True), toks(m, 3.8), None) for m in msgs]
         read = self.auto_cache(pieces); total = sum(p[1] for p in pieces)
-        thinking = think_tokens(); text = "Here is the answer. " * rand([5, 40])
-        out_total = thinking + text_toks(text)
+        thinking = think_tokens(body); text = "Here is the answer. " * rand([5, 40])
+        n = int(body.get("n") or 1)  # n choices: each one is written, and billed, in full
+        thinking *= n
+        out_total = thinking + n * text_toks(text)
         rec = {"provider": "openai", "format": "chat", "kind": "main", "step": len(msgs), "model": model, "input": total - read, "cache_read": read, "cache_write_short": 0, "cache_write_long": 0, "output": out_total, "reasoning": thinking, "t": time.time() - T0, "usage_sent": (not body.get("stream")) or bool((body.get("stream_options") or {}).get("include_usage"))}
         usage = {"prompt_tokens": total, "prompt_tokens_details": {"cached_tokens": read}, "completion_tokens": out_total, "completion_tokens_details": {"reasoning_tokens": thinking}, "total_tokens": total + out_total}
         cid = "chatcmpl-" + uuid.uuid4().hex[:20]
@@ -427,11 +521,11 @@ class H(http.server.BaseHTTPRequestHandler):
         self.send_response(200); self.send_header("content-type", "text/event-stream"); self.send_header("connection", "close"); self.end_headers()
         gen = 0
         try:
-            self.pace(thinking); gen += thinking
+            self.pace(thinking / n); gen += thinking  # n choices reason side by side
             words = text.split(" ")
             for w in range(0, len(words), 8):
-                part = " ".join(words[w:w + 8]) + " "; self.pace(text_toks(part)); gen += text_toks(part)
-                self.write(f"data: {json.dumps({'id': cid, 'object': 'chat.completion.chunk', 'model': model, 'choices': [{'index': 0, 'delta': {'content': part}, 'finish_reason': None}], 'usage': None})}\n\n".encode())
+                part = " ".join(words[w:w + 8]) + " "; self.pace(text_toks(part)); gen += n * text_toks(part)
+                self.write(f"data: {json.dumps({'id': cid, 'object': 'chat.completion.chunk', 'model': model, 'choices': [{'index': i, 'delta': {'content': part}, 'finish_reason': None} for i in range(n)], 'usage': None})}\n\n".encode())
             self.write(f"data: {json.dumps({'id': cid, 'object': 'chat.completion.chunk', 'model': model, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}], 'usage': None})}\n\n".encode())
             if (body.get("stream_options") or {}).get("include_usage"):
                 self.write(f"data: {json.dumps({'id': cid, 'object': 'chat.completion.chunk', 'model': model, 'choices': [], 'usage': usage})}\n\n".encode())
@@ -440,28 +534,145 @@ class H(http.server.BaseHTTPRequestHandler):
             self.bill(rec, gen, False); raise
         self.bill(rec, out_total, True)
 
+    # ---- Work the provider runs out of the connection: batches, and Gemini's cache storage ----
+
+    def batch_line(self, provider, endpoint, params):
+        """One request of a batch, run at once: its counts, and the reply body with its usage."""
+        model = params.get("model", "")
+        total = toks(params.get("messages") or params.get("input") or params.get("contents") or "", 3.8) + toks(params.get("system") or params.get("instructions") or "", 3.6)
+        thinking = think_tokens(params); text = "Here is the answer. " * rand([5, 40])
+        out = min(thinking + text_toks(text), int(params.get("max_tokens") or params.get("max_completion_tokens") or params.get("max_output_tokens") or 10**9))
+        rec = {"provider": provider, "format": "batch", "kind": "batch", "model": model, "tier": "batch", "input": total, "cache_read": 0, "cache_write_short": 0, "cache_write_long": 0, "output": out, "reasoning": min(thinking, out), "t": time.time() - T0}
+        if provider == "anthropic":
+            body = {"id": "msg_" + uuid.uuid4().hex[:20], "type": "message", "role": "assistant", "model": model, "content": [{"type": "text", "text": text}], "stop_reason": "end_turn", "usage": {"input_tokens": total, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0, "output_tokens": out}}
+        elif endpoint.endswith("/responses"):
+            body = {"id": "resp_" + uuid.uuid4().hex[:20], "object": "response", "model": model, "status": "completed", "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": text}]}], "usage": {"input_tokens": total, "input_tokens_details": {"cached_tokens": 0}, "output_tokens": out, "output_tokens_details": {"reasoning_tokens": rec["reasoning"]}}}
+        else:
+            body = {"id": "chatcmpl-" + uuid.uuid4().hex[:20], "object": "chat.completion", "model": model, "choices": [{"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": "stop"}], "usage": {"prompt_tokens": total, "prompt_tokens_details": {"cached_tokens": 0}, "completion_tokens": out, "completion_tokens_details": {"reasoning_tokens": rec["reasoning"]}}}
+        return rec, body
+
+    def openai_file_upload(self, body):
+        raw = body.get("_multipart", b""); ctype = body.get("_ctype", "")
+        bnd = ctype.split("boundary=")[1].strip('"').encode()
+        fields = {}
+        for part in raw.split(b"--" + bnd):
+            if b"\r\n\r\n" not in part: continue
+            head, data = part.split(b"\r\n\r\n", 1)
+            data = data[:-2] if data.endswith(b"\r\n") else data
+            name = head.split(b'name="')[1].split(b'"')[0].decode() if b'name="' in head else ""
+            fields[name] = data
+        fid = "file-" + uuid.uuid4().hex[:20]
+        with LOCK: FILES[fid] = fields.get("file", b"")
+        return self.send_json({"id": fid, "object": "file", "bytes": len(fields.get("file", b"")), "purpose": (fields.get("purpose") or b"").decode(), "filename": "batch.jsonl"})
+
+    def openai_batch_create(self, body):
+        with LOCK: data = FILES.get(body.get("input_file_id"))
+        if data is None: return self.send_json({"error": {"message": "No such file"}}, 404)
+        lines = [json.loads(l) for l in data.decode().splitlines() if l.strip()]
+        bid = "batch_" + uuid.uuid4().hex[:20]
+        obj = {"id": bid, "object": "batch", "endpoint": body.get("endpoint"), "input_file_id": body.get("input_file_id"), "completion_window": "24h", "status": "validating", "output_file_id": None, "error_file_id": None, "request_counts": {"total": len(lines), "completed": 0, "failed": 0}}
+        with LOCK: BATCHES[bid] = obj
+        def run():
+            time.sleep(SC.get("batch_seconds", 2))
+            out = []
+            for l in lines:
+                rec, b = self.batch_line("openai", l.get("url", ""), l.get("body") or {})
+                ledger(dict(rec, completed=True, batch=bid))
+                out.append(json.dumps({"id": "batch_req_" + uuid.uuid4().hex[:12], "custom_id": l.get("custom_id"), "response": {"status_code": 200, "request_id": "req_" + uuid.uuid4().hex[:12], "body": b}, "error": None}))
+            ofid = "file-" + uuid.uuid4().hex[:20]
+            with LOCK:
+                FILES[ofid] = ("\n".join(out) + "\n").encode()
+                BATCHES[bid] = dict(obj, status="completed", output_file_id=ofid, request_counts={"total": len(lines), "completed": len(lines), "failed": 0})
+        threading.Thread(target=run, daemon=True).start()
+        return self.send_json(obj)
+
+    def openai_batch_get(self, bid):
+        with LOCK: obj = BATCHES.get(bid)
+        return self.send_json(obj) if obj else self.send_json({"error": {"message": "No such batch"}}, 404)
+
+    def openai_file_content(self, fid):
+        with LOCK: data = FILES.get(fid)
+        if data is None: return self.send_json({"error": {"message": "No such file"}}, 404)
+        self.send_response(200); self.send_header("content-type", "application/octet-stream"); self.send_header("content-length", str(len(data))); self.end_headers(); self.wfile.write(data)
+
+    def anthropic_batch_create(self, body):
+        reqs = body.get("requests") or []
+        bid = "msgbatch_" + uuid.uuid4().hex[:20]
+        obj = {"id": bid, "type": "message_batch", "processing_status": "in_progress", "request_counts": {"processing": len(reqs), "succeeded": 0, "errored": 0, "canceled": 0, "expired": 0}, "results_url": None}
+        with LOCK: BATCHES[bid] = obj
+        def run():
+            time.sleep(SC.get("batch_seconds", 2))
+            out = []
+            for r in reqs:
+                rec, b = self.batch_line("anthropic", "", r.get("params") or {})
+                ledger(dict(rec, completed=True, batch=bid))
+                out.append(json.dumps({"custom_id": r.get("custom_id"), "result": {"type": "succeeded", "message": b}}))
+            with LOCK:
+                FILES[bid] = ("\n".join(out) + "\n").encode()
+                BATCHES[bid] = dict(obj, processing_status="ended", request_counts={"processing": 0, "succeeded": len(reqs), "errored": 0, "canceled": 0, "expired": 0}, results_url=f"https://api.anthropic.com/v1/messages/batches/{bid}/results")
+        threading.Thread(target=run, daemon=True).start()
+        return self.send_json(obj)
+
+    def anthropic_batch_get(self, bid):
+        with LOCK: obj = BATCHES.get(bid)
+        return self.send_json(obj) if obj else self.send_json({"error": {"type": "not_found_error", "message": "No such batch"}}, 404)
+
+    def anthropic_batch_results(self, bid):
+        return self.openai_file_content(bid)
+
+    # Gemini's explicit cache: its tokens are billed as storage for as long as it lives (the docs:
+    # "billed based on the TTL duration of cached token count"), here by the hour, scaled like
+    # the other caches so that a run takes seconds.
+    def gcache_create(self, body):
+        model = (body.get("model") or "").split("/")[-1]
+        tokens = toks(body.get("contents") or [], 3.6) + toks(body.get("systemInstruction") or "", 3.6)
+        ttl = float(str(body.get("ttl") or "3600s").rstrip("s"))
+        name = "cachedContents/" + uuid.uuid4().hex[:12]
+        now = time.time()
+        with LOCK: GCACHES[name.split("/")[1]] = {"model": model, "tokens": tokens, "created": now, "expires": now + ttl * TTL_SCALE / 3600 * 3600, "ttl": ttl}
+        ledger({"provider": "google", "format": "cache-storage", "kind": "cache", "model": model, "cache": name, "tokens": tokens, "hours": ttl / 3600, "completed": True, "event": "create", "t": now - T0})
+        return self.send_json({"name": name, "model": "models/" + model, "createTime": "now", "expireTime": f"+{ttl}s", "usageMetadata": {"totalTokenCount": tokens}})
+
+    def gcache_patch(self, cid, body):
+        with LOCK: c = GCACHES.get(cid)
+        if not c: return self.send_json({"error": {"code": 404, "message": "no cache"}}, 404)
+        ttl = float(str(body.get("ttl") or "3600s").rstrip("s"))
+        now = time.time(); used_h = (now - c["created"]) / TTL_SCALE / 3600
+        c["ttl"] = used_h * 3600 + ttl
+        ledger({"provider": "google", "format": "cache-storage", "kind": "cache", "model": c["model"], "cache": "cachedContents/" + cid, "tokens": c["tokens"], "hours": c["ttl"] / 3600, "completed": True, "event": "patch", "t": now - T0})
+        return self.send_json({"name": "cachedContents/" + cid, "usageMetadata": {"totalTokenCount": c["tokens"]}, "expireTime": f"+{ttl}s"})
+
+    def gcache_delete(self, cid):
+        with LOCK: c = GCACHES.pop(cid, None)
+        if not c: return self.send_json({"error": {"code": 404, "message": "no cache"}}, 404)
+        now = time.time(); hours = (now - c["created"]) / TTL_SCALE / 3600
+        ledger({"provider": "google", "format": "cache-storage", "kind": "cache", "model": c["model"], "cache": "cachedContents/" + cid, "tokens": c["tokens"], "hours": min(hours, c["ttl"] / 3600), "completed": True, "event": "delete", "t": now - T0})
+        return self.send_json({})
+
     # ---- Google Gemini ----
     def gemini(self, body, path):
         model = path.split("/models/")[1].split(":")[0]
         contents = body.get("contents") or []
         decls = [d for t in (body.get("tools") or []) for d in (t.get("functionDeclarations") or t.get("function_declarations") or [])]
         names = {d.get("name") for d in decls}
-        kind = "main" if decls else "side"
+        searches = 2 if any("googleSearch" in t or "google_search" in t for t in (body.get("tools") or [])) else 0
+        kind = "main" if decls or searches else "side"
         step = sum(1 for c in contents if c.get("role") == "model")
         pieces = [(json.dumps(body.get("tools"), sort_keys=True), toks(body.get("tools") or [], 3.0), None), (json.dumps(body.get("systemInstruction"), sort_keys=True), toks(body.get("systemInstruction") or "", 3.6), None)]
         pieces += [(json.dumps(c, sort_keys=True), toks(c, 3.6), None) for c in contents]
         read = self.auto_cache(pieces); total = sum(p[1] for p in pieces)
         what, payload = plan_step(kind, step, names)
-        thinking = think_tokens() if kind != "side" else 0
+        thinking = think_tokens(body) if kind != "side" or "THINK=" in json.dumps(body)[-4000:] else 0
         if what == "tools":
             parts = [{"functionCall": {"name": c["name"], "args": c["input"]}} for c in payload]
             visible = sum(toks(c["input"], 3.0) + 5 for c in payload)
         else:
             parts = [{"text": payload}]; visible = text_toks(payload)
         out_total = thinking + visible
-        rec = {"provider": "google", "format": "gemini", "kind": kind, "step": step, "model": model, "input": total - read, "cache_read": read, "cache_write_short": 0, "cache_write_long": 0, "output": out_total, "reasoning": thinking, "t": time.time() - T0}
+        rec = {"provider": "google", "format": "gemini", "kind": kind, "step": step, "model": model, "input": total - read, "cache_read": read, "cache_write_short": 0, "cache_write_long": 0, "output": out_total, "reasoning": thinking, "web_searches": searches, "t": time.time() - T0}
         um = {"promptTokenCount": total, "cachedContentTokenCount": read, "candidatesTokenCount": visible, "thoughtsTokenCount": thinking, "totalTokenCount": total + out_total}
         chunk_last = {"candidates": [{"content": {"role": "model", "parts": parts}, "finishReason": "STOP", "index": 0}], "usageMetadata": um, "modelVersion": model}
+        if searches: chunk_last["candidates"][0]["groundingMetadata"] = {"webSearchQueries": ["silo budgets", "silo spend"][:searches], "groundingChunks": []}
         if ":generateContent" in path:
             time.sleep(out_total / SC.get("tps", 300)); self.bill(rec, out_total, True); return self.send_json(chunk_last)
         sse = "alt=sse" in path

@@ -44,3 +44,20 @@ against stand-in providers that billed each call.
 So "a count the provider does not give is recorded as missing" holds, and the spend of such a call
 needs a second figure the app marks as estimated. Visible characters are a poor floor for it.
 Seconds elapsed at the model's speed, up to `max_tokens`, is a better one.
+
+## What the token counts leave out (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-spend-budget-edges`.
+
+- **Searches the provider runs.** OpenAI's web search bills $10 per 1,000 calls, outside `usage`:
+  each one is a `web_search_call` item of the response. Gemini 3's grounding bills $14 per 1,000
+  queries, listed in `groundingMetadata.webSearchQueries`. Counting only tokens missed 83% of a run
+  of five calls with searches ($0.018 for $0.104). Counting the items and the queries made it
+  exact.
+- **Context the provider keeps.** A Responses request that names `previous_response_id` or a
+  `conversation` sends only its new input, and the provider bills the whole chain again as input
+  (OpenAI's conversation-state guide says so). Estimated from its size, the input of each such
+  call was 99.9% short; from the counts of the response it names, it was exact.
+- **A reply that says the work goes on.** A response with `background: true` answers `queued` with
+  no usage. Read as a whole reply, it counted $0; its counts come from `GET /v1/responses/{id}`
+  later. See `budget-and-work-out-of-sight`.
