@@ -28,3 +28,10 @@ holds the Mac awake while a virtual machine runs is not known; `pmset -g asserti
 An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
 
 #378 found a guest's clock an hour and a half behind after the Mac slept. Every certificate the boundary signs is then "not yet valid" in main, and every HTTPS connection fails. #382 lists the same case as its gap 5. Recommended, from #378: the helper sets main's clock from the Mac's on wake and every few minutes, and the boundary dates the certificates it signs a day back.
+
+## The clock after a sleep, measured
+
+An agent's part, 25 November 2026, from [the guest clock across a sleep](../../../research/2026-11-25-guest-clock-across-sleep/README.md).
+Holding the Mac awake does not cover every sleep: a closed lid, or a MacBook on battery. After
+each one, main is behind by the whole sleep and does not catch up. The fix is now an open entry of
+its own, `main-clock-kept`.
