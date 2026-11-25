@@ -344,3 +344,7 @@ holds is what the model's script prints: with `text(r.output)` the exit code and
 a process still running are not in the traffic, with `text(JSON.stringify(r))` they are. The task
 `spawn_agent` gives a subagent is marked `encrypted` in its schema, so the boundary may not be able
 to read what a Codex subagent was asked.
+
+## Native builds through the proxy
+
+Agent, 25 November 2026, from `research/2026-11-25-native-builds-through-the-proxy/`. The two runs the note above asks for, on Linux through #378's closed network. The Claude Code `install.sh` installs (2.1.332, a Bun executable, its SHA-256 checked against `downloads.claude.ai`'s list) follows `HTTPS_PROXY` and `https_proxy`, and trusts Silo's authority through `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE` or the system's store, signed in with a key or with a plan token. Codex 0.172.0 opens its WebSocket to `api.openai.com` as a `CONNECT` with no setting of its own, and trusts the authority through `SSL_CERT_FILE` or the system's store. So main's environment sets `HTTPS_PROXY`, `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS` and `NODE_USE_ENV_PROXY=1`, and puts the authority in the system's store. Still not tried: Codex signed in with ChatGPT up to its model call (the stand-in could not answer its workspace lookup), and which protocol each program picks when HTTP/2 is offered.

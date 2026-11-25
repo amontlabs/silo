@@ -154,3 +154,7 @@ such a host unread" holds only if Silo's reading is the host's. On #385's bounda
 after a bare LF is part of the line before it to the boundary and a header of its own to the host.
 Both carried model calls the boundary never counted. A request the boundary cannot read exactly as
 the host will is traffic Silo cannot read, and is refused like it.
+
+## Native builds through the proxy
+
+Agent, 25 November 2026, from `research/2026-11-25-native-builds-through-the-proxy/`. The answer says a program that refuses Silo's certificate cannot reach the host. What the person sees then differs by program. Claude Code stops after 18 s and names the certificate. Codex 0.172.0 tries its WebSocket five times, falls back, then says "waiting for network" and never stops: it was still at it after 400 s and 53 refused handshakes. The proxy of #378 logs those connections as allowed, with bytes, since it cannot see inside them. Only the boundary, which ends TLS, sees each refusal (Codex sends the alert `unknown_ca`, Claude Code closes the connection). So the record should hold refused handshakes by program and host, and the morning should show them as one line, for example "Codex did not trust Silo's certificate on api.openai.com from 02:10: it did no work".
