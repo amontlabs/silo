@@ -1,0 +1,6 @@
+# ip host...  (one loopback address per CLI)
+127.0.0.5 backboard.railway.app backboard.railway.com api.railway.app railway.com
+127.0.0.6 api.vercel.com vercel.com
+127.0.0.7 api.fly.io api.machines.dev
+127.0.0.8 api.cloudflare.com
+127.0.0.10 api.supabase.com api.supabase.io
