@@ -1,0 +1,22 @@
+case	exit	seconds	last line of output
+cc-none	1	194.9	API Error: Can't reach the API server — check your internet or DNS (EAI_AGAIN)
+cc-proxy-node-ca	0	5.8	Hello from the stand-in.
+cc-proxy-lower-node-ca	0	5.7	Hello from the stand-in.
+cc-proxy-no-ca	1	18.5	API Error: Unable to connect to API: Self-signed certificate detected (SELF_SIGNED_CERT_IN_CHAIN). The certificate comes from an authority Claude Code doesn't trust, usually a TLS-inspecting corporate
+cc-proxy-ssl-cert-file	0	5.7	Hello from the stand-in.
+cc-proxy-no-updater	0	5.7	Hello from the stand-in.
+cc-proxy-no-traffic	0	5.4	Hello from the stand-in.
+cx-none	124	400.0	{"type":"error","message":"Reconnecting... waiting for network (Connection failed: error sending request)"}
+cx-proxy	0	0.4	{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":6,"reasoning_output_tokens":0}}
+cx-proxy-lower	0	0.4	{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":6,"reasoning_output_tokens":0}}
+cx-proxy-no-ca	124	400.0	{"type":"error","message":"Reconnecting... waiting for network (Connection failed: error sending request)"}
+cc-proxy-store	0	5.7	Hello from the stand-in.
+cc-proxy-store-use-sys	0	5.7	Hello from the stand-in.
+cx-proxy-store	0	16.3	{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":6,"reasoning_output_tokens":0}}
+cc-plan-proxy	0	6.2	Hello from the stand-in.
+cx-chatgpt-proxy	1	13.2	{"type":"turn.failed","error":{"message":"selected workspace missing from routing discovery"}}
+cc-tool-command	0	6.1	Hello from the stand-in.
+cx-proxy	0	0.4	{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":6,"reasoning_output_tokens":0}}
+cx-proxy-store	0	0.4	{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":6,"reasoning_output_tokens":0}}
+cc-update	1	2.4	Try running "claude doctor" for diagnostics
+cx-chatgpt-proxy	1	13.9	{"type":"turn.failed","error":{"message":"workspace routing discovery has invalid account routing override"}}
