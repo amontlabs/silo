@@ -28,3 +28,26 @@ Put forward, and not answered:
 
 - Silo can propose that rule from its opinions, and it changes nothing until you accept it.
 - Such a checkpoint says what it left out (`partial-checkpoint-says-so`).
+
+## A way to build it
+
+An agent's part, 25 November 2026, from `research/2026-11-25-checkpoint-disk-use/`. Measured on Linux over three days of agent work
+(npm, Cargo, pip): `target` held 49% of what checkpoints kept, `node_modules` 24%, a virtual
+environment 13%. Leaving them all out takes a 512 GB Mac at 2 GiB an hour from 4.3 to 25.3 days
+back.
+
+What was tried:
+
+- A second disk mounted on the folder. `rm -rf node_modules`, `cargo clean`, `git clean -fdx` and
+  `mv` emptied it and then failed with "Device or resource busy", so a script with `&&` stopped.
+- A symbolic link to a second disk. The first `npm install` replaced it with a real folder.
+- Each tool's own setting pointing at a second disk that no checkpoint holds (`CARGO_TARGET_DIR`,
+  the npm, pip and Cargo caches, Xcode's DerivedData location, uv's environment). It works, and the
+  computer's recipe can set them. It reaches 63% of what was held, and gives 10.3 days.
+
+npm has no setting for `node_modules`. Compression with dedup covers it instead: a second
+`npm install` stored about 1% of its size. With the settings and zstd, the 512 GB Mac reaches the
+30 days of the age rule at 2 GiB an hour.
+
+Recommended if offered: the rule names tools, not paths, and Silo applies each tool's setting
+through a second disk. A path no tool setting reaches stays in checkpoints.

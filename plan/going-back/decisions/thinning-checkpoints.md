@@ -62,3 +62,11 @@ measurements.
 
 Checkpoints at each turn (one a minute) held the same disk and reach, and raised the most removed in
 one hour from 15 to 63.
+
+## Stretching the reach
+
+An agent's part, 25 November 2026, from `research/2026-11-25-checkpoint-disk-use/`. The limit's reach of 4.3 days on a 512 GB Mac at
+2 GiB an hour becomes 17.3 days with lz4, 26.3 with zstd, and 30 with dedup and zstd or with
+rebuildable folders left out and zstd. These need checkpoints as Silo's own files
+(`checkpoint-per-system`). With them, the 30 days of this answer are reachable on most Macs, and the
+limit stays as it is.

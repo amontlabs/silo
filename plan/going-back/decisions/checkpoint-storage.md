@@ -28,3 +28,16 @@ whoever builds it.
   append-only log of changes. A checkpoint of a computer's disk also carries the record position at
   which it was taken, so "what happened since this checkpoint" is a plain query.
   ([source](https://github.com/evmts/guillotine-mini/blob/edafd394bc0aa48a9691b037da36b6f36525121a/client/state/journal.zig#L5))
+
+## An external disk
+
+An agent's part, 25 November 2026, from `research/2026-11-25-checkpoint-disk-use/`. "Cannot move to an external drive without a full
+copy" holds for clones. When checkpoints are files Silo writes (#365's `delta`, or old blocks
+copied before the write), the oldest move as files. In #389's simulation, 500 GiB on an external
+disk gives a 512 GB Mac the full 30 days at 2 GiB an hour, and 16 to 17 days at 5 GiB an hour or
+without TRIM. With zstd as well, 30 days in every case simulated.
+
+What it needs: the files encrypted with a key in the Mac's Keychain, since anyone holding the disk
+can read it; and the Timeline showing those checkpoints as out of reach while the disk is not
+connected. A cloud store works the same way, at about 1.2 Mbit/s of upload for 2 GiB an hour
+compressed.
