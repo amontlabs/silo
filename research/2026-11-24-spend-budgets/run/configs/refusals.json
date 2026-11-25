@@ -1,0 +1,2 @@
+{"policy": "finish", "prices": "/home/user/silo/research/2026-11-24-spend-budgets/prices.json",
+ "computers": [{"name": "main", "address": "127.0.0.2", "credentials": [{"value": "sk-ant-api03-main-fake"}], "limits": {"total": 50}}]}

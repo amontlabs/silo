@@ -76,3 +76,11 @@ options:
 
 Recommended: the channel, off by default, one port at a time. A model on the Mac is a common way to
 work without paying a provider, and its traffic is easier to read than any provider's.
+
+## A known model host under a budget (24 November 2026)
+
+An agent's part, 24 November 2026, from `research/2026-11-24-spend-budgets`. #351 proposed that a connection to a known model
+host Silo cannot count is denied while a budget covers the computer. The prototype does it: a
+request to `api.mistral.ai` from a computer with a budget got 400 in OpenAI's shape, which most
+such hosts copy, with "Silo: api.mistral.ai is a model host Silo cannot count, and a budget covers
+this computer." Without a budget the connection passes.

@@ -1,0 +1,2 @@
+{"seed": 6, "main_steps": 30, "subagents": 3, "spawn_at": 2, "sub_steps": 6, "think": [1000, 6000], "tps": 800,
+ "plan": {"start_5h": 0.30, "start_7d": 0.40, "per_dollar_5h": 0.06, "per_dollar_7d": 0.01, "other_device_per_s": 0.0015}}

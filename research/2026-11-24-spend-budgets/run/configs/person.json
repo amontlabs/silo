@@ -1,0 +1,6 @@
+{"policy": "finish", "output_tps": 800, "prices": "/home/user/silo/research/2026-11-24-spend-budgets/prices.json",
+ "computers": [
+  {"name": "main", "address": "127.0.0.2", "person": "polar", "credentials": [{"value": "sk-ant-api03-main-fake"}], "limits": {"total": 10}},
+  {"name": "codex", "address": "127.0.0.3", "person": "polar", "credentials": [{"value": "sk-proj-codex-fake"}], "limits": {"total": 10}},
+  {"name": "fork", "address": "127.0.0.4", "person": "polar", "credentials": [{"value": "sk-ant-api03-fork-fake"}]}],
+ "people": [{"name": "polar", "limits": {"total": 2.5}}]}

@@ -20,3 +20,14 @@ The options:
 
 Recommended: dollars everywhere, and the plan's share for the plan. One unit lets you compare
 conversations and computers, and the share tells you when the plan runs out.
+
+## A plan's window, per computer (24 November 2026)
+
+An agent's part, 24 November 2026, from `research/2026-11-24-spend-budgets`. Claude Code signed in with a subscription worked
+under a cap of 50% of the plan's 5-hour window, while other devices of the same account also used
+it. The cap held: Claude Code stopped at 51%, from the account's own reading in each reply.
+
+The computer's share did not. The boundary put on the computer the rise of the window between its
+own calls: 0.19 of the window. The stand-in had counted 0.14 from this computer and 0.06 from the
+others. A reading covers the whole account, so the app can show the plan's share for the account,
+and a cap on it, but not a share per computer or conversation.
