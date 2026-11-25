@@ -137,3 +137,5 @@
 | `medium/mac-512/30d-half-oldest/seed=3` | 100.0 | 80.0 | 3.3 | 2.3 | 30/30 | gone / gone / gone | 42 | 14 | 0 |
 | `heavy/mac-512/30d-half-oldest/hand_before_bed=True` | 720.5 | -520.5 | 0.0 | 0.0 | 3/30 | gone / gone / gone | 8433 | 85 | 32730 |
 | `medium/mac-1tb/30d-half-oldest/saves_set_aside_h=None/alerts_forgotten=0.25` | 250.0 | 230.0 | 8.3 | 8.3 | 30/30 | 8.0 / gone / gone | 25 | 14 | 0 |
+| `medium/mac-1tb/30d-no-limit/nights=90` | 641.1 | -141.1 | 29.3 | 10.3 | 90/90 | 8.0 / 8.0 / 8.0 | 0 | 13 | 78390 |
+| `medium/mac-512/30d-half-even/seed=3` | 100.0 | 80.0 | 13.6 | 10.3 | 30/30 | 159.2 / gone / gone | 1485 | 28 | 0 |
