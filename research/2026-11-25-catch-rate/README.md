@@ -103,7 +103,7 @@ from their issues, and notes nine record errors the reader found (for example, c
 reporter later withdrew the issue). The cases themselves were left as #377 wrote them.
 
 ```sh
-python3 check/catch_rate.py --set fresh [--no-processes] [--model model-reader/sonnet-fresh.json] [--cases]
+python3 check/catch_rate.py --set fresh [--no-processes] [--model model-reader/small-fresh.json] [--cases]
 python3 check/model_reader.py fresh > batch.txt     # what the model reader is given
 python3 check/tests/test_narrowed.py
 ```
