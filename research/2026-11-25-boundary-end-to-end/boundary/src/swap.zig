@@ -32,6 +32,16 @@ pub fn swapHead(gpa: std.mem.Allocator, head: []const u8, host: []const u8, secr
     return .{ .send = .{ .head = cur, .used = used } };
 }
 
+/// The first placeholder of another computer's secrets that a head carries, if any: refused on every
+/// host, not only where #374 checks a model call's credential.
+pub fn fromOther(head: []const u8, computers: []const conf.Computer, self: usize) ?struct { computer: usize, secret: usize } {
+    for (computers, 0..) |cp, k| {
+        if (k == self) continue;
+        for (cp.secrets, 0..) |s, i| if (s.placeholder.len > 0 and std.mem.indexOf(u8, head, s.placeholder) != null) return .{ .computer = k, .secret = i };
+    }
+    return null;
+}
+
 pub fn allowed(s: conf.Secret, host: []const u8) bool {
     for (s.hosts) |h| if (std.ascii.eqlIgnoreCase(h, host)) return true;
     return false;
@@ -74,4 +84,14 @@ test "swap only where allowed" {
     try t.expectEqualStrings("GET /v1beta/models?key=ya29.REAL HTTP/1.1\r\n\r\n", q.send.head);
     try t.expectEqualStrings("GET /v1beta/models", lineForRecord("GET /v1beta/models?key=ya29.PH2"));
     try t.expectEqual(@as(?usize, 1), inBody("{\"refresh_token\":\"ya29.PH2\"}", &secrets));
+}
+
+test "another computer's placeholder, on any host" {
+    var hosts = [_][]const u8{"management.azure.com"};
+    var s1 = [_]conf.Secret{.{ .name = "azure", .placeholder = "eyJ.eyJ.c1-ph", .value = "eyJ.eyJ.REAL1", .hosts = &hosts }};
+    var s2 = [_]conf.Secret{.{ .name = "azure", .placeholder = "eyJ.eyJ.c2-ph", .value = "eyJ.eyJ.REAL2", .hosts = &hosts }};
+    const cs = [_]conf.Computer{ .{ .name = "main", .id = "c1", .secrets = &s1 }, .{ .name = "fork", .id = "c2", .secrets = &s2 } };
+    const o = fromOther("GET / HTTP/1.1\r\nauthorization: Bearer eyJ.eyJ.c1-ph\r\n\r\n", &cs, 1).?;
+    try t.expectEqual(@as(usize, 0), o.computer);
+    try t.expect(fromOther("GET / HTTP/1.1\r\nauthorization: Bearer eyJ.eyJ.c2-ph\r\n\r\n", &cs, 1) == null);
 }

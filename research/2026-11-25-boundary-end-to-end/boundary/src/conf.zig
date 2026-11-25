@@ -46,6 +46,10 @@ pub const Host = struct {
     /// "read": Silo ends TLS and reads every request (model hosts, hosts a secret goes to).
     /// "pass": Silo checks the name and carries the bytes unread.
     mode: []const u8 = "pass",
+    /// On a host Silo reads: offer HTTP/2 to a program that asks for it, and speak it to the host.
+    /// For hosts a program reaches by gRPC, which cannot fall back to HTTP/1.1. Never on a model
+    /// host, where #374 counts calls over HTTP/1.1.
+    h2: bool = false,
 };
 
 pub const Config = struct {
@@ -76,3 +80,43 @@ pub const Config = struct {
     /// a ClientHello).
     head_timeout_ms: u32 = 10000,
 };
+
+/// Every placeholder names one secret of one computer: no two are equal, none holds another (the
+/// swap replaces substrings), and none holds a value or is held by one. Checked when the boundary
+/// starts; a config that fails it is refused.
+pub fn checkPlaceholders(computers: []const Computer) error{ PlaceholderEmpty, PlaceholderShared, PlaceholderInsideAnother, PlaceholderAndValueOverlap }!void {
+    for (computers, 0..) |a, ka| for (a.secrets, 0..) |sa, ia| {
+        if (sa.placeholder.len == 0) return error.PlaceholderEmpty;
+        if (std.mem.indexOf(u8, sa.value, sa.placeholder) != null or std.mem.indexOf(u8, sa.placeholder, sa.value) != null) return error.PlaceholderAndValueOverlap;
+        for (computers, 0..) |b, kb| for (b.secrets, 0..) |sb, ib| {
+            if (ka == kb and ia == ib) continue;
+            if (std.mem.eql(u8, sa.placeholder, sb.placeholder)) return error.PlaceholderShared;
+            if (std.mem.indexOf(u8, sb.placeholder, sa.placeholder) != null) return error.PlaceholderInsideAnother;
+            if (std.mem.indexOf(u8, sb.value, sa.placeholder) != null or std.mem.indexOf(u8, sa.placeholder, sb.value) != null) return error.PlaceholderAndValueOverlap;
+        };
+    };
+}
+
+test "one placeholder per secret and per computer" {
+    const t = std.testing;
+    var h = [_][]const u8{"api.anthropic.com"};
+    // #377: the same placeholder for every secret. Two keys for one host: which one was meant?
+    var shared = [_]Secret{
+        .{ .name = "anthropic-work", .placeholder = "placeholder-not-a-key", .value = "sk-ant-api03-WORK", .hosts = &h },
+        .{ .name = "anthropic-home", .placeholder = "placeholder-not-a-key", .value = "sk-ant-api03-HOME", .hosts = &h },
+    };
+    try t.expectError(error.PlaceholderShared, checkPlaceholders(&.{.{ .name = "main", .id = "c1", .secrets = &shared }}));
+    // The same placeholder on two computers.
+    var one = [_]Secret{.{ .name = "a", .placeholder = "sk-ant-api03-PH", .value = "sk-ant-api03-V", .hosts = &h }};
+    try t.expectError(error.PlaceholderShared, checkPlaceholders(&.{ .{ .name = "main", .id = "c1", .secrets = &one }, .{ .name = "fork", .id = "c2", .secrets = &one } }));
+    var nested = [_]Secret{
+        .{ .name = "a", .placeholder = "sk-ant-api03-PH", .value = "sk-ant-api03-V1", .hosts = &h },
+        .{ .name = "b", .placeholder = "sk-ant-api03-PH2", .value = "sk-ant-api03-V2", .hosts = &h },
+    };
+    try t.expectError(error.PlaceholderInsideAnother, checkPlaceholders(&.{.{ .name = "main", .id = "c1", .secrets = &nested }}));
+    var good = [_]Secret{
+        .{ .name = "anthropic-work", .placeholder = "sk-ant-api03-PHwork", .value = "sk-ant-api03-WORK", .hosts = &h },
+        .{ .name = "anthropic-home", .placeholder = "sk-ant-api03-PHhome", .value = "sk-ant-api03-HOME", .hosts = &h },
+    };
+    try checkPlaceholders(&.{.{ .name = "main", .id = "c1", .secrets = &good }});
+}

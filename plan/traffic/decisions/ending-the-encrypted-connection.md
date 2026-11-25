@@ -38,3 +38,12 @@ computer 2 h behind.
 The boundary of #347 and #374 offers only HTTP/1.1. curl and Node fall back. A gRPC client
 cannot, so #379's swap inside HTTP/2 headers has nowhere to run until the boundary speaks HTTP/2
 on the hosts it reads that serve gRPC.
+
+An agent's part, 25 November 2026 (`research/2026-11-25-boundary-conflicts`). The boundary now
+speaks HTTP/2 on hosts Silo reads that are marked for it, with nghttp2 on both sides. A gRPC client
+in each computer called a Google API with its placeholder: one call and one stream with trailers.
+Both reached the host with the real token. Before the change every call failed in the TLS handshake,
+since the boundary offered only HTTP/1.1. Each request's headers go through the same checks and swap
+as on HTTP/1.1. A refused gRPC call gets `PERMISSION_DENIED` with Silo's sentence, which the client
+prints. Model hosts stay on HTTP/1.1, where #374 counts calls. Not built yet: offering HTTP/2 only
+where the host offers it, which needs the boundary to reach the host before it answers the program.

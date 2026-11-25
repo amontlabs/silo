@@ -44,3 +44,23 @@ faults came up between the drafts.
 - #374 tells computers apart by the address a connection comes from. Neither way in gives one: vsock
   has none, and every computer behind its own gvproxy is `192.168.127.2`. The boundary gave each
   computer its own socket on each way in, and its own port for lookups.
+
+An agent's part, 25 November 2026 (`research/2026-11-25-boundary-conflicts`). Each of the three
+faults above has a fix, and a test that fails without it.
+
+- #378's relay inside the computer sets `TCP_NODELAY` on the program's connection. A boundary that
+  writes a reply in two pieces then answers a kept-alive request in 1.5 ms instead of 44 ms. The
+  relay is in the Linux computer on both systems, so this is one line in one place.
+- In hand-off mode, gvproxy hands every TCP connection to the boundary before its own checks. Its
+  deny list and its metadata check apply only when gvproxy dials out itself, which it never does in
+  this mode. With #380's flags unchanged (`-outbound-deny private,host`) and with `-sealed`, the
+  computer got its Google and Azure tokens from the boundary. A private address still reached
+  nothing: the boundary refused it. Cutting the deny list to `host` was the other fix, but `-sealed`
+  puts `private` back in. gvproxy's `-ec2-metadata-access` bug is a separate fix for upstream, with a
+  test that fails on `197eea05`.
+- The boundary knows a computer by the socket its connection arrives on: its own vsock listener by
+  `CONNECT`, its own hand-off socket, its own port for lookups. This needs one gvproxy per computer,
+  as #380 runs it. #374, which knows a computer by an address, skipped both its checks for a
+  connection from an address no computer has: a key nobody was given reached the provider, and no
+  budget applied. Patched, such a connection is refused with "this connection comes from no computer
+  Silo knows".

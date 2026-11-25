@@ -74,6 +74,11 @@ for c in ("c1", "c2"):
     m = mark()
     code, body, rc, dt = curl(c, "https://api.anthropic.com/v1/messages", "-H", f"x-api-key: {PH(other, 'anthropic')}", "-H", "content-type: application/json", "-d", MSG)
     case(f"{c} another computer's placeholder", code == "400" and seen_since(m) == [], f"{code}, host saw {seen_since(m)}")
+    # The same on a host that is not a model's, where #374's check of credentials does not run.
+    az_other = next(s["placeholder"] for k in json.load(open(f"{OUT}/config.json"))["boundary"]["computers"] if k["id"] == other for s in k["secrets"] if s["name"] == "azure")
+    m = mark()
+    code, body, rc, dt = curl(c, "https://management.azure.com/subscriptions?api-version=2022-12-01", "-H", f"authorization: Bearer {az_other}")
+    case(f"{c} another computer's placeholder, not a model host", code in ("400", "403") and seen_since(m) == [], f"{code}, host saw {seen_since(m)}: {body[:100]!r}")
     code, body, rc, dt = curl(c, "https://evil.example/", timeout=5)
     case(f"{c} a host not allowed", code == "000" or code == "403", f"{code} rc={rc} in {dt:.2f}s: {body[:90]!r}")
     # A host passed through unread: the program sees the host's own certificate.
