@@ -40,7 +40,7 @@ Claude Code's documented hosts. The paste upload is the scenario's and was not s
   documentation sites bring the morning to about 21.
 - In every run, and in every way of counting hosts as seen, the paste site comes first when the
   first-seen hosts are ordered by the bytes sent to each. In alphabetical order it is 9th to 35th.
-- Each of the 49 hosts measured received more than three times what it was sent. The
+- Each of the 49 hosts measured sent back more than three times what it was sent. The
   paste upload sent 1,750 times what it received.
 
 What this suggests for the rule, if polarzero takes it: the alert for one night's first-seen hosts
