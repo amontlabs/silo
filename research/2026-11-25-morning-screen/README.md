@@ -68,8 +68,7 @@ or list was changed.
 | `what-a-receipt-holds` | Numbered lines; the TLS line; "may still run" without the probe |
 | `new-host-alert-is-a-rule` | Start hosts off the queue, the rest one row; a start host that an agent also names |
 
-`plan check` reports 23 errors on this branch, the same 23 as on #399 and #400 merged without
-these notes (replaced entries still named by others).
+`plan check` passes on this branch in CI (Node 26).
 
 ## For polarzero to rule
 
