@@ -4,6 +4,7 @@
 # tier: vm
 # time: about 20 minutes
 # needs: the Xcode computer of test 23, macOS 27 on the Mac
+# step: later
 # decides: registry-traffic-read and secrets-held-outside (whether Silo's certificate must be added to every simulator), simulators-for-parallel-agents (a step for each simulator made)
 # question: Does an app in a simulator trust a certificate authority that the computer's system trusts, and does it after `simctl keychain add-root-cert`?
 # outcome separate-store: The app refused the server before, still refused it once the computer's

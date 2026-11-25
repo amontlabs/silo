@@ -4,6 +4,7 @@
 # tier: vm
 # time: about 25 minutes
 # needs: the Xcode computer of test 23, macOS 27 on the Mac
+# step: later
 # decides: computers-macos-screen, computer-image (whether main logs its user in on its screen), simulators-for-parallel-agents
 # question: Over SSH, does a simulator in a computer boot, install and launch an app, and give a screenshot that is not blank, first as the computer starts, then after its user is logged in on its screen?
 # outcome works-without-screen-login: Everything worked over SSH with nobody logged in on the

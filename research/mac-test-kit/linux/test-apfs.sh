@@ -1,6 +1,7 @@
 #!/bin/bash
 # The APFS probe of tests 17 to 19 (py/apfs/apfsread.py) on disks Apple's APFS wrote: the test
-# images of dissect.apfs (Fox-IT, AGPL-3.0, stored with Git LFS; not copied into the kit). They
+# images of dissect.apfs (Fox-IT, AGPL-3.0, stored with Git LFS; not copied into the kit), and the
+# content reader of test 39 (py/apfs/apfscontent.py) on the ones holding compressed files. They
 # are fetched once into KIT_APFS_DATA (default: a folder under the system's temporary folder).
 # Without a network the check is skipped. Also, when mkapfs and sgdisk are installed, a GPT disk
 # with two containers, as a macOS computer's disk has, must list both.
@@ -10,6 +11,7 @@ KIT_ROOT="${KIT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 disk_apfs_data || { echo "skip: no network for the test disks"; exit 0; }
 D="$KIT_APFS_DATA"
 python3 "$KIT_ROOT/linux/apfs-validate.py" "$D" || exit 1
+python3 "$KIT_ROOT/linux/apfs-content-check.py" "$D" || exit 1
 
 if command -v mkapfs >/dev/null 2>&1 && command -v sgdisk >/dev/null 2>&1 && [ "$(id -u)" = 0 ]; then
   t="$(mktemp -d)"; trap 'rm -rf "$t" "$T"' EXIT

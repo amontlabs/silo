@@ -13,7 +13,7 @@ itself: it is evidence for the owner, or for agents on an entry agents may take.
 How long do the download of Apple's restore image and the install of macOS into a new computer take on this Mac, and does the install work at all?
 
 - Decides: computer-image, first-run-time-macos, which-macos-the-mac-runs (file 10 of the research)
-- Tier: `setup`. Time: about an hour (download of about 18 GB, then the install); minutes when already done. Needs: macOS 27 on Apple silicon, 100 GB free, the VM helper (./kit build), no sudo.
+- Tier: `setup`. Step: needed for step 2 of the first build. Time: about an hour (download of about 18 GB, then the install); minutes when already done. Needs: macOS 27 on Apple silicon, 100 GB free, the VM helper (./kit build), no sudo.
 - Script: [`tests/00-install-base.sh`](tests/00-install-base.sh)
 
 | Outcome | What it means |
@@ -28,7 +28,7 @@ How long do the download of Apple's restore image and the install of macOS into 
 Does Apple's guest provisioning accept the Mac's own login name as the computer's user, and if not, at which stage and with which error is it refused?
 
 - Decides: moving-in-on-macos, step 5 of file 10 (how a new macOS computer gets its user and SSH)
-- Tier: `vm`. Time: about 30 minutes (two or three first starts). Needs: the base computer of test 00, macOS 27, no sudo; a person only for the optional look at Setup Assistant.
+- Tier: `vm`. Step: needed for step 2 of the first build. Time: about 30 minutes (two or three first starts). Needs: the base computer of test 00, macOS 27, no sudo; a person only for the optional look at Setup Assistant.
 - Script: [`tests/01-provision-user-name.sh`](tests/01-provision-user-name.sh)
 
 | Outcome | What it means |
@@ -41,17 +41,17 @@ Does Apple's guest provisioning accept the Mac's own login name as the computer'
 
 ## 02. Claude Code and Codex signed in over SSH: reconnect, restart, checkpoint, fork
 
-Signed in over SSH inside a macOS computer, where does each program keep its login (a file or the keychain), and does the login still work after a reconnect, a restart of the computer, in a copy restored from a checkpoint and in a fork with a new identity?
+Signed in over SSH inside a macOS computer, where does each program keep its login (a file or the keychain), and does the login still work after a reconnect, in a tmux or screen session that outlives its SSH connection, after a restart of the computer, in a copy restored from a checkpoint and in a fork with a new identity?
 
-- Decides: fork-and-sign-in (where each login lands), whether the first build's "ssh main, start Claude Code, go to bed" holds, agent-programs-logins-kept-out-of-copies
-- Tier: `guided`. Time: about 45 minutes, with you at the keyboard for the sign-ins (about 5 minutes). Needs: the installed computer of test 00, macOS 27 on the Mac, network, a Claude subscription or Console account and a ChatGPT account (either one is enough).
+- Decides: fork-and-sign-in (where each login lands), runs-outlive-the-terminal (a login used from a session left running after its terminal closed), whether the first build's "ssh main, start Claude Code, go to bed" holds, agent-programs-logins-kept-out-of-copies
+- Tier: `guided`. Step: needed for step 2 of the first build. Time: about 45 minutes, with you at the keyboard for the sign-ins (about 5 minutes). Needs: the installed computer of test 00, macOS 27 on the Mac, network, a Claude subscription or Console account and a ChatGPT account (either one is enough).
 - Script: [`tests/02-agent-login-over-ssh.sh`](tests/02-agent-login-over-ssh.sh)
 
 | Outcome | What it means |
 |---|---|
 | `lasts-in-files` | Both logins landed in files (~/.claude/.credentials.json, ~/.codex/auth.json) and worked after reconnecting, after a restart, in the checkpoint copy and in the fork: "start Claude Code, go to bed" holds over SSH; fork-and-sign-in can keep a login out of a fork by leaving those files out, as it says. |
 | `lasts-in-keychain` | The logins kept working, but at least one landed in the login keychain: a fork copies it and Silo cannot leave one keychain item out (research 06, cross-cutting 1); fork-and-sign-in must say, for macOS computers, that this login is copied. |
-| `lost-somewhere` | A login that worked right after signing in failed later; the facts name the first stage that failed for each program (reconnect, restart, checkpoint, fork). Before the first build, the story "go to bed" changes, or Silo signs agents in another way (claude setup-token). |
+| `lost-somewhere` | A login that worked right after signing in failed later; the facts name the first stage that failed for each program (reconnect, a session left running in tmux or screen after its SSH connection closed, restart, checkpoint, fork). Before the first build, the story "go to bed" changes, or Silo signs agents in another way (claude setup-token). |
 | `inconclusive` | No login worked right after signing in, or the computer did not come back; read the facts and the attached checks. |
 
 ## 03. APFS clone time against fragmentation, with a writer
@@ -59,7 +59,7 @@ Signed in over SSH inside a macOS computer, where does each program keep its log
 Does cloning a disk image stall a program writing to it, and does the stall grow with the pieces checkpoints leave the image in, raw and ASIF?
 
 - Decides: checkpoint-per-system, speed-budgets (the checkpoint's target), research 07 "What to do if APFS behaves like XFS"
-- Tier: `quick`. Time: about 25 minutes (stops early past its time limit). Needs: 30 GB free, no VM, no sudo (the ASIF part asks for sudo only if its device is not yours).
+- Tier: `quick`. Step: needed for step 4 of the first build. Time: about 25 minutes (stops early past its time limit). Needs: 30 GB free, no VM, no sudo (the ASIF part asks for sudo only if its device is not yours).
 - Script: [`tests/03-apfs-clone-stall.sh`](tests/03-apfs-clone-stall.sh)
 
 | Outcome | What it means |
@@ -75,7 +75,7 @@ Does cloning a disk image stall a program writing to it, and does the stall grow
 When the Mac clones the disk of a running macOS computer, does the clone keep every write the guest flushed before it, with no write missing before a later one, in each of the 9 caching and sync modes, with and without the guest flushing?
 
 - Decides: checkpoint-per-system (the mode main's disk is attached in; whether a checkpoint needs a pause), whole-computer-grain
-- Tier: `vm`. Time: about 60 minutes (19 starts of a computer). Needs: the base computer of test 00, 40 GB free, no sudo on the Mac.
+- Tier: `vm`. Step: needed for step 2 of the first build. Time: about 60 minutes (19 starts of a computer). Needs: the base computer of test 00, 40 GB free, no sudo on the Mac.
 - Script: [`tests/04-clone-moment-in-time.sh`](tests/04-clone-moment-in-time.sh)
 
 | Outcome | What it means |
@@ -91,7 +91,7 @@ When the Mac clones the disk of a running macOS computer, does the clone keep ev
 Does F_LOG2PHYS_EXT on two APFS clones of a disk image tell exactly which blocks differ, matching a byte comparison, and how fast?
 
 - Decides: file-changes-from-outside (catching writes past APFS), research 11 "Where the trust comes from", the "how much changed" of a gap
-- Tier: `quick`. Time: about 5 minutes. Needs: 12 GB free, no VM, no sudo.
+- Tier: `quick`. Step: needed for step 5 of the first build. Time: about 5 minutes. Needs: 12 GB free, no VM, no sudo.
 - Script: [`tests/05-log2phys-diff.sh`](tests/05-log2phys-diff.sh)
 
 | Outcome | What it means |
@@ -106,7 +106,7 @@ Does F_LOG2PHYS_EXT on two APFS clones of a disk image tell exactly which blocks
 What do fsync, F_BARRIERFSYNC and F_FULLFSYNC cost, alone, grouped and while another program writes, and does an overwrite take new space once a clone shares the file?
 
 - Decides: engine-saved-state, events-until-the-recorder, low-disk, record-speed-cost
-- Tier: `quick`. Time: about 6 minutes. Needs: 3 GB free, the Command Line Tools, no VM, no sudo; run on mains power with other apps closed.
+- Tier: `quick`. Step: needed for step 1 of the first build. Time: about 6 minutes. Needs: 3 GB free, the Command Line Tools, no VM, no sudo; run on mains power with other apps closed.
 - Script: [`tests/06-fsync-cost.sh`](tests/06-fsync-cost.sh)
 
 | Outcome | What it means |
@@ -123,7 +123,7 @@ Does a macOS computer work on gvproxy (DHCP, MTU, ssh through a Unix socket forw
 
 - Decides: network-stack, computers-main-on-a-mac, who-can-call-the-engine
 - **Blocks: option A of the first build (#373): main is on Silo's network stack from its first start, so this runs before main does.**
-- Tier: `vm`. Time: about an hour. Needs: the base computer of test 00, a 27 MB download of gvproxy, about 1 GB downloaded inside the computer (Node, git, npm packages), no sudo; you only for the optional sleep step.
+- Tier: `vm`. Step: needed for step 2 of the first build. Time: about an hour. Needs: the base computer of test 00, a 27 MB download of gvproxy, about 1 GB downloaded inside the computer (Node, git, npm packages), no sudo; you only for the optional sleep step.
 - Script: [`tests/07-gvproxy-macos-guest.sh`](tests/07-gvproxy-macos-guest.sh)
 
 | Outcome | What it means |
@@ -140,7 +140,7 @@ Does a macOS computer work on gvproxy (DHCP, MTU, ssh through a Unix socket forw
 Does the Codex app list a host that only an Included file defines, and do Claude desktop and the Codex app connect through a ProxyCommand that hands ssh its socket (ProxyUseFdpass), as Silo's entry would?
 
 - Decides: reaching-a-computer, computer-reached-over-ssh, agent-programs-reach-every-computer
-- Tier: `guided`. Time: about 20 minutes. Needs: you at the keyboard, Claude desktop and/or the Codex app (or the ChatGPT app with Codex) installed and signed in, the base computer of test 00, ./kit build (c/sshproxy.c); one line added to ~/.ssh/config for the length of the test.
+- Tier: `guided`. Step: needed for step 2 of the first build. Time: about 20 minutes. Needs: you at the keyboard, Claude desktop and/or the Codex app (or the ChatGPT app with Codex) installed and signed in, the base computer of test 00, ./kit build (c/sshproxy.c); one line added to ~/.ssh/config for the length of the test.
 - Script: [`tests/08-codex-claude-ssh-config.sh`](tests/08-codex-claude-ssh-config.sh)
 
 | Outcome | What it means |
@@ -156,7 +156,7 @@ Does the Codex app list a host that only an Included file defines, and do Claude
 Can a program started by launchd, as a user agent and as a system daemon (with you logged in, then with nobody logged in), start a macOS computer that answers SSH?
 
 - Decides: where the engine runs; engine-matches-wanted (does main wait for your login after the Mac restarts)
-- Tier: `guided`. Time: about 30 minutes, plus 10 minutes logged out if you agree. Needs: the installed computer of test 00, macOS 27 on the Mac, --allow-sudo for the daemon half (it loads one job in launchd's system domain and removes it).
+- Tier: `guided`. Step: needed for step 2 of the first build. Time: about 30 minutes, plus 10 minutes logged out if you agree. Needs: the installed computer of test 00, macOS 27 on the Mac, --allow-sudo for the daemon half (it loads one job in launchd's system domain and removes it).
 - Script: [`tests/09-engine-under-launchd.sh`](tests/09-engine-under-launchd.sh)
 
 | Outcome | What it means |
@@ -175,7 +175,7 @@ Can a program started by launchd, as a user agent and as a system daemon (with y
 When a computer's first, provisioned start is forced off 20 seconds in, does starting it again with the same options still provision it?
 
 - Decides: computer-image, step 4 of file 10 (is the never-started copy needed for retries)
-- Tier: `vm`. Time: about 20 minutes. Needs: the base computer of test 00, macOS 27, no sudo.
+- Tier: `vm`. Step: needed for step 2 of the first build. Time: about 20 minutes. Needs: the base computer of test 00, macOS 27, no sudo.
 - Script: [`tests/10-cut-off-first-start.sh`](tests/10-cut-off-first-start.sh)
 
 | Outcome | What it means |
@@ -190,7 +190,7 @@ When a computer's first, provisioned start is forced off 20 seconds in, does sta
 In a provisioned computer reached over SSH, can a command list and write ~/Documents, ~/Desktop and ~/Downloads, or does macOS's privacy protection (TCC) refuse it?
 
 - Decides: computer-reached-over-ssh, unmodified-agent-programs (where agents' work can live over SSH)
-- Tier: `vm`. Time: about 10 minutes. Needs: the installed computer of test 00, macOS 27 on the Mac.
+- Tier: `vm`. Step: needed for step 2 of the first build. Time: about 10 minutes. Needs: the installed computer of test 00, macOS 27 on the Mac.
 - Script: [`tests/11-documents-over-ssh.sh`](tests/11-documents-over-ssh.sh)
 
 | Outcome | What it means |
@@ -205,7 +205,7 @@ In a provisioned computer reached over SSH, can a command list and write ~/Docum
 Asked to stop while busy, how often does a macOS 27 guest shut down by itself within 30 seconds, and does a stop ever leave one of Apple's two places for macOS computers taken?
 
 - Decides: what-stop-ends, neutral-core (a refused start taken as a fact)
-- Tier: `long`. Time: about 1.5 hours. Needs: the installed computer of test 00, macOS 27 on the Mac, no other macOS VM running (UTM, Tart, Parallels).
+- Tier: `long`. Step: needed for step 2 of the first build. Time: about 1.5 hours. Needs: the installed computer of test 00, macOS 27 on the Mac, no other macOS VM running (UTM, Tart, Parallels).
 - Script: [`tests/12-twenty-stops.sh`](tests/12-twenty-stops.sh)
 
 | Outcome | What it means |
@@ -220,7 +220,7 @@ Asked to stop while busy, how often does a macOS 27 guest shut down by itself wi
 How long does a fresh clone of the installed computer take from its first start to SSH, how often does it fail, and does a clone with a new machine identifier and auxiliary storage start and provision?
 
 - Decides: computer-image, first-run-time-macos, step 6 of file 10 (the time limit before a retry)
-- Tier: `long`. Time: about an hour (eleven first starts in sequence). Needs: the base computer of test 00, macOS 27, no sudo.
+- Tier: `long`. Step: needed for step 2 of the first build. Time: about an hour (eleven first starts in sequence). Needs: the base computer of test 00, macOS 27, no sudo.
 - Script: [`tests/13-ten-fresh-computers.sh`](tests/13-ten-fresh-computers.sh)
 
 | Outcome | What it means |
@@ -235,7 +235,7 @@ How long does a fresh clone of the installed computer take from its first start 
 After Apple's provisioning, is FileVault off, does the user hold a secure token, is SSH served, is the login keychain unlocked in an SSH session, and what do auto-login, sleep, the screen lock and softwareupdate look like?
 
 - Decides: the checks before main is called ready (research 10, step 8), first-run-time-macos, file-changes-from-outside (FileVault off)
-- Tier: `vm`. Time: about 15 minutes. Needs: the installed computer of test 00, macOS 27 on the Mac, network (softwareupdate asks Apple).
+- Tier: `vm`. Step: needed for step 2 of the first build. Time: about 15 minutes. Needs: the installed computer of test 00, macOS 27 on the Mac, network (softwareupdate asks Apple).
 - Script: [`tests/14-what-provisioning-leaves.sh`](tests/14-what-provisioning-leaves.sh)
 
 | Outcome | What it means |
@@ -250,7 +250,7 @@ After Apple's provisioning, is FileVault off, does the user hold a secure token,
 How fast does a real macOS computer's disk image fragment under agent-like work with a checkpoint per step, how long does a write inside wait during a checkpoint, and does a checkpoint from mid-run boot clean with its repositories intact?
 
 - Decides: checkpoint-per-system, speed-budgets (the checkpoint's target as the wait inside), restore-to-a-checkpoint, what-a-restore-leaves, research 07 "What to do if APFS behaves like XFS"
-- Tier: `long`. Time: 2 to 3 hours (KIT_15_STEPS shortens it). Needs: the base computer of test 00, 120 GB free, a network for the guest (GitHub, npm, nodejs.org), no sudo on the Mac.
+- Tier: `long`. Step: needed for step 4 of the first build. Time: 2 to 3 hours (KIT_15_STEPS shortens it). Needs: the base computer of test 00, 120 GB free, a network for the guest (GitHub, npm, nodejs.org), no sudo on the Mac.
 - Script: [`tests/15-real-guest-under-work.sh`](tests/15-real-guest-under-work.sh)
 
 | Outcome | What it means |
@@ -265,8 +265,8 @@ How fast does a real macOS computer's disk image fragment under agent-like work 
 
 Left idle for a night, what does a provisioned macOS computer cost the Mac in processor, memory and disk, and which paths does macOS write inside it by itself?
 
-- Decides: own-cost-targets and silo-is-light (the idle reference every cost target is read against), the default filter of silo changes
-- Tier: `long`. Time: one night (8 hours by default; KIT_IDLE_HOURS sets it). Needs: the installed computer of test 00, macOS 27 on the Mac, the Mac on power and left awake (the test holds a caffeinate assertion while it runs).
+- Decides: mac-kept-awake (whether the computer's process holds the Mac awake by itself, read before the test's own assertion), own-cost-targets and silo-is-light (the idle reference every cost target is read against), the default filter of silo changes
+- Tier: `long`. Step: needed for step 3 of the first build. Time: one night (8 hours by default; KIT_IDLE_HOURS sets it). Needs: the installed computer of test 00, macOS 27 on the Mac, the Mac on power and left awake (the test holds a caffeinate assertion while it runs).
 - Script: [`tests/16-idle-night.sh`](tests/16-idle-night.sh)
 
 | Outcome | What it means |
@@ -280,7 +280,7 @@ Left idle for a night, what does a provisioned macOS computer cost the Mac in pr
 Of 100 clones of a macOS computer's disk taken while programs inside write, how many have a newest APFS checkpoint that does not check, and does an older one always open?
 
 - Decides: research 11 "What the reader has to handle" (the fallback), file-changes-from-outside
-- Tier: `long`. Time: about 45 minutes. Needs: the base computer of test 00 (raw disk), 40 GB free, no sudo on the Mac.
+- Tier: `long`. Step: needed for step 4 of the first build. Time: about 45 minutes. Needs: the base computer of test 00 (raw disk), 40 GB free, no sudo on the Mac.
 - Script: [`tests/17-checkpoint-broken-rate.sh`](tests/17-checkpoint-broken-rate.sh)
 
 | Outcome | What it means |
@@ -295,7 +295,7 @@ Of 100 clones of a macOS computer's disk taken while programs inside write, how 
 On clones of a real macOS computer's disk with many files, does the leaf-address diff give the same changes as a full walk, and do the blocks it reads follow the changes rather than the tree?
 
 - Decides: file-changes-from-outside ("the time follows the size of the tree"), research 11's estimate of a comparison's cost
-- Tier: `long`. Time: about 50 minutes. Needs: the base computer of test 00 (raw disk), 40 GB free, no sudo on the Mac.
+- Tier: `long`. Step: needed for step 5 of the first build. Time: about 50 minutes. Needs: the base computer of test 00 (raw disk), 40 GB free, no sudo on the Mac.
 - Script: [`tests/18-leaf-diff-scale.sh`](tests/18-leaf-diff-scale.sh)
 
 | Outcome | What it means |
@@ -311,7 +311,7 @@ On clones of a real macOS computer's disk with many files, does the leaf-address
 Can root inside a macOS computer write its raw disk with SIP on, can FileVault be turned on inside, and what does the reader see on clones after 100 local snapshots, an added volume and FileVault?
 
 - Decides: research 11 "Where the trust comes from" and "What the reader has to handle", file-changes-from-outside, macos-ships-facts-first
-- Tier: `guided`. Time: about 60 minutes; you may be asked to turn on FileVault in the computer's window. Needs: the base computer of test 00 (raw disk), 40 GB free, no sudo on the Mac (sudo runs inside the computer only).
+- Tier: `guided`. Step: needed for step 5 of the first build. Time: about 60 minutes; you may be asked to turn on FileVault in the computer's window. Needs: the base computer of test 00 (raw disk), 40 GB free, no sudo on the Mac (sudo runs inside the computer only).
 - Script: [`tests/19-reader-gaps.sh`](tests/19-reader-gaps.sh)
 
 | Outcome | What it means |
@@ -326,7 +326,7 @@ Can root inside a macOS computer write its raw disk with SIP on, can FileVault b
 What does a Unix socket server on the Mac learn about the process that connected (user, pid, audit token, the parent chain up to an app), does the audit token's pid version change when that process runs exec, and is a process of another user kept out?
 
 - Decides: who-can-call-the-engine, reaching-a-computer
-- Tier: `quick`. Time: about 2 minutes. Needs: ./kit build (c/peercred.c), no VM, no download; sudo only with --allow-sudo, for the other-user half (otherwise skipped).
+- Tier: `quick`. Step: needed for step 1 of the first build. Time: about 2 minutes. Needs: ./kit build (c/peercred.c), no VM, no download; sudo only with --allow-sudo, for the other-user half (otherwise skipped).
 - Script: [`tests/20-engine-socket-peer.sh`](tests/20-engine-socket-peer.sh)
 
 | Outcome | What it means |
@@ -342,7 +342,7 @@ Inside a macOS computer, does each agent program accept a TLS certificate from a
 
 - Decides: reading-each-agent-program on macOS (how model traffic is read in a macOS computer, second build)
 - **Blocks: option A of the first build (#373): the first run puts Silo's authority in main, and this says where (keychain, or each program's own setting).**
-- Tier: `vm`. Time: about 25 minutes; a person for one approval if macOS asks for it. Needs: the installed computer of test 00, macOS 27 on the Mac, network (downloads Claude Code and Codex inside the computer, about 300 MB).
+- Tier: `vm`. Step: needed for step 2 of the first build. Time: about 25 minutes; a person for one approval if macOS asks for it. Needs: the installed computer of test 00, macOS 27 on the Mac, network (downloads Claude Code and Codex inside the computer, about 300 MB).
 - Script: [`tests/21-agent-trust-store.sh`](tests/21-agent-trust-store.sh)
 
 | Outcome | What it means |
@@ -359,7 +359,7 @@ Inside a macOS computer, does each agent program accept a TLS certificate from a
 Inside a macOS computer, does eslogger (Endpoint Security) run as root from an SSH session and see an agent-like command's process starts and file writes, and if not, which grant makes it work?
 
 - Decides: denied-tool-call-mechanism and processes-in-the-record for a macOS computer (second build): can they use Endpoint Security inside it
-- Tier: `guided`. Time: about 20 minutes, with you at the computer's window for one switch (about 2 minutes). Needs: the installed computer of test 00, macOS 27 on the Mac.
+- Tier: `guided`. Step: after the first build. Time: about 20 minutes, with you at the computer's window for one switch (about 2 minutes). Needs: the installed computer of test 00, macOS 27 on the Mac.
 - Script: [`tests/22-endpoint-security-in-guest.sh`](tests/22-endpoint-security-in-guest.sh)
 
 | Outcome | What it means |
@@ -374,7 +374,7 @@ Inside a macOS computer, does eslogger (Endpoint Security) run as root from an S
 Does Xcode copied from this Mac into a computer pass Apple's signature check, accept its license and finish its first launch over SSH with nobody at the screen, and does the iOS simulator runtime download there with no Apple Account?
 
 - Decides: xcode-in-a-computer, first-run-time-macos, computer-image (whether the kept image can hold Xcode)
-- Tier: `vm`. Time: about an hour, most of it copying Xcode and downloading the runtime. Needs: the installed computer of test 00 (80 GB disk), macOS 27 on the Mac, Xcode installed on this Mac (read, never changed), about 40 GB free, network (the runtime comes from Apple's CDN, about 9 GB).
+- Tier: `vm`. Step: after the first build. Time: about an hour, most of it copying Xcode and downloading the runtime. Needs: the installed computer of test 00 (80 GB disk), macOS 27 on the Mac, Xcode installed on this Mac (read, never changed), about 40 GB free, network (the runtime comes from Apple's CDN, about 9 GB).
 - Script: [`tests/23-xcode-into-a-computer.sh`](tests/23-xcode-into-a-computer.sh)
 
 | Outcome | What it means |
@@ -390,7 +390,7 @@ Does Xcode copied from this Mac into a computer pass Apple's signature check, ac
 Over SSH, does a simulator in a computer boot, install and launch an app, and give a screenshot that is not blank, first as the computer starts, then after its user is logged in on its screen?
 
 - Decides: computers-macos-screen, computer-image (whether main logs its user in on its screen), simulators-for-parallel-agents
-- Tier: `vm`. Time: about 25 minutes. Needs: the Xcode computer of test 23, macOS 27 on the Mac.
+- Tier: `vm`. Step: after the first build. Time: about 25 minutes. Needs: the Xcode computer of test 23, macOS 27 on the Mac.
 - Script: [`tests/24-simulator-over-ssh.sh`](tests/24-simulator-over-ssh.sh)
 
 | Outcome | What it means |
@@ -407,7 +407,7 @@ Over SSH, does a simulator in a computer boot, install and launch an app, and gi
 In a computer with its user on the screen, how much memory does each booted simulator with an app running take, and how many boot before the computer starts to swap or a boot fails?
 
 - Decides: simulators-for-parallel-agents (the maximum booted at once), sizing-target (memory of main for an iOS developer)
-- Tier: `long`. Time: about 40 minutes. Needs: the Xcode computer of test 23, macOS 27 on the Mac; KIT_SIMS sets the most simulators booted (8).
+- Tier: `long`. Step: after the first build. Time: about 40 minutes. Needs: the Xcode computer of test 23, macOS 27 on the Mac; KIT_SIMS sets the most simulators booted (8).
 - Script: [`tests/25-simulators-per-computer.sh`](tests/25-simulators-per-computer.sh)
 
 | Outcome | What it means |
@@ -421,7 +421,7 @@ In a computer with its user on the screen, how much memory does each booted simu
 Over SSH, does codesign sign with an identity in the login keychain, and with one in a keychain of its own set up the way CI does it, without a dialog on the screen?
 
 - Decides: apple-keys-in-a-computer (whether a development identity in the computer works for agents with nobody at the screen)
-- Tier: `vm`. Time: about 15 minutes. Needs: the Xcode computer of test 23, macOS 27 on the Mac; no Apple account (a throwaway self-signed identity is made in the computer).
+- Tier: `vm`. Step: after the first build. Time: about 15 minutes. Needs: the Xcode computer of test 23, macOS 27 on the Mac; no Apple account (a throwaway self-signed identity is made in the computer).
 - Script: [`tests/26-codesign-over-ssh.sh`](tests/26-codesign-over-ssh.sh)
 
 | Outcome | What it means |
@@ -436,7 +436,7 @@ Over SSH, does codesign sign with an identity in the login keychain, and with on
 Does an app in a simulator trust a certificate authority that the computer's system trusts, and does it after `simctl keychain add-root-cert`?
 
 - Decides: registry-traffic-read and secrets-held-outside (whether Silo's certificate must be added to every simulator), simulators-for-parallel-agents (a step for each simulator made)
-- Tier: `vm`. Time: about 20 minutes. Needs: the Xcode computer of test 23, macOS 27 on the Mac.
+- Tier: `vm`. Step: after the first build. Time: about 20 minutes. Needs: the Xcode computer of test 23, macOS 27 on the Mac.
 - Script: [`tests/27-certificate-in-simulators.sh`](tests/27-certificate-in-simulators.sh)
 
 | Outcome | What it means |
@@ -452,7 +452,7 @@ Does an app in a simulator trust a certificate authority that the computer's sys
 With the real App Store Connect key kept on the Mac and a placeholder key in the computer, do notarytool, altool and xcodebuild -allowProvisioningUpdates work through a boundary that ends TLS and signs each token again with the real key, also when each GET token is scoped to its one request, and which hosts, audiences and token lifetimes do they use?
 
 - Decides: signing-keys-re-signed, apple-keys-in-a-computer (whether an App Store Connect key can stay out of every computer)
-- Tier: `guided`. Time: about 30 minutes, with you at the keyboard for the key's details and perhaps one approval in the computer's window. Needs: the Xcode computer of test 23, macOS 27 on the Mac, Xcode on this Mac, an App Store Connect API key (.p8) on this Mac with its key ID and issuer ID (KIT_ASC_KEY, KIT_ASC_KEY_ID, KIT_ASC_ISSUER, or asked), network; for xcodebuild, KIT_ASC_PROJECT and KIT_ASC_SCHEME (a project of yours, copied into the computer).
+- Tier: `guided`. Step: after the first build. Time: about 30 minutes, with you at the keyboard for the key's details and perhaps one approval in the computer's window. Needs: the Xcode computer of test 23, macOS 27 on the Mac, Xcode on this Mac, an App Store Connect API key (.p8) on this Mac with its key ID and issuer ID (KIT_ASC_KEY, KIT_ASC_KEY_ID, KIT_ASC_ISSUER, or asked), network; for xcodebuild, KIT_ASC_PROJECT and KIT_ASC_SCHEME (a project of yours, copied into the computer).
 - Script: [`tests/28-app-store-connect-resigned.sh`](tests/28-app-store-connect-resigned.sh)
 
 | Outcome | What it means |
@@ -469,7 +469,7 @@ With the real App Store Connect key kept on the Mac and a placeholder key in the
 With Xcode open on the computer's screen, can an agent reached over SSH use `xcrun mcpbridge` (Xcode's tools for outside agents), and when Xcode asks to allow it, can a script inside the computer answer, or only a person, and is the answer kept for the next agent process?
 
 - Decides: computers-macos-screen (whether main's screen must carry Xcode for agents), agents-drive-the-screen, xcode-in-a-computer (a step Silo's setup takes)
-- Tier: `guided`. Time: about 25 minutes, with you at the computer's window for one or two clicks. Needs: the Xcode computer of test 23 with Xcode 26.3 or later, macOS 27 on the Mac.
+- Tier: `guided`. Step: after the first build. Time: about 25 minutes, with you at the computer's window for one or two clicks. Needs: the Xcode computer of test 23 with Xcode 26.3 or later, macOS 27 on the Mac.
 - Script: [`tests/29-xcode-agent-bridge.sh`](tests/29-xcode-agent-bridge.sh)
 
 | Outcome | What it means |
@@ -486,7 +486,7 @@ With Xcode open on the computer's screen, can an agent reached over SSH use `xcr
 On macOS 27, does an iPhone given to a computer with USB passthrough show in the computer, pair with Xcode's device tools there, and take an install from it?
 
 - Decides: builds-on-your-iphone (whether an agent's build reaches your iPhone from inside the computer, or leaves it for the Mac)
-- Tier: `guided`. Time: about 20 minutes, with you at the keyboard to plug in and unlock the iPhone and tap Trust. Needs: the Xcode computer of test 23, macOS 27 on the Mac, an iPhone and its cable, and a VM helper with --usb-device (VZUSBPassthroughDevice), which ./kit build does not make yet; while the computer runs, the iPhone is the computer's and not the Mac's.
+- Tier: `guided`. Step: after the first build. Time: about 20 minutes, with you at the keyboard to plug in and unlock the iPhone and tap Trust. Needs: the Xcode computer of test 23, macOS 27 on the Mac, an iPhone and its cable, and a VM helper with --usb-device (VZUSBPassthroughDevice), which ./kit build does not make yet; while the computer runs, the iPhone is the computer's and not the Mac's.
 - Script: [`tests/30-iphone-usb-passthrough.sh`](tests/30-iphone-usb-passthrough.sh)
 
 | Outcome | What it means |
@@ -502,7 +502,7 @@ On macOS 27, does an iPhone given to a computer with USB passthrough show in the
 On APFS, does cloning a file that shares blocks with the live disk image (the last checkpoint, which nobody writes) make the live image's writes wait, as it did on XFS (up to 1.0 s), and how do the prototype's ways compare there?
 
 - Decides: checkpoint-per-system (which way a checkpoint is taken on a Mac: a clone, cbw, or delta), checkpoint-at-each-turn, thinning-checkpoints (the wait of a drop), research 2026-11-24-checkpoint-engine
-- Tier: `long`. Time: about 50 minutes (four runs of an 8 GiB image, then the catalog killed at 300 steps). Needs: 40 GB free, no VM, no sudo; Zig 0.15.2 (downloaded from ziglang.org, about 51 MB, if not on PATH) and the prototype's source (fetched from this repository's branch if not next to the kit); both asked first.
+- Tier: `long`. Step: needed for step 4 of the first build. Time: about 50 minutes (four runs of an 8 GiB image, then the catalog killed at 300 steps). Needs: 40 GB free, no VM, no sudo; Zig 0.15.2 (downloaded from ziglang.org, about 51 MB, if not on PATH) and the prototype's source (fetched from this repository's branch if not next to the kit); both asked first.
 - Script: [`tests/31-checkpoint-engine-on-apfs.sh`](tests/31-checkpoint-engine-on-apfs.sh)
 
 | Outcome | What it means |
@@ -520,7 +520,7 @@ On APFS, does cloning a file that shares blocks with the live disk image (the la
 Does a macOS guest boot from its disk served over NBD (VZNetworkBlockDeviceStorageDeviceAttachment, macOS 14) by Silo's prototype server, what does a small flushed write cost inside it against the same disk attached as a file, and does a checkpoint taken through the server while the guest writes hold every flushed write and boot?
 
 - Decides: checkpoint-per-system (whether a macOS computer's checkpoint can be taken from Silo's own log of writes: cbw or delta behind an NBD server), checkpoint-at-each-turn, research 2026-11-24-checkpoint-engine ("Who can keep the bitmap")
-- Tier: `vm`. Time: about 45 minutes (five starts of a computer). Needs: the base computer of test 00 (raw disk), 40 GB free, no sudo; the prototype's server if test 31 built it (~/SiloKit/bin/ckpt), else only the kit's Python server.
+- Tier: `vm`. Step: needed for step 4 of the first build. Time: about 45 minutes (five starts of a computer). Needs: the base computer of test 00 (raw disk), 40 GB free, no sudo; the prototype's server if test 31 built it (~/SiloKit/bin/ckpt), else only the kit's Python server.
 - Script: [`tests/32-boot-from-nbd.sh`](tests/32-boot-from-nbd.sh)
 
 | Outcome | What it means |
@@ -536,7 +536,7 @@ Does a macOS guest boot from its disk served over NBD (VZNetworkBlockDeviceStora
 When a macOS guest writes then deletes a few GB, does the disk image on the Mac shrink back (the guest's TRIM reaching the image as a hole), at once, after a sync and a minute, only when the volume is mounted again, or never; for the main raw image, a raw extra disk and an ASIF extra disk?
 
 - Decides: checkpoint-per-system and thinning-checkpoints (whether a macOS computer's deleted files keep growing its checkpoints), checkpoint-storage, research 2026-11-24-checkpoint-engine ("TRIM")
-- Tier: `vm`. Time: about 30 minutes (two starts of a computer, 9 GB written in it). Needs: the base computer of test 00, 40 GB free, no sudo on the Mac; ASIF needs macOS 26.
+- Tier: `vm`. Step: needed for step 4 of the first build. Time: about 30 minutes (two starts of a computer, 9 GB written in it). Needs: the base computer of test 00, 40 GB free, no sudo on the Mac; ASIF needs macOS 26.
 - Script: [`tests/33-trim-reaches-image.sh`](tests/33-trim-reaches-image.sh)
 
 | Outcome | What it means |
@@ -554,7 +554,7 @@ Signed in with their plans in a macOS computer and left to work for a whole nigh
 
 - Decides: model-traffic-read, recognising-a-conversation, provider-sees-silos-connection, reading-each-agent-program (the night it leaves to find out)
 - **Blocks: option A of the first build (#373): its step 6 is done when a night through the boundary is clean, and this is that night with a stand-in for Silo's boundary.**
-- Tier: `long`. Time: about 10 hours: 8 through the boundary (KIT_34_HOURS), 1 without it (KIT_34_CONTROL_HOURS), and the set-up with you at the keyboard for the sign-ins (about 10 minutes). Needs: the installed computer of test 00, macOS 27 on the Mac, network, Claude Code signed in with a Claude plan (Max) and Codex with a ChatGPT plan (either one is enough), you at the keyboard at the start, the Mac on power and left awake (the test holds a caffeinate assertion); test 21's outcome, when it ran, chooses how the programs trust the boundary.
+- Tier: `long`. Step: needed for step 6 of the first build. Time: about 10 hours: 8 through the boundary (KIT_34_HOURS), 1 without it (KIT_34_CONTROL_HOURS), and the set-up with you at the keyboard for the sign-ins (about 10 minutes). Needs: the installed computer of test 00, macOS 27 on the Mac, network, Claude Code signed in with a Claude plan (Max) and Codex with a ChatGPT plan (either one is enough), you at the keyboard at the start, the Mac on power and left awake (the test holds a caffeinate assertion); test 21's outcome, when it ran, chooses how the programs trust the boundary.
 - Script: [`tests/34-night-through-the-boundary.sh`](tests/34-night-through-the-boundary.sh)
 
 | Outcome | What it means |
@@ -565,3 +565,83 @@ Signed in with their plans in a macOS computer and left to work for a whole nigh
 | `differs-from-control` | Through the boundary the programs' own errors and retries were clearly more frequent than without it (over twice the control's rate an hour plus 2, or a quarter more failed launches), a provider answered with a challenge, or a program refused the boundary's certificate. provider-sees-silos-connection is in question: the facts say what differed; before option A ships, find whether it is the boundary's connection (TLS, HTTP/1.1 only, this test's SSH hop) or the hour, with a second night. |
 | `credential-leaked` | A sign-in value of the computer (~/.claude/.credentials.json, the keychain item, ~/.codex/auth.json) or a secret the boundary saw in a request was found in a file this run wrote; the facts name the files. Do not pack or share these results until those files are deleted. The stand-in's redaction failed, and Silo's boundary must pass the same search before step 6 is done. |
 | `inconclusive` | Neither program was signed in, the computer's requests never reached the boundary, no model call went through it, or the control did not run; the sentence says which. |
+
+## 35. Silo's gvproxy (#363's seal, grown in #380) with a macOS computer: what root inside reaches, sealed and closed
+
+With #380's patch at gvisor-tap-vsock 197eea05, started with -sealed, does gvproxy give a macOS computer what it needs (a lease, DNS, the internet, Silo's own SSH forward) while nothing inside, root included, reaches the Mac (its loopback, its own addresses, gvproxy's API, the engine's socket) or the Mac's local network, by TCP or by ping? Started with -closed, does nothing go out at all (no connection, no ping, no name asked of a resolver) while Silo's SSH forward still gets in? How fast is traffic into the computer over the datagram socket, at MTU 1500 and 65520?
+
+- Decides: network-stack (the sealed gvproxy as main's stack: #363's recommendation, #380's patch, #370's condition for a closed network and for "never your Mac, your local network"), main-on-macos-first (option A's stack)
+- **Blocks: option A of the first build (#373): main is on Silo's network stack from its first start, and #363 and #380 recommend the sealed gvproxy as that stack until Silo writes its own.**
+- Tier: `vm`. Step: needed for step 2 of the first build. Time: about 40 minutes, plus building gvproxy once (Go 1.26, about 65 MB, and gvproxy's modules). Needs: the base computer of test 00, git (the Command Line Tools), a 65 MB download of Go unless Go 1.26.0 is installed, no sudo on the Mac.
+- Script: [`tests/35-sealed-gvproxy.sh`](tests/35-sealed-gvproxy.sh)
+
+| Outcome | What it means |
+|---|---|
+| `sealed-holds` | Sealed, the computer got its lease, DNS, the internet and Silo's SSH forward, and root inside reached nothing of the Mac or its network: no loopback through 192.168.127.254, no port of the gateway but DNS, no API, no service or ping on the Mac's own address, no device on the Mac's network. Closed, nothing went out and SSH still got in. network-stack: the sealed gvproxy can carry main from its first start (option A), the first run can say "never your Mac, your local network" (#370 finding 3) without Apple's NAT, and the closed network #370 says Apple's NAT cannot give exists. Names still reach the Mac's resolver when sealed (the facts say so): a closed computer, or the boundary (#380), is what stops a name carrying data out. |
+| `sealed-leaks` | Root inside reached something of the Mac or its local network when sealed, or anything outside when closed (named in the sentence): the patch misses a path on macOS; the sealed gvproxy cannot carry main until it is fixed, and the facts say what to add. |
+| `sealed-breaks` | The sealed build gave no lease, no DNS, no internet or no SSH forward, or the closed one no SSH forward, while the same computer has them on gvproxy as released (test 07): the patch refuses something the computer needs; the sentence says what. |
+| `inconclusive` | Silo's gvproxy did not build, or the computer did not start on it; the sentence says why. |
+
+## 36. What a computer's connections meet on gvproxy and on Apple's NAT, and a restart of the stack
+
+Through gvproxy, against Apple's NAT as the reference, does a computer's connection carry bytes exactly (100 bodies of 1 KB to 2 MB), pass a streamed reply's first event at once, keep a reply silent for 60 s and 330 s, and carry lines both ways on one connection? And when gvproxy restarts under a running computer, does the computer's network come back by itself, or only when the program holding the computer's network link connects again (a helper), or not at all?
+
+- Decides: network-stack (#347's checks 6 to 10 against main's network, which #370 step 2 and the entry ask to be measured), when-the-engine-stops and #373 step 3 (a restart of the stack, or of the boundary in it, in the night)
+- Tier: `vm`. Step: needed for step 2 of the first build. Time: about an hour (three starts of one computer, two replies held silent for 60 s and 330 s). Needs: the base computer of test 00, a 27 MB download of gvproxy (test 07's), the Mac on a network (its own address is where the computer connects), no sudo.
+- Script: [`tests/36-stack-cost-and-restart.sh`](tests/36-stack-cost-and-restart.sh)
+
+| Outcome | What it means |
+|---|---|
+| `transparent` | Every check gave the same through gvproxy as through Apple's NAT, and after gvproxy restarted, the computer's new connections worked again within 30 s with nothing done to the computer: the stack can be a process of its own, restarted in the night (#373 step 3), and connections open at the restart end, as the facts say. |
+| `restart-needs-helper` | The checks held, but after gvproxy restarted the computer's network stayed dead until the program between the computer and the stack (here a relay standing in for Silo's helper) connected again and said who it is: the computer's network link must be held by the helper, which reconnects, never handed by the Virtualization framework straight to the stack's socket (as silovm and vfkit do). |
+| `restart-breaks` | The checks held, but after gvproxy restarted, the computer's network did not come back even through the relay: a restart of the stack costs a restart of main; the stack must never stop while main runs (when-the-engine-stops, #373 step 3). |
+| `alters` | A check gave less through gvproxy than through Apple's NAT (named in the sentence: bytes changed, the first event held back, a silent reply cut, lines lost): network-stack's cost is not only speed; gvproxy needs that fixed before it carries main. |
+| `inconclusive` | The computer did not start on gvproxy, the Mac has no network address, or a check did not run; the sentence says which. |
+
+## 37. The Mac sleeps and wakes with main running
+
+While a computer runs, does its process hold the Mac awake by itself, and when the Mac sleeps anyway, does the computer come back whole after the wake: still running, answering SSH, a run left in tmux or screen still going, its clock right within a minute, its network working? How long was the sleep, as the Mac's clocks tell it and as the computer saw it?
+
+- Decides: mac-kept-awake (does Apple's framework hold the Mac awake while a computer runs, without Silo), who-made-each-change (a sleep measured from the Mac's side as #370 writes it, with mach_continuous_time), runs-outlive-the-terminal (a run left detached keeps going across a sleep)
+- Tier: `guided`. Step: needed for step 3 of the first build. Time: about 25 minutes; you put the Mac to sleep and wake it (with --allow-sudo the kit wakes it by itself after 3 minutes). Needs: the installed computer of test 00, macOS 27 on the Mac, network; the Mac may sleep (close nothing else that matters).
+- Script: [`tests/37-sleep-and-wake.sh`](tests/37-sleep-and-wake.sh)
+
+| Outcome | What it means |
+|---|---|
+| `wakes-whole` | The computer ran on after the wake: SSH, the detached run, the network, and its clock within 5 s of the Mac's a minute after the wake. A sleep pauses main and costs nothing else; the record writes it with author device (#370), and the helper measures it as the facts give. |
+| `clock-behind` | The computer came back, but its clock was still behind the Mac's by more than 5 s a minute after the wake: main needs its clock set after each wake (the helper, or sntp in main), or every time in the record after a sleep is wrong. |
+| `network-lost` | The computer came back, but its network did not within a minute of the wake. |
+| `run-lost` | The computer stopped, stopped answering SSH, or the run left detached ended across the sleep; the sentence says which. A sleep must be refused while main runs (mac-kept-awake on battery too). |
+| `no-sleep` | The Mac did not sleep (the clocks saw no sleep over 30 s); the fact vm_holds_awake says whether the computer's process held it awake. |
+| `inconclusive` | The computer did not answer before the sleep, or a measurement is missing. |
+
+## 38. The Mac's volume fills under a running computer
+
+When the volume holding a running computer's disk image fills, what does the computer see (write errors, writes that wait, or nothing), does Apple's framework stop it, and once room is made, do its writes work again on a volume that still verifies?
+
+- Decides: space-the-engine-keeps (whether a full volume stops the computer, damages it, or only fails its writes until room is made), low-disk and checkpoint-storage (what a full volume does to a running computer, which Silo's levels are set against)
+- Tier: `vm`. Step: needed for step 4 of the first build. Time: about 30 minutes. Needs: the installed computer of test 00, macOS 27 on the Mac, 3 GB free (a 2 GB volume of its own, in a disk image the kit makes and deletes), no sudo on the Mac.
+- Script: [`tests/38-full-volume.sh`](tests/38-full-volume.sh)
+
+| Outcome | What it means |
+|---|---|
+| `io-error-recovers` | The computer's writes failed while the volume was full, the computer kept running, its writes worked again within a minute of room being made, and its volume verified: a reserve file freed when the volume fills is enough; Silo stops checkpoints at the floor and says why. |
+| `writes-wait` | The computer's writes hung while the volume was full (no error, no progress), and went on by themselves once room was made: the volume verified. The engine still frees its reserve at once, since a computer whose writes hang looks dead to its agents. |
+| `framework-stops` | Apple's framework stopped the computer when the volume filled (the run ended, or the computer stopped answering): the engine must keep room before the volume fills (reserve-file), never after. |
+| `guest-damaged` | The computer kept running, but its volume did not verify after room was made: a full volume can damage main; the engine must never let it fill (reserve-file and the floor). |
+| `inconclusive` | The volume did not fill within 10 minutes, or the computer did not start with the extra disk; the sentence says which. |
+
+## 39. The contents of compressed files, read from outside the computer
+
+Inside a macOS computer, files compressed by APFS (decmpfs: zlib, LZVN, LZFSE, in the xattr or in a resource fork) are common: the system's own apps keep them, and ditto writes them. Read from outside, from the computer's disk image, does a reader built on Apple's open-source decoders give back every file byte for byte, and which compressions does main actually hold?
+
+- Decides: putting-back-a-path and file-changes-from-outside (#370 finding 6: look and put-back need the contents of a path, APFS compression included, from a reader no trial has run)
+- Tier: `vm`. Step: needed for step 5 of the first build. Time: about 25 minutes (one first start, a few hundred MB copied inside, the disk read from the Mac). Needs: the installed computer of test 00 (a raw disk, FileVault off inside, as test 14 checks), no sudo on the Mac.
+- Script: [`tests/39-compressed-files-from-outside.sh`](tests/39-compressed-files-from-outside.sh)
+
+| Outcome | What it means |
+|---|---|
+| `reads-all` | Every file of the corpus read from outside equals what the guest read, compressed ones included (the sentence counts each compression): the second mode of #370's reader works as specified, with zlib and Apple's lzfse library; look and put-back can read a checkpoint without mounting it. The census of main's own data volume (facts) says how much of it is compressed. |
+| `type-unread` | Every file the reader could decode was right, but main holds a compression it has no decoder for (named, LZBITMAP most likely): Silo's reader needs that decoder, or shows those files as a gap in look and put-back. |
+| `reads-wrong` | A file read from outside differs from the guest's, a file the guest marks compressed was read as plain, or a plain file gave a gap: the reader's handling of that case is wrong (examples in the facts); nothing reads contents from outside until it is fixed. |
+| `inconclusive` | The computer did not start, its disk is not raw, its data volume is encrypted, or no compressed file was made; the sentence says which. |

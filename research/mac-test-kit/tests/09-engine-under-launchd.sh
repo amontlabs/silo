@@ -4,6 +4,7 @@
 # tier: guided
 # time: about 30 minutes, plus 10 minutes logged out if you agree
 # needs: the installed computer of test 00, macOS 27 on the Mac, --allow-sudo for the daemon half (it loads one job in launchd's system domain and removes it)
+# step: 2
 # decides: where the engine runs; engine-matches-wanted (does main wait for your login after the Mac restarts)
 # question: Can a program started by launchd, as a user agent and as a system daemon (with you logged in, then with nobody logged in), start a macOS computer that answers SSH?
 # outcome agent-and-daemon: A user agent and a system daemon both started a computer that answered SSH

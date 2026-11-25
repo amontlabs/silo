@@ -4,6 +4,7 @@
 # tier: guided
 # time: about 20 minutes
 # needs: you at the keyboard, Claude desktop and/or the Codex app (or the ChatGPT app with Codex) installed and signed in, the base computer of test 00, ./kit build (c/sshproxy.c); one line added to ~/.ssh/config for the length of the test
+# step: 2
 # decides: reaching-a-computer, computer-reached-over-ssh, agent-programs-reach-every-computer
 # question: Does the Codex app list a host that only an Included file defines, and do Claude desktop and the Codex app connect through a ProxyCommand that hands ssh its socket (ProxyUseFdpass), as Silo's entry would?
 # outcome include-and-fdpass-work: the Codex app lists the included host, and each app tried connects through the fd-passing ProxyCommand. reaching-a-computer: take "one line that includes Silo's file"; the SSH

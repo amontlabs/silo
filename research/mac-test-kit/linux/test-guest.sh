@@ -1,5 +1,5 @@
 #!/bin/bash
-# The Linux runs of the guest tests (02 09 11 12 14 16 21 22): each test runs with KIT_FAKE=1 in a
+# The Linux runs of the guest tests (02 09 11 12 14 16 21 22 37): each test runs with KIT_FAKE=1 in a
 # temporary folder, with the fake silovm of linux/fake-silovm-guest, and must end on the outcome
 # its Linux analogue is built to reach. Called by linux/selftest.sh. Changes nothing outside the
 # temporary folder (test 21 listens on 127.0.0.1:18443, test 09 on 127.0.0.1:18022 for a moment).
@@ -46,4 +46,5 @@ run 14 keychain-locked-over-ssh
 run 16 quiet
 run 21 both-trust-keychain linux_cases_as_expected=1
 run 22 inconclusive linux_parsers_ok=1
+run 37 no-sleep
 exit $((fails > 0))

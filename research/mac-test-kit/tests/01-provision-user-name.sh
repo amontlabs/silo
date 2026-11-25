@@ -4,6 +4,7 @@
 # tier: vm
 # time: about 30 minutes (two or three first starts)
 # needs: the base computer of test 00, macOS 27, no sudo; a person only for the optional look at Setup Assistant
+# step: 2
 # decides: moving-in-on-macos, step 5 of file 10 (how a new macOS computer gets its user and SSH)
 # question: Does Apple's guest provisioning accept the Mac's own login name as the computer's user, and if not, at which stage and with which error is it refused?
 # outcome own-name-works: The Mac's own login name was provisioned and SSH answered. moving-in-on-macos

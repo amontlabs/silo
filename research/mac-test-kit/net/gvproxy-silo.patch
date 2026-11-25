@@ -1,0 +1,767 @@
+From 0722af487f54c2c5dd90abc84faa8e09add3acc9 Mon Sep 17 00:00:00 2001
+From: silo-research <noreply@anthropic.com>
+Date: Wed, 25 Nov 2026 10:32:52 +0000
+Subject: [PATCH] gvproxy for Silo: no gateway API, no host loopback, outbound
+ deny list, DNS upstream, hand-off to a boundary, -sealed and -closed
+
+---
+ cmd/gvproxy/config.go                   |  46 ++++++-
+ cmd/gvproxy/config_test.go              |  37 ++++++
+ cmd/gvproxy/main.go                     |  10 +-
+ pkg/services/dns/dns.go                 |  43 ++++++
+ pkg/services/dns/dns_test.go            |  52 ++++++++
+ pkg/services/forwarder/icmp.go          |  11 ++
+ pkg/services/forwarder/outbound.go      | 169 ++++++++++++++++++++++++
+ pkg/services/forwarder/outbound_test.go | 113 ++++++++++++++++
+ pkg/services/forwarder/tcp.go           |  26 +++-
+ pkg/services/forwarder/udp.go           |   8 ++
+ pkg/types/configuration.go              |  13 ++
+ pkg/virtualnetwork/services.go          |  19 ++-
+ 12 files changed, 534 insertions(+), 13 deletions(-)
+ create mode 100644 pkg/services/forwarder/outbound.go
+ create mode 100644 pkg/services/forwarder/outbound_test.go
+
+diff --git a/cmd/gvproxy/config.go b/cmd/gvproxy/config.go
+index 9413b173..381124dc 100644
+--- a/cmd/gvproxy/config.go
++++ b/cmd/gvproxy/config.go
+@@ -50,6 +50,13 @@ type GvproxyArgs struct {
+ 	servicesEndpoint   string
+ 	ec2MetadataAccess  bool
+ 	apiTokenFile       string
++	noGatewayAPI       bool
++	noHostLoopback     bool
++	outboundDeny       arrayFlags
++	outboundHandoff    string
++	dnsUpstream        string
++	sealed             bool
++	closed             bool
+ }
+ 
+ type GvproxyConfig struct {
+@@ -70,6 +77,8 @@ type GvproxyConfig struct {
+ 	Ec2MetadataAccess  bool                   `yaml:"ec2-metadata-access,omitempty"`
+ 	NotificationSocket string                 `yaml:"notification,omitempty"`
+ 	APITokenFile       string                 `yaml:"api-token-file,omitempty"`
++	NoGatewayAPI       bool                   `yaml:"no-gateway-api,omitempty"`
++	NoHostLoopback     bool                   `yaml:"no-host-loopback,omitempty"`
+ }
+ 
+ type GvproxyConfigForward struct {
+@@ -144,6 +153,13 @@ func GvproxyArgParse(flagSet *flag.FlagSet, args *GvproxyArgs, argv []string) (*
+ 	flagSet.BoolVar(&args.ec2MetadataAccess, "ec2-metadata-access", false, "Permits access to EC2 Metadata Service and Amazon Time Sync Service")
+ 	flagSet.StringVar(&args.notificationSocket, "notification", "", "Socket to be used to send network-ready notifications")
+ 	flagSet.StringVar(&args.apiTokenFile, "api-token-file", "", "Path to file where API token will be read from (needs 0600 permissions on macOS and Linux)")
++	flagSet.BoolVar(&args.noGatewayAPI, "no-gateway-api", false, "Do not serve the HTTP API on the gateway address inside the virtual network (it stays on -listen and -services)")
++	flagSet.BoolVar(&args.noHostLoopback, "no-host-loopback", false, "Map no address of the virtual network to the host's loopback (no default NAT entry, no gateway virtual IP)")
++	flagSet.Var(&args.outboundDeny, "outbound-deny", "Destinations no outbound TCP, UDP or ICMP may reach: a CIDR, an address, private, host, host-networks or all (repeatable, or comma-separated)")
++	flagSet.StringVar(&args.outboundHandoff, "outbound-handoff", "", "Unix socket path: hand every outbound TCP connection to it after a PROXY v2 header, dial nothing, drop outbound UDP and ICMP")
++	flagSet.StringVar(&args.dnsUpstream, "dns-upstream", "", "Where names outside the DNS zones are asked: empty for the host's resolver, none, or ip:port")
++	flagSet.BoolVar(&args.sealed, "sealed", false, "Nothing inside reaches gvproxy, the host or a private network: -no-gateway-api -no-host-loopback -outbound-deny private,host,host-networks")
++	flagSet.BoolVar(&args.closed, "closed", false, "No way out at all: -sealed, -outbound-deny all and -dns-upstream none. Forwards into the guest still work")
+ 	if err := flagSet.Parse(argv); err != nil {
+ 		return nil, err
+ 	}
+@@ -253,12 +269,38 @@ func GvproxyConfigure(config *GvproxyConfig, args *GvproxyArgs, version string)
+ 	if config.Stack.GatewayMacAddress == "" {
+ 		config.Stack.GatewayMacAddress = "5a:94:ef:e4:0c:dd"
+ 	}
+-	if len(config.Stack.NAT) == 0 {
++	if args.sealed || args.closed {
++		args.noGatewayAPI, args.noHostLoopback = true, true
++		args.outboundDeny = append(args.outboundDeny, "private", "host", "host-networks")
++	}
++	if args.closed {
++		args.outboundDeny = append(args.outboundDeny, "all")
++		args.dnsUpstream = "none"
++	}
++	if args.noGatewayAPI {
++		config.NoGatewayAPI = true
++	}
++	if args.noHostLoopback {
++		config.NoHostLoopback = true
++	}
++	config.Stack.OutboundDeny = append(config.Stack.OutboundDeny, args.outboundDeny...)
++	if args.outboundHandoff != "" {
++		config.Stack.OutboundHandoff = args.outboundHandoff
++	}
++	if args.dnsUpstream != "" {
++		config.Stack.DNSUpstream = args.dnsUpstream
++	}
++	if config.NoHostLoopback {
++		// Not the defaults below: an empty map or list would be refilled with them.
++		config.Stack.NAT = map[string]string{}
++		config.Stack.GatewayVirtualIPs = []string{}
++	}
++	if !config.NoHostLoopback && len(config.Stack.NAT) == 0 {
+ 		config.Stack.NAT = map[string]string{
+ 			config.Stack.HostIP: "127.0.0.1",
+ 		}
+ 	}
+-	if len(config.Stack.GatewayVirtualIPs) == 0 {
++	if !config.NoHostLoopback && len(config.Stack.GatewayVirtualIPs) == 0 {
+ 		config.Stack.GatewayVirtualIPs = []string{
+ 			config.Stack.HostIP,
+ 		}
+diff --git a/cmd/gvproxy/config_test.go b/cmd/gvproxy/config_test.go
+index 2fcbf3ac..7f19dd38 100644
+--- a/cmd/gvproxy/config_test.go
++++ b/cmd/gvproxy/config_test.go
+@@ -743,3 +743,40 @@ stack:
+ 		},
+ 	}
+ }
++
++func configureArgs(t *testing.T, argv ...string) *GvproxyConfig {
++	t.Helper()
++	var cnf GvproxyConfig
++	var args GvproxyArgs
++	_, err := GvproxyArgParse(flag.NewFlagSet("gvproxy", flag.ContinueOnError), &args, argv)
++	require.NoError(t, err)
++	_, err = GvproxyConfigure(&cnf, &args, "testing")
++	require.NoError(t, err)
++	return &cnf
++}
++
++func TestSealedAndClosed(t *testing.T) {
++	t.Parallel()
++	stock := configureArgs(t)
++	assert.False(t, stock.NoGatewayAPI)
++	assert.Equal(t, map[string]string{"192.168.127.254": "127.0.0.1"}, stock.Stack.NAT)
++	assert.Empty(t, stock.Stack.OutboundDeny)
++
++	sealed := configureArgs(t, "-sealed")
++	assert.True(t, sealed.NoGatewayAPI)
++	assert.Empty(t, sealed.Stack.NAT, "no address may lead to the host's loopback")
++	assert.Empty(t, sealed.Stack.GatewayVirtualIPs)
++	assert.Equal(t, []string{"private", "host", "host-networks"}, sealed.Stack.OutboundDeny)
++	assert.Empty(t, sealed.Stack.DNSUpstream, "a sealed computer still resolves names through the host")
++
++	closed := configureArgs(t, "-closed")
++	assert.True(t, closed.NoGatewayAPI)
++	assert.Empty(t, closed.Stack.NAT)
++	assert.Contains(t, closed.Stack.OutboundDeny, "all")
++	assert.Equal(t, "none", closed.Stack.DNSUpstream)
++
++	handoff := configureArgs(t, "-no-gateway-api", "-outbound-handoff", "/run/silo/boundary.sock", "-dns-upstream", "127.0.0.1:5353")
++	assert.Equal(t, "/run/silo/boundary.sock", handoff.Stack.OutboundHandoff)
++	assert.Equal(t, "127.0.0.1:5353", handoff.Stack.DNSUpstream)
++	assert.Equal(t, map[string]string{"192.168.127.254": "127.0.0.1"}, handoff.Stack.NAT, "-no-host-loopback is its own choice")
++}
+diff --git a/cmd/gvproxy/main.go b/cmd/gvproxy/main.go
+index c9041a82..7933ffde 100644
+--- a/cmd/gvproxy/main.go
++++ b/cmd/gvproxy/main.go
+@@ -174,11 +174,13 @@ func run(ctx context.Context, g *errgroup.Group, config *GvproxyConfig) error {
+ 		httpServe(ctx, g, ln, vn.ServicesMux())
+ 	}
+ 
+-	ln, err := vn.Listen("tcp", fmt.Sprintf("%s:80", config.Stack.GatewayIP))
+-	if err != nil {
+-		return err
++	if !config.NoGatewayAPI {
++		ln, err := vn.Listen("tcp", fmt.Sprintf("%s:80", config.Stack.GatewayIP))
++		if err != nil {
++			return err
++		}
++		httpServe(ctx, g, ln, vn.GatewayMux())
+ 	}
+-	httpServe(ctx, g, ln, vn.GatewayMux())
+ 
+ 	if InDebugMode() {
+ 		g.Go(func() error {
+diff --git a/pkg/services/dns/dns.go b/pkg/services/dns/dns.go
+index a326ec94..8fe39b5c 100644
+--- a/pkg/services/dns/dns.go
++++ b/pkg/services/dns/dns.go
+@@ -38,6 +38,9 @@ type dnsHandler struct {
+ 	// forwarded query so that changes to the host's DNS servers are followed.
+ 	nameservers func() []string
+ 	client      *dns.Client
++	// forward, when set, replaces the host's resolver for names no zone holds: "none" answers
++	// REFUSED, anything else is a server's "ip:port" that gets the query as it came.
++	forward string
+ }
+ 
+ func (h *dnsHandler) handle(w dns.ResponseWriter, r *dns.Msg, responseMessageSize int) {
+@@ -151,6 +154,10 @@ func (h *dnsHandler) addAnswers(m *dns.Msg) {
+ 		if done := h.addLocalAnswers(m, q); done {
+ 			return
+ 		}
++		if h.forward != "" {
++			h.forwardQuestion(m, q)
++			return
++		}
+ 
+ 		resolver := h.upstream
+ 		switch q.Qtype {
+@@ -322,6 +329,26 @@ func (h *dnsHandler) addAnswersFromNameservers(m *dns.Msg, q dns.Question) {
+ 	m.Rcode = dns.RcodeServerFailure
+ }
+ 
++func (h *dnsHandler) forwardQuestion(m *dns.Msg, q dns.Question) {
++	if h.forward == "none" {
++		m.Rcode = dns.RcodeRefused
++		m.RecursionAvailable = false
++		return
++	}
++	req := new(dns.Msg)
++	req.SetQuestion(q.Name, q.Qtype)
++	req.RecursionDesired = true
++	resp, _, err := h.client.Exchange(req, h.forward)
++	if err != nil || resp == nil {
++		log.Debugf("dns upstream %s: %v", h.forward, err)
++		m.Rcode = dns.RcodeServerFailure
++		return
++	}
++	m.Answer = append(m.Answer, resp.Answer...)
++	m.Ns = append(m.Ns, resp.Ns...)
++	m.Rcode = resp.Rcode
++}
++
+ type Server struct {
+ 	udpConn net.PacketConn
+ 	tcpLn   net.Listener
+@@ -335,6 +362,22 @@ func New(udpConn net.PacketConn, tcpLn net.Listener, zones []types.Zone) (*Serve
+ 	return NewWithUpstreamResolver(udpConn, tcpLn, zones, upstream)
+ }
+ 
++// NewWithUpstream is New with the names no zone holds sent to upstream instead of the host's
++// resolver: "" keeps the host's resolver, "none" answers REFUSED, "ip:port" asks that server.
++func NewWithUpstream(udpConn net.PacketConn, tcpLn net.Listener, zones []types.Zone, upstream string) (*Server, error) {
++	s, err := New(udpConn, tcpLn, zones)
++	if err != nil {
++		return nil, err
++	}
++	if upstream != "" && upstream != "none" {
++		if _, _, err := net.SplitHostPort(upstream); err != nil {
++			return nil, fmt.Errorf("dns upstream %q: %w", upstream, err)
++		}
++	}
++	s.handler.forward = upstream
++	return s, nil
++}
++
+ func NewWithUpstreamResolver(udpConn net.PacketConn, tcpLn net.Listener, zones []types.Zone, upstream upstreamResolver) (*Server, error) {
+ 	handler := &dnsHandler{
+ 		zones:       zones,
+diff --git a/pkg/services/dns/dns_test.go b/pkg/services/dns/dns_test.go
+index edc29f42..d7fe11c3 100644
+--- a/pkg/services/dns/dns_test.go
++++ b/pkg/services/dns/dns_test.go
+@@ -841,3 +841,55 @@ func startDNSServer(upstream upstreamResolver) (string, func(), error) {
+ 		tcpLn.Close()
+ 	}, nil
+ }
++
++var _ = ginkgo.Describe("dns upstream", func() {
++	query := func(server *Server, name string, qtype uint16) *dns.Msg {
++		m := new(dns.Msg)
++		m.SetQuestion(name, qtype)
++		server.handler.addAnswers(m)
++		return m
++	}
++
++	ginkgo.It("none refuses every name outside the zones and asks nobody", func() {
++		upstream := &failingResolver{err: errors.New("the host's resolver must not be asked")}
++		server, err := NewWithUpstreamResolver(nil, nil, []types.Zone{{
++			Name:    "containers.internal.",
++			Records: []types.Record{{Name: "gateway", IP: net.ParseIP("192.168.127.1")}},
++		}}, upstream)
++		gomega.Expect(err).ToNot(gomega.HaveOccurred())
++		server.handler.forward = "none"
++		server.handler.nameservers = func() []string { panic("the host's nameservers must not be asked") }
++		for _, qtype := range []uint16{dns.TypeA, dns.TypeAAAA, dns.TypeTXT, dns.TypePTR} {
++			m := query(server, "x1234.exfil.example.", qtype)
++			gomega.Expect(m.Rcode).To(gomega.Equal(dns.RcodeRefused))
++			gomega.Expect(m.Answer).To(gomega.BeEmpty())
++		}
++		m := query(server, "gateway.containers.internal.", dns.TypeA)
++		gomega.Expect(m.Rcode).To(gomega.Equal(dns.RcodeSuccess))
++		gomega.Expect(m.Answer[0].(*dns.A).A.String()).To(gomega.Equal("192.168.127.1"))
++	})
++
++	ginkgo.It("ip:port sends every name outside the zones to that server only", func() {
++		mockSrv, err := mockdns.NewServer(map[string]mockdns.Zone{
++			"allowed.example.": {A: []string{"203.0.113.10"}, TXT: []string{"from the boundary"}},
++		}, false)
++		gomega.Expect(err).ToNot(gomega.HaveOccurred())
++		defer mockSrv.Close()
++		server, err := NewWithUpstreamResolver(nil, nil, []types.Zone{}, &failingResolver{err: errors.New("not this one")})
++		gomega.Expect(err).ToNot(gomega.HaveOccurred())
++		server.handler.forward = mockSrv.LocalAddr().String()
++		server.handler.nameservers = func() []string { panic("the host's nameservers must not be asked") }
++		m := query(server, "allowed.example.", dns.TypeA)
++		gomega.Expect(m.Rcode).To(gomega.Equal(dns.RcodeSuccess))
++		gomega.Expect(m.Answer[0].(*dns.A).A.String()).To(gomega.Equal("203.0.113.10"))
++		m = query(server, "allowed.example.", dns.TypeTXT)
++		gomega.Expect(m.Answer[0].(*dns.TXT).Txt).To(gomega.Equal([]string{"from the boundary"}))
++		m = query(server, "unknown.example.", dns.TypeA)
++		gomega.Expect(m.Rcode).To(gomega.Equal(dns.RcodeNameError))
++	})
++
++	ginkgo.It("NewWithUpstream refuses an address it cannot read", func() {
++		_, err := NewWithUpstream(nil, nil, nil, "127.0.0.1")
++		gomega.Expect(err).To(gomega.HaveOccurred())
++	})
++})
+diff --git a/pkg/services/forwarder/icmp.go b/pkg/services/forwarder/icmp.go
+index cd09cd8e..de11967a 100644
+--- a/pkg/services/forwarder/icmp.go
++++ b/pkg/services/forwarder/icmp.go
+@@ -15,6 +15,11 @@ type Forwarder struct {
+ }
+ 
+ func ICMP(s *stack.Stack, nat map[tcpip.Address]tcpip.Address, natLock *sync.Mutex) *Forwarder {
++	return ICMPWithOutbound(s, nat, natLock, nil)
++}
++
++// ICMPWithOutbound is ICMP with a policy for the echo requests it forwards (see Outbound).
++func ICMPWithOutbound(s *stack.Stack, nat map[tcpip.Address]tcpip.Address, natLock *sync.Mutex, out *Outbound) *Forwarder {
+ 	return NewForwarder(s, func(r *ICMPForwarderRequest) {
+ 		localAddress := r.ID().LocalAddress
+ 
+@@ -24,6 +29,12 @@ func ICMP(s *stack.Stack, nat map[tcpip.Address]tcpip.Address, natLock *sync.Mut
+ 			localAddress = replaced
+ 		}
+ 		natLock.Unlock()
++		if out.handsOff() || out.denied(localAddress, 0, "icmp") {
++			if p := r.Packet(); p != nil {
++				p.DecRef()
++			}
++			return
++		}
+ 
+ 		pkt := r.Packet()
+ 		if pkt == nil {
+diff --git a/pkg/services/forwarder/outbound.go b/pkg/services/forwarder/outbound.go
+new file mode 100644
+index 00000000..76c10ee1
+--- /dev/null
++++ b/pkg/services/forwarder/outbound.go
+@@ -0,0 +1,169 @@
++package forwarder
++
++import (
++	"encoding/binary"
++	"fmt"
++	"net"
++	"strings"
++	"sync"
++	"time"
++
++	log "github.com/sirupsen/logrus"
++	"gvisor.dev/gvisor/pkg/tcpip"
++)
++
++// Outbound says what the forwarders may do with a connection the guest opens to an address that
++// gvproxy does not own, once NAT is applied. The zero value, or nil, dials anything.
++type Outbound struct {
++	// Deny is checked for TCP, UDP and ICMP. A denied TCP connection is reset, a denied UDP
++	// datagram or ICMP echo is dropped.
++	Deny *DenyList
++	// Handoff, when set, is the path of a unix socket. Every TCP connection is handed to it, after a
++	// PROXY protocol v2 header that carries the guest's source and the destination it asked for,
++	// and gvproxy dials nothing itself. UDP and ICMP to such destinations are dropped.
++	Handoff string
++}
++
++func (o *Outbound) denied(a tcpip.Address, port uint16, proto string) bool {
++	if o == nil || o.Deny == nil {
++		return false
++	}
++	ip := net.IP(a.AsSlice())
++	if o.Deny.Contains(ip) {
++		log.Debugf("outbound %s to %s:%d denied", proto, ip, port)
++		return true
++	}
++	return false
++}
++
++func (o *Outbound) handsOff() bool { return o != nil && o.Handoff != "" }
++
++// DenyList is a list of networks no outbound connection may reach.
++type DenyList struct {
++	nets         []*net.IPNet
++	host         bool
++	hostNetworks bool
++
++	mu       sync.Mutex
++	hostAddr []*net.IPNet
++	readAt   time.Time
++}
++
++// The networks the keyword "private" stands for: loopback, RFC 1918, shared address space
++// (carrier-grade NAT), link-local, "this network", multicast, reserved and broadcast, and their
++// IPv6 counterparts.
++var privateNets = []string{
++	"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12",
++	"192.168.0.0/16", "224.0.0.0/4", "240.0.0.0/4",
++	"::/128", "::1/128", "fc00::/7", "fe80::/10", "ff00::/8",
++}
++
++// hostAddrTTL bounds how stale the list of the host's own addresses may be. The host's addresses
++// change when it joins a network; reading them costs a system call per interface.
++var hostAddrTTL = time.Second
++
++// ParseDenyList reads entries that are each a CIDR, a single address, "private" (see privateNets),
++// "host" (every address of the host's own interfaces, read again as they change), "host-networks"
++// (every network the host's interfaces are attached to, such as an office network on public
++// addresses or a global IPv6 network) or "all".
++func ParseDenyList(entries []string) (*DenyList, error) {
++	d := &DenyList{}
++	for _, e := range entries {
++		for _, e := range strings.Split(e, ",") {
++			e = strings.TrimSpace(e)
++			switch e {
++			case "":
++			case "host":
++				d.host = true
++			case "host-networks":
++				d.hostNetworks = true
++			case "private":
++				for _, c := range privateNets {
++					_, n, _ := net.ParseCIDR(c)
++					d.nets = append(d.nets, n)
++				}
++			case "all":
++				for _, c := range []string{"0.0.0.0/0", "::/0"} {
++					_, n, _ := net.ParseCIDR(c)
++					d.nets = append(d.nets, n)
++				}
++			default:
++				if !strings.Contains(e, "/") {
++					ip := net.ParseIP(e)
++					if ip == nil {
++						return nil, fmt.Errorf("outbound deny: %q is not an address, a CIDR or a keyword", e)
++					}
++					if ip.To4() != nil {
++						e += "/32"
++					} else {
++						e += "/128"
++					}
++				}
++				_, n, err := net.ParseCIDR(e)
++				if err != nil {
++					return nil, fmt.Errorf("outbound deny: %w", err)
++				}
++				d.nets = append(d.nets, n)
++			}
++		}
++	}
++	return d, nil
++}
++
++// Contains says whether ip may not be reached.
++func (d *DenyList) Contains(ip net.IP) bool {
++	if v4 := ip.To4(); v4 != nil {
++		ip = v4
++	}
++	for _, n := range d.nets {
++		if n.Contains(ip) {
++			return true
++		}
++	}
++	if d.host || d.hostNetworks {
++		for _, a := range d.hostAddrs() {
++			if d.host && a.IP.Equal(ip) {
++				return true
++			}
++			if d.hostNetworks && a.Contains(ip) {
++				return true
++			}
++		}
++	}
++	return false
++}
++
++func (d *DenyList) hostAddrs() []*net.IPNet {
++	d.mu.Lock()
++	defer d.mu.Unlock()
++	if d.hostAddr != nil && time.Since(d.readAt) < hostAddrTTL {
++		return d.hostAddr
++	}
++	addrs, err := net.InterfaceAddrs()
++	if err != nil {
++		log.Warnf("outbound deny: cannot read the host's addresses: %v", err)
++	}
++	list := []*net.IPNet{}
++	for _, a := range addrs {
++		if n, ok := a.(*net.IPNet); ok {
++			list = append(list, n)
++		}
++	}
++	d.hostAddr, d.readAt = list, time.Now()
++	return list
++}
++
++// proxyHeaderV2 is the PROXY protocol v2 header for a TCP connection from src to dst.
++func proxyHeaderV2(src, dst tcpip.Address, srcPort, dstPort uint16) []byte {
++	h := []byte("\r\n\r\n\x00\r\nQUIT\n")
++	s, d := src.AsSlice(), dst.AsSlice()
++	if len(s) == 4 && len(d) == 4 {
++		h = append(h, 0x21, 0x11, 0, 12)
++	} else {
++		s, d = net.IP(s).To16(), net.IP(d).To16()
++		h = append(h, 0x21, 0x21, 0, 36)
++	}
++	h = append(h, s...)
++	h = append(h, d...)
++	return binary.BigEndian.AppendUint16(binary.BigEndian.AppendUint16(h, srcPort), dstPort)
++}
+diff --git a/pkg/services/forwarder/outbound_test.go b/pkg/services/forwarder/outbound_test.go
+new file mode 100644
+index 00000000..f7edd092
+--- /dev/null
++++ b/pkg/services/forwarder/outbound_test.go
+@@ -0,0 +1,113 @@
++package forwarder
++
++import (
++	"net"
++
++	"github.com/onsi/ginkgo/v2"
++	"github.com/onsi/gomega"
++	"gvisor.dev/gvisor/pkg/tcpip"
++)
++
++var _ = ginkgo.Describe("outbound deny list", func() {
++	ginkgo.DescribeTable("private",
++		func(ip string, denied bool) {
++			d, err := ParseDenyList([]string{"private"})
++			gomega.Expect(err).ToNot(gomega.HaveOccurred())
++			gomega.Expect(d.Contains(net.ParseIP(ip))).To(gomega.Equal(denied))
++		},
++		ginkgo.Entry("loopback", "127.0.0.1", true),
++		ginkgo.Entry("loopback, another address", "127.8.9.10", true),
++		ginkgo.Entry("RFC 1918 10/8", "10.77.0.2", true),
++		ginkgo.Entry("RFC 1918 172.16/12", "172.31.255.1", true),
++		ginkgo.Entry("RFC 1918 192.168/16", "192.168.1.1", true),
++		ginkgo.Entry("carrier-grade NAT, Tailscale's range", "100.100.100.100", true),
++		ginkgo.Entry("link-local, cloud metadata", "169.254.169.254", true),
++		ginkgo.Entry("this network", "0.0.0.1", true),
++		ginkgo.Entry("unspecified", "0.0.0.0", true),
++		ginkgo.Entry("multicast, mDNS", "224.0.0.251", true),
++		ginkgo.Entry("broadcast", "255.255.255.255", true),
++		ginkgo.Entry("IPv4-mapped IPv6 of a private address", "::ffff:192.168.1.1", true),
++		ginkgo.Entry("IPv6 loopback", "::1", true),
++		ginkgo.Entry("IPv6 unique local", "fd00::1", true),
++		ginkgo.Entry("IPv6 link-local", "fe80::1", true),
++		ginkgo.Entry("the internet", "203.0.113.10", false),
++		ginkgo.Entry("the internet, 8.8.8.8", "8.8.8.8", false),
++		ginkgo.Entry("the internet over IPv6", "2001:db8::1", false),
++	)
++
++	ginkgo.It("host denies the host's own addresses and nothing else", func() {
++		d, err := ParseDenyList([]string{"host"})
++		gomega.Expect(err).ToNot(gomega.HaveOccurred())
++		addrs, err := net.InterfaceAddrs()
++		gomega.Expect(err).ToNot(gomega.HaveOccurred())
++		for _, a := range addrs {
++			gomega.Expect(d.Contains(a.(*net.IPNet).IP)).To(gomega.BeTrue(), a.String())
++		}
++		gomega.Expect(d.Contains(net.ParseIP("203.0.113.10"))).To(gomega.BeFalse())
++	})
++
++	ginkgo.It("host-networks denies every network the host is attached to", func() {
++		d, err := ParseDenyList([]string{"host-networks"})
++		gomega.Expect(err).ToNot(gomega.HaveOccurred())
++		addrs, err := net.InterfaceAddrs()
++		gomega.Expect(err).ToNot(gomega.HaveOccurred())
++		for _, a := range addrs {
++			n := a.(*net.IPNet)
++			ones, bits := n.Mask.Size()
++			if bits-ones < 2 {
++				continue
++			}
++			// another address of the same network than the host's own
++			other := make(net.IP, len(n.IP))
++			copy(other, n.IP)
++			other[len(other)-1] ^= 1
++			gomega.Expect(d.Contains(other)).To(gomega.BeTrue(), other.String())
++		}
++		gomega.Expect(d.Contains(net.ParseIP("203.0.113.10"))).To(gomega.BeFalse())
++	})
++
++	ginkgo.It("all denies everything", func() {
++		d, err := ParseDenyList([]string{"all"})
++		gomega.Expect(err).ToNot(gomega.HaveOccurred())
++		for _, ip := range []string{"8.8.8.8", "203.0.113.10", "2001:db8::1", "10.0.0.1"} {
++			gomega.Expect(d.Contains(net.ParseIP(ip))).To(gomega.BeTrue(), ip)
++		}
++	})
++
++	ginkgo.It("takes addresses, CIDRs and comma-separated lists", func() {
++		d, err := ParseDenyList([]string{"198.51.100.7, 203.0.113.0/28", "2001:db8::/32"})
++		gomega.Expect(err).ToNot(gomega.HaveOccurred())
++		gomega.Expect(d.Contains(net.ParseIP("198.51.100.7"))).To(gomega.BeTrue())
++		gomega.Expect(d.Contains(net.ParseIP("198.51.100.8"))).To(gomega.BeFalse())
++		gomega.Expect(d.Contains(net.ParseIP("203.0.113.15"))).To(gomega.BeTrue())
++		gomega.Expect(d.Contains(net.ParseIP("203.0.113.16"))).To(gomega.BeFalse())
++		gomega.Expect(d.Contains(net.ParseIP("2001:db8:1::5"))).To(gomega.BeTrue())
++	})
++
++	ginkgo.It("refuses an entry it cannot read", func() {
++		_, err := ParseDenyList([]string{"privat"})
++		gomega.Expect(err).To(gomega.HaveOccurred())
++		_, err = ParseDenyList([]string{"10.0.0.0/33"})
++		gomega.Expect(err).To(gomega.HaveOccurred())
++	})
++
++	ginkgo.It("a nil policy denies nothing and hands nothing off", func() {
++		var o *Outbound
++		gomega.Expect(o.denied(tcpip.AddrFrom4([4]byte{127, 0, 0, 1}), 80, "tcp")).To(gomega.BeFalse())
++		gomega.Expect(o.handsOff()).To(gomega.BeFalse())
++	})
++})
++
++var _ = ginkgo.Describe("PROXY protocol v2 header", func() {
++	ginkgo.It("encodes a TCP over IPv4 connection as the specification's example layout", func() {
++		h := proxyHeaderV2(tcpip.AddrFrom4([4]byte{192, 168, 127, 2}), tcpip.AddrFrom4([4]byte{203, 0, 113, 10}), 40000, 443)
++		gomega.Expect(h).To(gomega.Equal([]byte{
++			0x0d, 0x0a, 0x0d, 0x0a, 0x00, 0x0d, 0x0a, 0x51, 0x55, 0x49, 0x54, 0x0a, // signature
++			0x21,       // version 2, PROXY
++			0x11,       // AF_INET, STREAM
++			0x00, 0x0c, // 12 bytes follow
++			192, 168, 127, 2, 203, 0, 113, 10,
++			0x9c, 0x40, 0x01, 0xbb,
++		}))
++	})
++})
+diff --git a/pkg/services/forwarder/tcp.go b/pkg/services/forwarder/tcp.go
+index 6a1f548a..12a8b70f 100644
+--- a/pkg/services/forwarder/tcp.go
++++ b/pkg/services/forwarder/tcp.go
+@@ -24,6 +24,11 @@ const (
+ )
+ 
+ func TCP(s *stack.Stack, nat map[tcpip.Address]tcpip.Address, natLock *sync.Mutex, ec2MetadataAccess bool, maxInFlight int, connectTimeout time.Duration) *tcp.Forwarder {
++	return TCPWithOutbound(s, nat, natLock, ec2MetadataAccess, maxInFlight, connectTimeout, nil)
++}
++
++// TCPWithOutbound is TCP with a policy for the connections it dials (see Outbound).
++func TCPWithOutbound(s *stack.Stack, nat map[tcpip.Address]tcpip.Address, natLock *sync.Mutex, ec2MetadataAccess bool, maxInFlight int, connectTimeout time.Duration, out *Outbound) *tcp.Forwarder {
+ 	if maxInFlight <= 0 {
+ 		maxInFlight = defaultTCPMaxInFlight
+ 	}
+@@ -43,9 +48,26 @@ func TCP(s *stack.Stack, nat map[tcpip.Address]tcpip.Address, natLock *sync.Mute
+ 			localAddress = replaced
+ 		}
+ 		natLock.Unlock()
+-		outbound, err := net.DialTimeout("tcp", net.JoinHostPort(localAddress.String(), fmt.Sprint(r.ID().LocalPort)), connectTimeout)
++		if out.denied(localAddress, r.ID().LocalPort, "tcp") {
++			r.Complete(true)
++			return
++		}
++		var outbound net.Conn
++		var err error
++		if out.handsOff() {
++			outbound, err = net.DialTimeout("unix", out.Handoff, connectTimeout)
++			if err == nil {
++				id := r.ID()
++				_, err = outbound.Write(proxyHeaderV2(id.RemoteAddress, localAddress, id.RemotePort, id.LocalPort))
++			}
++		} else {
++			outbound, err = net.DialTimeout("tcp", net.JoinHostPort(localAddress.String(), fmt.Sprint(r.ID().LocalPort)), connectTimeout)
++		}
+ 		if err != nil {
+-			log.Tracef("net.DialTimeout() = %v", err)
++			log.Tracef("outbound dial = %v", err)
++			if outbound != nil {
++				outbound.Close()
++			}
+ 			r.Complete(true)
+ 			return
+ 		}
+diff --git a/pkg/services/forwarder/udp.go b/pkg/services/forwarder/udp.go
+index 12694496..0050b34c 100644
+--- a/pkg/services/forwarder/udp.go
++++ b/pkg/services/forwarder/udp.go
+@@ -15,6 +15,11 @@ import (
+ )
+ 
+ func UDP(s *stack.Stack, nat map[tcpip.Address]tcpip.Address, natLock *sync.Mutex, ec2MetadataAccess bool) *udp.Forwarder {
++	return UDPWithOutbound(s, nat, natLock, ec2MetadataAccess, nil)
++}
++
++// UDPWithOutbound is UDP with a policy for the datagrams it forwards (see Outbound).
++func UDPWithOutbound(s *stack.Stack, nat map[tcpip.Address]tcpip.Address, natLock *sync.Mutex, ec2MetadataAccess bool, out *Outbound) *udp.Forwarder {
+ 	return udp.NewForwarder(s, func(r *udp.ForwarderRequest) bool {
+ 		localAddress := r.ID().LocalAddress
+ 
+@@ -27,6 +32,9 @@ func UDP(s *stack.Stack, nat map[tcpip.Address]tcpip.Address, natLock *sync.Mute
+ 			localAddress = replaced
+ 		}
+ 		natLock.Unlock()
++		if out.handsOff() || out.denied(localAddress, r.ID().LocalPort, "udp") {
++			return true
++		}
+ 
+ 		var wq waiter.Queue
+ 		ep, tcpErr := r.CreateEndpoint(&wq)
+diff --git a/pkg/types/configuration.go b/pkg/types/configuration.go
+index 4005e32f..31f34c75 100644
+--- a/pkg/types/configuration.go
++++ b/pkg/types/configuration.go
+@@ -68,6 +68,19 @@ type Configuration struct {
+ 
+ 	// Timeout in seconds for outbound TCP connection attempts (default: 30)
+ 	TCPConnectTimeout int `yaml:"tcpConnectTimeout,omitempty"`
++
++	// Destinations no outbound connection may reach, checked after NAT for TCP, UDP and ICMP.
++	// Each entry is a CIDR, an address, "private", "host" (the host's own addresses), "host-networks"
++	// (the networks the host is attached to) or "all".
++	OutboundDeny []string `yaml:"outboundDeny,omitempty"`
++
++	// When set, a unix socket path: every outbound TCP connection is handed to it after a PROXY
++	// protocol v2 header, gvproxy dials nothing itself, and outbound UDP and ICMP are dropped.
++	OutboundHandoff string `yaml:"outboundHandoff,omitempty"`
++
++	// Where the embedded DNS server sends names it has no zone for. Empty: the host's resolver.
++	// "none": nowhere, the answer is REFUSED. Otherwise a server's "ip:port", asked over UDP.
++	DNSUpstream string `yaml:"dnsUpstream,omitempty"`
+ }
+ 
+ type Protocol string
+diff --git a/pkg/virtualnetwork/services.go b/pkg/virtualnetwork/services.go
+index 3ed9a996..4af8240c 100644
+--- a/pkg/virtualnetwork/services.go
++++ b/pkg/virtualnetwork/services.go
+@@ -25,12 +25,21 @@ func addServices(configuration *types.Configuration, s *stack.Stack, ipPool *tap
+ 	var natLock sync.Mutex
+ 	translation := parseNATTable(configuration)
+ 
+-	tcpForwarder := forwarder.TCP(s, translation, &natLock, configuration.Ec2MetadataAccess,
+-		configuration.TCPMaxInFlight, time.Duration(configuration.TCPConnectTimeout)*time.Second)
++	out := &forwarder.Outbound{Handoff: configuration.OutboundHandoff}
++	if len(configuration.OutboundDeny) > 0 {
++		deny, err := forwarder.ParseDenyList(configuration.OutboundDeny)
++		if err != nil {
++			return nil, err
++		}
++		out.Deny = deny
++	}
++
++	tcpForwarder := forwarder.TCPWithOutbound(s, translation, &natLock, configuration.Ec2MetadataAccess,
++		configuration.TCPMaxInFlight, time.Duration(configuration.TCPConnectTimeout)*time.Second, out)
+ 	s.SetTransportProtocolHandler(tcp.ProtocolNumber, tcpForwarder.HandlePacket)
+-	udpForwarder := forwarder.UDP(s, translation, &natLock, configuration.Ec2MetadataAccess)
++	udpForwarder := forwarder.UDPWithOutbound(s, translation, &natLock, configuration.Ec2MetadataAccess, out)
+ 	s.SetTransportProtocolHandler(udp.ProtocolNumber, udpForwarder.HandlePacket)
+-	icmpForwarder := forwarder.ICMP(s, translation, &natLock)
++	icmpForwarder := forwarder.ICMPWithOutbound(s, translation, &natLock, out)
+ 	s.SetTransportProtocolHandler(icmp.ProtocolNumber4, icmpForwarder.HandlePacket)
+ 
+ 	dnsMux, err := dnsServer(configuration, s)
+@@ -77,7 +86,7 @@ func dnsServer(configuration *types.Configuration, s *stack.Stack) (http.Handler
+ 		return nil, err
+ 	}
+ 
+-	server, err := dns.New(udpConn, tcpLn, configuration.DNS)
++	server, err := dns.NewWithUpstream(udpConn, tcpLn, configuration.DNS, configuration.DNSUpstream)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-- 
+2.43.0
+

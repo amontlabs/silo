@@ -4,6 +4,7 @@
 # tier: vm
 # time: about 25 minutes; a person for one approval if macOS asks for it
 # needs: the installed computer of test 00, macOS 27 on the Mac, network (downloads Claude Code and Codex inside the computer, about 300 MB)
+# step: 2
 # decides: reading-each-agent-program on macOS (how model traffic is read in a macOS computer, second build)
 # blocks: option A of the first build (#373): the first run puts Silo's authority in main, and this says where (keychain, or each program's own setting)
 # question: Inside a macOS computer, does each agent program accept a TLS certificate from an authority trusted in the System keychain, and does it accept one given only in its own setting (NODE_EXTRA_CA_CERTS, CODEX_CA_CERTIFICATE, SSL_CERT_FILE)?

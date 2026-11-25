@@ -4,8 +4,9 @@
 # tier: guided
 # time: about 45 minutes, with you at the keyboard for the sign-ins (about 5 minutes)
 # needs: the installed computer of test 00, macOS 27 on the Mac, network, a Claude subscription or Console account and a ChatGPT account (either one is enough)
-# decides: fork-and-sign-in (where each login lands), whether the first build's "ssh main, start Claude Code, go to bed" holds, agent-programs-logins-kept-out-of-copies
-# question: Signed in over SSH inside a macOS computer, where does each program keep its login (a file or the keychain), and does the login still work after a reconnect, a restart of the computer, in a copy restored from a checkpoint and in a fork with a new identity?
+# step: 2
+# decides: fork-and-sign-in (where each login lands), runs-outlive-the-terminal (a login used from a session left running after its terminal closed), whether the first build's "ssh main, start Claude Code, go to bed" holds, agent-programs-logins-kept-out-of-copies
+# question: Signed in over SSH inside a macOS computer, where does each program keep its login (a file or the keychain), and does the login still work after a reconnect, in a tmux or screen session that outlives its SSH connection, after a restart of the computer, in a copy restored from a checkpoint and in a fork with a new identity?
 # outcome lasts-in-files: Both logins landed in files (~/.claude/.credentials.json, ~/.codex/auth.json)
 #   and worked after reconnecting, after a restart, in the checkpoint copy and in the fork: "start
 #   Claude Code, go to bed" holds over SSH; fork-and-sign-in can keep a login out of a fork by leaving
@@ -14,7 +15,8 @@
 #   a fork copies it and Silo cannot leave one keychain item out (research 06, cross-cutting 1);
 #   fork-and-sign-in must say, for macOS computers, that this login is copied.
 # outcome lost-somewhere: A login that worked right after signing in failed later; the facts name the
-#   first stage that failed for each program (reconnect, restart, checkpoint, fork). Before the first
+#   first stage that failed for each program (reconnect, a session left running in tmux or screen
+#   after its SSH connection closed, restart, checkpoint, fork). Before the first
 #   build, the story "go to bed" changes, or Silo signs agents in another way (claude setup-token).
 # outcome inconclusive: No login worked right after signing in, or the computer did not come back;
 #   read the facts and the attached checks.
@@ -74,11 +76,11 @@ if [ "$CALL" = 1 ]; then
   echo "$o" | grep -v "^ *$" | tail -1 | sed "s/^/codex_call=/"
 fi'
 
-# check STAGE: run the check in the current computer, keep it, record facts. Sets CL_OK and CX_OK
-# (yes, no) for the stage.
+# check STAGE [OUTPUT]: run the check in the current computer (or read OUTPUT, a check that already
+# ran), keep it, record facts. Sets CL_OK and CX_OK (yes, no) for the stage.
 check() {
   local f="$KIT_WORK/check-$1.txt"
-  guest_sh "CALL=$CALL; $CHECK" 2>&1 | guest_redact > "$f"
+  if [ -n "${2:-}" ]; then guest_redact < "$2" > "$f"; else guest_sh "CALL=$CALL; $CHECK" 2>&1 | guest_redact > "$f"; fi
   kit_attach "$f"
   v() { sed -n "s/^$1=//p" "$f" | head -1; }
   kit_fact "$1_claude" "file=$(v claude_file) mode=$(v claude_file_mode) keychain_item_rc=$(v claude_keychain_item) keychain_lines=$(v keychain_claude_lines) status_rc=$(v claude_status_rc) status=$(v claude_status | cut -c1-80) call_rc=$(v claude_call_rc) call=$(v claude_call | cut -c1-80)"
@@ -143,6 +145,30 @@ note_stage() { # STAGE: record the first stage each signed-in program fails at
   [ "$CX_IN" = yes ] && [ "$CX_OK" != yes ] && [ -z "$lost_cx" ] && lost_cx="$1"
   return 0
 }
+
+# --- 1b. A session that outlives its terminal: the first build's "ssh main, start Claude Code, go to
+# bed", where #370 has `ssh main.keep` open tmux. The check starts in tmux or screen, the SSH
+# connection that started it closes at once, and it runs on alone; its output is read afterwards.
+KEEPER="$(guest_sh 'for t in tmux screen; do command -v $t >/dev/null 2>&1 && { echo $t; break; }; done')"
+kit_fact detached_keeper "${KEEPER:-none}"
+if [ -z "$KEEPER" ]; then
+  kit_note "neither tmux nor screen is in the computer: the detached stage did not run"
+else
+  printf '%s\n' "CALL=$CALL; $CHECK" > "$KIT_WORK/detached-check.sh"
+  guest_put "$KIT_WORK/detached-check.sh" silokit-detached.sh
+  run='sh "$HOME/silokit-detached.sh" > "$HOME/silokit-detached.txt" 2>&1; touch "$HOME/silokit-detached.done"'
+  guest_sh "rm -f \"\$HOME/silokit-detached.done\"; if [ $KEEPER = tmux ]; then tmux new-session -d -s silokit02 $(printf '%q' "$run"); else screen -dmS silokit02 sh -c $(printf '%q' "$run"); fi"
+  i=0
+  while ! guest_sh 'test -f "$HOME/silokit-detached.done"' 2>/dev/null && [ "$i" -lt 60 ]; do sleep 10; i=$((i + 1)); done
+  if guest_sh 'test -f "$HOME/silokit-detached.done"' 2>/dev/null; then
+    guest_get silokit-detached.txt "$KIT_WORK/detached-raw.txt"
+    check detached "$KIT_WORK/detached-raw.txt"
+    note_stage detached
+  else
+    kit_note "the check in $KEEPER did not end within 10 minutes"; CL_OK=no; CX_OK=no; note_stage detached
+  fi
+  guest_sh "rm -f \"\$HOME/silokit-detached.sh\" \"\$HOME/silokit-detached.txt\" \"\$HOME/silokit-detached.done\"" || true
+fi
 
 # --- 2. Restart the computer from inside.
 how="$(guest_reboot)" || kit_note "the computer did not come back within 10 minutes of its restart"

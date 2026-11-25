@@ -4,6 +4,7 @@
 # tier: long
 # time: about 45 minutes
 # needs: the base computer of test 00 (raw disk), 40 GB free, no sudo on the Mac
+# step: 4
 # decides: research 11 "What the reader has to handle" (the fallback), file-changes-from-outside
 # question: Of 100 clones of a macOS computer's disk taken while programs inside write, how many have a newest APFS checkpoint that does not check, and does an older one always open?
 # outcome never-broken: No clone had a broken newest checkpoint: the reader's fallback is a rare path; it stays, tested on dissect.apfs's corrupt image.

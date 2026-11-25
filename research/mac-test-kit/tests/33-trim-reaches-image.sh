@@ -4,6 +4,7 @@
 # tier: vm
 # time: about 30 minutes (two starts of a computer, 9 GB written in it)
 # needs: the base computer of test 00, 40 GB free, no sudo on the Mac; ASIF needs macOS 26
+# step: 4
 # decides: checkpoint-per-system and thinning-checkpoints (whether a macOS computer's deleted files keep growing its checkpoints), checkpoint-storage, research 2026-11-24-checkpoint-engine ("TRIM")
 # question: When a macOS guest writes then deletes a few GB, does the disk image on the Mac shrink back (the guest's TRIM reaching the image as a hole), at once, after a sync and a minute, only when the volume is mounted again, or never; for the main raw image, a raw extra disk and an ASIF extra disk?
 # outcome trim-reaches: A raw image gave back at least 75% of what the write took within a minute of the delete and a sync:

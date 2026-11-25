@@ -4,6 +4,7 @@
 # tier: setup
 # time: about an hour (download of about 18 GB, then the install); minutes when already done
 # needs: macOS 27 on Apple silicon, 100 GB free, the VM helper (./kit build), no sudo
+# step: 2
 # decides: computer-image, first-run-time-macos, which-macos-the-mac-runs (file 10 of the research)
 # question: How long do the download of Apple's restore image and the install of macOS into a new computer take on this Mac, and does the install work at all?
 # outcome installed: The base computer is installed and was never started; every vm test clones it.

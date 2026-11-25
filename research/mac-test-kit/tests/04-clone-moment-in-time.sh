@@ -4,6 +4,7 @@
 # tier: vm
 # time: about 60 minutes (19 starts of a computer)
 # needs: the base computer of test 00, 40 GB free, no sudo on the Mac
+# step: 2
 # decides: checkpoint-per-system (the mode main's disk is attached in; whether a checkpoint needs a pause), whole-computer-grain
 # question: When the Mac clones the disk of a running macOS computer, does the clone keep every write the guest flushed before it, with no write missing before a later one, in each of the 9 caching and sync modes, with and without the guest flushing?
 # outcome all-hold: In all 9 modes the clone held every flushed write, no hole, and booted: a checkpoint needs no pause; main's disk is attached in whichever mode is fastest (the default, automatic and full, unless test 15 says otherwise).
