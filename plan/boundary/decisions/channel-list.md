@@ -33,3 +33,13 @@ in the list, not that the list stays short.
 - Opening a link in the browser on your Mac is not in the list. `sign-in-from-a-computer` needs it.
 - The list says each channel has a direction and does not say what is at the other end.
   `files-between-computers` and `macos-screen-from-a-linux-computer` put another computer there.
+
+## Two channels found on 25 November 2026, by an agent
+
+- **The clipboard, from a preview.** In `research/2026-11-25-port-previews`, a page shown in a
+  preview replaced what you copied from it with a command of its own, in every set-up tried. The
+  clipboard is already a channel; a preview is a second way onto it.
+- **A model on your Mac.** `research/2026-11-25-local-models` designs a channel from a computer to
+  one model server on your Mac, through the boundary, that lets through only calls that run or list
+  a model. It is a question for `program-that-cannot-be-read`, and it touches
+  `nothing-shared-from-your-device`.

