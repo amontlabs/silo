@@ -18,3 +18,16 @@ The options:
 
 Recommended: build it. Nearly everything the record says about an agent's work, and every budget,
 rests on it.
+
+## In the first build
+
+An agent's part, 24 November 2026, from [the comparison of first builds](../../../research/2026-11-24-first-build-and-the-record/README.md). #348 puts this feature in the third build. The
+comparison proposes it in the first, beside main and its checkpoints, because the record of what
+agents sent and spent is what no other product found gives, and the first build otherwise records
+only which files changed. It costs 19 more open decisions, most of them already tried in #347,
+#367, #369 or #371.
+
+One need would have to go. This feature needs `secrets-held-outside`, which needs
+`open-limited-or-closed` and with it the rule engine. Reading traffic does not need a secret held
+outside: a subscription's sign-in stays in the program (`logins`), and an API key the program keeps
+in main is read like any other request. Holding that key outside would come in the second build.
