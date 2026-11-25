@@ -8,6 +8,8 @@
 //!   silorec night <dir> heavy|light full|delta the size of a night
 //!   silorec import <dir> <lines.jsonl>         writes lines converted from another record
 //!   silorec redact-cost <secrets> <lines>      what redaction costs per line
+//!   silorec workload <dir> <max_segment>       the crash test's workload, printing each ack (power-cut test)
+//!   silorec start <dir> <max_segment> [rule]   starts the writer on what is there and stops it (power-cut test)
 const std = @import("std");
 const format = @import("format.zig");
 const verify = @import("verify.zig");
@@ -41,6 +43,8 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(gpa);
     defer std.process.argsFree(gpa, args);
     if (args.len < 2) return usage();
+    // SILOREC_START_RULE=after_head runs any command with that start rule (power-cut test).
+    if (std.posix.getenv("SILOREC_START_RULE")) |r| writer.start_rule = std.meta.stringToEnum(writer.StartRule, r) orelse return usage();
     const cmd = args[1];
     if (std.mem.eql(u8, cmd, "verify") and args.len == 4) {
         var dir = try std.fs.cwd().openDir(args[2], .{ .iterate = true });
@@ -129,6 +133,22 @@ pub fn main() !void {
             first = false;
         };
         out("}}}}\n", .{});
+    } else if (std.mem.eql(u8, cmd, "workload") and args.len == 4) {
+        // The power-cut test traces this run's calls to the disk; an ack is a write to stdout.
+        std.fs.cwd().deleteTree(args[2]) catch {};
+        var w = try writer.Writer.open(gpa, args[2], "c1", harness.options(try std.fmt.parseInt(u64, args[3], 10)));
+        defer w.close();
+        try harness.workload(gpa, &w, std.fs.File.stdout().handle);
+    } else if (std.mem.eql(u8, cmd, "start") and (args.len == 4 or args.len == 5)) {
+        if (args.len == 5) {
+            if (std.meta.stringToEnum(writer.StartRule, args[4])) |r| writer.start_rule = r else crash.mutant = std.meta.stringToEnum(crash.Mutant, args[4]) orelse return usage();
+        }
+        var w = writer.Writer.open(gpa, args[2], "c1", harness.options(try std.fmt.parseInt(u64, args[3], 10))) catch |e| {
+            out("the writer refused to start: {s}\n", .{@errorName(e)});
+            std.process.exit(3);
+        };
+        w.close();
+        out("started\n", .{});
     } else if (std.mem.eql(u8, cmd, "import") and args.len == 4) {
         try importLines(gpa, args[2], args[3]);
     } else if (std.mem.eql(u8, cmd, "redact-cost") and args.len == 4) {

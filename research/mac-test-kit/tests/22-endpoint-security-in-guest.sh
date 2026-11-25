@@ -4,6 +4,7 @@
 # tier: guided
 # time: about 20 minutes, with you at the computer's window for one switch (about 2 minutes)
 # needs: the installed computer of test 00, macOS 27 on the Mac
+# step: later
 # decides: denied-tool-call-mechanism and processes-in-the-record for a macOS computer (second build): can they use Endpoint Security inside it
 # question: Inside a macOS computer, does eslogger (Endpoint Security) run as root from an SSH session and see an agent-like command's process starts and file writes, and if not, which grant makes it work?
 # outcome es-over-ssh-works: eslogger ran as root over SSH with no grant and saw the command's exec and

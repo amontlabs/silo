@@ -1,0 +1,6 @@
+A holds page 173; pages shared before B: 0
+  B: slowest guess 173: 10143 ns; the other 255: 105 ns on average
+A holds page none; pages shared before B: 1
+  B: slowest guess 139: 695 ns; the other 255: 114 ns on average
+A holds page 42; pages shared before B: 0
+  B: slowest guess 42: 20896 ns; the other 255: 110 ns on average

@@ -4,6 +4,7 @@
 # tier: long
 # time: about 40 minutes
 # needs: the Xcode computer of test 23, macOS 27 on the Mac; KIT_SIMS sets the most simulators booted (8)
+# step: later
 # decides: simulators-for-parallel-agents (the maximum booted at once), sizing-target (memory of main for an iOS developer)
 # question: In a computer with its user on the screen, how much memory does each booted simulator with an app running take, and how many boot before the computer starts to swap or a boot fails?
 # outcome measured: Simulators were booted one at a time until the computer swapped, a boot failed

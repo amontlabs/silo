@@ -1,0 +1,15 @@
+--- progs.sh	2026-11-25 11:20:36.570863391 +0000
++++ progs.sh	2026-11-25 11:23:59.816320404 +0000
+@@ -15,3 +15,12 @@
+ P_big="127.0.0.7|SSL_CERT_FILE=$TLS/store-with-silo.crt|python3 $R/bigcall.py"
+ # The edge cases of run/edges.py play the computer at 127.0.0.7 and, for a fork, 127.0.0.8.
+ P_edge="127.0.0.7|SSL_CERT_FILE=$TLS/store-with-silo.crt CASE=${CASE:-}|python3 $R/edges.py"
++# key or plan: computers set for a plan trust only the provider's own authority (here the
++# stand-in's), so Claude Code works there only if Silo did not end the connection.
++CCB="IS_SANDBOX=1 DISABLE_AUTOUPDATER=1 DISABLE_TELEMETRY=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
++UP_TRUST="NODE_EXTRA_CA_CERTS=$TLS/up-ca.crt"
++P_kk="127.0.0.2|$CCB $NODE_TRUST ANTHROPIC_API_KEY=sk-ant-api03-kk-fake|claude -p Do_the_task. $CCARGS"
++P_kp="127.0.0.4|$CCB $NODE_TRUST CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-kp-fake|claude -p Do_the_task. $CCARGS"
++P_pp="127.0.0.5|$CCB $UP_TRUST CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-pp-fake|claude -p Do_the_task. $CCARGS"
++P_pk="127.0.0.6|$CCB $UP_TRUST ANTHROPIC_API_KEY=sk-ant-api03-pk-fake|claude -p Do_the_task. $CCARGS"
++P_rp="127.0.0.8|$CCB $NODE_TRUST CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-rp-fake|claude -p Do_the_task. $CCARGS"

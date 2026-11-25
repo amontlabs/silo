@@ -4,6 +4,7 @@
 # tier: long
 # time: 2 to 3 hours (KIT_15_STEPS shortens it)
 # needs: the base computer of test 00, 120 GB free, a network for the guest (GitHub, npm, nodejs.org), no sudo on the Mac
+# step: 4
 # decides: checkpoint-per-system, speed-budgets (the checkpoint's target as the wait inside), restore-to-a-checkpoint, what-a-restore-leaves, research 07 "What to do if APFS behaves like XFS"
 # question: How fast does a real macOS computer's disk image fragment under agent-like work with a checkpoint per step, how long does a write inside wait during a checkpoint, and does a checkpoint from mid-run boot clean with its repositories intact?
 # outcome holds: The restored checkpoint booted clean, git and npm worked in it, and no flushed write inside waited more than 0.1 s during a checkpoint: checkpoints per step are fine as they are; the target can be written at the pieces reached.

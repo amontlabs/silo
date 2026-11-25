@@ -1,0 +1,7 @@
+{
+  "asks": "What on a shared host can a computer reach?",
+  "answer": "Only its own boundary. The host drops whatever a computer sends to any other address or port of the host, so a service that listens on every address of the host, such as another person's development server, is not reachable from a computer.",
+  "needs": [
+    "computer-known-by-its-link"
+  ]
+}

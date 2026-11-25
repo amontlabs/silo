@@ -1,0 +1,10 @@
+c1: claude exit=0 in 3.0s, result: success 1 'All done. All done. All done. All done. All done. All done. All done. All done.
+c1: what reached the hosts: {'real:anthropic@api.anthropic.com': 21, 'none@api.anthropic.com': 1}
+c1: refused by the boundary: {' unknown-credential': 1}
+c2: claude exit=0 in 3.6s, result: success 1 'All done. All done. All done. All done. All done. All done. All done. All done.
+c2: what reached the hosts: {'real:anthropic@api.anthropic.com': 21, 'none@api.anthropic.com': 1}
+c2: refused by the boundary: {' unknown-credential': 2}
+record c1: 57 lines checked in 1 segments, 0 blob references · the chain holds
+{'connection/opened': 11, 'connection/secret-used': 9, 'connection/closed': 11, 'model-call/refused': 1, 'connection/request': 1, 'model-call/admitted': 12, 'model-call/counted': 12}
+record c2: 57 lines checked in 1 segments, 0 blob references · the chain holds
+{'connection/name-looked-up': 3, 'connection/opened': 9, 'connection/request': 2, 'connection/closed': 9, 'connection/secret-used': 9, 'model-call/refused': 1, 'model-call/admitted': 12, 'model-call/counted': 12}

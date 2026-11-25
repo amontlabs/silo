@@ -1,0 +1,18 @@
+== 1. One bridge for every computer; the server knows a computer by its address
+A asks:                         token-of-A
+B asks:                         token-of-B
+B reaches A's computer:         reached
+B reaches a host service:       reached
+B, A stopped, with A's address: token-of-A
+-- the bridge's port isolation on, and each port held to its own address and MAC
+A asks:                         token-of-A
+B reaches A's computer:         not reached
+B, A stopped, with A's address: no answer
+B reaches a host service:       reached
+== 2. A link of its own for each computer; the server knows a computer by the link
+A asks:                         token-of-A
+B asks:                         token-of-B
+B asks at A's link address:     no answer
+B reaches A's computer (host forwarding 0): not reached
+B reaches a host service:       reached
+B, A stopped, with A's address: token-of-B (asking at its own link); no answer (at A's)

@@ -4,6 +4,7 @@
 # tier: guided
 # time: about 60 minutes; you may be asked to turn on FileVault in the computer's window
 # needs: the base computer of test 00 (raw disk), 40 GB free, no sudo on the Mac (sudo runs inside the computer only)
+# step: 5
 # decides: research 11 "Where the trust comes from" and "What the reader has to handle", file-changes-from-outside, macos-ships-facts-first
 # question: Can root inside a macOS computer write its raw disk with SIP on, can FileVault be turned on inside, and what does the reader see on clones after 100 local snapshots, an added volume and FileVault?
 # outcome raw-writes-allowed: Root inside wrote its own raw disk with SIP on: a write past APFS is possible from main, so the reader's trust must come from the Mac's block map (test 05), never from APFS's rules alone.

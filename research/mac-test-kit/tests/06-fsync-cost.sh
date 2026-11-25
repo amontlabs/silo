@@ -4,6 +4,7 @@
 # tier: quick
 # time: about 6 minutes
 # needs: 3 GB free, the Command Line Tools, no VM, no sudo; run on mains power with other apps closed
+# step: 1
 # decides: engine-saved-state, events-until-the-recorder, low-disk, record-speed-cost
 # question: What do fsync, F_BARRIERFSYNC and F_FULLFSYNC cost, alone, grouped and while another program writes, and does an overwrite take new space once a clone shares the file?
 # outcome full-fast-reserve-needed: F_FULLFSYNC's p99 while another program writes is 50 ms or less, and an overwrite after a clone takes new space: the engine flushes each write group with F_FULLFSYNC (engine-saved-state as proposed in research 02), and low-disk keeps a reserve, since preallocating does not protect once a checkpoint or local snapshot shares the file.

@@ -4,6 +4,7 @@
 # tier: vm
 # time: about 15 minutes
 # needs: the installed computer of test 00, macOS 27 on the Mac, network (softwareupdate asks Apple)
+# step: 2
 # decides: the checks before main is called ready (research 10, step 8), first-run-time-macos, file-changes-from-outside (FileVault off)
 # question: After Apple's provisioning, is FileVault off, does the user hold a secure token, is SSH served, is the login keychain unlocked in an SSH session, and what do auto-login, sleep, the screen lock and softwareupdate look like?
 # outcome ready-checks-hold: FileVault is off, the user has a secure token and owns the volume, sshd

@@ -4,6 +4,7 @@
 # tier: vm
 # time: about 20 minutes
 # needs: the base computer of test 00, macOS 27, no sudo
+# step: 2
 # decides: computer-image, step 4 of file 10 (is the never-started copy needed for retries)
 # question: When a computer's first, provisioned start is forced off 20 seconds in, does starting it again with the same options still provision it?
 # outcome provisioned-after-cut: The second start provisioned the computer and SSH answered. A cut-off

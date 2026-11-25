@@ -49,3 +49,13 @@ Gemini's batch result format, which was not built.
 An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
 
 #378 proposes refusing batch routes under a budget, "until they are counted", as the gateway tool it studied does. #385 counted them: a batch, a background response or a cache leaves when its whole bound fits, and the count matched the bill to the cent. The condition of #378's proposal is met, so its refusal is the fallback only for work Silo still cannot count, such as code execution billed by container time.
+
+## Two prices checked (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-model-prices`.
+
+- Gemini's cache storage price is on Google's page: $4.50 per million tokens per hour for Gemini
+  3.1 Pro Preview, $8.10 at the priority tier, and $0.50 for Gemini 3.8 Flash. The stand-in value
+  of $4.50 above is the real one for that model.
+- OpenAI now prices eligible background requests 30% below standard for a 2-hour completion
+  window and 40% below for an 8-hour one. A bound at the standard price stays a bound for them.

@@ -1,0 +1,6 @@
+Silo's authority made 2 days ago; the certificate it makes per host starts 1 day back (cert_backdate_s).
+Default test authority of run/tls.sh, made today, and that certificate 2 h behind: error 9 at 1 depth lookup: certificate is not yet valid
+computer clock      0s behind: minted.pem: OK
+computer clock   7200s behind: minted.pem: OK
+computer clock  86000s behind: minted.pem: OK
+computer clock  90000s behind: error minted.pem: verification failed

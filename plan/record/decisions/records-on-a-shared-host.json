@@ -1,0 +1,7 @@
+{
+  "asks": "On a shared host, who reads the record of a computer?",
+  "answer": "The person whose computer it is, and the people they share it with. The record of a main the team shares is read by every person who follows it. The record is kept in its owner's folder, as their Unix user. The host's administrator can read every record, and Silo says so.",
+  "needs": [
+    "members-on-a-host"
+  ]
+}

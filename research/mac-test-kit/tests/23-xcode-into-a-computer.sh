@@ -4,6 +4,7 @@
 # tier: vm
 # time: about an hour, most of it copying Xcode and downloading the runtime
 # needs: the installed computer of test 00 (80 GB disk), macOS 27 on the Mac, Xcode installed on this Mac (read, never changed), about 40 GB free, network (the runtime comes from Apple's CDN, about 9 GB)
+# step: later
 # decides: xcode-in-a-computer, first-run-time-macos, computer-image (whether the kept image can hold Xcode)
 # question: Does Xcode copied from this Mac into a computer pass Apple's signature check, accept its license and finish its first launch over SSH with nobody at the screen, and does the iOS simulator runtime download there with no Apple Account?
 # outcome ready: Xcode passed the signature check, its license and first launch were done over SSH,

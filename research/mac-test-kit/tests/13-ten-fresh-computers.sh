@@ -4,6 +4,7 @@
 # tier: long
 # time: about an hour (eleven first starts in sequence)
 # needs: the base computer of test 00, macOS 27, no sudo
+# step: 2
 # decides: computer-image, first-run-time-macos, step 6 of file 10 (the time limit before a retry)
 # question: How long does a fresh clone of the installed computer take from its first start to SSH, how often does it fail, and does a clone with a new machine identifier and auxiliary storage start and provision?
 # outcome reliable-identity-ok: All ten provisioned, and the clone with a new identity did too. The
