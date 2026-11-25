@@ -100,7 +100,7 @@ Agents' notes; no answer, `sets` or verdict changed:
 > libkrun's write hook written and tested (2 commits, one an upstreamable fix for a guest write to
 > sector 2^55 that landed on sector 0), Silo's Zig side measured at 30 ns to 1.8 µs a write, a rule
 > found for the write in flight at a checkpoint's moment, and the ext4 reader made a checkpoint
-> reader: with the write log it compared a million-path disk reading 13 MiB instead of 533 (#this PR).
+> reader: with the write log it compared a million-path disk reading 13 MiB instead of 533 (#398).
 
 ## For polarzero to rule
 
