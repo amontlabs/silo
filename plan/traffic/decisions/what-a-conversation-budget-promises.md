@@ -20,3 +20,17 @@ says exactly what it holds.
 
 Split on 22 November 2026 from `recognising-a-conversation`, which keeps how a conversation is
 recognised in the traffic.
+
+## Where a fork's copy starts, made exact (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-forked-conversations`, on the traffic of Claude Code 2.1.332 and Codex
+0.172.0 in seven kinds of fork. It refines the option recommended in #385's notes, "starts at what
+its parent's had spent", without changing the choice.
+
+"What its parent's had spent" needs a moment. #385's prototype takes it when the fork first
+calls. A fork of a checkpoint then starts with every turn main made after the checkpoint: one turn
+in the runs (/bin/bash.0166 with Claude Code, /bin/bash.0207 with Codex), and a day of work for a checkpoint
+taken a day before. Taken at the request the fork's first request continues, the copy starts at
+exactly what its own history spent, in all seven cases: a fork, a fork with a new machine id, a
+fork of a checkpoint, a fork of a fork (it carries main's turns and its parent's), and a fork that
+becomes main (main's conversation goes on from the fork's spend, not from main's old one).
