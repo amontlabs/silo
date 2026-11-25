@@ -167,6 +167,11 @@ Four facts from this work weigh on the choice:
 - **The measured costs come from the TCP engine and the frame transport, not from gvproxy's extra
   features.** The patch removes features and the numbers do not move. A program of Silo's own on the
   same netstack would therefore be no faster; it would only be smaller and Silo's to change.
+- **A restart of gvproxy needs a part of Silo that owns the link.** #390 measured on Linux that a
+  computer whose datagram link goes straight to gvproxy's socket, as Apple's framework hands it,
+  stays offline for good when gvproxy restarts; through a relay that reconnects, it came back 3 s
+  after gvproxy did. A fork is upgraded by restarting it, so the helper that starts gvproxy has to
+  hold the computer's end of the link and reconnect it.
 - **passt is not an option for a Mac.** #366 measured it faster into the computer on Linux, but it
   runs on Linux only; macOS support is an open item on its tracker (bugs.passt.top #6), not a
   release.
