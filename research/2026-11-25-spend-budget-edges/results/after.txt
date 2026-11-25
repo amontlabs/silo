@@ -1,0 +1,72 @@
+prev_id under prev_id: billed $0.4003, counted $0.4003, refused {}
+  PASS  counted equals billed  counted=0.4003 billed=0.4003
+  PASS  input of each chained call estimated within 10% of the provider's count  errors=[-0.0, -0.0, -0.0, -0.0, -0.0] cold_first_calls=[0.267, 0.267]
+  ok
+background under background: billed $0.6526, counted $0.6526, refused {'input': 2}
+  PASS  counted equals billed  counted=0.6526 billed=0.6526
+  PASS  spend stays within the budget  spent=0.6526 budget=1.5
+  PASS  a background call is refused once held calls fill the budget  said=['Silo: this background response may cost up to $0.31, which it holds until it ends, and this computer has $0.25 left of $1.50. Raise the budget in the Silo app to go on.']
+  ok
+websearch under websearch: billed $0.1035, counted $0.1035, refused {}
+  PASS  counted equals billed  counted=0.1035 billed=0.1035
+  PASS  searches counted  counted_searches=7
+  ok
+chat under chat-deny: billed $0.2499, counted $0.2499, refused {'no-usage': 2}
+  PASS  streams that do not ask for usage are refused, the others pass  refused=['stream, no usage', 'stream, n=4, no usage']
+  PASS  counted equals billed  counted=0.2499 billed=0.2499
+  ok
+chat under chat-estimate: billed $0.4088, counted $0.4134, refused {}
+  PASS  calls without usage settled on an estimate  estimated=2
+        estimated: counted $0.1614 against billed $0.1569
+  ok
+cache_expiry under cache_expiry: billed $1.0114, counted $1.0114, refused {}
+  PASS  counted equals billed  counted=1.0114 billed=1.0114
+  PASS  the input priced before each call is not under what the provider billed for it  before_vs_billed=[(0.6407, 0.3159), (0.013, 0.0128), (0.0131, 0.0129), (0.506, 0.3161), (0.0134, 0.013), (0.5063, 0.3163)]
+  ok
+gcache under gcache: billed $0.1224, counted $0.1222, refused {'out-of-sight': 1}
+  PASS  storage counted within 1% of its bill (each side times the cache's life)  counted=0.1222 billed=0.1224
+  PASS  a day of storage that does not fit is refused  said=Silo: keeping this cache for its lifetime may cost up to $6.48, and this computer has $1.00 left of $1.00. Raise the budget in the Silo app, or ask for a shorter ttl.
+  ok
+batch under batch: billed $0.583, counted $0.3862, refused {'out-of-sight': 1}
+  PASS  batches whose results were read are counted at their bill  settled=0.38618 billed_read=0.38616
+  PASS  a batch that does not fit is refused  said=['Silo: this batch of 400 requests may cost up to $8.82, which it holds until its results are read, and this computer has $1.81 left of $2.00. Raise the budget in the Silo app to go on.']
+  PASS  a batch never read stays held at its bound  open_holds=[0.2814] unread_billed=0.19684
+  ok
+midstream under midstream-finish: billed $1.5206, counted $1.5206, refused {'total': 1}
+        long call: whole=True secs=30.4 said=None
+  PASS  the long call finishes, past the budget  billed=1.5206 budget=1
+  ok
+midstream under midstream-cut: billed $0.9966, counted $1.0017, refused {'total': 1}
+        long call: whole=False secs=17.0 said=Silo: this computer's budget of $1.00 was reached while this answer was being written ($1.00 spent), so it was stopped. Raise the budget in the Silo app to go on.
+  PASS  spend ends within 5% of the budget  billed=0.9966 budget=1
+  PASS  the program is told why its answer stopped  said=Silo: this computer's budget of $1.00 was reached while this answer was being written ($1.00 spent), so it was stopped. Raise the budget in the Silo app to go on.
+  PASS  the cut call, settled on an estimate, is counted within 10% of its bill  counted=1.0017 billed=0.9966
+  ok
+midstream under midstream-typical-finish: billed $1.5206, counted $1.5206, refused {'total': 1}
+        long call: whole=True secs=30.3 said=None
+  PASS  the long call finishes, past the budget  billed=1.5206 budget=1
+  ok
+midstream under midstream-typical-cut: billed $0.9966, counted $1.0011, refused {'total': 1}
+        long call: whole=False secs=17.0 said=Silo: this computer's budget of $1.00 was reached while this answer was being written ($1.00 spent), so it was stopped. Raise the budget in the Silo app to go on.
+  PASS  spend ends within 5% of the budget  billed=0.9966 budget=1
+  PASS  the program is told why its answer stopped  said=Silo: this computer's budget of $1.00 was reached while this answer was being written ($1.00 spent), so it was stopped. Raise the budget in the Silo app to go on.
+  PASS  the cut call, settled on an estimate, is counted within 10% of its bill  counted=1.0011 billed=0.9966
+  ok
+fork under fork-fresh: billed $1.1046, counted $1.1046, refused {}
+        turns: main turn 0:200, main turn 1:200, main turn 2:200, fork turn 0:200, fork turn 1:200, fork turn 2:200, fork turn 3:200, fork turn 4:200, fork turn 5:200, main turn 3:200, main turn 4:200, main turn 5:200
+        by conversation: conversation:1: script=0.0917 script=0.0918 script=0.0919 script=0.092 script=0.0921 script=0.0921 (sum 0.5516); conversation:2: fork=0.092 fork=0.0921 fork=0.0921 fork=0.0922 fork=0.0923 fork=0.0924 (sum 0.5531)
+  PASS  counted equals billed  counted=1.1046 billed=1.1046
+  PASS  the fork's spend counts in main's computer budget  fork=0.5531
+  ok
+fork under fork-carry: billed $0.8277, counted $0.8277, refused {'total': 1}
+        turns: main turn 0:200, main turn 1:200, main turn 2:200, fork turn 0:200, fork turn 1:200, fork turn 2:200, fork turn 3:400, main turn 3:200, main turn 4:200, main turn 5:200
+        by conversation: conversation:1: script=0.0917 script=0.0918 script=0.0919 script=0.092 script=0.0921 script=0.0921 (sum 0.5516); conversation:2: fork=0.092 fork=0.0921 fork=0.0921 (sum 0.2762)
+  PASS  counted equals billed  counted=0.8277 billed=0.8277
+  PASS  the fork's spend counts in main's computer budget  fork=0.2762
+  ok
+fork under fork-shared: billed $0.5515, counted $0.5515, refused {'total': 2}
+        turns: main turn 0:200, main turn 1:200, main turn 2:200, fork turn 0:200, fork turn 1:200, fork turn 2:200, fork turn 3:400, main turn 3:400
+        by conversation: conversation:1: script=0.0917 script=0.0918 script=0.0919 fork=0.092 fork=0.0921 fork=0.0921 (sum 0.5516)
+  PASS  counted equals billed  counted=0.5515 billed=0.5515
+  PASS  the fork's spend counts in main's computer budget  fork=0.2762
+  ok

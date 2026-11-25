@@ -12,7 +12,7 @@ The same shape has three other forms: an OpenAI response sent with `background: 
 answers "queued" at once and is fetched later by id; Anthropic's Message Batches; and Gemini's
 explicit cache, billed by the hour for as long as it is kept. Measured against stand-in providers
 that bill each of them, a boundary that counts only the calls it watches counted nothing: $1.06 of
-background responses, $4.47 of batches and $5.51 of cache storage went by at $0.
+background responses, $4.47 of batches and $5.52 of cache storage went by at $0.
 
 The options:
 
