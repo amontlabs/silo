@@ -1,0 +1,7 @@
+--- a/cmd/gvproxy/config.go
++++ b/cmd/gvproxy/config.go
+@@ -351,3 +351,4 @@
+ 	if args.ec2MetadataAccess {
+ 		config.Ec2MetadataAccess = true
++		config.Stack.Ec2MetadataAccess = true
+ 	}
