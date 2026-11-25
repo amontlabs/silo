@@ -645,3 +645,36 @@ Inside a macOS computer, files compressed by APFS (decmpfs: zlib, LZVN, LZFSE, i
 | `type-unread` | Every file the reader could decode was right, but main holds a compression it has no decoder for (named, LZBITMAP most likely): Silo's reader needs that decoder, or shows those files as a gap in look and put-back. |
 | `reads-wrong` | A file read from outside differs from the guest's, a file the guest marks compressed was read as plain, or a plain file gave a gap: the reader's handling of that case is wrong (examples in the facts); nothing reads contents from outside until it is fixed. |
 | `inconclusive` | The computer did not start, its disk is not raw, its data volume is encrypted, or no compressed file was made; the sentence says which. |
+
+## 40. What Silo's own writers wait for on APFS: an acknowledgement with F_FULLFSYNC, F_BARRIERFSYNC or fsync
+
+On this Mac's APFS, what does the record's writer wait for before it acknowledges a line, when every flush is F_FULLFSYNC, when only the flush before an acknowledgement is (the rest F_BARRIERFSYNC), and with plain fsync (which keeps nothing through a power cut), alone and while another program writes; and what does a SQLite commit cost with fullfsync?
+
+- Decides: record-file-format (the flush before an acknowledgement), record-damaged-at-start (whether the barrier rule of research 2026-11-25-record-head-off-the-mac is worth it), what-a-budget-promises (the spend journal's two flushes per model call), pooled-budget-ledger (the team ledger's commit on a Mac), research 2026-11-25-durability-on-a-mac
+- Tier: `long`. Step: needed for step 1 of the first build. Time: about 15 minutes (18 runs of the record's writer and 4 of SQLite, quiet and while another program writes). Needs: 2 GB free, no VM, no sudo; Zig 0.15.2 and the writer's source, as test 31 (both asked first).
+- Script: [`tests/40-writers-flush-cost.sh`](tests/40-writers-flush-cost.sh)
+
+| Outcome | What it means |
+|---|---|
+| `full-affordable` | With every flush F_FULLFSYNC, an acknowledgement waits 50 ms or less at the 99th percentile even while another program writes, new blobs included: Silo's writers flush that way everywhere, the spend journal's two flushes per model call cost nothing a person sees, and no barrier rule is needed. |
+| `barrier-for-blobs` | Each acknowledgement alone is 50 ms or less, but a line with a new blob passes it with every flush F_FULLFSYNC and not with the barrier rule: the writer keeps F_FULLFSYNC before each acknowledgement and F_BARRIERFSYNC for blobs and folders, as #394's mac-barrier model, and test 41 must show the barrier holds. |
+| `group-lines` | An acknowledgement with F_FULLFSYNC passes 50 ms while another program writes, and grouping 16 lines per flush brings the rate back over 1,000 lines a second: the writer groups what arrives while a flush runs (one flush acknowledges them all), as the recorder's batch already does. |
+| `too-slow` | Even grouped by 16, F_FULLFSYNC leaves the writer under 1,000 lines a second while another program writes: the record's flush needs another design (a longer batch, or acknowledging after the flush is only issued) before the first build relies on it. |
+| `inconclusive` | The writer did not build or a run failed; look at the attached logs. |
+
+## 41. A power cut under the record's writer: a macOS computer on a disk that loses its cache
+
+When a macOS computer loses power while the record's writer runs, with its disk served by a stand-in drive that keeps writes in a cache until a flush and loses part of that cache in the cut, does every line the writer acknowledged survive and the record start again, with every flush F_FULLFSYNC, with the barrier rule, and with plain fsync?
+
+- Decides: record-file-format (the flush before an acknowledgement), record-damaged-at-start (the after-head start rule), research 2026-11-25-durability-on-a-mac, research 2026-11-25-record-head-off-the-mac
+- Tier: `vm`. Step: needed for step 1 of the first build. Time: about 40 minutes (seven starts of a computer). Needs: the base computer of test 00 (raw disk), 40 GB free, no sudo; Zig 0.15.2 and the writer's source, as test 31 (both asked first).
+- Script: [`tests/41-power-cut-through-the-disk.sh`](tests/41-power-cut-through-the-disk.sh)
+
+| Outcome | What it means |
+|---|---|
+| `full-holds-fsync-loses` | With F_FULLFSYNC, and with the barrier rule, every acknowledged line survived every cut and the record started; with plain fsync some did not: the writer's flushes are right on APFS, and the barrier rule may be used where test 40 says it saves time. |
+| `barrier-loses` | F_FULLFSYNC kept every acknowledged line, the barrier rule did not: F_BARRIERFSYNC does not order the writes the rule needs through this disk; the writer uses F_FULLFSYNC for every flush. |
+| `fsync-holds` | Even plain fsync kept every acknowledged line: the computer's disk path flushed on its own (the flush counts are in the facts), so this stand-in cannot tell the flushes apart; trust #394's models and test 40 instead. |
+| `full-loses` | An acknowledged line was lost even with every flush F_FULLFSYNC: F_FULLFSYNC does not reach the disk through this path, or the writer is wrong; nothing relies on the record's durability on a Mac until the cause is found (the runs are attached). |
+| `no-start` | The computer did not start again after a cut: APFS itself did not survive this stand-in's power cut, which says more about the stand-in than about the writer; look at the attached logs. |
+| `inconclusive` | The computer did not start from the served disk or the writer did not run; read the facts. |
