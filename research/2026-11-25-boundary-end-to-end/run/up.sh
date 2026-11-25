@@ -22,7 +22,7 @@ CONFIG=$OUT/config.json OUT=$OUT PROVIDER=127.0.0.1:8443 UP_CA=$TLS/up-ca.crt TL
 # The recorder and the boundary.
 mkdir -p $OUT/record
 [ -z "${NO_RECORDER:-}" ] && { bg $E/recorder/zig-out/bin/recorder $OUT/config.json $OUT/record $OUT/recorder.sock 2> $OUT/recorder.err; echo $! > $OUT/recorder.pid; }
-SILO_CONFIG=$OUT/config.json RECORD=$OUT/trace.jsonl bg $E/boundary/zig-out/bin/boundary 2> $OUT/boundary.err
+SILO_CONFIG=$OUT/config.json RECORD=$OUT/trace.jsonl bg ${BOUNDARY_BIN:-$E/boundary/zig-out/bin/boundary} 2> $OUT/boundary.err
 echo $! > $OUT/boundary.pid
 sleep 0.5
 # c1: only a loopback; its way out is the relay to the boundary's CONNECT socket.
