@@ -59,3 +59,12 @@ for the ledger like any held model request (#364).
 Not built yet: a lease that expires, so a slice held by a Mac that went to sleep comes back; and
 admitting each call at the ledger once less than a slice per Mac is free, which would remove the
 recalls at the end of a budget (they made calls wait up to 48 s through a Git repository).
+
+## The ledger's commit on a Mac
+
+An agent's part, 25 November 2026, from [durability on a Mac](../../../research/2026-11-25-durability-on-a-mac/README.md). The team ledger commits each
+grant to SQLite with `synchronous=FULL`. On a Mac that is a plain `fsync(2)`, which leaves the
+commit in the drive's cache, so a ledger on a member's Mac that stays on can lose a grant a Mac
+already spends from in a power cut, and grant the same dollars twice. SQLite asks for
+`F_FULLFSYNC` only with `PRAGMA fullfsync` and `PRAGMA checkpoint_fullfsync`, both off by
+default; the prototype now sets both.

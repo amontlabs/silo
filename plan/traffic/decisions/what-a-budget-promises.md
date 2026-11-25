@@ -190,3 +190,16 @@ of Silo's own).
 Recommended: count it at a bound. A budget still holds, since the bound is above what the provider
 charges, and a new model does not stop work. This would replace the sentence of the answer on a
 model Silo has no price for. The answer is left as it is for polarzero to choose.
+
+## A budget across a restart
+
+An agent's part, 25 November 2026, from [durability on a Mac](../../../research/2026-11-25-durability-on-a-mac/README.md). In #374's boundary the ledgers
+live in memory. Main reaches its budget of 1 dollar after 23 calls; the boundary is killed, as a
+crash or a power cut kills it, and starts again: the next call is admitted, since every budget
+starts again at zero. The same happens when the boundary stops while a call streams. So
+`budget-stops-what-it-meters` holds only until the boundary restarts.
+
+A spend journal fixes it: each call that leaves, and each settlement, is written and flushed
+(`F_FULLFSYNC` on a Mac) before the call goes on, and a start puts every ledger back. A call that
+left and never settled counts at its reserve, the most it can cost. With it, both cases refuse the
+call after the restart. It costs two flushes per model call; the Mac kit's test 40 measures them.

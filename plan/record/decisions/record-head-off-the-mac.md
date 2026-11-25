@@ -56,3 +56,9 @@ Mac the key is a P-256 key in the Secure Enclave, usable only by Silo's signed a
 an app bundle with a provisioning profile hold such a key, not a bare command-line tool, so this
 depends on how Silo is shipped. Until then the key is a keychain item, which a program running as
 you may use; the anchor still catches the rewrite, since the old heads stay.
+
+## The anchor's own flush
+
+An agent's part, 25 November 2026, from [durability on a Mac](../../../research/2026-11-25-durability-on-a-mac/README.md). The stand-in ledger answered a
+head as kept after Python's `os.fsync`, which is a plain `fsync(2)` on a Mac too. A team's host
+on a Mac that stays on (#388) must use `F_FULLFSYNC` before it answers; the prototype now does.
