@@ -373,7 +373,7 @@ fn endCall(st: *State, call: *Call, how: []const u8) void {
         // An error reply: nothing generated, nothing billed.
         cost = 0;
     } else if (call.meter.final) {
-        if (spend.costOf(&st.table, provider, &call.meter, day)) |v| cost = v else {
+        if (spend.costOf(&st.table, provider, &call.meter, call.req.asked, day)) |v| cost = v else {
             priced = false;
             if (call.row) |r| cost = prices.cost(r, billed);
         }
