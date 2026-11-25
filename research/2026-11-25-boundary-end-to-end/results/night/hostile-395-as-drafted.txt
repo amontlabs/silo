@@ -1,0 +1,16 @@
+{"case": "control /v1/messages", "got": "HTTP/1.1 200 OK", "ms": 5090.5}
+{"case": "path https://api.anthropic.com/v1/messages", "got": "HTTP/1.1 404 Not Found", "ms": 5056.1}
+{"case": "path //v1/messages", "got": "HTTP/1.1 200 OK", "ms": 5083.8}
+{"case": "path /v1//messages", "got": "HTTP/1.1 404 Not Found", "ms": 5055.4}
+{"case": "path /v1/./messages", "got": "HTTP/1.1 404 Not Found", "ms": 5056.0}
+{"case": "path /v1/x/../messages", "got": "HTTP/1.1 404 Not Found", "ms": 5056.0}
+{"case": "path /%761/messages", "got": "HTTP/1.1 404 Not Found", "ms": 5055.7}
+{"case": "path //v1/responses", "got": "HTTP/1.1 200 OK", "ms": 5079.9}
+{"case": "path /v1/./responses", "got": "HTTP/1.1 200 OK", "ms": 5077.5}
+{"case": "bare LF before transfer-encoding", "got": "HTTP/1.1 200 OK", "ms": 5082.6}
+{"case": "folded content-length", "got": "HTTP/1.1 200 OK", "ms": 5083.7}
+{"case": "space before colon", "got": "HTTP/1.1 200 OK", "ms": 5051.8}
+{"case": "content-length with _", "got": "HTTP/1.1 200 OK", "ms": 5056.1}
+{"case": "zstd body of 64 KiB unpacking to 2 GiB", "got": "(closed, nothing back)", "ms": 5008.2}
+{"case": "Host header names another host than TLS", "got": "HTTP/1.1 200 OK", "ms": 5011.1}
+{"model_calls_served": 8, "counted": 7, "served_paths": ["/%761/messages", "/v1/./messages", "/v1/./responses", "/v1//messages", "/v1/messages", "/v1/responses", "/v1/x/../messages", "https://api.anthropic.com/v1/messages"], "hosts_saw": [["api.anthropic.com", "real:anthropic"], ["api.openai.com", "real:openai"], ["collector.example", "real:anthropic"]], "boundary_peak_mb": 5049.2421875, "boundary_alive": true}
