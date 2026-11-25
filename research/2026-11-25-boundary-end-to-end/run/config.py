@@ -27,7 +27,10 @@ def secrets(c):
         {"name": "gemini", "placeholder": f"AIzaSiloPlaceholder{c}000", "value": "AIzaREALgeminiKey11223344", "hosts": ["generativelanguage.googleapis.com"]},
         {"name": "gcp", "placeholder": f"ya29.silo-placeholder-{c}", "value": "ya29.REAL-google-access-token-aabbccdd", "hosts": ["storage.googleapis.com"]},
         {"name": "azure", "placeholder": AZ_PH, "value": AZ_REAL, "hosts": ["management.azure.com"]},
-    ]
+    ] + ([
+        {"name": "github", "placeholder": f"ghp_siloPlaceholder{c}0000", "value": "ghp_REALgithubToken55667788", "hosts": ["api.github.com"]},
+        {"name": "vercel", "placeholder": f"vercel_silo_placeholder_{c}", "value": "vercel_REAL_token_99aabbcc", "hosts": ["api.vercel.com"]},
+    ] if os.environ.get("PLATFORMS") else [])
 
 hosts = [
     {"name": "api.anthropic.com", "mode": "read"}, {"name": "api.openai.com", "mode": "read"},
@@ -35,6 +38,9 @@ hosts = [
     {"name": "storage.googleapis.com", "mode": "read"}, {"name": "management.azure.com", "mode": "read"},
     {"name": "github.com", "mode": "pass", "ports": [443, 22]},
 ]
+# The platforms whose writes #383's rules hold, read by Silo so the precaution sees each request.
+if os.environ.get("PLATFORMS"):
+    hosts += [{"name": n, "mode": "read"} for n in ("api.github.com", "api.vercel.com", "backboard.railway.com")]
 STANDIN = "127.0.0.1:9443"
 resolve = {h["name"]: STANDIN for h in hosts}
 resolve["github.com:22"] = "127.0.0.1:2022"
@@ -50,6 +56,7 @@ cfg = {
             {"name": "fork", "id": "c2", "handoff": f"{OUT}/c2.handoff.sock", "dns": "127.0.0.1:5302", "secrets": secrets("c2"), "google_token": "gcp", "azure_token": "azure"},
         ],
         "hosts": hosts, "resolve": resolve, "recorder": f"{OUT}/recorder.sock",
+        **({"precaution": f"{OUT}/precaution.sock"} if os.environ.get("PRECAUTION") else {}),
         "ca_cert": f"{TLS}/silo-ca.crt", "ca_key": f"{TLS}/silo-ca.key", "leaf_key": f"{TLS}/silo-leaf.key", "upstream_ca": f"{TLS}/up-ca.crt",
     },
 }

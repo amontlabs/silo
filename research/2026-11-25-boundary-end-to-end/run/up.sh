@@ -16,6 +16,9 @@ OUT=$OUT SCENARIO=${SCENARIO:-$E/../2026-11-24-spend-budgets/run/scenarios/short
   bg python3 -I $E/../2026-11-24-spend-budgets/fake/provider.py 2> $OUT/provider.err
 CONFIG=$OUT/config.json OUT=$OUT PROVIDER=127.0.0.1:8443 UP_CA=$TLS/up-ca.crt TLS_CERT=$TLS/up-chain.crt TLS_KEY=$TLS/up-leaf.key PORT=9443 SSH_PORT=2022 \
   bg python3 -I $E/standin/hosts.py 2> $OUT/hosts.err
+# The precaution that holds destructive calls (PRECAUTION=1; ANSWER and ANSWER_MS: the person).
+[ -n "${PRECAUTION:-}" ] && SOCK=$OUT/precaution.sock READY=$OUT/precaution.ready LOG=$OUT/precaution.jsonl bg python3 $E/precaution/precaution.py 2> $OUT/precaution.err; [ -n "${PRECAUTION:-}" ] && tail -1 $OUT/pids > $OUT/precaution.pid
+[ -n "${PRECAUTION:-}" ] && for i in $(seq 1 50); do [ -f $OUT/precaution.ready ] && break; sleep 0.1; done
 # The recorder and the boundary.
 mkdir -p $OUT/record
 [ -z "${NO_RECORDER:-}" ] && { bg $E/recorder/zig-out/bin/recorder $OUT/config.json $OUT/record $OUT/recorder.sock 2> $OUT/recorder.err; echo $! > $OUT/recorder.pid; }
