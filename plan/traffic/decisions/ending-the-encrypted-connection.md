@@ -38,3 +38,10 @@ computer 2 h behind.
 The boundary of #347 and #374 offers only HTTP/1.1. curl and Node fall back. A gRPC client
 cannot, so #379's swap inside HTTP/2 headers has nowhere to run until the boundary speaks HTTP/2
 on the hosts it reads that serve gRPC.
+
+An agent's part, 25 November 2026 (`research/2026-11-25-tls-refusals`). Each host Silo reads is
+where a program can refuse Silo's certificate, and the boundary is the only place that sees it.
+The program's ClientHello names its TLS client well enough to tell programs apart: Claude Code,
+Codex, curl, Python, Go, git and Node each had their own, Claude Code and Codex two each. A
+fingerprint names a TLS library build, not a program, so Silo learns the name from the
+User-Agent of a connection that worked.
