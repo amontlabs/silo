@@ -1,0 +1,239 @@
+[
+{
+"method": "GET",
+"path": "/r2/buckets/mybucket/lifecycle",
+"body": {
+"success": true,
+"errors": [],
+"messages": [],
+"result": {
+"rules": []
+}
+}
+},
+{
+"method": "GET",
+"path": "/queues\\?",
+"body": {
+"success": true,
+"errors": [],
+"messages": [],
+"result": [
+{
+"queue_id": "q1",
+"queue_name": "jobs",
+"created_on": "2026-11-24T00:00:00Z",
+"modified_on": "2026-11-24T00:00:00Z",
+"producers": [],
+"consumers": []
+}
+],
+"result_info": {
+"page": 1,
+"per_page": 100,
+"count": 1,
+"total_count": 1
+}
+}
+},
+{
+"method": "GET",
+"path": "/queues/q1",
+"body": {
+"success": true,
+"errors": [],
+"messages": [],
+"result": {
+"queue_id": "q1",
+"queue_name": "jobs",
+"producers": [],
+"consumers": []
+}
+}
+},
+{
+"method": "GET",
+"path": "/workers/scripts/my-worker/deployments",
+"body": {
+"success": true,
+"errors": [],
+"messages": [],
+"result": {
+"deployments": [
+{
+"id": "dep1",
+"created_on": "2026-11-24T00:00:00Z",
+"source": "wrangler",
+"strategy": "percentage",
+"versions": [
+{
+"version_id": "v1",
+"percentage": 100
+}
+],
+"annotations": {}
+}
+]
+}
+}
+},
+{
+"method": "POST",
+"path": "/d1/database$",
+"body": {
+"success": true,
+"errors": [],
+"messages": [],
+"result": {
+"uuid": "0000aaaa-0000-0000-0000-000000000002",
+"name": "newdb",
+"created_at": "2026-11-24T00:00:00Z",
+"version": "production"
+}
+}
+},
+{
+"method": "GET",
+"path": "/d1/database/mydb",
+"body": {
+"success": true,
+"errors": [],
+"messages": [],
+"result": {
+"uuid": "11111111-2222-3333-4444-555555555555",
+"name": "mydb"
+}
+}
+},
+{
+"method": "GET",
+"path": "/d1/database(\\?|$)",
+"body": {
+"success": true,
+"errors": [],
+"messages": [],
+"result": [
+{
+"uuid": "11111111-2222-3333-4444-555555555555",
+"name": "mydb",
+"created_at": "2026-01-01T00:00:00Z",
+"version": "production"
+}
+],
+"result_info": {
+"page": 1,
+"per_page": 1000,
+"count": 1,
+"total_count": 1
+}
+}
+},
+{
+"method": "GET",
+"path": "/r2/buckets/mybucket",
+"body": {
+"success": true,
+"errors": [],
+"messages": [],
+"result": {
+"name": "mybucket",
+"creation_date": "2026-01-01T00:00:00Z",
+"location": "weur"
+}
+}
+},
+{
+"method": "GET",
+"path": "/workers/scripts/my-worker",
+"body": {
+"success": true,
+"errors": [],
+"messages": [],
+"result": {
+"id": "my-worker"
+}
+}
+},
+{
+"method": "GET",
+"path": "/workers/services/my-worker",
+"body": {
+"success": true,
+"errors": [],
+"messages": [],
+"result": {
+"id": "my-worker",
+"default_environment": {
+"environment": "production",
+"script": {
+"id": "my-worker"
+}
+}
+}
+}
+},
+{
+"method": "GET",
+"path": "/memberships|/accounts(\\?|$)",
+"body": {
+"success": true,
+"errors": [],
+"messages": [],
+"result": [
+{
+"id": "acc123",
+"name": "Acme",
+"account": {
+"id": "acc123",
+"name": "Acme"
+}
+}
+]
+}
+},
+{
+"method": "GET",
+"path": "/user",
+"body": {
+"success": true,
+"errors": [],
+"messages": [],
+"result": {
+"id": "u1",
+"email": "alice@example.com"
+}
+}
+},
+{
+"method": "DELETE",
+"body": {
+"success": true,
+"errors": [],
+"messages": [],
+"result": null
+}
+},
+{
+"method": "GET",
+"body": {
+"success": true,
+"errors": [],
+"messages": [],
+"result": [],
+"result_info": {
+"page": 1,
+"per_page": 100,
+"count": 0,
+"total_count": 0
+}
+}
+},
+{
+"body": {
+"success": true,
+"errors": [],
+"messages": [],
+"result": {}
+}
+}
+]

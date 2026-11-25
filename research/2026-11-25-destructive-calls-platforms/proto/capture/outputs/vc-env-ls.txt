@@ -1,0 +1,6 @@
+$ VERCEL_TOKEN=testtoken123 VERCEL_TELEMETRY_DISABLED=1 -- vercel env ls
+Vercel CLI 66.6.0
+Retrieving project…
+> Environment Variables found for acme/my-app [59ms]
+Error: An unexpected error occurred in env: TypeError: Cannot read properties of undefined (reading 'replace')
+--- exit=1 seconds=.346072854

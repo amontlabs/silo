@@ -16,18 +16,18 @@ rw-var-set	railway	either	railway variable set FOO=bar --service api
 rw-var-list	railway	allow	railway variable list --service api
 rw-domain-delete	railway	hold:outage	railway domain delete api.example.com --service api --yes
 rw-domain-new	railway	allow	railway domain --service api
-rw-tcp-delete	railway	hold:outage	railway tcp-proxy delete --service api --yes
-rw-tcp-create	railway	either	railway tcp-proxy create 5432 --service api
+rw-tcp-delete	railway	hold:outage	railway tcp-proxy delete tcpproxy-1 --service api --yes
+rw-tcp-create	railway	either	railway tcp-proxy create --port 5432 --service api
 rw-bucket-delete	railway	hold:gone	railway bucket delete --bucket assets --yes
 rw-bucket-reset	railway	hold:outage	railway bucket credentials --bucket assets --reset --yes
-rw-bucket-create	railway	allow	railway bucket create assets2
+rw-bucket-create	railway	allow	railway bucket create assets2 --region ams
 rw-project-delete	railway	hold:recoverable	railway project delete --project prod-app --yes
 rw-down	railway	hold:outage	railway down --service api --yes
 rw-redeploy	railway	deploy	railway redeploy --service api --yes
 rw-restart	railway	either	railway restart --service api --yes
 rw-scale-zero	railway	hold:outage	railway scale --service api us-west2=0
-rw-usage-remove	railway	hold:money	railway usage limit remove
-rw-ssh-key-add	railway	hold:exposed	railway ssh keys add
+rw-usage-remove	railway	hold:money	railway usage limit remove --yes
+rw-ssh-key-add	railway	hold:exposed	railway ssh keys add --name laptop
 rw-flag-delete	railway	either	railway flag delete checkout.v2
 rw-status	railway	allow	railway status
 rw-list	railway	allow	railway list
@@ -58,7 +58,7 @@ fly-vol-extend	fly	either	flyctl volumes extend vol_123 -a my-app -s 20 --yes
 fly-mpg-destroy	fly	hold:gone	flyctl mpg destroy pg123 --yes
 fly-status	fly	allow	flyctl status -a my-app
 vc-remove	vercel	hold:gone	vercel remove my-app --yes
-vc-project-rm	vercel	hold:gone	vercel project rm my-app
+vc-project-rm	vercel	hold:gone	vercel project rm my-app --confirm-name my-app --scope acme
 vc-project-add	vercel	allow	vercel project add new-app
 vc-env-rm	vercel	hold:gone	vercel env rm DATABASE_URL production --yes
 vc-env-add	vercel	allow	vercel env add FOO production --value bar --yes
@@ -70,10 +70,10 @@ vc-alias-rm	vercel	hold:outage	vercel alias rm my-app.example.com --yes
 vc-certs-rm	vercel	hold:outage	vercel certs rm cert_1
 vc-promote	vercel	deploy	vercel promote dpl_2 --yes
 vc-rollback	vercel	deploy	vercel rollback dpl_1 --yes
-vc-teams-invite	vercel	hold:exposed	vercel teams invite bob@example.com
+vc-teams-invite	vercel	hold:exposed	vercel teams invite bob@example.com --scope acme
 vc-tokens-add	vercel	hold:exposed	vercel tokens add ci-token
 vc-webhooks-create	vercel	hold:exposed	vercel webhooks create https://hooks.example.net/x --event deployment.created
-vc-drains-add	vercel	hold:exposed	vercel drains add https://logs.example.net/in
+vc-drains-add	vercel	hold:exposed	vercel drains create --name ext --type logs --url https://logs.example.net/in
 vc-firewall-bypass	vercel	hold:exposed	vercel firewall system-bypass add 0.0.0.0/0 --yes
 vc-cache-purge	vercel	either	vercel cache purge --yes
 vc-ls	vercel	allow	vercel ls
@@ -81,7 +81,7 @@ vc-whoami	vercel	allow	vercel whoami
 wr-d1-delete	wrangler	hold:gone	wrangler d1 delete mydb -y
 wr-d1-drop	wrangler	hold:gone	wrangler d1 execute mydb --remote --command "DROP TABLE users" -y
 wr-d1-select	wrangler	allow	wrangler d1 execute mydb --remote --command "SELECT * FROM users LIMIT 5" -y
-wr-d1-timetravel	wrangler	hold:gone	wrangler d1 time-travel restore mydb --timestamp 1764000000 -y
+wr-d1-timetravel	wrangler	hold:gone	wrangler d1 time-travel restore mydb --timestamp 2026-11-24T12:00:00Z
 wr-d1-create	wrangler	allow	wrangler d1 create newdb
 wr-kv-ns-delete	wrangler	hold:gone	wrangler kv namespace delete --namespace-id ns123 -y
 wr-kv-key-delete	wrangler	hold:gone	wrangler kv key delete session:1 --namespace-id ns123 --remote

@@ -1,0 +1,12 @@
+$ SUPABASE_ACCESS_TOKEN=<redacted> SUPABASE_YES=1 DO_NOT_TRACK=1 -- supabase postgres-config update --config max_connections=100 --project-ref abcdefghijklmnopqrst --experimental --yes
+Warning: --project-ref is deprecated and will be removed in v4. Use --remote=<ref> instead
+Target: project abcdefghijklmnopqrst
+Confirmed by --yes: Update the Postgres config overrides on project abcdefghijklmnopqrst
+- Custom Postgres Config -
+
+  
+   Parameter | Value 
+  -----------|-------
+
+- End of Custom Postgres Config -
+--- exit=0 seconds=.563220921

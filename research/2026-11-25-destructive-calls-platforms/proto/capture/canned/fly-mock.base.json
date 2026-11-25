@@ -1,0 +1,1 @@
+{"App.name": "my-app", "Organization.slug": "acme", "Organization.name": "Acme", "Organization.id": "org-1", "Release.configDefinition": {"app": "my-app", "primary_region": "cdg"}, "configDefinition": {"app": "my-app", "primary_region": "cdg"}}

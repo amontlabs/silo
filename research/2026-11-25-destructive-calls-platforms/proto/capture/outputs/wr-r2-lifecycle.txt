@@ -1,0 +1,7 @@
+$ CLOUDFLARE_API_TOKEN=test-token-123 CLOUDFLARE_ACCOUNT_ID=acc123 WRANGLER_SEND_METRICS=false -- wrangler r2 bucket lifecycle add mybucket expire-all --expire-days 1 -y
+
+ ⛅️ wrangler 4.168.0
+────────────────────
+Adding lifecycle rule 'expire-all' to bucket 'mybucket'...
+✨ Added lifecycle rule 'expire-all' to bucket 'mybucket'.
+--- exit=0 seconds=.798533504

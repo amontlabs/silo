@@ -1,0 +1,4 @@
+$ FLY_API_TOKEN=FlyV1 fm2_test-token-123 FLY_NO_UPDATE_CHECK=1 FLY_METRICS_TOKEN=- -- flyctl machine cordon 3d8d1 -a my-app
+Activating cordon on machine 3d8d1...
+done!
+--- exit=0 seconds=.105457422

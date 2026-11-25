@@ -1,0 +1,240 @@
+[
+{
+"method": "GET",
+"path": "^/v1/projects$",
+"body": [
+{
+"id": "abcdefghijklmnopqrst",
+"ref": "abcdefghijklmnopqrst",
+"organization_id": "org1",
+"organization_slug": "acme",
+"name": "prod",
+"region": "eu-west-3",
+"created_at": "2026-01-01T00:00:00Z",
+"status": "ACTIVE_HEALTHY",
+"database": {
+"host": "db.abcdefghijklmnopqrst.supabase.co",
+"version": "17",
+"postgres_engine": "17",
+"release_channel": "ga"
+}
+}
+]
+},
+{
+"method": "GET",
+"path": "^/v1/organizations$",
+"body": [
+{
+"id": "org1",
+"slug": "acme",
+"name": "Acme"
+}
+]
+},
+{
+"method": "GET",
+"path": "/branches/br-1",
+"body": {
+"id": "11111111-1111-4111-8111-111111111111",
+"name": "feature",
+"project_ref": "bbbbbbbbbbbbbbbbbbbb",
+"parent_project_ref": "abcdefghijklmnopqrst",
+"is_default": false,
+"persistent": false,
+"status": "FUNCTIONS_DEPLOYED",
+"created_at": "2026-11-24T00:00:00Z",
+"updated_at": "2026-11-24T00:00:00Z",
+"with_data": false
+}
+},
+{
+"method": "GET",
+"path": "/v1/branches/",
+"body": {
+"id": "11111111-1111-4111-8111-111111111111",
+"name": "feature",
+"project_ref": "bbbbbbbbbbbbbbbbbbbb",
+"parent_project_ref": "abcdefghijklmnopqrst",
+"is_default": false,
+"persistent": false,
+"status": "FUNCTIONS_DEPLOYED",
+"created_at": "2026-11-24T00:00:00Z",
+"updated_at": "2026-11-24T00:00:00Z",
+"with_data": false
+}
+},
+{
+"method": "GET",
+"path": "/branches$",
+"body": [
+{
+"id": "11111111-1111-4111-8111-111111111111",
+"name": "feature",
+"project_ref": "bbbbbbbbbbbbbbbbbbbb",
+"parent_project_ref": "abcdefghijklmnopqrst",
+"is_default": false,
+"persistent": false,
+"status": "FUNCTIONS_DEPLOYED",
+"created_at": "2026-11-24T00:00:00Z",
+"updated_at": "2026-11-24T00:00:00Z",
+"with_data": false
+}
+]
+},
+{
+"method": "POST",
+"path": "/branches$",
+"body": {
+"id": "11111111-1111-4111-8111-111111111111",
+"name": "feature",
+"project_ref": "bbbbbbbbbbbbbbbbbbbb",
+"parent_project_ref": "abcdefghijklmnopqrst",
+"is_default": false,
+"persistent": false,
+"status": "FUNCTIONS_DEPLOYED",
+"created_at": "2026-11-24T00:00:00Z",
+"updated_at": "2026-11-24T00:00:00Z",
+"with_data": false
+}
+},
+{
+"method": "GET",
+"path": "/functions$",
+"body": [
+{
+"id": "f1",
+"slug": "hello",
+"name": "hello",
+"status": "ACTIVE",
+"version": 1,
+"created_at": 1700000000000,
+"updated_at": 1700000000000
+}
+]
+},
+{
+"method": "GET",
+"path": "/secrets$",
+"body": [
+{
+"name": "FOO",
+"value": "x"
+}
+]
+},
+{
+"method": "GET",
+"path": "/api-keys",
+"body": [
+{
+"name": "anon",
+"api_key": "eyJhbGciOiJIUzI1NiJ9.e30.x",
+"type": "legacy"
+},
+{
+"name": "service_role",
+"api_key": "eyJhbGciOiJIUzI1NiJ9.e30.y",
+"type": "legacy"
+}
+]
+},
+{
+"method": "POST",
+"path": "/database/query",
+"status": 201,
+"body": []
+},
+{
+"method": "GET",
+"path": "/network-restrictions",
+"body": {
+"entitlement": "allowed",
+"config": {
+"dbAllowedCidrs": []
+},
+"status": "applied"
+}
+},
+{
+"method": "POST",
+"path": "/network-restrictions/apply",
+"body": {
+"entitlement": "allowed",
+"config": {
+"dbAllowedCidrs": [
+"0.0.0.0/0"
+]
+},
+"status": "applied"
+}
+},
+{
+"method": "GET",
+"path": "/ssl-enforcement",
+"body": {
+"currentConfig": {
+"database": true
+},
+"appliedSuccessfully": true
+}
+},
+{
+"method": "PUT",
+"path": "/ssl-enforcement",
+"body": {
+"currentConfig": {
+"database": false
+},
+"appliedSuccessfully": true
+}
+},
+{
+"host": "supabase.co",
+"method": "DELETE",
+"path": "^/storage/v1/object",
+"body": [
+{
+"name": "u1.png"
+}
+]
+},
+{
+"host": "supabase.co",
+"method": "GET",
+"path": "^/storage/v1/bucket",
+"body": [
+{
+"id": "avatars",
+"name": "avatars",
+"public": false
+}
+]
+},
+{
+"method": "DELETE",
+"path": "^/v1/projects/",
+"body": {
+"id": 1,
+"ref": "abcdefghijklmnopqrst",
+"name": "prod"
+}
+},
+{
+"method": "GET",
+"path": "^/v1/projects/abcdefghijklmnopqrst$",
+"body": {
+"id": "abcdefghijklmnopqrst",
+"ref": "abcdefghijklmnopqrst",
+"organization_id": "org1",
+"name": "prod",
+"region": "eu-west-3",
+"created_at": "2026-01-01T00:00:00Z",
+"status": "ACTIVE_HEALTHY",
+"database": {
+"host": "db.abcdefghijklmnopqrst.supabase.co",
+"version": "17"
+}
+}
+}
+]

@@ -1,0 +1,8 @@
+$ CLOUDFLARE_API_TOKEN=test-token-123 CLOUDFLARE_ACCOUNT_ID=acc123 WRANGLER_SEND_METRICS=false -- wrangler kv key put session:1 value --namespace-id ns123 --remote
+
+ ⛅️ wrangler 4.168.0
+────────────────────
+Resource location: remote 
+
+Writing the value "value" to key "session:1" on namespace id: "ns123".
+--- exit=0 seconds=.838694813

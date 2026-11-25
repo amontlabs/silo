@@ -1,0 +1,7 @@
+$ CLOUDFLARE_API_TOKEN=test-token-123 CLOUDFLARE_ACCOUNT_ID=acc123 WRANGLER_SEND_METRICS=false -- wrangler r2 bucket delete mybucket
+
+ ⛅️ wrangler 4.168.0
+────────────────────
+Deleting bucket mybucket.
+Deleted bucket mybucket.
+--- exit=0 seconds=.861900229

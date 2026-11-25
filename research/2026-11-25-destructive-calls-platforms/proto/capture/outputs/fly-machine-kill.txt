@@ -1,0 +1,4 @@
+$ FLY_API_TOKEN=FlyV1 fm2_test-token-123 FLY_NO_UPDATE_CHECK=1 FLY_METRICS_TOKEN=- -- flyctl machine kill 3d8d1 -a my-app
+machine 3d8d1 was found and is currently in a started state, attempting to kill...
+kill signal has been sent
+--- exit=0 seconds=.093115542

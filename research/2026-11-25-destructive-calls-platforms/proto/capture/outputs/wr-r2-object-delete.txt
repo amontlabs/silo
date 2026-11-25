@@ -1,0 +1,9 @@
+$ CLOUDFLARE_API_TOKEN=test-token-123 CLOUDFLARE_ACCOUNT_ID=acc123 WRANGLER_SEND_METRICS=false -- wrangler r2 object delete mybucket/backups/db.dump --remote
+
+ ⛅️ wrangler 4.168.0
+────────────────────
+Resource location: remote 
+
+Deleting object "backups/db.dump" from bucket "mybucket".
+Delete complete.
+--- exit=0 seconds=.812072295

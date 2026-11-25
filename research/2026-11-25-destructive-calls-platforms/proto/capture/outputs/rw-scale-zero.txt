@@ -1,0 +1,9 @@
+$ RAILWAY_TOKEN=test-token-123 -- railway scale --service api us-west2=0
+
+Scaled api
+    environment:   production
+    region:        x
+    replicas:      0 replicas configured
+    deployment:    Redeploy started
+    service ID:    service-1
+--- exit=0 seconds=.191590532

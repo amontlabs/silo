@@ -14,8 +14,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 BASE = os.path.normpath(os.path.join(HERE, "..", "..", "..", "2026-11-24-destructive-calls", "proto", "capture"))
 sys.path.insert(0, BASE)
 import server as base  # noqa: E402
-from graphql import (build_client_schema, graphql_sync, get_nullable_type, is_list_type, is_scalar_type,  # noqa: E402
-                     is_enum_type, is_abstract_type)
+from graphql import (build_client_schema, parse, execute, get_nullable_type, is_list_type, is_scalar_type,  # noqa: E402
+                     is_enum_type, is_non_null_type)
 
 SCHEMAS = {"backboard.railway.com": "railway_full.json", "backboard.railway.app": "railway_full.json",
            "api.fly.io": "fly_full.json"}
@@ -23,7 +23,7 @@ SCHEMAS = {"backboard.railway.com": "railway_full.json", "backboard.railway.app"
 
 class Mock:
     def __init__(self, path, fixtures):
-        self.schema = build_client_schema(json.load(open(path))["data"])
+        self.schema = build_client_schema(json.load(open(path))["data"], assume_valid=True)
         self.fx = fixtures
 
     def value(self, t, parent, field, is_mutation_root):
@@ -39,7 +39,9 @@ class Mock:
             n = t.name
             if n in ("Boolean",):
                 return bool(is_mutation_root)
-            if n in ("Int", "Float", "BigInt"):
+            if n == "BigInt":
+                return "1"
+            if n in ("Int", "Float"):
                 return 1
             if n in ("DateTime", "ISO8601DateTime", "Date"):
                 return "2026-11-24T00:00:00Z"
@@ -57,6 +59,13 @@ class Mock:
         if isinstance(root, dict) and info.field_name in root and info.field_name != "__parent":
             return root[info.field_name]
         parent = info.parent_type.name
+        k = "%s.%s" % (parent, info.field_name)
+        if k in self.fx:
+            return self.fx[k]
+        t = get_nullable_type(info.return_type)
+        if (not is_non_null_type(info.return_type) and is_scalar_type(t) and t.name in ("DateTime", "ISO8601DateTime")
+                and info.field_name not in ("createdAt", "updatedAt")):
+            return None   # deletedAt, archivedAt, expiresAt...: absent
         return self.value(info.return_type, parent, info.field_name, parent == (self.schema.mutation_type and self.schema.mutation_type.name))
 
     def type_resolver(self, value, info, abstract):
@@ -72,9 +81,14 @@ class Mock:
         items = d if isinstance(d, list) else [d]
         outs = []
         for it in items:
-            r = graphql_sync(self.schema, it.get("query") or "", root_value={}, variable_values=it.get("variables"),
-                             operation_name=it.get("operationName"), field_resolver=self.resolver,
-                             type_resolver=self.type_resolver)
+            try:
+                doc = parse(it.get("query") or "")
+            except Exception as e:
+                outs.append({"data": None, "errors": [{"message": str(e)}]})
+                continue
+            r = execute(self.schema, doc, root_value={}, variable_values=it.get("variables"),
+                        operation_name=it.get("operationName"), field_resolver=self.resolver,
+                        type_resolver=self.type_resolver)
             o = {"data": r.data}
             if r.errors:
                 o["errors"] = [{"message": e.message} for e in r.errors]
@@ -92,7 +106,23 @@ class Server(base.Server):
             if os.path.exists(p):
                 self.mocks[h] = Mock(p, fx)
 
+    def reload(self):
+        a = self.args
+        if a.mock and os.path.exists(a.mock):
+            m = os.path.getmtime(a.mock)
+            if m != getattr(self, "_mtime", None):
+                self._mtime = m
+                fx = json.load(open(a.mock))
+                for mk in self.mocks.values():
+                    mk.fx = fx
+        if a.canned and os.path.exists(a.canned):
+            m = os.path.getmtime(a.canned)
+            if m != getattr(self, "_cmtime", None):
+                self._cmtime = m
+                self.rules = base.Rules(a.canned)
+
     def canned(self, host, method, path, ops, text):
+        self.reload()
         r = self.rules.find(host, method, path, ops)
         if r is None and ops and host in self.mocks:
             return 200, {}, json.dumps(self.mocks[host].answer(text)).encode()

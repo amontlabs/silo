@@ -1,0 +1,6 @@
+$ SUPABASE_ACCESS_TOKEN=<redacted> SUPABASE_YES=1 DO_NOT_TRACK=1 -- supabase vanity-subdomains delete --project-ref abcdefghijklmnopqrst --experimental --yes
+Warning: --project-ref is deprecated and will be removed in v4. Use --remote=<ref> instead
+Target: project abcdefghijklmnopqrst
+Confirmed by --yes: Delete the vanity subdomain on project abcdefghijklmnopqrst
+Deleted vanity subdomain successfully.
+--- exit=0 seconds=.525722715

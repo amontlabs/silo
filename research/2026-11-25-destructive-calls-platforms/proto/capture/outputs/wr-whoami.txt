@@ -1,0 +1,14 @@
+$ CLOUDFLARE_API_TOKEN=test-token-123 CLOUDFLARE_ACCOUNT_ID=acc123 WRANGLER_SEND_METRICS=false -- wrangler whoami
+
+ ⛅️ wrangler 4.168.0
+────────────────────
+Getting User settings...
+👋 You are logged in with an User API Token, associated with the email alice@example.com.
+ℹ️  The API Token is read from the CLOUDFLARE_API_TOKEN environment variable.
+┌──────────────┬────────────┐
+│ Account Name │ Account ID │
+├──────────────┼────────────┤
+│ Acme         │ acc123     │
+└──────────────┴────────────┘
+🔓 To see token permissions visit https://dash.cloudflare.com/profile/api-tokens
+--- exit=0 seconds=.881575151

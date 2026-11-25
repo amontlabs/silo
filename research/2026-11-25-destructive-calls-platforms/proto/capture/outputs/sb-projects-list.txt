@@ -1,0 +1,8 @@
+$ SUPABASE_ACCESS_TOKEN=<redacted> SUPABASE_YES=1 DO_NOT_TRACK=1 -- supabase projects list
+Cannot find project ref. Have you run supabase link?
+
+  
+   LINKED | ORG ID | REFERENCE ID         | NAME | REGION          | CREATED AT (UTC)    
+  --------|--------|----------------------|------|-----------------|---------------------
+          | acme   | abcdefghijklmnopqrst | prod | West EU (Paris) | 2026-01-01 00:00:00 
+--- exit=0 seconds=.510334985

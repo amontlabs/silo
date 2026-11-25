@@ -1,0 +1,24 @@
+$ RAILWAY_TOKEN=test-token-123 -- railway status
+
+Workspace:       x
+
+Project:         prod-app
+Project ID:      project-1
+
+Environment:     production
+Environment ID:  environment-1
+Unmerged:        1 change
+
+Linked service
+
+    Service:         None
+
+────────────────────────────────────────────────
+
+All resources
+
+    Cron jobs
+      - api: ● Online · https://api.example.com · 0/1 running, 1 crashed · pg-data · x
+    Buckets
+      - assets
+--- exit=0 seconds=.188170225

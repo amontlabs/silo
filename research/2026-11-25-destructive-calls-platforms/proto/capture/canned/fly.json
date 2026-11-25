@@ -1,0 +1,316 @@
+[
+{
+"host": "api.fly.io",
+"method": "GET",
+"path": "^/api/v1/apps/my-app/releases",
+"body": {
+"releases": [
+{
+"id": "rel-1",
+"version": 3,
+"stable": true,
+"status": "complete",
+"strategy": "rolling",
+"user": "alice@example.com",
+"created_at": "2026-11-24T00:00:00Z",
+"image_ref": "registry.fly.io/my-app:v1"
+}
+]
+}
+},
+{
+"host": "api.machines.dev",
+"method": "GET",
+"path": "^/v1/apps/my-app/secrets",
+"body": {
+"secrets": [
+{
+"name": "DATABASE_URL",
+"digest": "abc",
+"created_at": "2026-11-24T00:00:00Z"
+}
+]
+}
+},
+{
+"host": "api.machines.dev",
+"method": "GET",
+"path": "^/v1/platform/regions",
+"body": {
+"Regions": [
+{
+"code": "cdg",
+"name": "Paris, France",
+"gateway_available": true
+}
+],
+"Nearest": "cdg"
+}
+},
+{
+"host": "api.fly.io",
+"method": "GET",
+"path": "^/api/v1/organizations/acme",
+"body": {
+"id": "org-1",
+"internal_numeric_id": 1,
+"slug": "acme",
+"raw_slug": "acme",
+"name": "Acme",
+"paid_plan": true,
+"billing_status": "CURRENT"
+}
+},
+{
+"host": "api.fly.io",
+"method": "GET",
+"path": "^/api/v1/organizations/other",
+"body": {
+"id": "org-2",
+"internal_numeric_id": 1,
+"slug": "other",
+"raw_slug": "other",
+"name": "Other",
+"paid_plan": true,
+"billing_status": "CURRENT"
+}
+},
+{
+"host": "api.fly.io",
+"method": "GET",
+"path": "^/api/v1/organizations\\?",
+"body": {
+"organizations": [
+{
+"id": "org-1",
+"internal_numeric_id": 1,
+"slug": "acme",
+"raw_slug": "acme",
+"name": "Acme",
+"paid_plan": true,
+"billing_status": "CURRENT"
+},
+{
+"id": "org-2",
+"internal_numeric_id": 1,
+"slug": "other",
+"raw_slug": "other",
+"name": "Other",
+"paid_plan": true,
+"billing_status": "CURRENT"
+}
+]
+}
+},
+{
+"host": "api.machines.dev",
+"method": "GET",
+"path": "^/v1/apps/my-app/machines/3d8d1/lease",
+"status": 404,
+"body": {
+"error": "no lease"
+}
+},
+{
+"host": "api.machines.dev",
+"method": "POST",
+"path": "^/v1/apps/my-app/machines/3d8d1/lease",
+"body": {
+"status": "success",
+"data": {
+"nonce": "n1",
+"expires_at": 1795700000,
+"owner": "alice@example.com",
+"description": "x",
+"version": "1"
+}
+}
+},
+{
+"host": "api.machines.dev",
+"method": "GET",
+"path": "^/v1/apps/my-app/machines/3d8d1/wait",
+"body": {
+"ok": true
+}
+},
+{
+"host": "api.machines.dev",
+"method": "GET",
+"path": "^/v1/apps/my-app/machines/3d8d1",
+"body": {
+"id": "3d8d1",
+"name": "web-1",
+"state": "started",
+"region": "cdg",
+"instance_id": "i1",
+"private_ip": "fdaa::3",
+"config": {
+"image": "registry.fly.io/my-app:v1",
+"guest": {
+"cpu_kind": "shared",
+"cpus": 1,
+"memory_mb": 256
+},
+"metadata": {
+"fly_process_group": "app",
+"fly_platform_version": "v2",
+"fly_release_id": "rel-1",
+"fly_release_version": "3"
+}
+},
+"image_ref": {
+"registry": "registry.fly.io",
+"repository": "my-app",
+"tag": "v1",
+"digest": "sha256:0"
+},
+"created_at": "2026-11-24T00:00:00Z",
+"updated_at": "2026-11-24T00:00:00Z",
+"events": []
+}
+},
+{
+"host": "api.machines.dev",
+"method": "GET",
+"path": "^/v1/apps/my-app/machines",
+"body": [
+{
+"id": "3d8d1",
+"name": "web-1",
+"state": "started",
+"region": "cdg",
+"instance_id": "i1",
+"private_ip": "fdaa::3",
+"config": {
+"image": "registry.fly.io/my-app:v1",
+"guest": {
+"cpu_kind": "shared",
+"cpus": 1,
+"memory_mb": 256
+},
+"metadata": {
+"fly_process_group": "app",
+"fly_platform_version": "v2",
+"fly_release_id": "rel-1",
+"fly_release_version": "3"
+}
+},
+"image_ref": {
+"registry": "registry.fly.io",
+"repository": "my-app",
+"tag": "v1",
+"digest": "sha256:0"
+},
+"created_at": "2026-11-24T00:00:00Z",
+"updated_at": "2026-11-24T00:00:00Z",
+"events": []
+}
+]
+},
+{
+"host": "api.machines.dev",
+"method": "GET",
+"path": "^/v1/apps/my-app/volumes/vol_123",
+"body": {
+"id": "vol_123",
+"name": "data",
+"state": "created",
+"size_gb": 10,
+"region": "cdg",
+"attached_machine_id": null,
+"created_at": "2026-11-24T00:00:00Z"
+}
+},
+{
+"host": "api.machines.dev",
+"method": "GET",
+"path": "^/v1/apps/my-app/volumes",
+"body": [
+{
+"id": "vol_123",
+"name": "data",
+"state": "created",
+"size_gb": 10,
+"region": "cdg",
+"attached_machine_id": null,
+"created_at": "2026-11-24T00:00:00Z"
+}
+]
+},
+{
+"host": "api.machines.dev",
+"method": "GET",
+"path": "^/v1/apps/my-app/secrets",
+"body": [
+{
+"name": "DATABASE_URL",
+"digest": "abc",
+"created_at": "2026-11-24T00:00:00Z"
+}
+]
+},
+{
+"host": "api.machines.dev",
+"method": "GET",
+"path": "^/v1/apps/my-app/ip_assignments",
+"body": {
+"ips": [
+{
+"ip": "203.0.113.7",
+"region": "global",
+"service_name": "my-app",
+"shared": false,
+"created_at": "2026-11-24T00:00:00Z"
+}
+]
+}
+},
+{
+"host": "api.machines.dev",
+"method": "GET",
+"path": "^/v1/apps/my-app/certificates/example.com",
+"body": {
+"hostname": "example.com",
+"configured": true,
+"status": "ready"
+}
+},
+{
+"host": "api.machines.dev",
+"method": "GET",
+"path": "^/v1/apps/my-app(\\?|$)",
+"body": {
+"id": "app-1",
+"name": "my-app",
+"status": "deployed",
+"organization": {
+"name": "Acme",
+"slug": "acme"
+}
+}
+},
+{
+"host": "api.machines.dev",
+"method": "GET",
+"path": "^/v1/postgres/pg123",
+"body": {
+"data": {
+"id": "pg123",
+"name": "main-db",
+"region": "cdg",
+"status": "ready",
+"plan": "basic",
+"organization": {
+"slug": "acme"
+}
+}
+}
+},
+{
+"host": "api.machines.dev",
+"method": "DELETE",
+"status": 200,
+"body": {}
+}
+]

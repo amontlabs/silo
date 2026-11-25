@@ -1,0 +1,7 @@
+$ CLOUDFLARE_API_TOKEN=test-token-123 CLOUDFLARE_ACCOUNT_ID=acc123 WRANGLER_SEND_METRICS=false -- wrangler hyperdrive delete hd123
+
+ ⛅️ wrangler 4.168.0
+────────────────────
+🗑️ Deleting Hyperdrive database config hd123
+✅ Deleted
+--- exit=0 seconds=.805855671

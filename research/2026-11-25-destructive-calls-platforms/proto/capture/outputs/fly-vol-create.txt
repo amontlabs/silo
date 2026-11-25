@@ -1,0 +1,12 @@
+$ FLY_API_TOKEN=FlyV1 fm2_test-token-123 FLY_NO_UPDATE_CHECK=1 FLY_METRICS_TOKEN=- -- flyctl volumes create data -a my-app --region cdg --size 1 --yes
+                  ID: 
+                Name: 
+                 App: my-app
+              Region: 
+                Zone: 
+             Size GB: 0
+           Encrypted: false
+          Created at: 01 Jan 01 00:00 UTC
+  Snapshot retention: 0
+ Scheduled snapshots: false
+--- exit=0 seconds=.133121660

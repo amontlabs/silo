@@ -23,7 +23,7 @@ def surface_cases():
 
 
 def main(which):
-    rulesets = {"353": score.OLD_RULES, "new": score.NEW_RULES}
+    rulesets = {"353": score.OLD_RULES, "blind": score.BLIND_RULES, "tuned": score.NEW_RULES}
     for w in which:
         if w == "surface":
             cases = surface_cases()
@@ -35,7 +35,7 @@ def main(which):
             sys.path.insert(0, score.OLD)
             import corpus_build, capture_labels, base64
             cases = []
-            for c in corpus_build.main() + capture_labels.cases():
+            for c in corpus_build.CASES + capture_labels.cases():  # CASES, not main(): main() rewrites #353's corpus.jsonl
                 req = dict(c["req"])
                 req["body"] = base64.b64decode(req.pop("body_b64", ""))
                 cases.append({"id": c["id"], "provider": c["family"] + "/" + c["kind"], "label": c["label"], "req": req})

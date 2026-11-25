@@ -1,0 +1,8 @@
+$ RAILWAY_TOKEN=test-token-123 -- railway list
+
+x
+  prod-app
+
+x
+  prod-app
+--- exit=0 seconds=.181793026

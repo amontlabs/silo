@@ -1,0 +1,14 @@
+$ RAILWAY_TOKEN=test-token-123 -- railway service list
+
+Services in production
+
+api
+    status:        ● Online
+    repo:          x
+    image:         x
+    url:           https://api.example.com
+    volume:        pg-data · x · 1 MB / 1 MB
+    replicas:      0/1 running, 1 crashed
+    deployment ID: deployment-1
+    service ID:    service-1
+--- exit=0 seconds=.198413118

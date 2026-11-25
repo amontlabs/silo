@@ -1,0 +1,5 @@
+$ SUPABASE_ACCESS_TOKEN=<redacted> SUPABASE_YES=1 DO_NOT_TRACK=1 -- supabase backups restore --timestamp 1764000000 --remote=abcdefghijklmnopqrst --yes
+Target: project abcdefghijklmnopqrst
+Confirmed by --yes: Restore the database to Unix timestamp 1764000000 (PITR) on project abcdefghijklmnopqrst
+Started PITR restore: abcdefghijklmnopqrst
+--- exit=0 seconds=.526138626
