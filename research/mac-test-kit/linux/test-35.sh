@@ -24,15 +24,12 @@ if grep -q '"kind":"skip"' "$KIT_OUT"; then
   echo "test 35's analogue skipped: $(grep '"kind":"skip"' "$KIT_OUT" | head -1)"; exit 0
 fi
 [ "$rc" = 0 ] || { echo "test 35 exited $rc"; exit 1; }
-# This machine's router may sit on addresses -sealed does not call private (TEST-NET here): that
-# one reach is the analogue's network, named as such, not a fault of the build.
-if grep -q '"key":"sealed-leaks"' "$KIT_OUT" && grep '"kind":"outcome"' "$KIT_OUT" | grep -qE 'reached: ping_router:not-private-lan"'; then
-  echo "ok   35: sealed-leaks only through this machine's router, whose address is not private (outside -sealed's ranges)"
-elif ! grep -q '"key":"sealed-holds"' "$KIT_OUT"; then
+# This machine's router sits on TEST-NET (192.0.2.0/24), which is not a private range: #380's
+# host-networks entry must refuse it as one of the networks this machine is on.
+if ! grep -q '"key":"sealed-holds"' "$KIT_OUT"; then
   echo "FAIL: expected sealed-holds"; grep -E '"kind":"(outcome|fact)"' "$KIT_OUT" | tail -25; exit 1
-else
-  echo "ok   35: sealed-holds"
 fi
+echo "ok   35: sealed-holds"
 
 # The planted fault: gvproxy as released, standing in for Silo's build (-sealed and -closed
 # dropped). The test must see the Mac reached.
@@ -46,6 +43,7 @@ case "$1" in -help) echo "  -sealed"; echo "  -closed"; exit 0 ;; -version) exec
 exec "$(dirname "$0")/gvproxy-v0.9.0" -config "$2"
 EOS
 chmod +x "$m/bin/gvproxy-197eea05-silo"
+( . "$KIT_ROOT/lib/common.sh"; . "$KIT_ROOT/lib/net.sh"; net_sha256 "$KIT_ROOT/net/gvproxy-silo.patch" ) > "$m/bin/gvproxy-197eea05-silo.patch-sha256"
 : > "$KIT_OUT"; rm -rf "$KIT_WORK"; mkdir -p "$KIT_WORK"
 KIT_WORK_ROOT="$m" bash "$KIT_ROOT/tests/35-sealed-gvproxy.sh" < /dev/null > "$tmp/mutant.log" 2>&1
 if grep -q '"key":"sealed-leaks"' "$KIT_OUT"; then

@@ -156,12 +156,13 @@ confirm:
   socket that no longer exists). Through a relay that connects again and says who it is, the
   network came back 3 s after gvproxy did. Test 36 measures this on the Mac; if it holds, the
   helper owns each computer's network link and gvproxy never receives it directly.
-- **Silo's gvproxy (#380) holds in the analogue, sealed and closed, with one gap**: root in the
-  namespace reached nothing of the host by TCP or ping, and still the internet and Silo's SSH
+- **Silo's gvproxy (#380) holds in the analogue, sealed and closed**: root in the namespace
+  reached nothing of the host or its network by TCP or ping, and still the internet and Silo's SSH
   forward; closed, nothing went out and names were refused. Gvproxy as released in its place is
-  caught. The gap: `-sealed` refuses private address ranges, so a local network on other addresses
-  (this machine's router is on 192.0.2.0/24; some offices and universities use public ones) is
-  still reached, by ping here. Sealed, a made-up name still reaches the host's resolver. Into the
+  caught. An earlier copy of the patch refused only private address ranges, so this machine's
+  router (on 192.0.2.0/24, as some offices and universities use public ones) answered a ping; #380
+  now refuses every network the host is on, and the router is no longer reached. Sealed, a
+  made-up name still reaches the host's resolver. Into the
   computer through Silo's forward: 0.88 Gbit/s at MTU 1500, 4.1 at MTU 65520. Test 35 asks the
   same of a macOS computer.
 - **A corrupted LZVN or LZFSE block decodes to wrong bytes without an error**: neither format

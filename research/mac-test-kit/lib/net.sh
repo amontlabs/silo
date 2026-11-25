@@ -99,8 +99,12 @@ net_go() {
   echo "$dir/bin/go"
 }
 
-# net_sealed_present: true when Silo's gvproxy is built.
-net_sealed_present() { [ -x "$NET_GVPROXY_SEALED" ] && "$NET_GVPROXY_SEALED" -help 2>&1 | grep -q -- -closed; }
+# net_sealed_present: true when Silo's gvproxy is built, from the patch as it is now (its sha256
+# is kept beside the binary, so a new copy of the patch is built again).
+net_sealed_present() {
+  [ -x "$NET_GVPROXY_SEALED" ] && "$NET_GVPROXY_SEALED" -help 2>&1 | grep -q -- -closed &&
+    [ "$(cat "$NET_GVPROXY_SEALED.patch-sha256" 2>/dev/null)" = "$(net_sha256 "$KIT_ROOT/net/gvproxy-silo.patch")" ]
+}
 
 # net_sealed_build: build gvproxy at NET_GVPROXY_COMMIT with net/gvproxy-silo.patch into
 # NET_GVPROXY_SEALED. Needs git, and Go (net_go); Go fetches gvproxy's modules from
@@ -115,6 +119,7 @@ net_sealed_build() {
   git -C "$src" -c advice.detachedHead=false checkout -q "$NET_GVPROXY_COMMIT" || { kit_log "no commit $NET_GVPROXY_COMMIT in gvisor-tap-vsock"; return 1; }
   git -C "$src" apply "$KIT_ROOT/net/gvproxy-silo.patch" || { kit_log "Silo's patch does not apply"; return 1; }
   (cd "$src" && CGO_ENABLED=0 GOTOOLCHAIN=local GOFLAGS=-mod=readonly "$go" build -o "$NET_GVPROXY_SEALED" ./cmd/gvproxy) >&2 || return 1
+  net_sha256 "$KIT_ROOT/net/gvproxy-silo.patch" > "$NET_GVPROXY_SEALED.patch-sha256"
   rm -rf "$src"
   net_sealed_present
 }
