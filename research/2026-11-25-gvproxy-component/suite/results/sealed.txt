@@ -1,0 +1,23 @@
+gateway-ports 53
+host-loopback-ports none
+api-list blocked
+api-expose blocked
+host-loopback-tcp blocked
+host-own-address-tcp blocked
+lan-neighbour-tcp blocked
+lan-neighbour-udp blocked
+lan-neighbour-ping blocked
+host-own-address-ping blocked
+metadata-tcp blocked
+zero-net-tcp blocked
+internet-tcp reached
+internet-udp reached
+internet-ping reached
+dns-name 203.0.113.10
+dns-exfil 203.0.113.10
+host-listeners 127.0.0.1:2222
+host-port-opened-from-inside no
+way-in works
+dns-exfil-seen-by host-resolver
+/home/user/work/suite/run.sh: line 54: /tmp/gvsuite/sealed/udp-lan.log: No such file or directory
+udp-lan-datagrams 0
