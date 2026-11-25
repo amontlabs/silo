@@ -1,0 +1,67 @@
+Worst case under 'running calls finish', one call that leaves just under the limit:
+model                input  max_out  one call $     x4 $    x16 $
+opus-5-5           200,000   64,000        2.88    11.52    46.08
+opus-5-5           200,000  128,000        4.16    16.64    66.56
+opus-5-5         1,000,000  128,000       10.56    42.24   168.96
+fable-5-2          200,000   64,000        5.76    23.04    92.16
+fable-5-2          200,000  128,000        8.32    33.28   133.12
+fable-5-2        1,000,000  128,000       21.12    84.48   337.92
+fable-5-2-fast     200,000   64,000       11.52    46.08   184.32
+fable-5-2-fast     200,000  128,000       16.64    66.56   266.24
+fable-5-2-fast   1,000,000  128,000       42.24   168.96   675.84
+
+== opus-5-5, budget $50, 4 parallel subagents, max_tokens 64,000 (20 nights)
+policy           spend  over med  over max false stops  left at 1st false stop cut $ wasted  calls
+finish           50.28      0.20      0.99         0.0                    0.00         0.00    382
+admit_input      50.21      0.14      0.88         0.0                    0.00         0.00    382
+reserve_max      48.52      0.00      0.00        24.8                   11.69         0.00    368
+reserve_input    49.79      0.00      0.12        17.2                    1.37         0.00    379
+cut              50.09      0.09      0.17         0.0                    0.00         0.37    379
+
+== opus-5-5, budget $50, 8 parallel subagents, max_tokens 64,000 (20 nights)
+policy           spend  over med  over max false stops  left at 1st false stop cut $ wasted  calls
+finish           50.79      0.67      1.80         0.0                    0.00         0.00    401
+admit_input      50.62      0.59      1.37         0.0                    0.00         0.00    401
+reserve_max      48.57      0.00      0.00        55.0                   16.68         0.00    384
+reserve_input    49.95      0.00      0.94        28.5                    1.89         0.00    397
+cut              50.34      0.22      1.79         0.0                    0.00         0.90    396
+
+== opus-5-5, budget $50, 16 parallel subagents, max_tokens 128,000 (20 nights)
+policy           spend  over med  over max false stops  left at 1st false stop cut $ wasted  calls
+finish           51.88      1.53      5.02         0.0                    0.00         0.00    436
+admit_input      51.79      1.48      5.02         0.0                    0.00         0.00    436
+reserve_max      47.14      0.00      0.00       122.4                   46.09         0.00    383
+reserve_input    50.36      0.00      2.10        23.6                    4.80         0.00    425
+cut              50.47      0.46      1.02         0.0                    0.00         1.93    422
+
+== fable-5-2-fast, budget $50, 4 parallel subagents, max_tokens 64,000 (20 nights)
+policy           spend  over med  over max false stops  left at 1st false stop cut $ wasted  calls
+finish           51.58      1.07      5.69         0.0                    0.00         0.00    118
+admit_input      51.17      0.92      5.69         0.0                    0.00         0.00    119
+reserve_max      44.46      0.00      0.00        34.4                   36.32         0.00     94
+reserve_input    49.26      0.00      2.57        21.2                    4.72         0.00    114
+cut              50.64      0.45      2.61         0.0                    0.00         2.07    115
+
+== fable-5-2-fast, budget $50, 8 parallel subagents, max_tokens 64,000 (20 nights)
+policy           spend  over med  over max false stops  left at 1st false stop cut $ wasted  calls
+finish           52.28      1.77      6.69         0.0                    0.00         0.00    125
+admit_input      52.01      1.48      6.69         0.1                    0.84         0.00    124
+reserve_max      44.43      0.00      0.00        68.2                   44.83         0.00     88
+reserve_input    49.66      0.00      3.50        35.6                    7.24         0.00    118
+cut              50.79      0.68      2.41         0.0                    0.00         2.69    119
+
+== fable-5-2-fast, budget $50, 16 parallel subagents, max_tokens 128,000 (20 nights)
+policy           spend  over med  over max false stops  left at 1st false stop cut $ wasted  calls
+finish           55.67      5.53     12.60         0.0                    0.00         0.00    124
+admit_input      55.36      5.09     12.44         0.0                    0.00         0.00    124
+reserve_max      39.42      0.00      0.00       135.6                   44.83         0.00     76
+reserve_input    50.25      0.02      3.06        44.9                   16.90         0.00    111
+cut              51.60      1.59      3.12         0.0                    0.00         5.96    111
+
+== The same nights with no budget (opus-5-5, 8 parallel, max_tokens 64,000)
+spend over 8 hours: median 214.20, min 120.74, max 256.68
+of which the runaway loop from 03:00: median 32.87
+
+== Runaway loop from 03:00, opus-5-5, 8 parallel: total $150, with and without a rate
+total only   runaway stopped at median 6.07 h; total reached at median 6.07 h; night spend 148.95; denied conversations 23.2
++ $15/hour   runaway stopped at median 3.48 h; total reached at median not reached; night spend 76.32; denied conversations 48.1
