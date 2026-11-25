@@ -204,3 +204,9 @@ which one compressed full copy renewed each week bounds.
 A challenge to the answer: "a copy of the computer's disk that shares blocks with it" would rule
 out compression. Proposed instead: a checkpoint is a file of the blocks it alone holds, written and
 compressed by Silo outside the computer, with one full compressed copy as an anchor.
+
+## Where the drafts disagree, third pass (integration)
+
+An agent's part, 25 November 2026, written while merging #397 to #412 onto #391 (`research/2026-11-25-integration-2/`).
+
+Three drafts challenge this answer from different sides, and they fit together. #381 asks that "a copy that shares blocks" also allow the blocks copied just before each write (#365's `delta`). #411 shows that only checkpoints written as Silo's own files can be compressed, which takes a 512 GB Mac from 4.3 to 26.3 days back, and that `delta`'s oldest checkpoint is still a clone, which keeps most of that gain away. #398 adds the rule for the write in flight at the checkpoint's moment. Recommended: one rewrite. Where Silo sees the computer's writes, a checkpoint is a compressed file of the blocks it alone holds, copied just before each write, with one full compressed copy as an anchor; a clone that shares blocks only where Silo does not see the writes.

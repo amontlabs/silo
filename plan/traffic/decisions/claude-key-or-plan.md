@@ -86,3 +86,7 @@ Three things the trial showed:
 Not checked: real Anthropic; the path through #378's proxy, where the host comes from `CONNECT`
 before any encryption, which is simpler than reading it from the handshake; changing the setting
 on a running computer; Claude Code builds other than 2.1.332.
+
+## The program's own report (25 November 2026)
+
+An agent's part, from `research/2026-11-25-plan-windows/`, added on merge because #407 wrote it before #393 had landed. "A budget cannot be set on a computer whose Claude traffic passes unread" holds for budgets read from traffic. `program-reports-its-own-spend` would allow a precaution budget there. The app's sentence for such a computer should also say that the plan's window is not shown.
