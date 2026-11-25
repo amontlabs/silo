@@ -51,7 +51,8 @@ def truth_cost(rows, rec, day):
 def main():
     out = sys.argv[1]
     cfg = json.load(open(f"{out}/config.json"))
-    rows = price_rows(cfg["prices"])
+    # A run that changes Silo's table on purpose prices the bill with the providers' own prices.
+    rows = price_rows(cfg.get("truth_prices", cfg["prices"]))
     day = cfg.get("today", "2026-11-24")
     led_all = load(f"{out}/ledger.jsonl")
     led = [l for l in led_all if "plan" not in l]

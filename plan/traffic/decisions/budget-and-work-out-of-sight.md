@@ -43,3 +43,13 @@ no bound: under a budget it is refused.
 Not verified: Gemini's storage price per million tokens per hour (the run used $4.50 as a
 stand-in), whether OpenAI bills a cancelled background response for what it generated, and
 Gemini's batch result format, which was not built.
+
+## Two prices checked (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-model-prices`.
+
+- Gemini's cache storage price is on Google's page: $4.50 per million tokens per hour for Gemini
+  3.1 Pro Preview, $8.10 at the priority tier, and $0.50 for Gemini 3.8 Flash. The stand-in value
+  of $4.50 above is the real one for that model.
+- OpenAI now prices eligible background requests 30% below standard for a 2-hour completion
+  window and 40% below for an 8-hour one. A bound at the standard price stays a bound for them.

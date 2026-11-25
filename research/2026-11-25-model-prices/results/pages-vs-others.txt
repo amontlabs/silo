@@ -1,0 +1,19 @@
+== anthropic: page against OpenRouter
+32 rows on both sides, 0 differ; 10 only in page, 0 only in openrouter
+== openai: page against OpenRouter
+DIFFERS openai/gpt-5.4/batch: cache_read page=0.13 openrouter=0.125
+28 rows on both sides, 1 differ; 0 only in page, 0 only in openrouter
+== google: page against OpenRouter
+DIFFERS google/gemini-3-flash-preview/batch: cache_read page=0.05 openrouter=0
+DIFFERS google/gemini-3-pro-image/standard: output page=0.24 openrouter=12.0, cache_read page=0 openrouter=0.2
+DIFFERS google/gemini-3.1-flash-image/standard: output page=0.151 openrouter=3.0
+DIFFERS google/gemini-3.1-flash-lite-image/standard: output page=0.0336 openrouter=1.5
+DIFFERS google/gemini-3.1-pro-preview/batch: cache_read page=0.2 openrouter=0
+DIFFERS google/gemini-3.8-flash/standard: input page=0.75 openrouter=0.825, output page=3.75 openrouter=4.125, cache_read page=0.075 openrouter=0.0825
+DIFFERS google/gemini-nano-banana-2.1/standard: output page=0.113 openrouter=7.5
+DIFFERS google/gemini-omni-1.1-flash/standard: output page=17.5 openrouter=9.0
+DIFFERS google/gemini-omni-1.2-flash/standard: output page=12.0 openrouter=9.0
+29 rows on both sides, 9 differ; 8 only in page, 0 only in openrouter
+== Claude on Bedrock (global endpoint) against Anthropic's page
+12 rows on both sides, 0 differ; 0 only in bedrock, 9 only in page
+Bedrock regional input over global, per model: [1.1]

@@ -1,0 +1,15 @@
+{
+  "asks": "Where do Silo's model prices come from, and how are they kept current?",
+  "answer": "Silo prices model calls from its own price table, which it publishes as releases signed with Silo's key. Each release is built from the providers' own price pages, compared with an independent source, and published once a person or agent has settled every price the two give differently. The app fetches each new release, takes it only if Silo's key signed it and its version is above the last one taken, and otherwise keeps the table it has. A price with a date of effect is in the table before that day, and a release that drops it withdraws it. You can add your own prices beside the table, and yours win over it. The app says when the table it has is past its check-by day.",
+  "sets": [
+    {
+      "in": "traffic/properties",
+      "id": "prices-signed-or-yours",
+      "says": "Silo counts spend only from prices in a table Silo signed, or from prices you wrote yourself.",
+      "kind": "safety",
+      "check": [
+        "hostile test"
+      ]
+    }
+  ]
+}

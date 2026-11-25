@@ -31,3 +31,17 @@ The computer's share did not. The boundary put on the computer the rise of the w
 own calls: 0.19 of the window. The stand-in had counted 0.14 from this computer and 0.06 from the
 others. A reading covers the whole account, so the app can show the plan's share for the account,
 and a cap on it, but not a share per computer or conversation.
+
+## Prices that depend on where and how the call runs (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-model-prices`.
+
+- Anthropic charges 1.1 times every token price for US-only inference (`inference_geo: "us"`) on
+  Claude 4.6 and later. Claude on Bedrock and on Google Cloud costs 1.1 times as much on a regional
+  endpoint as on the global one; AWS's own price list confirms it on every Claude model. OpenAI
+  charges 10% more on regional endpoints for models released on or after 5 March 2026. Spend "at
+  the provider's API prices" has to include these, and the research's boundary counts the first.
+- Anthropic, OpenAI and Google sell volume discounts by contract. The research's table takes a
+  discount you write in your own prices file. Whether the app shows that discounted figure, or the
+  list price as this entry proposes, is still open. Showing the list price keeps conversations
+  comparable between people. Showing the discounted one keeps a budget in the dollars you pay.
