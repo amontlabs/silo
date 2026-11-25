@@ -339,3 +339,15 @@ An agent's part, 24 November 2026, from each project's documentation; the full t
 - **Measurement 1 above needs a machine with `/dev/kvm`.** The Linux cloud containers agents work
   in have none (the one of 24 November 2026 had KVM's modules in its kernel, without the device),
   so it needs a rented dedicated server or a cloud instance with nested virtualization.
+
+## If main is a Linux computer
+
+An agent's part, 25 November 2026, from [option B's specs](../../../research/2026-11-25-linux-main/README.md). Each of the five measurements above is a test of the
+kit written for a Linux host with KVM (K01, K06, K02) or for the Mac (L2, L3), with the outcome that
+keeps or reopens the choice. Read again on 25 November 2026: libkrun's `main` is still the untagged
+2.0 interface, which has pause and resume, an orderly stop on an arm64 Mac, an external kernel and
+a generic vhost-user device (Linux only); the newest release is 1.19.8, which has no pause. A
+helper for a Linux main would pin a commit of `main`. One patch is proposed on top: a hook in the
+block device before each write, from which Silo keeps a log of the blocks written, for cheap
+checkpoints and exact file facts. It is the first entry for `libkrun-patches` and
+`engine-patch-review`.

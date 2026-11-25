@@ -158,3 +158,16 @@ perform better", so checkpoints every few minutes need layers merged in the back
 merge rewrites blocks. A fork must also copy the auxiliary storage of a virtual Mac, which is not
 in the stack. What to measure on a Mac: reads at a depth of 10, 100 and 1,000 layers, and the time
 and stall of a merge, next to the APFS clone of the first-build test.
+
+## A checkpoint that does not share blocks
+
+An agent's part, 25 November 2026, from [option B's specs](../../../research/2026-11-25-linux-main/README.md). #365 measured its `delta` way best: the blocks the
+computer overwrites after the checkpoint's moment, copied just before each write, so nothing is
+cloned while the computer runs and its writes do not wait. That is not "a copy of the computer's
+disk that shares blocks with it", so the answer as written excludes it. Proposed first sentence:
+"On every system, a checkpoint is a copy of the computer's disk at one moment, taken from outside
+the computer: either a copy that shares blocks with the disk, by the same means as a fork's disk
+(`fork-shares-disk-blocks`), or the blocks the computer overwrites after that moment, copied just
+before each write, where Silo sees the computer's writes." Silo sees them for a Linux computer
+through a hook in libkrun's block device, and for a macOS computer only if its disk is served over
+NBD.

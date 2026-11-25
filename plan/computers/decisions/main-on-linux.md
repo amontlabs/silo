@@ -49,3 +49,12 @@ An agent's part, 24 November 2026, from [the comparison of first builds](../../.
 kit's tests, this entry is the one that moves forward: a Linux main on the Mac, with the same
 engine, boundary and recorder. The comparison counts 94 open decisions for that first build,
 against 88 for a macOS main with the record of model traffic.
+
+## Specified, 25 November 2026
+
+An agent's part, from [option B's specs](../../../research/2026-11-25-linux-main/README.md). The fallback above is now specified: the feature
+`computers-linux-main-on-a-mac`, placed after this entry. If it is taken for the first build, the
+answer's last sentence becomes "Silo starts with a Linux main on a Mac", and this entry moves to
+the first build's block of the order with it. Counted on #348's tree, that first build needs 96
+open decisions, not the 94 the comparison above gave: `files-through-a-channel` and
+`mac-silo-needs` are needed by a Linux main too.

@@ -114,3 +114,13 @@ leaf address, and a gap for a disk it cannot read. It finds one more need: `silo
 put-back` read file contents, with APFS's compression, which the metadata-only reader of #352 does
 not. It writes a rename as a delete and a create, as `file-changes-in-the-record` says, with the
 APFS object id on both lines so they can be joined later.
+
+## ext4 needs its journal replayed
+
+An agent's part, 25 November 2026, from [option B's specs](../../../research/2026-11-25-linux-main/README.md). Measured in a Linux container: copies of a mounted
+ext4 disk taken 7 s and 30 s after a burst of changes showed none of them to a reader that ignores
+the journal; at 120 s they all showed. A checkpoint is such a copy, so the last minutes before each
+checkpoint would land in the next one. A trial reader that replays the journal in memory matched
+the kernel exactly, on those copies and on Ubuntu 26.04's own image (107,853 paths). Proposed
+sentence: "On a filesystem with a journal, such as ext4, the reader replays the journal in memory
+before it reads, as the computer's kernel does at its next boot, and never writes it back."

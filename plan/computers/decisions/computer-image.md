@@ -53,3 +53,12 @@ An agent's note, 24 November 2026. For a Mac or iOS developer, the installed sta
 includes Xcode and a simulator runtime, over 20 GB that every later macOS computer would otherwise
 fetch again. `xcode-in-a-computer` proposes keeping it the way this answer keeps the installed
 system. Mac test 23 of `research/2026-11-24-mac-and-ios-developers/README.md` measures it.
+
+## Ubuntu's image as it is
+
+An agent's part, 25 November 2026, from [option B's specs](../../../research/2026-11-25-linux-main/README.md). Read on that day: Ubuntu 26.04's cloud image for arm64
+is a qcow2 file of 943 MB, checked against Ubuntu's `SHA256SUMS`, with 95 % of its clusters
+compressed; root in partition 1, `/boot` in 13, EFI in 15. A computer boots a raw disk, so the copy
+Silo keeps is the converted raw disk, and its hash can be pinned too: proposed words after "checks
+it against Ubuntu's published checksum and keeps it": "converted to a raw disk whose checksum Silo
+also pins,".

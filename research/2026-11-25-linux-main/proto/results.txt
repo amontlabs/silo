@@ -1,0 +1,47 @@
+Run on 25 November 2026 in a Linux cloud container: kernel 6.18.44, 4 processors, no KVM,
+e2fsprogs 1.47.0, ext4 on a loop device over the container's disk. One run each.
+
+$ sudo sh check.sh
+a: kernel 3350 paths; reader with replay: 0 differing lines; without replay: 0
+b: kernel 1700 paths; reader with replay: 0 differing lines; without replay: 1958
+journal blocks replayed in b: 240
+-- diff a b, with replay:
+end	files	1960
+changed 5
+deleted 1803
+created 153
+-- diff a b, without replay:
+end	files	0
+
+a was copied after a sync and 6 s; b was copied 7 s after the night's changes, with no sync.
+"kernel" is the copy after e2fsck replayed its journal, mounted read only and listed with find:
+inode, type, size, mode and path of every path. The expected diff: 301 + 1500 + 2 deleted
+(fixtures and its 300 files, 1500 entries of big, m2.ts renamed, m5.ts replaced), 153 created
+(new and its 150 files, renamed.ts, the new m5.ts), and changed m3.ts (content), m4.ts (mode)
+and three folders.
+
+$ sudo sh journal-lag.sh       (an earlier run of the same steps, by hand)
+after 7s,   journal ignored: /work holds 500 names (truth 401), /work/new 0 (truth 200)
+after 30s,  journal ignored: /work holds 500 names (truth 401), /work/new 0 (truth 200)
+after 120s, journal ignored: /work holds 401 names (truth 401), /work/new 200 (truth 200)
+after 300s, journal ignored: /work holds 401 names (truth 401), /work/new 200 (truth 200)
+
+Ubuntu's own image, read the same way (25 November 2026):
+
+$ curl -O https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-arm64.img
+  943,232,000 bytes, SHA-256 cf3b8472b84e7de37cdc2d2e9a9bf82b3edf0ab97113a1422eff048f26688e2f,
+  equal to the line of SHA256SUMS in the same folder. Last modified 14 November 2026.
+$ python3 -I qcow2raw.py ubuntu-26.04-server-cloudimg-arm64.img u.raw
+size 3758096384 cluster 65536 data 1823 compressed 37536 zero 0          (8.6 s)
+  qcow2 version 3, no backing file, no encryption, no snapshots, deflate. 95 % of the clusters
+  are compressed, so the converter must inflate them. The raw disk's SHA-256 is
+  4ea998f3c39576606cdfc33b09dc5c3e6065f9e795528365b8e63f98f72ffbe4 (not checked against
+  qemu-img convert, which this container lacks).
+GPT of u.raw: partition 1 cloudimg-rootfs (Linux arm64 root, 2,558 MiB), 13 (extended boot
+  loader, /boot, 923 MiB), 15 (EFI system, 99 MiB).
+Root filesystem features: has_journal ext_attr resize_inode dir_index orphan_file filetype
+  extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize
+  metadata_csum. Journal: revoke, 64-bit, checksum v3.
+$ python3 -I ext4read.py walk root.img     (partition 1 copied out)
+  107,853 paths, equal to find on the same filesystem mounted read only by the kernel: inode,
+  type, size, mode and path. 1.4 s. The trial keeps no cache, so it read 130,934 blocks.

@@ -39,3 +39,14 @@ on Linux 6.18, without a kernel built for it. On `go build -a std`, with 2 500 f
 690 exits, its reader used 0.08 s of processor time against 60 s for the build, 0.1 %. The build's
 own time did not move beyond the noise of the runs. The details are in `record-speed-cost`. The
 cost of the process connector and of fanotify's FID mode alone was not measured.
+
+## In a first build with a Linux main
+
+An agent's part, 25 November 2026, from [option B's specs](../../../research/2026-11-25-linux-main/README.md). Its step 7 builds the probe as this answer says, on a
+kernel of Silo's own configuration (eBPF on tracepoints, BTF, the process connector; no modules,
+no kexec, no `/dev/mem`). Under polarzero's direction of 20 November, it proposes one sentence
+more: "Before the probe is relied on, a report of each exec and exit made by Silo's own kernel
+through a call to the helper is measured against the same target; it cannot be stopped by root
+inside without a kernel exploit, and where it meets the target it replaces the probe for starts and
+exits." The case: an agent with root stops the probe, then deletes a folder; the record has a
+silent source and file facts with no process behind them.
