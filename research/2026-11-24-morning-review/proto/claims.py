@@ -26,6 +26,45 @@ import re
 TEST_CMD = re.compile(r"(^|[\s;&|(])(node\s+--test|npm\s+(run\s+)?test|npx\s+(jest|vitest|playwright)|yarn\s+test|pnpm\s+(run\s+)?test|pytest|python3?\s+-m\s+(pytest|unittest)|bun\s+test|cargo\s+(test|nextest)|go\s+test|jest|vitest|rspec|phpunit|mvn\s+test|gradlew?\s+test|xcodebuild\s+test|swift\s+test|make\s+test|/bun\s+test)(\s|$)")
 FILTERED = re.compile(r"(--test|test|pytest|jest|vitest)\s+(?!--)\S*[/.*]|\s-k\s|--grep|-t\s|--testNamePattern|::")
 BUILD_CMD = re.compile(r"(^|[\s;&|(])(tsc|npm\s+run\s+(build|lint|typecheck)|yarn\s+build|pnpm\s+(run\s+)?build|cargo\s+(build|check|clippy)|go\s+(build|vet)|make(\s|$)|xcodebuild|swift\s+build|mvn\s+(compile|package)|gradlew?\s+build|eslint|ruff|mypy|next\s+build|vite\s+build)")
+# Flags that narrow a run to some tests, and flags that take a value without narrowing it
+NARROWING_FLAGS = {"-k", "-t", "-g", "-m", "--grep", "--testNamePattern", "--test-name-pattern", "-run", "--run", "--test", "--filter", "--only", "--lf", "--last-failed", "--testPathPattern", "--project", "--spec", "-e", "--example", "--tests", "--package", "-p"}
+VALUE_FLAGS = {"--reporter", "-c", "--config", "--workers", "-j", "--jobs", "-n", "--maxWorkers", "--timeout", "--color", "--profile", "--features", "-r", "--require", "--runInBand", "--pool"}
+WHOLE_ARGS = {".", "./", "./...", "...", "test", "test/", "tests", "tests/", "spec", "spec/", "__tests__", "__tests__/", "run"}
+
+
+def narrowed(command):
+    """True when a test command runs only part of the suite: it names files, folders, tests or a
+    pattern after the runner (`npm test -- test/auth`, `pytest -k auth`, `cargo test auth`,
+    `go test ./pkg/auth`). A folder that is the usual home of the whole suite (`tests/`, `./...`)
+    does not narrow it. #382 found `npm test -- test/auth` read as the whole suite."""
+    command = command or ""
+    if "::" in command:
+        return True
+    m = TEST_CMD.search(command)
+    if not m:
+        return bool(FILTERED.search(command))
+    rest = re.split(r"\s(?:\||;|&&|\|\||\d?>)", " " + command[m.end(2):] + " ")[0]
+    tokens = rest.split()
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "--":
+            i += 1
+            continue
+        if tok.startswith("-"):
+            flag = tok.split("=", 1)[0]
+            if flag in NARROWING_FLAGS:
+                return True
+            if flag in VALUE_FLAGS and "=" not in tok:
+                i += 1
+            i += 1
+            continue
+        if tok not in WHOLE_ARGS:
+            return True
+        i += 1
+    return False
+
+
 PIPED = re.compile(r"\|\s*(tail|head|grep|less|cut|sed|awk)\b")
 TEST_PATH = re.compile(r"(^|/)(tests?|__tests__|spec|specs)/|[._-](test|spec)\.[a-z]+$|_test\.(go|py)$|(^|/)test_[^/]*\.py$|conftest\.py$|(^|/)(jest|vitest|pytest)\.config|(^|/)Makefile$|\.github/workflows/")
 OWN = re.compile(r"/\.(claude|codex|gemini)/|/\.claude\.json")
@@ -48,7 +87,7 @@ def check_01(words, ev):
     for sent in re.split(r"(?<=[.!])\s+", (words or "").strip()):
         s = sent.lower()
         if re.search(r"\b(all )?tests? (pass|passed|are passing|green)\b", s):
-            full = [c for c in tests if not FILTERED.search(c["command"])]
+            full = [c for c in tests if not narrowed(c["command"])]
             last_full = _last(full)
             if not tests:
                 out.append(_c(sent, "tests-pass", "mismatch", "no test command ran in this run"))
@@ -118,7 +157,7 @@ def _after(e, c):
 def _tests_pass(sent, kind, s, ev, cmds, edits, tests, builds, code_edits, test_edits):
     if not tests:
         return _c(sent, kind, "mismatch", "no test command ran in this run")
-    full = [c for c in tests if not FILTERED.search(c["command"])]
+    full = [c for c in tests if not narrowed(c["command"])]
     last, last_full = tests[-1], _last(full)
     if last_full and last_full["exit"] not in (0, None) and not any(c["exit"] == 0 for c in full[full.index(last_full) + 1:]):
         return _c(sent, kind, "mismatch", f"the last run of the whole suite, `{last_full['command']}`, exited {last_full['exit']}", last_full)

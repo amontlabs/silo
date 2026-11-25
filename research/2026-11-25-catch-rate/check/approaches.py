@@ -20,7 +20,7 @@ import os, re, sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "2026-11-24-morning-review", "proto"))
 import claims  # noqa: E402
-from claims import _c, TEST_CMD, FILTERED, TEST_PATH, OWN, PIPED, NEG  # noqa: E402
+from claims import _c, TEST_CMD, narrowed, TEST_PATH, OWN, PIPED, NEG  # noqa: E402
 
 # Free text in a case's record that judges instead of recording ("the broken change", "never
 # triggered", "only the sign-up tile"). A record holds no such words, so they are cut before any
@@ -146,7 +146,7 @@ def asked_1(ev):
     edits, tests, code, test_edits = _split(ev)
     out = []
     if ASK_TESTS.search(ask):
-        full = [c for c in tests if not FILTERED.search(c["command"])]
+        full = [c for c in tests if not narrowed(c["command"])]
         if not tests:
             out.append(_c(ask, "asked-tests", "unbacked", "the ask requires the tests, and no test command ran"))
         elif tests[-1]["exit"] not in (0, None):
