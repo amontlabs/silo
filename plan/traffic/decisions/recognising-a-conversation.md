@@ -154,3 +154,13 @@ the program rewrites.
 An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
 
 #376 edited this answer to end with "the same conversation continued in a fork is a new conversation of the fork". #385 measured that this lets a fork spend a conversation's budget again ($1.10 against $0.50), and recommends that the fork's copy start at the parent's spend. The notes of `what-a-conversation-budget-promises` hold the case. Recommended: keep "a new conversation of the fork", and add that its spend starts at the parent's.
+
+## The session identifier, kept
+
+An agent's part, 25 November 2026, from [attribution without processes](../../../research/2026-11-25-attribution-without-processes/README.md).
+#371's boundary joins a conversation by the program's session identifier (`metadata.user_id`'s
+`session_id` for Claude Code, `prompt_cache_key` for Codex) but does not write it in the record.
+Keeping it on each model-call fact costs one field and names the program's own files: Claude Code's
+transcript is `~/.claude/projects/<folder>/<session_id>.jsonl` and Codex's
+`~/.codex/sessions/…/rollout-<time>-<prompt_cache_key>.jsonl`. Without processes, that is how 33 of
+those files on a night of four runs in main named their conversation (`author-from-traffic`).
