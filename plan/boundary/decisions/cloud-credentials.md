@@ -44,3 +44,30 @@ repository.
   libraries look there before they ask the metadata server.
 - A project on GitHub, `salrashid123/gce_metadata_server`, shows Google's libraries for Python,
   Java, Go, Node and .NET, and `gcloud`, working against such a server.
+
+## Measured
+
+An agent's part, 25 November 2026, in `research/2026-11-25-credential-brokering/` of this
+repository. A prototype metadata server answered as Google's and as Azure's, and the boundary
+swapped placeholders on the clouds' hosts. Stand-ins played Google and Microsoft.
+
+- It works with no setting in the computer. `google.auth.default()` with Cloud Storage,
+  `gcloud storage ls`, an ID token sent to Cloud Run, `ManagedIdentityCredential`,
+  `DefaultAzureCredential`, `az login --identity`, `az group list` and
+  `az account get-access-token` all worked with placeholders.
+- Nothing real reached the computer. A program that sent every file of the computer's home, and
+  fresh tokens from the server, to an outside host sent only placeholders. Each one, sent to the
+  cloud from outside, was refused.
+- With real one-hour tokens, the same programs worked, and every token was usable from outside
+  for its life. `gcloud` wrote one to its `access_tokens.db`.
+- A challenge to "until that swap is built, the computer would get the real token". On HTTP/1.1
+  the swap is the one `secret-placeholder` already has. Only gRPC needs more: Go's and Node's gRPC
+  clients compress the header with HPACK's Huffman code, so a swap of bytes misses it, and the
+  server got the placeholder. A swap that decodes each HTTP/2 header block worked for Python, Go
+  and Node. Proposed: hand out placeholders from the start, with no first cut of real tokens.
+- Google's ID tokens are JWTs, like Azure's tokens. With an opaque placeholder,
+  `fetch_id_token` and `az login --identity` failed. A placeholder with the real header and claims
+  and another signature worked for both.
+- Google's credential helper for Docker (`gcloud auth configure-docker`) sends the access token as the password of Basic
+  auth. The token's hosts then include `*.pkg.dev` and `gcr.io`, with that slot. Not run.
+
