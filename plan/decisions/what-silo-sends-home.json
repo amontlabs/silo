@@ -1,0 +1,4 @@
+{
+  "asks": "What does Silo send to Amont Labs on its own?",
+  "answer": "Nothing, unless you turn it on. Silo sends no usage data, no crash report and nothing from the record. The one request it makes on its own is the check for a new version, and you can turn that off. A crash report is sent only when you choose to send it, and you see what it holds first."
+}
