@@ -1,4 +1,4 @@
 {
   "asks": "What does Silo send to Amont Labs on its own?",
-  "answer": "Nothing, unless you turn it on. Silo sends no usage data, no crash report and nothing from the record. The one request it makes on its own is the check for a new version, and you can turn that off. A crash report is sent only when you choose to send it, and you see what it holds first."
+  "answer": "Nothing, unless you turn it on. Silo sends no usage data, no crash report and nothing from the record. The one request it makes to Amont Labs on its own is a daily fetch of one public file, signed by Silo, that names the latest version of Silo and of its price table. The request carries nothing about you or your Mac, not even the version you run: the app compares versions itself. You can turn it off; Silo then learns of a new version or new prices only when you update it. A crash report is sent only when you choose to send it, and you see what it holds first."
 }
