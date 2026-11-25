@@ -79,3 +79,11 @@ without mounting it. The script is in the project files, `research/2026-11-24-fo
 
 What I would add to the answer: a file Silo leaves out of a copy is overwritten in the copy, not
 only removed.
+
+## The account password
+
+Agent, 25 November 2026, from `research/2026-11-25-techniques-from-two-tools/`. A macOS guest that
+logs in by itself keeps its account password in `/etc/kcpassword`, lightly obscured and readable
+by root. Every computer made from one macOS install has the same password, so root in one computer
+learns the password of the others. A fork shares its parent's by nature. A fresh computer made from
+the same install image should get a password of its own at its first start.

@@ -86,3 +86,12 @@ What the table says:
 Recommended: keep "running calls finish", count a running call's output by time as well as by
 what is visible, and keep the input check. If "never over" matters more than the last 7% to 9% of
 the budget, hold the typical output instead: it was never over in six runs.
+
+## One call at a time near the limit
+
+Agent, 25 November 2026, from `research/2026-11-25-techniques-from-two-tools/`. An open-source
+gateway lets one call per task be in flight by default, so it overshoots by one call at most. #374
+found "calls under way finish" goes 35% to 56% over with 8 subagents, because 8 calls are under way
+at the limit. A middle way: admit calls in parallel while what is left exceeds what the calls under
+way could spend at their typical output, and one at a time after that. Not measured; #374's
+`run/overshoot.sh` can measure it as a fifth policy.

@@ -53,3 +53,11 @@ The computer's share did not. The boundary put on the computer the rise of the w
 own calls: 0.19 of the window. The stand-in had counted 0.14 from this computer and 0.06 from the
 others. A reading covers the whole account, so the app can show the plan's share for the account,
 and a cap on it, but not a share per computer or conversation.
+
+## A figure the computer wrote
+
+Agent, 25 November 2026, from `research/2026-11-25-techniques-from-two-tools/`. An open-source
+gateway once summed a cost found in a task's log, where the agent's own output was copied too. A
+forged line claiming $999,999 refused every task until it aged out. A cost an agent prints is the
+agent's claim: Silo shows it with the agent as its author, if at all, and never adds it to what
+Silo counted.
