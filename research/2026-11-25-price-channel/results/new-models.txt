@@ -1,0 +1,11 @@
+line at 0.5x the provider's cheapest: 6 of 100 new models since 2025-01-01 fall under it
+    2025-03-12 google/gemma-3-27b-it at 0.12x the cheapest
+    2025-03-13 google/gemma-3-4b-it at 0.31x the cheapest
+    2025-08-05 openai/gpt-oss-20b at 0.30x the cheapest
+    2025-09-29 anthropic/claude-sonnet-4.5 at 0.20x the cheapest
+    2025-10-15 anthropic/claude-haiku-4.5 at 0.33x the cheapest
+    2026-10-07 anthropic/claude-haiku-5.5 at 0.10x the cheapest
+line at 0.25x the provider's cheapest: 3 of 100 new models since 2025-01-01 fall under it
+    2025-03-12 google/gemma-3-27b-it at 0.12x the cheapest
+    2025-09-29 anthropic/claude-sonnet-4.5 at 0.20x the cheapest
+    2026-10-07 anthropic/claude-haiku-5.5 at 0.10x the cheapest
