@@ -167,3 +167,58 @@
 | leases, ledger down 1 minute from 300 s | 0.99 | -0.3% | -2.2% | 90 | 51910 | 51.9 | 0.5 | 5.77 |
 | central, calls wait, ledger down 2 minutes from 300 s | 0.99 | -0.1% | -1.4% | 90 | 119757 | 119.8 | 6.7 | 3.49 |
 | leases, ledger down 2 minutes from 300 s | 0.99 | -0.2% | -2.2% | 90 | 111940 | 111.9 | 1.2 | 5.28 |
+
+### One Mac, $3, stand-in speed, with #385's cut: the simulator against #385
+
+| Way | Spent / budget, mean | Over, worst | Over, best | Paid for cut answers, mean | Calls done, mean | Messages per call |
+|---|---:|---:|---:|---:|---:|---:|
+| finish_tps and cut | 1.00 | +0.3% | -0.1% | $0.57 | 13 | 0.00 |
+| reserve_typical and cut | 0.96 | -1.8% | -6.4% | $0.00 | 15 | 0.00 |
+
+### Team of 5, $15, 50 tokens/s, #385's `cut`: calls under way are cut once the budget is passed
+
+| Way | Spent / budget, mean | Over, worst | Over, best | Paid for cut answers, mean | Calls done, mean | Messages per call |
+|---|---:|---:|---:|---:|---:|---:|
+| exact: one boundary sees all | 1.00 | +0.0% | +0.0% | $1.43 | 84 | 0.00 |
+| central ledger, 1 ms (a Linux host on the LAN) | 1.00 | +0.0% | +0.0% | $1.43 | 84 | 3.82 |
+| central ledger, 30 ms (a host over a VPN, or one region) | 1.00 | +0.0% | +0.0% | $1.44 | 84 | 3.82 |
+| central ledger, 150 ms (another continent) | 1.00 | +0.0% | +0.0% | $1.47 | 84 | 3.82 |
+| central on a shared Linux host: 2 members' computers on it, 3 Macs at 30 ms | 1.00 | +0.1% | +0.0% | $1.41 | 84 | 3.81 |
+| leases, 30 ms | 1.00 | +0.0% | +0.0% | $1.85 | 82 | 25.29 |
+| leases, 2 s (a Git push as the ledger) | 1.00 | +0.2% | -10.1% | $1.89 | 81 | 1.72 |
+| gossip every 1 s | 1.00 | +0.1% | +0.0% | $1.44 | 84 | 249.69 |
+| gossip every 10 s | 1.00 | +0.6% | +0.2% | $1.45 | 84 | 24.95 |
+| static fifths | 0.80 | -19.9% | -20.0% | $1.40 | 63 | 0.00 |
+| gossip every 1 s, team cut in two | 1.21 | +35.3% | +8.3% | $1.60 | 105 | 162.64 |
+| gossip every 1 s, cut in two, escrow on silence | 1.00 | +0.0% | +0.0% | $1.56 | 83 | 453.57 |
+| central, ledger down 10 minutes from 600 s, calls wait | 1.00 | +0.0% | +0.0% | $1.18 | 85 | 3.76 |
+| leases, ledger down 10 minutes from 600 s | 1.00 | +0.0% | +0.0% | $1.52 | 83 | 37.57 |
+
+### Team of 5, $15, 50 tokens/s, #385's `typical-cut`: calls under way are cut once the budget is passed
+
+| Way | Spent / budget, mean | Over, worst | Over, best | Paid for cut answers, mean | Calls done, mean | Messages per call |
+|---|---:|---:|---:|---:|---:|---:|
+| exact: one boundary sees all | 0.99 | -0.1% | -1.5% | $0.00 | 90 | 0.00 |
+| central ledger, 1 ms (a Linux host on the LAN) | 0.99 | -0.1% | -1.5% | $0.00 | 90 | 3.49 |
+| central ledger, 30 ms (a host over a VPN, or one region) | 0.99 | -0.1% | -1.5% | $0.00 | 90 | 3.49 |
+| central ledger, 150 ms (another continent) | 0.99 | -0.2% | -1.5% | $0.00 | 90 | 3.49 |
+| central on a shared Linux host: 2 members' computers on it, 3 Macs at 30 ms | 0.99 | -0.1% | -1.5% | $0.00 | 91 | 3.48 |
+| leases, 30 ms | 0.99 | +0.0% | -2.2% | $0.09 | 90 | 5.69 |
+| leases, 2 s (a Git push as the ledger) | 0.99 | -0.1% | -3.0% | $0.20 | 89 | 286.98 |
+| gossip every 1 s | 0.97 | -1.3% | -4.1% | $0.03 | 88 | 289.36 |
+| gossip every 10 s | 0.97 | -1.3% | -4.5% | $0.07 | 88 | 28.76 |
+| static fifths | 0.76 | -22.1% | -25.7% | $0.00 | 67 | 0.00 |
+| gossip every 1 s, team cut in two | 1.19 | +24.5% | +8.3% | $1.39 | 104 | 164.28 |
+| gossip every 1 s, cut in two, escrow on silence | 0.98 | -1.1% | -3.6% | $0.01 | 89 | 719.25 |
+| central, ledger down 10 minutes from 600 s, calls wait | 0.99 | -0.3% | -1.4% | $0.00 | 90 | 3.49 |
+| leases, ledger down 10 minutes from 600 s | 0.99 | +0.0% | -7.7% | $0.12 | 89 | 2.27 |
+
+### Team of 5, $15, `typical-cut`, and one batch with a $4 bound held until its results (#385)
+
+| Way | Batch admitted, share of runs | Spent / budget, mean | Over, worst | Over, best | Calls done, mean |
+|---|---:|---:|---:|---:|---:|
+| one boundary | 100% | 0.82 | -16.8% | -18.1% | 63 |
+| central ledger, 30 ms | 100% | 0.82 | -16.8% | -18.1% | 63 |
+| leases, 30 ms | 100% | 0.82 | -16.9% | -18.2% | 62 |
+| gossip every 1 s | 100% | 0.80 | -18.4% | -20.9% | 61 |
+| fixed fifths ($3 each) | 0% | 0.76 | -22.1% | -25.7% | 67 |

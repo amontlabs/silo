@@ -4,7 +4,9 @@ Research of 25 November 2026, by an agent, for polarzero. #374 measured a budget
 boundary. #362 proposed a budget per team member, enforced on each Mac, and said a budget pooled
 across Macs needs "a shared count that each Mac must reach before every model call". This folder
 designs the ways several Macs can hold one budget, builds them, and measures how far past the
-budget each one goes when many agents spend at once, counted with #374's rule.
+budget each one goes when many agents spend at once. Each Mac counts with #374's rule and with
+#385's additions: a call under way cut once the budget is passed, and work out of sight (a batch, a
+background response) held at its whole bound until its result comes back.
 
 Nothing here is a decision. Under `plan/` it adds one open decision, `pooled-budget-ledger`, and
 agents' notes on `team-budget`, `what-a-budget-promises` and `shared-host-system`. The branch is
@@ -62,6 +64,23 @@ member's computers run on two Macs.
   work with no server at all: a push to a branch of the team's repository is a compare-and-swap,
   and 12 Macs took $30 in 32 grants with none lost.
 
+- **With #385's cut, every way that shares one count stops the team at the budget.** Cutting
+  calls under way once the total is passed ended a team of five within 0.6% over $15, for one
+  boundary, a ledger, leases or gossip. It paid $1.40 to $1.90 a run for answers that were cut.
+  Gossip with the team cut in two still went 35% over; with the escrow, not at all.
+- **Under leases a Mac cuts on its own slice, not on the team's total.** It cannot see what the
+  others spend. Here it asks the ledger once more and cuts when the ledger says nothing is left,
+  or when no answer comes within a second and a round trip. That was never more than 0.2% over,
+  but cut more answers than one boundary ($1.85 a run against $1.43), and through Git's 2 s pushes
+  ended up to 10% under. #385's `typical-cut` (hold the typical output, cut only what passes
+  anyway) avoids nearly all of it: leases ended between 2.2% under and the budget, with $0.09 a run
+  cut.
+- **A batch bigger than a slice is asked for, not refused.** A batch with a $4 bound, sent by a
+  Mac holding a $2 slice, was admitted in every run under leases: the Mac asked the ledger for what
+  was missing. Fixed $3 shares refused it every time. Holding the bound until the results came back
+  left 17% of the budget unspent in every way alike; that is the cost #385's rule accepts, not the
+  ledger's.
+
 ## The ways
 
 | Way | What each Mac's boundary does | What it needs |
@@ -93,11 +112,11 @@ reaches it: the boundary prices each call itself and sends only the amount.
 
 | File | What it is |
 |---|---|
-| `ledger/book.py` | #374's admission rule (`boundary/src/budget.zig`, total limits) ported to Python, used by both the simulator and the server, so what is measured is the rule that runs |
+| `ledger/book.py` | #374's admission rule (`boundary/src/budget.zig`, total limits), with #385's whole bound for work out of sight, ported to Python, used by both the simulator and the server, so what is measured is the rule that runs |
 | `ledger/server.py` | The ledger: central admission (`/admit`, `/settle`) and leases (`/lease`, `/give`), over HTTP and JSON. SQLite in WAL mode with `synchronous=FULL`; every change is committed before the answer goes out. A lease request carries an id, so a request sent again after a lost answer gets the same answer |
 | `ledger/test_ledger.py` | 12 Macs at once against the server; the server killed and restarted while they ask |
 | `ledger/gitlease.py` | Leases through a branch of a Git repository, with its test |
-| `sim/sim.py` | A discrete-event simulation of a team: each Mac's agents, its boundary, and each way above, with network delay, a ledger that goes down, and a team cut in two |
+| `sim/sim.py` | A discrete-event simulation of a team: each Mac's agents, its boundary, and each way above, with network delay, a ledger that goes down, and a team cut in two. With `--cut`, #385's cut: each way decides every half second which calls under way end, and a cut call is billed for what it generated, then ends its conversation, as Claude Code did in #385 |
 | `sim/experiments.py` | Every table below, 20 seeds each; the full tables are in [`out/tables.md`](out/tables.md) |
 
 ### The simulator against #374
@@ -174,6 +193,49 @@ A call waiting for the ledger is a held model request. #364 found a held model r
 indefinitely when its headers go out at once with a keep-alive, so waiting is possible for every
 program #369 tested except Codex on the Responses format, which needs a real event.
 
+### On #385's counting: a cut, and a batch held at its bound
+
+One Mac, $3, stand-in speed, 20 runs: cutting at the budget with output counted by time ended at
+0.1% under to 0.3% over, and paid $0.57 a run for cut answers; #385 measured $2.99 to $3.03 and
+$0.52 to $0.92. Holding the typical output with a cut behind it ended 2% to 6% under, with nothing
+cut; #385 measured 7% under.
+
+A team of five, $15, a real model's speed. Over and under are the worst of 20 runs.
+
+| Way | `cut`: over, worst | `cut`: under, worst | `cut`: paid for cut answers | `typical-cut`: over, worst | `typical-cut`: under, worst |
+|---|---:|---:|---:|---:|---:|
+| One boundary | +0.0% | +0.0% | $1.43 | −0.1% | −1.5% |
+| Central ledger, 30 ms | +0.0% | +0.0% | $1.44 | −0.1% | −1.5% |
+| Central ledger, 150 ms | +0.0% | +0.0% | $1.47 | −0.2% | −1.5% |
+| Leases, 30 ms | +0.0% | +0.0% | $1.85 | +0.0% | −2.2% |
+| Leases in a Git repository, 2 s | +0.2% | −10.1% | $1.89 | −0.1% | −3.0% |
+| Gossip every 1 s | +0.1% | +0.0% | $1.44 | −1.3% | −4.1% |
+| Gossip every 10 s | +0.6% | +0.2% | $1.45 | −1.3% | −4.5% |
+| Fixed fifths | −19.9% | −20.0% | $1.40 | −22.1% | −25.7% |
+| Gossip, team cut in two for 10 minutes | +35.3% | +8.3% | $1.60 | +24.5% | +8.3% |
+| Gossip, cut in two, escrow on silence | +0.0% | +0.0% | $1.56 | −1.1% | −3.6% |
+| Central, ledger down 10 minutes, calls wait | +0.0% | +0.0% | $1.18 | −0.3% | −1.4% |
+| Leases, ledger down 10 minutes | +0.0% | +0.0% | $1.52 | +0.0% | −7.7% |
+
+A ledger asked per call cuts by telling each Mac with calls under way, half a round trip later.
+Under leases each Mac decides alone: its first version cut as soon as its slice was spent and the
+ledger's last answer had been "nothing left", which ended the team up to 38% under through Git
+and, when the ledger was down, 3% over, since a Mac waiting for an answer did not cut. The rule
+above (ask once more; cut on "nothing left" or after a second and a round trip without an answer)
+fixed both. Its cost is the extra cut answers in the table, and 25 to 38 messages per call at the
+end of a run with plain `cut`, from recalls.
+
+The batch: the medium member sends one at 120 s with a $4 bound, which costs $1.50 and whose
+results come back at 1,500 s, after the budget is spent. Under `typical-cut`:
+
+| Way | Batch admitted | Spent / budget, mean |
+|---|---:|---:|
+| One boundary | 20 of 20 | 0.82 |
+| Central ledger, 30 ms | 20 of 20 | 0.82 |
+| Leases, 30 ms | 20 of 20 | 0.82 |
+| Gossip every 1 s | 20 of 20 | 0.80 |
+| Fixed fifths, $3 each | 0 of 20 | 0.76 |
+
 ### The ledger server
 
 `python3 ledger/test_ledger.py`:
@@ -213,13 +275,16 @@ apart.
   ledger, with a recall, admitted on each Mac with the rule `what-a-budget-promises` settles; the
   ledger runs where the team has a place for it. Options with their costs in its notes.
 - **`what-a-budget-promises`.** Over a team, the overshoot from calls under way is a smaller
-  share of the budget than on one computer: at most 15% for five Macs, against 35% for one. The
-  rule the decision settles applies unchanged on each Mac and on a ledger. Note added.
+  share of the budget than on one computer: at most 15% for five Macs, against 35% for one. With
+  #385's options, `cut` and `typical-cut` both hold a team to its budget through any way that
+  shares one count; under leases `typical-cut` cuts far less. Note added.
 - **`shared-host-system`.** The shared Linux host is the natural place for a team's ledger: the
   computers on it count exactly, and members' Macs reach it already. Note added.
 
 ## Not built, or not measured
 
+- The cut and the whole bound in the ledger server. They are in `book.py` and the simulator; the
+  server admits and settles calls and leases, and would need a way to tell a Mac to cut.
 - Leases inside #374's Zig boundary. The rule is ported from it and the simulator gives #374's
   numbers, but no real agent program ran against a shared ledger.
 - Real networks. Delays are fixed numbers per Mac; no jitter, no packet loss, no NAT.
