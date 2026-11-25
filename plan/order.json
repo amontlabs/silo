@@ -65,6 +65,7 @@
         "first-run-time-macos",
         "macos-vm-driver",
         "network-stack",
+        "way-in-before-the-relay",
         "network-before-rules",
         "where-rules-run",
         "which-process-holds-the-boundary",

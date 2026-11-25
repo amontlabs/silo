@@ -53,3 +53,7 @@ that nothing in their words mentioned (`node scripts/sessiond.js`, `bun test --w
 receipt's outcome showed it from the probe's reports: "1 process it started still running". The
 outcome also shows the last run of the whole suite apart from the last test command of any kind,
 since a run that ends on a narrower test is the case that misleads.
+
+## From option A's first-run transcript
+
+Agent, 25 November 2026, from `research/2026-11-25-first-run-option-a/` (gap 7 there). Option A has no probe, so the receipt's "processes it started that are still running" is "not known yet". That costs more than its line. #377's corpus of 49 false claims from public incidents, read again with the processes taken out (`checks/catch_rate_under_a.py`): on the 30 test cases, the receipt's outcome lines alone catch 3 instead of 7, and with `claims@0.3` they catch or flag 10 instead of 13. On all 49, 22 instead of 25. A process left running is the outcome line A loses, and it is the one `processes-in-the-record` brings back.

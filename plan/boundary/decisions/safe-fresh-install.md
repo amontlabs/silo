@@ -20,3 +20,7 @@ under which a computer never reaches more than you granted.
 
 "Safe" is among the words the record says not to use for the product. The sentence is copied as
 the record has it.
+
+## From option A's first-run transcript
+
+Agent, 25 November 2026, from `research/2026-11-25-first-run-option-a/` (gap 3 there). With #378's network (a card that leads nowhere and a proxy on the Mac), a closed main is possible in the first build, and an open one is no longer "not checked": every connection is recorded by host, and model traffic is read. So #348's `network-before-rules` ("not checked, held or recorded") and #370's `silo status` (`network open, not checked`) are wrong under option A, and the first run's question can offer a real choice. The case against closed as the default in A: A has no rules and no asks, so a main limited to the providers stops the first `npm install` at night with nothing anyone can approve, and the agent spends the night on it. The transcript asks "open" or "providers only", with open as the default, and says what open records. Closed or limited as a default fits once `allow-hold-or-deny` and asks exist.
