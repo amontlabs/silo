@@ -13,11 +13,12 @@ sys.path.insert(0, os.path.join(HERE, "detector"))
 import engine  # noqa: E402  the same engine with two body conditions added
 
 OLD_RULES = os.path.join(OLD, "rules.json")
-NEW_RULES = os.path.join(HERE, "detector", "rules.json")
+BLIND_RULES = os.path.join(HERE, "detector", "rules-blind.json")  # frozen before the captures
+NEW_RULES = os.path.join(HERE, "detector", "rules.json")  # blind + the rules tuned after them
 
 
 def load(path):
-    return (engine.Detector if path == NEW_RULES else Detector).load(path)
+    return (Detector if path == OLD_RULES else engine.Detector).load(path)
 
 
 def score(det, cases):

@@ -173,6 +173,39 @@
      "say": "applies a change set to a Railway environment; the request does not show what it deletes"
     },
     {
+     "id": "railway.volumeInstanceUpdate-detach",
+     "match": {
+      "graphql": {
+       "type": "mutation",
+       "field": "volumeInstanceUpdate",
+       "arg": {
+        "input.serviceId*": [
+         null
+        ]
+       }
+      }
+     },
+     "outcome": "outage",
+     "say": "detaches the Railway volume {volumeId} from its service; the service runs without the data until it is attached again"
+    },
+    {
+     "id": "railway.environmentPatchCommit-scale-zero",
+     "match": {
+      "graphql": {
+       "type": "mutation",
+       "field": "environmentPatchCommit",
+       "arg": {
+        "patch.services.*.deploy.multiRegionConfig.*": [
+         null,
+         0
+        ]
+       }
+      }
+     },
+     "outcome": "outage",
+     "say": "applies a patch to the Railway environment {environmentId} that removes a region's replicas ({matched})"
+    },
+    {
      "id": "railway.cloudAgentDelete",
      "match": {
       "graphql": {
@@ -1394,7 +1427,8 @@
       "rest": {
        "method": "DELETE",
        "path": [
-        "/v*/aliases/{alias}"
+        "/v*/aliases/{alias}",
+        "/aliases/{alias}"
        ]
       }
      },
@@ -1407,7 +1441,8 @@
       "rest": {
        "method": "DELETE",
        "path": [
-        "/v*/projects/{project}/domains/{domain}"
+        "/v*/projects/{project}/domains/{domain}",
+        "/projects/{project}/domains/{domain}"
        ]
       }
      },
@@ -1420,7 +1455,8 @@
       "rest": {
        "method": "DELETE",
        "path": [
-        "/v*/certs/{id}"
+        "/v*/certs/{id}",
+        "/certs/{id}"
        ]
       }
      },
@@ -1434,7 +1470,9 @@
        "method": "DELETE",
        "path": [
         "/v*/projects/{project}/env",
-        "/v*/env"
+        "/v*/env",
+        "/projects/{project}/env",
+        "/env"
        ]
       }
      },
@@ -1447,7 +1485,8 @@
       "rest": {
        "method": "DELETE",
        "path": [
-        "/v*/projects/{project}/custom-environments/{env}"
+        "/v*/projects/{project}/custom-environments/{env}",
+        "/projects/{project}/custom-environments/{env}"
        ]
       }
      },
@@ -1460,7 +1499,8 @@
       "rest": {
        "method": "DELETE",
        "path": [
-        "/v*/user/tokens/{id}"
+        "/v*/user/tokens/{id}",
+        "/user/tokens/{id}"
        ]
       }
      },
@@ -1474,7 +1514,9 @@
        "method": "DELETE",
        "path": [
         "/v*/teams/{team}/members/{uid}",
-        "/v*/projects/{project}/members/{uid}"
+        "/v*/projects/{project}/members/{uid}",
+        "/teams/{team}/members/{uid}",
+        "/projects/{project}/members/{uid}"
        ]
       }
      },
@@ -1487,7 +1529,8 @@
       "rest": {
        "method": "DELETE",
        "path": [
-        "/v*/user"
+        "/v*/user",
+        "/user"
        ]
       }
      },
@@ -1514,7 +1557,8 @@
       "rest": {
        "method": "PATCH",
        "path": [
-        "/v*/domains/records/{record}"
+        "/v*/domains/records/{record}",
+        "/domains/records/{record}"
        ]
       }
      },
@@ -1527,7 +1571,8 @@
       "rest": {
        "method": "PATCH",
        "path": [
-        "/v*/registrar/domains/{domain}/nameservers"
+        "/v*/registrar/domains/{domain}/nameservers",
+        "/registrar/domains/{domain}/nameservers"
        ]
       }
      },
@@ -1540,7 +1585,8 @@
       "rest": {
        "method": "POST",
        "path": [
-        "/v*/projects/{project}/domains/{domain}/move"
+        "/v*/projects/{project}/domains/{domain}/move",
+        "/projects/{project}/domains/{domain}/move"
        ]
       }
      },
@@ -1553,7 +1599,8 @@
       "rest": {
        "method": "PATCH",
        "path": [
-        "/v*/env/{id}/unlink/{project}"
+        "/v*/env/{id}/unlink/{project}",
+        "/env/{id}/unlink/{project}"
        ]
       }
      },
@@ -1566,7 +1613,8 @@
       "rest": {
        "method": "POST",
        "path": [
-        "/v*/projects/{project}/pause"
+        "/v*/projects/{project}/pause",
+        "/projects/{project}/pause"
        ]
       }
      },
@@ -1580,7 +1628,9 @@
        "method": "POST",
        "path": [
         "/v*/edge-cache/dangerously-delete-by-tags",
-        "/v*/edge-cache/dangerously-delete-by-src-images"
+        "/v*/edge-cache/dangerously-delete-by-src-images",
+        "/edge-cache/dangerously-delete-by-tags",
+        "/edge-cache/dangerously-delete-by-src-images"
        ]
       }
      },
@@ -1594,7 +1644,9 @@
        "method": "POST",
        "path": [
         "/v*/global-config/{id}/backups/{backup}/restore",
-        "/v*/edge-config/{id}/backups/{backup}/restore"
+        "/v*/edge-config/{id}/backups/{backup}/restore",
+        "/global-config/{id}/backups/{backup}/restore",
+        "/edge-config/{id}/backups/{backup}/restore"
        ]
       }
      },
@@ -1608,7 +1660,9 @@
        "method": "POST",
        "path": [
         "/v*/installations/{id}/credentials/revoke",
-        "/v*/installations/{id}/credentials/rotate"
+        "/v*/installations/{id}/credentials/rotate",
+        "/installations/{id}/credentials/revoke",
+        "/installations/{id}/credentials/rotate"
        ]
       }
      },
@@ -1621,7 +1675,8 @@
       "rest": {
        "method": "POST",
        "path": [
-        "/v*/kms/issuers/{issuer}/keys/{key}/revoke"
+        "/v*/kms/issuers/{issuer}/keys/{key}/revoke",
+        "/kms/issuers/{issuer}/keys/{key}/revoke"
        ]
       }
      },
@@ -1665,7 +1720,12 @@
         "/v*/registrar/domains/buy",
         "/v*/registrar/domains/{domain}/buy",
         "/v*/registrar/domains/{domain}/renew",
-        "/v*/registrar/domains/{domain}/transfer"
+        "/v*/registrar/domains/{domain}/transfer",
+        "/billing/buy",
+        "/registrar/domains/buy",
+        "/registrar/domains/{domain}/buy",
+        "/registrar/domains/{domain}/renew",
+        "/registrar/domains/{domain}/transfer"
        ]
       }
      },
@@ -1681,7 +1741,10 @@
         "/v*/user/tokens",
         "/api-keys",
         "/v*/global-config/{id}/token",
-        "/v*/edge-config/{id}/token"
+        "/v*/edge-config/{id}/token",
+        "/user/tokens",
+        "/global-config/{id}/token",
+        "/edge-config/{id}/token"
        ]
       }
      },
@@ -1694,7 +1757,8 @@
       "rest": {
        "method": "PUT",
        "path": [
-        "/v*/projects/{project}/feature-flags/sdk-keys"
+        "/v*/projects/{project}/feature-flags/sdk-keys",
+        "/projects/{project}/feature-flags/sdk-keys"
        ]
       }
      },
@@ -1708,7 +1772,9 @@
        "method": "POST",
        "path": [
         "/v*/teams/{team}/members",
-        "/v*/projects/{project}/members"
+        "/v*/projects/{project}/members",
+        "/teams/{team}/members",
+        "/projects/{project}/members"
        ]
       }
      },
@@ -1721,7 +1787,8 @@
       "rest": {
        "method": "PATCH",
        "path": [
-        "/v*/teams/{team}/members/{uid}"
+        "/v*/teams/{team}/members/{uid}",
+        "/teams/{team}/members/{uid}"
        ]
       }
      },
@@ -1735,7 +1802,9 @@
        "method": "POST",
        "path": [
         "/v*/access-groups/{group}/projects",
-        "/v*/access-groups/{group}"
+        "/v*/access-groups/{group}",
+        "/access-groups/{group}/projects",
+        "/access-groups/{group}"
        ]
       }
      },
@@ -1748,7 +1817,8 @@
       "rest": {
        "method": "PATCH",
        "path": [
-        "/v*/access-groups/{group}/projects/{project}"
+        "/v*/access-groups/{group}/projects/{project}",
+        "/access-groups/{group}/projects/{project}"
        ]
       }
      },
@@ -1761,7 +1831,8 @@
       "rest": {
        "method": "POST",
        "path": [
-        "/v*/teams/{team}/dsync-roles"
+        "/v*/teams/{team}/dsync-roles",
+        "/teams/{team}/dsync-roles"
        ]
       }
      },
@@ -1774,7 +1845,8 @@
       "rest": {
        "method": "PUT",
        "path": [
-        "/v*/organizations/{org}/dsync/groups/{group}"
+        "/v*/organizations/{org}/dsync/groups/{group}",
+        "/organizations/{org}/dsync/groups/{group}"
        ]
       }
      },
@@ -1788,7 +1860,8 @@
        "method": "PATCH",
        "path": [
         "/v*/projects/{project}/protection-bypass",
-        "/aliases/{id}/protection-bypass"
+        "/aliases/{id}/protection-bypass",
+        "/projects/{project}/protection-bypass"
        ]
       }
      },
@@ -1801,7 +1874,8 @@
       "rest": {
        "method": "PATCH",
        "path": [
-        "/v*/projects/{project}"
+        "/v*/projects/{project}",
+        "/projects/{project}"
        ],
        "body": {
         "field": "ssoProtection",
@@ -1820,7 +1894,8 @@
       "rest": {
        "method": "PATCH",
        "path": [
-        "/v*/projects/{project}"
+        "/v*/projects/{project}",
+        "/projects/{project}"
        ],
        "body": {
         "field": "passwordProtection",
@@ -1839,7 +1914,8 @@
       "rest": {
        "method": "PATCH",
        "path": [
-        "/v*/projects/{project}"
+        "/v*/projects/{project}",
+        "/projects/{project}"
        ],
        "body": {
         "field": "publicSource",
@@ -1862,7 +1938,9 @@
        ],
        "path": [
         "/v*/security/firewall/bypass",
-        "/v*/security/firewall/bypass/rules"
+        "/v*/security/firewall/bypass/rules",
+        "/security/firewall/bypass",
+        "/security/firewall/bypass/rules"
        ]
       }
      },
@@ -1875,7 +1953,8 @@
       "rest": {
        "method": "PUT",
        "path": [
-        "/v*/security/firewall/config"
+        "/v*/security/firewall/config",
+        "/security/firewall/config"
        ]
       }
      },
@@ -1890,7 +1969,10 @@
        "path": [
         "/v*/drains",
         "/v*/log-drains",
-        "/v*/integrations/log-drains"
+        "/v*/integrations/log-drains",
+        "/drains",
+        "/log-drains",
+        "/integrations/log-drains"
        ]
       }
      },
@@ -1903,7 +1985,8 @@
       "rest": {
        "method": "PATCH",
        "path": [
-        "/v*/drains/{id}"
+        "/v*/drains/{id}",
+        "/drains/{id}"
        ]
       }
      },
@@ -1916,7 +1999,8 @@
       "rest": {
        "method": "POST",
        "path": [
-        "/v*/webhooks"
+        "/v*/webhooks",
+        "/webhooks"
        ]
       }
      },
@@ -1929,7 +2013,8 @@
       "rest": {
        "method": "POST",
        "path": [
-        "/v*/vcr/repository/{repo}/permissions"
+        "/v*/vcr/repository/{repo}/permissions",
+        "/vcr/repository/{repo}/permissions"
        ]
       }
      },
@@ -1958,7 +2043,10 @@
        "path": [
         "/v*/projects/{project}/avatar",
         "/v*/teams/{team}/invites/{invite}",
-        "/v*/{team}/{project}/{repo}/blobs/uploads/{uuid}"
+        "/v*/{team}/{project}/{repo}/blobs/uploads/{uuid}",
+        "/projects/{project}/avatar",
+        "/teams/{team}/invites/{invite}",
+        "/{team}/{project}/{repo}/blobs/uploads/{uuid}"
        ]
       }
      },
@@ -3860,6 +3948,20 @@
      },
      "outcome": "gone",
      "say": "deletes or empties the storage bucket {bucket}"
+    },
+    {
+     "id": "supabase.storage-object-delete",
+     "match": {
+      "rest": {
+       "method": "DELETE",
+       "path": [
+        "/storage/v1/object/{bucket}",
+        "/storage/v1/object/{bucket}/{path+}"
+       ]
+      }
+     },
+     "outcome": "gone",
+     "say": "deletes objects from the storage bucket {bucket}"
     }
    ]
   },

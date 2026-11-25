@@ -6,7 +6,8 @@ The other APIs of #353 (GitHub, Heroku, Stripe, Neon, Turso, Gmail, AWS, MCP) ar
 added after them. A new outcome word, "exposed", marks calls that give access or data to someone
 new (the challenge in #353 details/detector.md).
 
-Run: python3 rules_build.py   (writes rules.json next to it)
+Run: python3 rules_build.py   (writes rules-blind.json, as frozen before the captures, and rules.json,
+which adds the rules tuned after them)
 """
 import copy, json, os
 
@@ -292,8 +293,43 @@ CF = [
 
 ADD = {"railway": RW, "fly": FLY, "vercel": VERCEL, "supabase": SB, "cloudflare": CF}
 
+# ------------------------------------------------------------------ Tuned after the captures
+# Everything above was frozen (rules-blind.json) before any CLI ran. These rules were added after
+# the blind measurement, one per miss, and are measured separately as "tuned".
+TUNED = {
+    "railway": [
+        # `railway volume detach` sends volumeInstanceUpdate(input: {serviceId: null}). The key glob
+        # only matches when serviceId is in the request, so a mount-path change stays allowed.
+        gql("railway.volumeInstanceUpdate-detach", "volumeInstanceUpdate", "outage",
+            "detaches the Railway volume {volumeId} from its service; the service runs without the data until it is attached again",
+            arg={"input.serviceId*": [None]}),
+        # `railway scale <region>=0` removes the region from the patch: multiRegionConfig.<region>: null.
+        gql("railway.environmentPatchCommit-scale-zero", "environmentPatchCommit", "outage",
+            "applies a patch to the Railway environment {environmentId} that removes a region's replicas ({matched})",
+            arg={"patch.services.*.deploy.multiRegionConfig.*": [None, 0]}),
+    ],
+    "supabase-data": [
+        # `supabase storage rm` calls the Storage API of the project, which is not in the Management API spec.
+        rest("supabase.storage-object-delete", "DELETE", ["/storage/v1/object/{bucket}", "/storage/v1/object/{bucket}/{path+}"],
+             "gone", "deletes objects from the storage bucket {bucket}"),
+    ],
+}
 
-def main():
+
+def unversioned(rules):
+    """The Vercel CLI calls some endpoints with no version (/teams/{id}/members, /now/aliases).
+    Each Vercel path written as /v*/x also matches /x."""
+    out = copy.deepcopy(rules)
+    for r in out:
+        m = r["match"].get("rest")
+        if not m:
+            continue
+        paths = m["path"] if isinstance(m["path"], list) else [m["path"]]
+        m["path"] = paths + [p[len(V):] for p in paths if p.startswith(V + "/") and p[len(V):] not in paths]
+    return out
+
+
+def build(tuned):
     rules = json.load(open(os.path.join(OLD, "rules.json")))
     out = copy.deepcopy(rules)
     out["about"] = (rules.get("about", "") + " Extended on 2026-11-25 for Railway, Fly.io, Vercel, Supabase and Cloudflare "
@@ -309,7 +345,11 @@ def main():
             ff = r["match"].get("graphql", {}).get("field_from")
             if ff:
                 ff["file"] = OLDP + ff["file"]
-        new = ADD.get(api["id"])
+        new = list(ADD.get(api["id"], []))
+        if tuned:
+            if api["id"] == "vercel":
+                new = unversioned(new)
+            new = TUNED.get(api["id"], []) + new
         if not new:
             continue
         have = {r["id"] for r in api["rules"]}
@@ -317,10 +357,15 @@ def main():
         assert not dup, dup
         # specific rules first; #353's fallbacks keep working because fallbacks only fire when nothing else matched
         api["rules"] = [r for r in api["rules"] if not r.get("fallback")] + new + [r for r in api["rules"] if r.get("fallback")]
-    with open(os.path.join(HERE, "rules.json"), "w") as f:
+    name = "rules.json" if tuned else "rules-blind.json"
+    with open(os.path.join(HERE, name), "w") as f:
         json.dump(out, f, indent=1)
-    print("rules.json:", sum(len(a.get("rules", [])) for a in out["apis"]), "rules,",
-          sum(len(v) for v in ADD.values()), "new")
+    print(name + ":", sum(len(a.get("rules", [])) for a in out["apis"]), "rules")
+
+
+def main():
+    build(False)
+    build(True)
 
 
 if __name__ == "__main__":

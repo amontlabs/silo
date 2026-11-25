@@ -41,3 +41,11 @@ worth saying, and a repository made public cannot be made private again for whoe
 - npm has its own hold for a publish: staged publishing keeps a version hidden until a maintainer
   approves it with a second factor. A token that may only stage, held by Silo, makes every publish
   wait for that approval.
+- On the five APIs measured on 25 November 2026 (Railway, Fly.io, Vercel, Supabase, Cloudflare),
+  102 of the 341 documented writes that should be held are exposed, and about half of them give
+  access to someone named rather than to anyone: `flyctl tokens create`, `vercel teams invite`, a Vercel
+  firewall bypass, a Supabase database opened to `0.0.0.0/0`, SSL enforcement turned off. #353's
+  rules held 8 of the 102. The answer's "readable by anyone" leaves out a token made for an
+  agent's own use. Proposed wording: "Exposed: it gives access or data to someone who did not
+  have it, such as a new token, an invitation, a public bucket or an opened network."
+  `research/2026-11-25-destructive-calls-platforms/README.md`.

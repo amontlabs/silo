@@ -35,3 +35,13 @@ right, in 0.06 ms per request at the median.
   AWS send reads as POST, so a list by method lets writes through or refuses reads.
 - SQL sent inside HTTPS (Supabase's `/database/query`, Neon's `/sql`, Turso, Cloudflare D1)
   should use the same classifier as the Postgres proxy designed in `research/2026-11-24-gap-fixes/`.
+- Extended on 25 November 2026 to every documented write of Railway, Fly.io, Vercel, Supabase and
+  Cloudflare (1,085 requests, labelled by hand), then measured blind on 121 commands of their own
+  CLIs: 62 of 66 writes that should be held were held, and none of 125 other requests.
+  `research/2026-11-25-destructive-calls-platforms/README.md`.
+- 14 of the 100 writes those CLIs sent are not in the provider's documented API. The Vercel CLI
+  calls `/v10/projects/{id}/env/{id}` where the spec has `/v9`, and `/teams/{id}/members` and
+  `/now/aliases/{id}` with no version. The Supabase CLI deletes storage objects through the
+  project's own host, which the Management API spec does not cover. A set that lists operations
+  by exact path would hold all 14 as unknown, without their sentence. A set should match the
+  version segment of a path as any version.
