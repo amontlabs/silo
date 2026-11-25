@@ -49,3 +49,13 @@ worth saying, and a repository made public cannot be made private again for whoe
   agent's own use. Proposed wording: "Exposed: it gives access or data to someone who did not
   have it, such as a new token, an invitation, a public bucket or an opened network."
   `research/2026-11-25-destructive-calls-platforms/README.md`.
+- A second, blind labelling of the same 1,085 writes, under the wording in force, called 11 of
+  those 102 exposed and 74 of them access given to someone named. Applied as written, the
+  proposed wording above also holds tokens an agent mints for its own run: `railway ssh` mints one
+  through `generateShellToken`, a Vercel build asks for its project's OIDC token. That is 86
+  operations more than today. Proposed instead: "Exposed: it makes something readable by anyone,
+  or gives lasting access to someone who did not have it: a new long-lived token or key, an
+  invitation or a role, the project moved to another account, data sent to an outside address."
+  Removing 2FA, a passkey or changing the account's email fit no outcome; they are a protection
+  turned off. Paid resources created (a Postgres cluster, a disk grown, a read replica, static
+  IPs) are the outcome the rules miss most: 17 pass. `research/2026-11-25-second-labeller/README.md`.

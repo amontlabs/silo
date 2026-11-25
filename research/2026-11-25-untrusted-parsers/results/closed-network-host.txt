@@ -1,0 +1,3 @@
+Host header other than the URL's: [b'{"headers":{"Connection":["close"]},"host":"registry.npmjs.org"}']
+second request on the connection: [b'{"headers":{},"host":"registry.npmjs.org"}HTTP/1.1 200 OK', b'{"headers":{"Connection":["close"]},"host":"collector.example"}']
+proxy log: {"method": "GET", "host": "registry.npmjs.org", "port": 80, "decision": "allowed", "up": 87, "down": 191, "time": 1795614867.227}

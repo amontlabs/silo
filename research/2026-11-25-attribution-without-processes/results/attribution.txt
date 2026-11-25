@@ -1,0 +1,80 @@
+night exec-command · 20 tool calls · checkpoints: one in 1 · tool calls open in a window with a file fact: 1.4 on average
+facts                                              nunattr. (probe)        scored         right   named/under    right call         wrong          none
+file, agent program's own                        174            32           142           130             0             0             0            12
+file, the work                                   461             0           461           458           453           457             0             3
+connection, the work                               4             0             4             3             3             3             0             1
+connection, agent program's own                    3             0             3             2             0             0             0             1
+how, the work: {('file', 'content'): 1, ('file', 'named'): 32, ('file', 'none'): 3, ('file', 'under'): 400, ('file', 'implied'): 20, ('file', 'only one'): 4, ('file', 'result'): 1, ('connection', 'none'): 1, ('connection', 'named'): 3}
+
+night code-mode · 16 tool calls · checkpoints: one in 1 · tool calls open in a window with a file fact: 1.1 on average
+facts                                              nunattr. (probe)        scored         right   named/under    right call         wrong          none
+file, agent program's own                        173           126            47            12             0             0             0            35
+file, the work                                   461             6           455           453           452           452             0             2
+connection, the work                               4             3             1             1             1             1             0             0
+connection, agent program's own                    3             3             0             0             0             0             0             0
+how, the work: {('file', 'content'): 1, ('file', 'named'): 31, ('file', 'only one'): 1, ('file', 'under'): 400, ('file', 'none'): 8, ('file', 'implied'): 20, ('connection', 'none'): 3, ('connection', 'named'): 1}
+
+night code-mode-fix · 20 tool calls · checkpoints: one in 1 · tool calls open in a window with a file fact: 1.3 on average
+facts                                              nunattr. (probe)        scored         right   named/under    right call         wrong          none
+file, agent program's own                        176            33           143           132             0             0             0            11
+file, the work                                   460             0           460           458           453           457             0             2
+connection, the work                               4             0             4             3             3             3             0             1
+connection, agent program's own                    3             0             3             2             0             0             0             1
+how, the work: {('file', 'content'): 1, ('file', 'named'): 32, ('file', 'under'): 400, ('file', 'none'): 2, ('file', 'implied'): 20, ('file', 'only one'): 4, ('file', 'result'): 1, ('connection', 'none'): 1, ('connection', 'named'): 3}
+
+night code-mode-json · 20 tool calls · checkpoints: one in 1 · tool calls open in a window with a file fact: 1.3 on average
+facts                                              nunattr. (probe)        scored         right   named/under    right call         wrong          none
+file, agent program's own                        176            32           144           133             0             0             0            11
+file, the work                                   461             0           461           459           453           458             0             2
+connection, the work                               4             0             4             3             3             3             0             1
+connection, agent program's own                    3             0             3             2             0             0             0             1
+how, the work: {('file', 'content'): 1, ('file', 'named'): 32, ('file', 'only one'): 5, ('file', 'under'): 400, ('file', 'none'): 2, ('file', 'implied'): 20, ('file', 'result'): 1, ('connection', 'none'): 1, ('connection', 'named'): 3}
+
+night one-main · 20 tool calls · checkpoints: one in 1 · tool calls open in a window with a file fact: 1.8 on average
+facts                                              nunattr. (probe)        scored         right   named/under    right call         wrong          none
+file, agent program's own                        172            33           139           130             0             0             0             9
+file, the work                                   461             0           461           454           453           453             0             7
+connection, the work                               4             0             4             3             3             3             0             1
+connection, agent program's own                    3             0             3             2             0             0             0             1
+how, the work: {('file', 'none'): 7, ('file', 'result'): 1, ('file', 'content'): 1, ('file', 'named'): 32, ('file', 'under'): 400, ('file', 'implied'): 20, ('connection', 'none'): 1, ('connection', 'named'): 3}
+
+night one-main-code-mode · 20 tool calls · checkpoints: one in 1 · tool calls open in a window with a file fact: 1.9 on average
+facts                                              nunattr. (probe)        scored         right   named/under    right call         wrong          none
+file, agent program's own                        176            38           138           127             0             0             0            11
+file, the work                                   460             1           459           455           453           454             0             4
+connection, the work                               4             0             4             3             3             3             0             1
+connection, agent program's own                    3             0             3             2             0             0             0             1
+how, the work: {('file', 'content'): 1, ('file', 'none'): 5, ('file', 'result'): 1, ('file', 'named'): 32, ('file', 'only one'): 1, ('file', 'under'): 400, ('file', 'implied'): 20, ('connection', 'none'): 1, ('connection', 'named'): 3}
+
+night one-main · 20 tool calls · checkpoints: one in 2 · tool calls open in a window with a file fact: 2.8 on average
+facts                                              nunattr. (probe)        scored         right   named/under    right call         wrong          none
+file, agent program's own                        164            33           131           122             0             0             0             9
+file, the work                                   459             2           457           454           453           453             0             3
+connection, the work                               4             0             4             3             3             3             0             1
+connection, agent program's own                    3             0             3             2             0             0             0             1
+how, the work: {('file', 'none'): 5, ('file', 'result'): 1, ('file', 'content'): 1, ('file', 'named'): 32, ('file', 'under'): 400, ('file', 'implied'): 20, ('connection', 'none'): 1, ('connection', 'named'): 3}
+
+night one-main · 20 tool calls · checkpoints: one in 4 · tool calls open in a window with a file fact: 4.3 on average
+facts                                              nunattr. (probe)        scored         right   named/under    right call         wrong          none
+file, agent program's own                        140            27           113            99             0             0             0            14
+file, the work                                   457             2           455           454           453           453             0             1
+connection, the work                               4             0             4             3             3             3             0             1
+connection, agent program's own                    3             0             3             2             0             0             0             1
+how, the work: {('file', 'none'): 3, ('file', 'result'): 1, ('file', 'content'): 1, ('file', 'named'): 32, ('file', 'under'): 400, ('file', 'implied'): 20, ('connection', 'none'): 1, ('connection', 'named'): 3}
+
+night one-main · 20 tool calls · checkpoints: one in 8 · tool calls open in a window with a file fact: 8.0 on average
+facts                                              nunattr. (probe)        scored         right   named/under    right call         wrong          none
+file, agent program's own                        129            21           108            91             0             0             0            17
+file, the work                                   456             1           455           454           453           453             0             1
+connection, the work                               4             0             4             3             3             3             0             1
+connection, agent program's own                    3             0             3             2             0             0             0             1
+how, the work: {('file', 'none'): 2, ('file', 'result'): 1, ('file', 'content'): 1, ('file', 'named'): 32, ('file', 'under'): 400, ('file', 'implied'): 20, ('connection', 'none'): 1, ('connection', 'named'): 3}
+
+night one-main · 20 tool calls · checkpoints: one in 16 · tool calls open in a window with a file fact: 11.5 on average
+facts                                              nunattr. (probe)        scored         right   named/under    right call         wrong          none
+file, agent program's own                        122            16           106            89             0             0             0            17
+file, the work                                   456             1           455           454           454           452             0             1
+connection, the work                               4             0             4             3             3             3             0             1
+connection, agent program's own                    3             0             3             2             0             0             0             1
+how, the work: {('file', 'none'): 2, ('file', 'named'): 33, ('file', 'content'): 1, ('file', 'under'): 400, ('file', 'implied'): 20, ('connection', 'none'): 1, ('connection', 'named'): 3}
+

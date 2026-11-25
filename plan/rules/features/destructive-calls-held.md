@@ -45,3 +45,11 @@ brings none of them back.
 - It sits beside `merges-and-deploys-held`, which holds a merge and a deploy. Holding deploys on
   these hosts also closes the case of a service that deletes from inside the provider.
 - Everything behind this feature: `research/2026-11-24-destructive-calls/`.
+- On a second, blind reading of the 1,085 documented writes of Railway, Fly.io, Vercel, Supabase
+  and Cloudflare, settled case by case, the rules of
+  `research/2026-11-25-destructive-calls-platforms/` hold 240 of 267 that should be held and
+  wrongly hold 125 of 575 (with the wording of "exposed" in force). 66 of the wrong holds are
+  revocations: a member removed, a webhook or log drain deleted, a firewall bypass or an SSH key
+  removed. A revocation should pass; an ask for it at night is noise. Cloudflare's D1 has an
+  undelete endpoint and Supabase restores a deleted branch, so the ask can say these come back.
+  `research/2026-11-25-second-labeller/README.md`.

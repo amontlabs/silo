@@ -1,0 +1,1391 @@
+{
+ "353": {
+  "railway/plain": {
+   "hold_n": 10,
+   "tp": 10,
+   "allow_n": 15,
+   "tn": 15
+  },
+  "railway/evasion": {
+   "hold_n": 41,
+   "tp": 40,
+   "fn": 1
+  },
+  "github/plain": {
+   "hold_n": 12,
+   "tp": 12,
+   "allow_n": 8,
+   "tn": 8
+  },
+  "github/evasion": {
+   "hold_n": 3,
+   "tp": 3
+  },
+  "git/plain": {
+   "hold_n": 1,
+   "tp": 1,
+   "allow_n": 3,
+   "tn": 3
+  },
+  "git/evasion": {
+   "hold_n": 2,
+   "fn": 1,
+   "tp": 1
+  },
+  "vercel/plain": {
+   "hold_n": 8,
+   "tp": 8,
+   "allow_n": 6,
+   "tn": 6
+  },
+  "vercel/evasion": {
+   "hold_n": 11,
+   "tp": 11
+  },
+  "fly/plain": {
+   "hold_n": 5,
+   "tp": 5,
+   "allow_n": 5,
+   "tn": 5
+  },
+  "fly/evasion": {
+   "hold_n": 1,
+   "tp": 1
+  },
+  "heroku/plain": {
+   "hold_n": 4,
+   "tp": 4,
+   "allow_n": 5,
+   "tn": 5
+  },
+  "heroku/evasion": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "cloudflare/plain": {
+   "hold_n": 8,
+   "tp": 8,
+   "allow_n": 6,
+   "tn": 6
+  },
+  "cloudflare/evasion": {
+   "hold_n": 3,
+   "tp": 3
+  },
+  "stripe/plain": {
+   "hold_n": 7,
+   "tp": 7,
+   "allow_n": 8,
+   "tn": 8
+  },
+  "stripe/evasion": {
+   "hold_n": 4,
+   "tp": 4
+  },
+  "supabase/plain": {
+   "hold_n": 11,
+   "tp": 11,
+   "allow_n": 12,
+   "tn": 12
+  },
+  "supabase/evasion": {
+   "hold_n": 11,
+   "tp": 9,
+   "fn": 2
+  },
+  "supabase-data/plain": {
+   "hold_n": 3,
+   "tp": 3,
+   "allow_n": 3,
+   "tn": 3
+  },
+  "supabase-data/evasion": {
+   "hold_n": 2,
+   "fn": 1,
+   "tp": 1
+  },
+  "neon/plain": {
+   "hold_n": 6,
+   "tp": 6,
+   "allow_n": 4,
+   "tn": 4
+  },
+  "neon/evasion": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "turso/plain": {
+   "hold_n": 2,
+   "tp": 2,
+   "allow_n": 2,
+   "tn": 2
+  },
+  "turso/evasion": {
+   "hold_n": 4,
+   "tp": 4
+  },
+  "aws/plain": {
+   "hold_n": 9,
+   "tp": 9,
+   "allow_n": 12,
+   "tn": 11,
+   "fp": 1
+  },
+  "aws/evasion": {
+   "hold_n": 11,
+   "tp": 11
+  },
+  "mcp/plain": {
+   "hold_n": 5,
+   "tp": 5,
+   "allow_n": 8,
+   "tn": 8
+  },
+  "mcp/evasion": {
+   "hold_n": 6,
+   "tp": 5,
+   "fn": 1
+  },
+  "gmail/plain": {
+   "hold_n": 2,
+   "tp": 2,
+   "allow_n": 3,
+   "tn": 3
+  },
+  "gmail/evasion": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "capture-aws/capture": {
+   "allow_n": 1,
+   "tn": 1,
+   "hold_n": 5,
+   "tp": 5
+  },
+  "capture-fly/capture": {
+   "allow_n": 5,
+   "tn": 5,
+   "hold_n": 4,
+   "tp": 4
+  },
+  "capture-gh/capture": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "capture-git/capture": {
+   "allow_n": 5,
+   "tn": 5,
+   "hold_n": 2,
+   "tp": 2
+  },
+  "capture-heroku/capture": {
+   "allow_n": 1,
+   "tn": 1,
+   "hold_n": 1,
+   "tp": 1
+  },
+  "capture-neon/capture": {
+   "hold_n": 2,
+   "tp": 2,
+   "allow_n": 3,
+   "tn": 3
+  },
+  "capture-railway/capture": {
+   "allow_n": 16,
+   "tn": 16,
+   "hold_n": 3,
+   "tp": 3
+  },
+  "capture-stripe/capture": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "capture-supabase/capture": {
+   "hold_n": 1,
+   "tp": 1,
+   "allow_n": 1,
+   "tn": 1
+  },
+  "capture-vercel/capture": {
+   "allow_n": 7,
+   "tn": 7,
+   "hold_n": 3,
+   "tp": 3
+  },
+  "capture-wrangler/capture": {
+   "allow_n": 7,
+   "tn": 7,
+   "hold_n": 3,
+   "tp": 3
+  },
+  "total": {
+   "hold_n": 226,
+   "tp": 220,
+   "allow_n": 146,
+   "tn": 145,
+   "fn": 6,
+   "fp": 1
+  }
+ },
+ "383": {
+  "railway/plain": {
+   "hold_n": 10,
+   "tp": 10,
+   "allow_n": 15,
+   "tn": 15
+  },
+  "railway/evasion": {
+   "hold_n": 41,
+   "tp": 40,
+   "fn": 1
+  },
+  "github/plain": {
+   "hold_n": 12,
+   "tp": 12,
+   "allow_n": 8,
+   "tn": 8
+  },
+  "github/evasion": {
+   "hold_n": 3,
+   "tp": 3
+  },
+  "git/plain": {
+   "hold_n": 1,
+   "tp": 1,
+   "allow_n": 3,
+   "tn": 3
+  },
+  "git/evasion": {
+   "hold_n": 2,
+   "fn": 1,
+   "tp": 1
+  },
+  "vercel/plain": {
+   "hold_n": 8,
+   "tp": 8,
+   "allow_n": 6,
+   "tn": 6
+  },
+  "vercel/evasion": {
+   "hold_n": 11,
+   "tp": 11
+  },
+  "fly/plain": {
+   "hold_n": 5,
+   "tp": 5,
+   "allow_n": 5,
+   "tn": 5
+  },
+  "fly/evasion": {
+   "hold_n": 1,
+   "tp": 1
+  },
+  "heroku/plain": {
+   "hold_n": 4,
+   "tp": 4,
+   "allow_n": 5,
+   "tn": 5
+  },
+  "heroku/evasion": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "cloudflare/plain": {
+   "hold_n": 8,
+   "tp": 8,
+   "allow_n": 6,
+   "tn": 6
+  },
+  "cloudflare/evasion": {
+   "hold_n": 3,
+   "tp": 3
+  },
+  "stripe/plain": {
+   "hold_n": 7,
+   "tp": 7,
+   "allow_n": 8,
+   "tn": 8
+  },
+  "stripe/evasion": {
+   "hold_n": 4,
+   "tp": 4
+  },
+  "supabase/plain": {
+   "hold_n": 11,
+   "tp": 11,
+   "allow_n": 12,
+   "tn": 12
+  },
+  "supabase/evasion": {
+   "hold_n": 11,
+   "tp": 9,
+   "fn": 2
+  },
+  "supabase-data/plain": {
+   "hold_n": 3,
+   "tp": 3,
+   "allow_n": 3,
+   "tn": 3
+  },
+  "supabase-data/evasion": {
+   "hold_n": 2,
+   "fn": 1,
+   "tp": 1
+  },
+  "neon/plain": {
+   "hold_n": 6,
+   "tp": 6,
+   "allow_n": 4,
+   "tn": 4
+  },
+  "neon/evasion": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "turso/plain": {
+   "hold_n": 2,
+   "tp": 2,
+   "allow_n": 2,
+   "tn": 2
+  },
+  "turso/evasion": {
+   "hold_n": 4,
+   "tp": 4
+  },
+  "aws/plain": {
+   "hold_n": 9,
+   "tp": 9,
+   "allow_n": 12,
+   "tn": 11,
+   "fp": 1
+  },
+  "aws/evasion": {
+   "hold_n": 11,
+   "tp": 11
+  },
+  "mcp/plain": {
+   "hold_n": 5,
+   "tp": 5,
+   "allow_n": 8,
+   "tn": 8
+  },
+  "mcp/evasion": {
+   "hold_n": 6,
+   "tp": 5,
+   "fn": 1
+  },
+  "gmail/plain": {
+   "hold_n": 2,
+   "tp": 2,
+   "allow_n": 3,
+   "tn": 3
+  },
+  "gmail/evasion": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "capture-aws/capture": {
+   "allow_n": 1,
+   "tn": 1,
+   "hold_n": 5,
+   "tp": 5
+  },
+  "capture-fly/capture": {
+   "allow_n": 5,
+   "tn": 5,
+   "hold_n": 4,
+   "tp": 4
+  },
+  "capture-gh/capture": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "capture-git/capture": {
+   "allow_n": 5,
+   "tn": 5,
+   "hold_n": 2,
+   "tp": 2
+  },
+  "capture-heroku/capture": {
+   "allow_n": 1,
+   "tn": 1,
+   "hold_n": 1,
+   "tp": 1
+  },
+  "capture-neon/capture": {
+   "hold_n": 2,
+   "tp": 2,
+   "allow_n": 3,
+   "tn": 3
+  },
+  "capture-railway/capture": {
+   "allow_n": 16,
+   "tn": 16,
+   "hold_n": 3,
+   "tp": 3
+  },
+  "capture-stripe/capture": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "capture-supabase/capture": {
+   "hold_n": 1,
+   "tp": 1,
+   "allow_n": 1,
+   "tn": 1
+  },
+  "capture-vercel/capture": {
+   "allow_n": 7,
+   "tn": 7,
+   "hold_n": 3,
+   "tp": 3
+  },
+  "capture-wrangler/capture": {
+   "allow_n": 7,
+   "tn": 7,
+   "hold_n": 3,
+   "tp": 3
+  },
+  "total": {
+   "hold_n": 226,
+   "tp": 220,
+   "allow_n": 146,
+   "tn": 145,
+   "fn": 6,
+   "fp": 1
+  }
+ },
+ "383blind": {
+  "railway/plain": {
+   "hold_n": 10,
+   "tp": 10,
+   "allow_n": 15,
+   "tn": 15
+  },
+  "railway/evasion": {
+   "hold_n": 41,
+   "tp": 40,
+   "fn": 1
+  },
+  "github/plain": {
+   "hold_n": 12,
+   "tp": 12,
+   "allow_n": 8,
+   "tn": 8
+  },
+  "github/evasion": {
+   "hold_n": 3,
+   "tp": 3
+  },
+  "git/plain": {
+   "hold_n": 1,
+   "tp": 1,
+   "allow_n": 3,
+   "tn": 3
+  },
+  "git/evasion": {
+   "hold_n": 2,
+   "fn": 1,
+   "tp": 1
+  },
+  "vercel/plain": {
+   "hold_n": 8,
+   "tp": 8,
+   "allow_n": 6,
+   "tn": 6
+  },
+  "vercel/evasion": {
+   "hold_n": 11,
+   "tp": 11
+  },
+  "fly/plain": {
+   "hold_n": 5,
+   "tp": 5,
+   "allow_n": 5,
+   "tn": 5
+  },
+  "fly/evasion": {
+   "hold_n": 1,
+   "tp": 1
+  },
+  "heroku/plain": {
+   "hold_n": 4,
+   "tp": 4,
+   "allow_n": 5,
+   "tn": 5
+  },
+  "heroku/evasion": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "cloudflare/plain": {
+   "hold_n": 8,
+   "tp": 8,
+   "allow_n": 6,
+   "tn": 6
+  },
+  "cloudflare/evasion": {
+   "hold_n": 3,
+   "tp": 3
+  },
+  "stripe/plain": {
+   "hold_n": 7,
+   "tp": 7,
+   "allow_n": 8,
+   "tn": 8
+  },
+  "stripe/evasion": {
+   "hold_n": 4,
+   "tp": 4
+  },
+  "supabase/plain": {
+   "hold_n": 11,
+   "tp": 11,
+   "allow_n": 12,
+   "tn": 12
+  },
+  "supabase/evasion": {
+   "hold_n": 11,
+   "tp": 9,
+   "fn": 2
+  },
+  "supabase-data/plain": {
+   "hold_n": 3,
+   "tp": 3,
+   "allow_n": 3,
+   "tn": 3
+  },
+  "supabase-data/evasion": {
+   "hold_n": 2,
+   "fn": 1,
+   "tp": 1
+  },
+  "neon/plain": {
+   "hold_n": 6,
+   "tp": 6,
+   "allow_n": 4,
+   "tn": 4
+  },
+  "neon/evasion": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "turso/plain": {
+   "hold_n": 2,
+   "tp": 2,
+   "allow_n": 2,
+   "tn": 2
+  },
+  "turso/evasion": {
+   "hold_n": 4,
+   "tp": 4
+  },
+  "aws/plain": {
+   "hold_n": 9,
+   "tp": 9,
+   "allow_n": 12,
+   "tn": 11,
+   "fp": 1
+  },
+  "aws/evasion": {
+   "hold_n": 11,
+   "tp": 11
+  },
+  "mcp/plain": {
+   "hold_n": 5,
+   "tp": 5,
+   "allow_n": 8,
+   "tn": 8
+  },
+  "mcp/evasion": {
+   "hold_n": 6,
+   "tp": 5,
+   "fn": 1
+  },
+  "gmail/plain": {
+   "hold_n": 2,
+   "tp": 2,
+   "allow_n": 3,
+   "tn": 3
+  },
+  "gmail/evasion": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "capture-aws/capture": {
+   "allow_n": 1,
+   "tn": 1,
+   "hold_n": 5,
+   "tp": 5
+  },
+  "capture-fly/capture": {
+   "allow_n": 5,
+   "tn": 5,
+   "hold_n": 4,
+   "tp": 4
+  },
+  "capture-gh/capture": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "capture-git/capture": {
+   "allow_n": 5,
+   "tn": 5,
+   "hold_n": 2,
+   "tp": 2
+  },
+  "capture-heroku/capture": {
+   "allow_n": 1,
+   "tn": 1,
+   "hold_n": 1,
+   "tp": 1
+  },
+  "capture-neon/capture": {
+   "hold_n": 2,
+   "tp": 2,
+   "allow_n": 3,
+   "tn": 3
+  },
+  "capture-railway/capture": {
+   "allow_n": 16,
+   "tn": 16,
+   "hold_n": 3,
+   "tp": 3
+  },
+  "capture-stripe/capture": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "capture-supabase/capture": {
+   "hold_n": 1,
+   "tp": 1,
+   "allow_n": 1,
+   "tn": 1
+  },
+  "capture-vercel/capture": {
+   "allow_n": 7,
+   "tn": 7,
+   "hold_n": 3,
+   "tp": 3
+  },
+  "capture-wrangler/capture": {
+   "allow_n": 7,
+   "tn": 7,
+   "hold_n": 3,
+   "tp": 3
+  },
+  "total": {
+   "hold_n": 226,
+   "tp": 220,
+   "allow_n": 146,
+   "tn": 145,
+   "fn": 6,
+   "fp": 1
+  }
+ },
+ "fallback": {
+  "railway/plain": {
+   "hold_n": 10,
+   "tp": 8,
+   "fn": 2,
+   "allow_n": 15,
+   "tn": 14,
+   "fp": 1
+  },
+  "railway/evasion": {
+   "hold_n": 41,
+   "tp": 24,
+   "fn": 17
+  },
+  "github/plain": {
+   "hold_n": 12,
+   "tp": 9,
+   "allow_n": 8,
+   "tn": 8,
+   "fn": 3
+  },
+  "github/evasion": {
+   "hold_n": 3,
+   "tp": 2,
+   "fn": 1
+  },
+  "git/plain": {
+   "hold_n": 1,
+   "fn": 1,
+   "allow_n": 3,
+   "tn": 3
+  },
+  "git/evasion": {
+   "hold_n": 2,
+   "fn": 2
+  },
+  "vercel/plain": {
+   "hold_n": 8,
+   "tp": 7,
+   "allow_n": 6,
+   "tn": 6,
+   "fn": 1
+  },
+  "vercel/evasion": {
+   "hold_n": 11,
+   "tp": 11
+  },
+  "fly/plain": {
+   "hold_n": 5,
+   "tp": 5,
+   "allow_n": 5,
+   "tn": 5
+  },
+  "fly/evasion": {
+   "hold_n": 1,
+   "tp": 1
+  },
+  "heroku/plain": {
+   "hold_n": 4,
+   "tp": 3,
+   "fn": 1,
+   "allow_n": 5,
+   "tn": 3,
+   "fp": 2
+  },
+  "heroku/evasion": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "cloudflare/plain": {
+   "hold_n": 8,
+   "tp": 7,
+   "allow_n": 6,
+   "tn": 6,
+   "fn": 1
+  },
+  "cloudflare/evasion": {
+   "hold_n": 3,
+   "fn": 2,
+   "tp": 1
+  },
+  "stripe/plain": {
+   "hold_n": 7,
+   "fn": 4,
+   "allow_n": 8,
+   "tn": 7,
+   "tp": 3,
+   "fp": 1
+  },
+  "stripe/evasion": {
+   "hold_n": 4,
+   "fn": 4
+  },
+  "supabase/plain": {
+   "hold_n": 11,
+   "tp": 4,
+   "allow_n": 12,
+   "tn": 12,
+   "fn": 7
+  },
+  "supabase/evasion": {
+   "hold_n": 11,
+   "fn": 11
+  },
+  "supabase-data/plain": {
+   "hold_n": 3,
+   "tp": 1,
+   "allow_n": 3,
+   "fp": 1,
+   "tn": 2,
+   "fn": 2
+  },
+  "supabase-data/evasion": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "neon/plain": {
+   "hold_n": 6,
+   "tp": 4,
+   "fn": 2,
+   "allow_n": 4,
+   "tn": 4
+  },
+  "neon/evasion": {
+   "hold_n": 2,
+   "fn": 2
+  },
+  "turso/plain": {
+   "hold_n": 2,
+   "fn": 1,
+   "allow_n": 2,
+   "tn": 2,
+   "tp": 1
+  },
+  "turso/evasion": {
+   "hold_n": 4,
+   "fn": 4
+  },
+  "aws/plain": {
+   "hold_n": 9,
+   "tp": 8,
+   "allow_n": 12,
+   "tn": 11,
+   "fp": 1,
+   "fn": 1
+  },
+  "aws/evasion": {
+   "hold_n": 11,
+   "tp": 7,
+   "fn": 4
+  },
+  "mcp/plain": {
+   "hold_n": 5,
+   "fn": 2,
+   "allow_n": 8,
+   "tn": 8,
+   "tp": 3
+  },
+  "mcp/evasion": {
+   "hold_n": 6,
+   "fn": 4,
+   "tp": 2
+  },
+  "gmail/plain": {
+   "hold_n": 2,
+   "fn": 2,
+   "allow_n": 3,
+   "tn": 3
+  },
+  "gmail/evasion": {
+   "hold_n": 2,
+   "fn": 2
+  },
+  "capture-aws/capture": {
+   "allow_n": 1,
+   "tn": 1,
+   "hold_n": 5,
+   "tp": 5
+  },
+  "capture-fly/capture": {
+   "allow_n": 5,
+   "tn": 5,
+   "hold_n": 4,
+   "tp": 4
+  },
+  "capture-gh/capture": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "capture-git/capture": {
+   "allow_n": 5,
+   "tn": 5,
+   "hold_n": 2,
+   "fn": 2
+  },
+  "capture-heroku/capture": {
+   "allow_n": 1,
+   "tn": 1,
+   "hold_n": 1,
+   "tp": 1
+  },
+  "capture-neon/capture": {
+   "hold_n": 2,
+   "tp": 2,
+   "allow_n": 3,
+   "tn": 3
+  },
+  "capture-railway/capture": {
+   "allow_n": 16,
+   "tn": 16,
+   "hold_n": 3,
+   "tp": 3
+  },
+  "capture-stripe/capture": {
+   "hold_n": 2,
+   "tp": 1,
+   "fn": 1
+  },
+  "capture-supabase/capture": {
+   "hold_n": 1,
+   "tp": 1,
+   "allow_n": 1,
+   "tn": 1
+  },
+  "capture-vercel/capture": {
+   "allow_n": 7,
+   "tn": 7,
+   "hold_n": 3,
+   "tp": 3
+  },
+  "capture-wrangler/capture": {
+   "allow_n": 7,
+   "tn": 7,
+   "hold_n": 3,
+   "tp": 3
+  },
+  "total": {
+   "hold_n": 226,
+   "tp": 140,
+   "fn": 86,
+   "allow_n": 146,
+   "tn": 140,
+   "fp": 6
+  }
+ },
+ "383+fb": {
+  "railway/plain": {
+   "hold_n": 10,
+   "tp": 10,
+   "allow_n": 15,
+   "tn": 14,
+   "fp": 1
+  },
+  "railway/evasion": {
+   "hold_n": 41,
+   "tp": 40,
+   "fn": 1
+  },
+  "github/plain": {
+   "hold_n": 12,
+   "tp": 12,
+   "allow_n": 8,
+   "tn": 8
+  },
+  "github/evasion": {
+   "hold_n": 3,
+   "tp": 3
+  },
+  "git/plain": {
+   "hold_n": 1,
+   "tp": 1,
+   "allow_n": 3,
+   "tn": 3
+  },
+  "git/evasion": {
+   "hold_n": 2,
+   "fn": 1,
+   "tp": 1
+  },
+  "vercel/plain": {
+   "hold_n": 8,
+   "tp": 8,
+   "allow_n": 6,
+   "tn": 6
+  },
+  "vercel/evasion": {
+   "hold_n": 11,
+   "tp": 11
+  },
+  "fly/plain": {
+   "hold_n": 5,
+   "tp": 5,
+   "allow_n": 5,
+   "tn": 5
+  },
+  "fly/evasion": {
+   "hold_n": 1,
+   "tp": 1
+  },
+  "heroku/plain": {
+   "hold_n": 4,
+   "tp": 4,
+   "allow_n": 5,
+   "tn": 5
+  },
+  "heroku/evasion": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "cloudflare/plain": {
+   "hold_n": 8,
+   "tp": 8,
+   "allow_n": 6,
+   "tn": 6
+  },
+  "cloudflare/evasion": {
+   "hold_n": 3,
+   "tp": 3
+  },
+  "stripe/plain": {
+   "hold_n": 7,
+   "tp": 7,
+   "allow_n": 8,
+   "tn": 7,
+   "fp": 1
+  },
+  "stripe/evasion": {
+   "hold_n": 4,
+   "tp": 4
+  },
+  "supabase/plain": {
+   "hold_n": 11,
+   "tp": 11,
+   "allow_n": 12,
+   "tn": 12
+  },
+  "supabase/evasion": {
+   "hold_n": 11,
+   "tp": 9,
+   "fn": 2
+  },
+  "supabase-data/plain": {
+   "hold_n": 3,
+   "tp": 3,
+   "allow_n": 3,
+   "fp": 1,
+   "tn": 2
+  },
+  "supabase-data/evasion": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "neon/plain": {
+   "hold_n": 6,
+   "tp": 6,
+   "allow_n": 4,
+   "tn": 4
+  },
+  "neon/evasion": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "turso/plain": {
+   "hold_n": 2,
+   "tp": 2,
+   "allow_n": 2,
+   "tn": 2
+  },
+  "turso/evasion": {
+   "hold_n": 4,
+   "tp": 4
+  },
+  "aws/plain": {
+   "hold_n": 9,
+   "tp": 9,
+   "allow_n": 12,
+   "tn": 11,
+   "fp": 1
+  },
+  "aws/evasion": {
+   "hold_n": 11,
+   "tp": 11
+  },
+  "mcp/plain": {
+   "hold_n": 5,
+   "tp": 5,
+   "allow_n": 8,
+   "tn": 8
+  },
+  "mcp/evasion": {
+   "hold_n": 6,
+   "tp": 5,
+   "fn": 1
+  },
+  "gmail/plain": {
+   "hold_n": 2,
+   "tp": 2,
+   "allow_n": 3,
+   "tn": 3
+  },
+  "gmail/evasion": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "capture-aws/capture": {
+   "allow_n": 1,
+   "tn": 1,
+   "hold_n": 5,
+   "tp": 5
+  },
+  "capture-fly/capture": {
+   "allow_n": 5,
+   "tn": 5,
+   "hold_n": 4,
+   "tp": 4
+  },
+  "capture-gh/capture": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "capture-git/capture": {
+   "allow_n": 5,
+   "tn": 5,
+   "hold_n": 2,
+   "tp": 2
+  },
+  "capture-heroku/capture": {
+   "allow_n": 1,
+   "tn": 1,
+   "hold_n": 1,
+   "tp": 1
+  },
+  "capture-neon/capture": {
+   "hold_n": 2,
+   "tp": 2,
+   "allow_n": 3,
+   "tn": 3
+  },
+  "capture-railway/capture": {
+   "allow_n": 16,
+   "tn": 16,
+   "hold_n": 3,
+   "tp": 3
+  },
+  "capture-stripe/capture": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "capture-supabase/capture": {
+   "hold_n": 1,
+   "tp": 1,
+   "allow_n": 1,
+   "tn": 1
+  },
+  "capture-vercel/capture": {
+   "allow_n": 7,
+   "tn": 7,
+   "hold_n": 3,
+   "tp": 3
+  },
+  "capture-wrangler/capture": {
+   "allow_n": 7,
+   "tn": 7,
+   "hold_n": 3,
+   "tp": 3
+  },
+  "total": {
+   "hold_n": 226,
+   "tp": 221,
+   "allow_n": 146,
+   "tn": 142,
+   "fp": 4,
+   "fn": 5
+  }
+ },
+ "383blind+fb": {
+  "railway/plain": {
+   "hold_n": 10,
+   "tp": 10,
+   "allow_n": 15,
+   "tn": 14,
+   "fp": 1
+  },
+  "railway/evasion": {
+   "hold_n": 41,
+   "tp": 40,
+   "fn": 1
+  },
+  "github/plain": {
+   "hold_n": 12,
+   "tp": 12,
+   "allow_n": 8,
+   "tn": 8
+  },
+  "github/evasion": {
+   "hold_n": 3,
+   "tp": 3
+  },
+  "git/plain": {
+   "hold_n": 1,
+   "tp": 1,
+   "allow_n": 3,
+   "tn": 3
+  },
+  "git/evasion": {
+   "hold_n": 2,
+   "fn": 1,
+   "tp": 1
+  },
+  "vercel/plain": {
+   "hold_n": 8,
+   "tp": 8,
+   "allow_n": 6,
+   "tn": 6
+  },
+  "vercel/evasion": {
+   "hold_n": 11,
+   "tp": 11
+  },
+  "fly/plain": {
+   "hold_n": 5,
+   "tp": 5,
+   "allow_n": 5,
+   "tn": 5
+  },
+  "fly/evasion": {
+   "hold_n": 1,
+   "tp": 1
+  },
+  "heroku/plain": {
+   "hold_n": 4,
+   "tp": 4,
+   "allow_n": 5,
+   "tn": 5
+  },
+  "heroku/evasion": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "cloudflare/plain": {
+   "hold_n": 8,
+   "tp": 8,
+   "allow_n": 6,
+   "tn": 6
+  },
+  "cloudflare/evasion": {
+   "hold_n": 3,
+   "tp": 3
+  },
+  "stripe/plain": {
+   "hold_n": 7,
+   "tp": 7,
+   "allow_n": 8,
+   "tn": 7,
+   "fp": 1
+  },
+  "stripe/evasion": {
+   "hold_n": 4,
+   "tp": 4
+  },
+  "supabase/plain": {
+   "hold_n": 11,
+   "tp": 11,
+   "allow_n": 12,
+   "tn": 12
+  },
+  "supabase/evasion": {
+   "hold_n": 11,
+   "tp": 9,
+   "fn": 2
+  },
+  "supabase-data/plain": {
+   "hold_n": 3,
+   "tp": 3,
+   "allow_n": 3,
+   "fp": 1,
+   "tn": 2
+  },
+  "supabase-data/evasion": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "neon/plain": {
+   "hold_n": 6,
+   "tp": 6,
+   "allow_n": 4,
+   "tn": 4
+  },
+  "neon/evasion": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "turso/plain": {
+   "hold_n": 2,
+   "tp": 2,
+   "allow_n": 2,
+   "tn": 2
+  },
+  "turso/evasion": {
+   "hold_n": 4,
+   "tp": 4
+  },
+  "aws/plain": {
+   "hold_n": 9,
+   "tp": 9,
+   "allow_n": 12,
+   "tn": 11,
+   "fp": 1
+  },
+  "aws/evasion": {
+   "hold_n": 11,
+   "tp": 11
+  },
+  "mcp/plain": {
+   "hold_n": 5,
+   "tp": 5,
+   "allow_n": 8,
+   "tn": 8
+  },
+  "mcp/evasion": {
+   "hold_n": 6,
+   "tp": 5,
+   "fn": 1
+  },
+  "gmail/plain": {
+   "hold_n": 2,
+   "tp": 2,
+   "allow_n": 3,
+   "tn": 3
+  },
+  "gmail/evasion": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "capture-aws/capture": {
+   "allow_n": 1,
+   "tn": 1,
+   "hold_n": 5,
+   "tp": 5
+  },
+  "capture-fly/capture": {
+   "allow_n": 5,
+   "tn": 5,
+   "hold_n": 4,
+   "tp": 4
+  },
+  "capture-gh/capture": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "capture-git/capture": {
+   "allow_n": 5,
+   "tn": 5,
+   "hold_n": 2,
+   "tp": 2
+  },
+  "capture-heroku/capture": {
+   "allow_n": 1,
+   "tn": 1,
+   "hold_n": 1,
+   "tp": 1
+  },
+  "capture-neon/capture": {
+   "hold_n": 2,
+   "tp": 2,
+   "allow_n": 3,
+   "tn": 3
+  },
+  "capture-railway/capture": {
+   "allow_n": 16,
+   "tn": 16,
+   "hold_n": 3,
+   "tp": 3
+  },
+  "capture-stripe/capture": {
+   "hold_n": 2,
+   "tp": 2
+  },
+  "capture-supabase/capture": {
+   "hold_n": 1,
+   "tp": 1,
+   "allow_n": 1,
+   "tn": 1
+  },
+  "capture-vercel/capture": {
+   "allow_n": 7,
+   "tn": 7,
+   "hold_n": 3,
+   "tp": 3
+  },
+  "capture-wrangler/capture": {
+   "allow_n": 7,
+   "tn": 7,
+   "hold_n": 3,
+   "tp": 3
+  },
+  "total": {
+   "hold_n": 226,
+   "tp": 221,
+   "allow_n": 146,
+   "tn": 142,
+   "fp": 4,
+   "fn": 5
+  }
+ }
+}

@@ -74,3 +74,55 @@ asyncssh, Go's `x/crypto/ssh` and Git.
   itself sees what a session does.
 - The rewrite to HTTPS is followed by `git` and by cargo (libgit2). go-git ignores it and uses the
   SSH agent, which then works through the agent above.
+
+## Who drives a session
+
+An agent's part, 25 November 2026, in `research/2026-11-25-ssh-tunnel-tell/` of this repository.
+The tunnel above was taken further: can the boundary tell a login that a program in the computer
+makes from one it only carries for someone outside? Four ways were built on Linux and measured
+with OpenSSH 9.6, Paramiko, asyncssh and Go, idle and with the CPU oversubscribed, against an
+outsider at round trips from 0 to 50 ms.
+
+- A check that the computer makes, such as asking the boundary to check the host key before the
+  agent signs, gives nothing. The program that carries the outsider's connection passes that
+  request on too, as it passes the agent's. This holds for any check made of messages: whatever
+  the computer can receive or send, that program can forward.
+- The shape of a session after login (how fast the client answers the server's data) does not
+  separate the two: a local OpenSSH answered more slowly, at the median, than an outsider 2 ms
+  away.
+- The time of the key exchange does not either. The first encrypted packet cannot leave before the
+  server's reply reached whoever makes the session keys, but OpenSSH 9.6's default exchange
+  (`sntrup761x25519`) takes the client about 20 ms itself, and Paramiko waits about 40 ms, so a
+  local login looks like an outsider 20 to 40 ms away.
+- The time from the signature to the client's next packet does. The signed login request has to
+  reach whoever holds the session keys and come back encrypted. A local client sent it within a
+  millisecond in almost every login; an outsider never sooner than its round trip.
+
+So the agent can add a deadline: after it signs for a connection, a client packet that arrives
+later than a few milliseconds, before the server has said anything since, closes the connection
+unforwarded. The signature is for that connection only, so it dies with it. The deadline stopped
+every outsider farther than it, using OpenSSH through a tunnel.
+
+It does not stop an outsider who knows of it. Sending the server a packet it must answer, at the
+moment it asks for the signature, lets the server's answer clear the deadline before the signed
+request arrives. With the server 20 ms from the boundary, that worked for 28 of 30 logins from an outsider 20 ms
+away and all 30 from 50 ms; at 5 and 10 ms, every login was still cut.
+Nor does it stop a program in the computer that logs in itself and then hands its session keys
+out: that program is code in the computer, and only what sees processes can name it.
+
+What it costs: logins cut when the computer's CPU is overloaded, each fixed by a retry. With a
+5 ms deadline and twice as many busy processes as CPUs, 7 of 150 local logins were cut; idle, none
+of 150. The slowest local answer measured was 10.7 ms, so a 12 ms deadline would have cut none of
+these and still stopped every outsider 20 ms away or more. The deadline has to be set from
+measurements on a Mac, where the computer is a virtual machine.
+
+The options for this entry:
+
+- Keep the agent as above, and state its limit: it signs for connections that cross the boundary,
+  to hosts on the key's list, with a host key Silo checked. It does not know who drives them.
+- Add the deadline (recommended). It costs a timer per signature, and closes the case of an
+  outsider using a stock SSH client through a tunnel from farther away than the deadline. Each
+  login's time from signature to answer becomes part of the signature's fact, so the record shows
+  how near the session keys were. The limit above still holds and is still stated.
+- End SSH at the boundary (the second option of the choice). It sees what a session does, but not
+  who drives it either, and it costs an SSH server and client in the boundary.

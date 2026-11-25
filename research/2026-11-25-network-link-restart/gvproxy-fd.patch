@@ -1,0 +1,56 @@
+diff --git a/cmd/gvproxy/config.go b/cmd/gvproxy/config.go
+index 16cbad4..c6e0f3c 100644
+--- a/cmd/gvproxy/config.go
++++ b/cmd/gvproxy/config.go
+@@ -341,11 +341,13 @@ func GvproxyConfigure(config *GvproxyConfig, args *GvproxyArgs, version string)
+ 		if err != nil || uri == nil {
+ 			return config, fmt.Errorf("invalid value for vfkit listen address: %w", err)
+ 		}
+-		if uri.Scheme != "unixgram" {
+-			return config, errors.New("vfkit listen address must be unixgram:// address")
++		if uri.Scheme != "unixgram" && uri.Scheme != "fd" {
++			return config, errors.New("vfkit listen address must be unixgram:// or fd:// address")
+ 		}
+-		if _, err := os.Stat(uri.Path); err == nil {
+-			return config, fmt.Errorf("%q already exists", uri.Path)
++		if uri.Scheme == "unixgram" {
++			if _, err := os.Stat(uri.Path); err == nil {
++				return config, fmt.Errorf("%q already exists", uri.Path)
++			}
+ 		}
+ 	}
+ 
+diff --git a/cmd/gvproxy/main.go b/cmd/gvproxy/main.go
+index 21ab61e..f1fc9b4 100644
+--- a/cmd/gvproxy/main.go
++++ b/cmd/gvproxy/main.go
+@@ -274,7 +274,28 @@ func run(ctx context.Context, g *errgroup.Group, config *GvproxyConfig) error {
+ 		})
+ 	}
+ 
+-	if config.Interfaces.Vfkit != "" {
++	if strings.HasPrefix(config.Interfaces.Vfkit, "fd://") {
++		// A datagram socket already connected to the computer's network card, inherited from
++		// the process that owns the link (Silo's helper). That process keeps its own copy, so
++		// the link outlives this gvproxy, and the next gvproxy is handed the same socket.
++		n, err := strconv.Atoi(strings.TrimPrefix(config.Interfaces.Vfkit, "fd://"))
++		if err != nil || n < 3 {
++			return fmt.Errorf("vfkit fd:// needs a descriptor number of 3 or more: %q", config.Interfaces.Vfkit)
++		}
++		f := os.NewFile(uintptr(n), "vfkit-link")
++		conn, err := net.FileConn(f)
++		_ = f.Close()
++		if err != nil {
++			return fmt.Errorf("vfkit fd: %w", err)
++		}
++		g.Go(func() error {
++			<-ctx.Done()
++			return conn.Close()
++		})
++		g.Go(func() error {
++			return vn.AcceptVfkit(ctx, conn)
++		})
++	} else if config.Interfaces.Vfkit != "" {
+ 		conn, err := transport.ListenUnixgram(config.Interfaces.Vfkit)
+ 		if err != nil {
+ 			notificationSender.Send(types.NotificationMessage{NotificationType: types.HypervisorError})

@@ -1,0 +1,33 @@
+api.anthropic.com                        /v1/messages                                               401 {"type":"error","error":{"type":"authentication_error","message":"x-ap
+api.anthropic.com                        /v1/nonexistent                                            404 {"type":"error","error":{"type":"not_found_error","message":"Not found
+api.anthropic.com                        https://api.anthropic.com/v1/messages                      401 {"type":"error","error":{"type":"authentication_error","message":"x-ap
+api.anthropic.com                        //v1/messages                                              401 {"type":"error","error":{"type":"authentication_error","message":"x-ap
+api.anthropic.com                        /v1//messages                                              401 {"type":"error","error":{"type":"authentication_error","message":"x-ap
+api.anthropic.com                        /v1/./messages                                             401 {"type":"error","error":{"type":"authentication_error","message":"x-ap
+api.anthropic.com                        /v1/x/../messages                                          401 {"type":"error","error":{"type":"authentication_error","message":"x-ap
+api.anthropic.com                        /%761/messages                                             401 {"type":"error","error":{"type":"authentication_error","message":"x-ap
+api.anthropic.com                        /v1/messages/                                              307 
+api.anthropic.com                        /V1/MESSAGES                                               404 
+api.anthropic.com                        /v1/messages;x                                             404 {"type":"error","error":{"type":"not_found_error","message":"Not found
+api.anthropic.com                        /v1/messages%2f                                            404 {"type":"error","error":{"type":"not_found_error","message":"Not found
+api.openai.com                           /v1/responses                                              401 {  "error": {    "code": null,    "message": "Missing bearer or bas
+api.openai.com                           /v1/nonexistent                                            404 
+api.openai.com                           //v1/responses                                             401 {  "error": {    "code": null,    "message": "Missing bearer or bas
+api.openai.com                           /v1/./responses                                            401 {  "error": {    "code": null,    "message": "Missing bearer or bas
+api.openai.com                           /v1/responses/                                             307 
+api.openai.com                           /v1/chat/completions/                                      404 {    "error": {        "message": "Invalid URL (POST /v1/chat/comple
+generativelanguage.googleapis.com        /v1beta/models/gemini-2.5-flash:generateContent            403 {  "error": {    "code": 403,    "message": "Permission denied on t
+generativelanguage.googleapis.com        /v1beta/models/gemini-2.5-flash:nonexistent                404 
+generativelanguage.googleapis.com        /v1beta/models/gemini-2.5-flash:generateContent/           403 {  "error": {    "code": 403,    "message": "Permission denied on t
+generativelanguage.googleapis.com        /v1beta/models/gemini-2.5-flash%3AgenerateContent          404 
+
+Does the proxy pass a path as written? A Go server redirects a path with a dot segment:
+httpbingo.org /./anything -> 307
+
+Headers after a bare LF or on a folded line (a key message means the host read the header):
+api.anthropic.com plain: HTTP/1.1 401 Unauthorized | {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"},"request_id":"req_011ChPm4ogk1JUjVcL
+api.anthropic.com lf: HTTP/1.1 401 Unauthorized | {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"},"request_id":"req_011ChPm4piVnso5w3f
+api.anthropic.com fold: HTTP/1.1 401 Unauthorized | 8d {"type":"error","error":{"type":"authentication_error","message":"x-api-key header is required"},"request_id":"req_011
+api.openai.com plain: HTTP/1.1 401 Unauthorized | {   "error": {     "code": "invalid_api_key",     "message": "Incorrect API key provided: bogus. You can find your API key
+api.openai.com lf: HTTP/1.1 401 Unauthorized | {   "error": {     "code": "invalid_api_key",     "message": "Incorrect API key provided: bogus. You can find your API key
+api.openai.com fold: HTTP/1.1 401 Unauthorized | {   "error": {     "code": null,     "message": "Missing bearer or basic authentication in header",     "param": null,    

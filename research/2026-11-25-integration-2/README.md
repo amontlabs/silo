@@ -3,6 +3,9 @@
 Second pass, 14:00 UTC: #390 and #392 to #396 are merged too, and #380, #388 and #389 again at
 their new heads. See "Second pass" below.
 
+Third pass, 19:00 UTC: #397 to #412 are merged too. See "Third pass" below. #376 to #396 had
+not moved since the second pass.
+
 For polarzero, 25 November 2026, by an agent. This branch is #375's branch (`b567132`, every draft
 up to #374 merged into `main` at `1b8f191`) with every draft from #376 to #389 merged into it.
 `plan check` passed after each merge. Nothing here is new research. The only changes made on this
@@ -137,6 +140,53 @@ Each row is also a note on the entry named, under "Where the drafts disagree, se
 - `record-head-off-the-mac` (#394, new): a Git repository with a protected branch for one person.
 - The nine entries of #392 for a team host, from `members-on-a-host` to `team-host-size`.
 - `enforcing-and-recording` (#395): a limit after which a request waiting for the record is refused.
+
+## Third pass
+
+Heads of 25 November, 19:00 UTC. `plan check` passed after each merge. #397, #399, #402, #403 and
+#412 are stacked on this branch; #398 on #381, #400 on #387, #404 and #405 on #383, #408 on #396,
+#410 on #384.
+
+| PR | Head | Fix-up on merge |
+|---|---|---|
+| #397 | `b07c934` | none |
+| #398 | `ca459ee` | none |
+| #399 | `14e7cf6` | none |
+| #400 | `7fe457b` | `agent-summary-checked.md`: #400's paragraph has no heading and fell under #387's section. It gets its own, "The reader under injected lines" |
+| #401 | `e403125` | `fuzz-untrusted-parsers`, `program-that-cannot-be-read`, `what-a-budget-promises`: added sections, all kept |
+| #402 | `fbc9606` | none |
+| #403 | `1175139` | `program-that-cannot-be-read`, `reading-each-agent-program`: added sections, all kept |
+| #404 | `cf914ad` | none |
+| #405 | `90954dc` | none |
+| #406 | `84a0344` | `alert-only-on-a-change`: added sections, all kept. Stacked on #402 |
+| #407 | `0f9cfc0` | `how-spend-is-shown`, `program-that-cannot-be-read`, `subscription-and-key-alike`: added sections, all kept. Then #407's notes for `budgets-in-dollars-or-a-window` (#376) and `claude-key-or-plan` (#393), kept in its README until those landed, added to those entries |
+| #408 | `82df9d2` | none |
+| #409 | `a86ae61` | none |
+| #410 | `0fe8678` | `program-that-cannot-be-read`: #410's branch merges #378 and #384 itself, so git saw a criss-cross clash. Every line of #410's version is already on this branch, which is kept |
+| #411 | `2192ba3` | `checkpoint-per-system`, `checkpoint-storage`: added sections, all kept. Stacked on #389 |
+| #412 | `37604dd` | none |
+
+### Where they disagree
+
+| Drafts | They disagree on | Recommended | Where |
+|---|---|---|---|
+| #381, #398, #411 against `checkpoint-per-system` | Three challenges to "a copy that shares blocks": allow copy-before-write (#381), the write in flight (#398), compression only with Silo's own files (#411, 4.3 to 26.3 days on a 512 GB Mac) | One rewrite: compressed files of the blocks each checkpoint alone holds, with a full compressed anchor; a clone only where Silo does not see the writes | note on `checkpoint-per-system` |
+| #402 against this branch's first pass | Apple's NAT for main's first start, recommended here, against the Mac end of the card making one connection | #402's, measured on Linux; it keeps `network-stack` whole. This branch's earlier recommendation is withdrawn | #402's section on `way-in-before-the-relay` |
+| #405 against #383 | #383's wider "exposed" holds the short-lived tokens agents mint for their own runs, 86 more holds | #405's wording: lasting access only | #405's note on `outcome-of-a-call` |
+| #401 against #385 | `budget-stops-what-it-meters` fails on #385's code for two parser findings | Take #401's patch: refuse what the boundary cannot read exactly | #401's note on `what-a-budget-promises` |
+| #408 against #360 and #396 | A version check that carries the version (#360); one signing key for prices (#396) | #408's: a daily fetch that carries nothing, and two keys with a floor | #408's notes on `what-silo-sends-home`, `where-prices-come-from` |
+| #399 against #373 | Under option A a changed file names no conversation (#373) | #399's `author-from-traffic`: an opinion from the tool call that wrote it | new entry `author-from-traffic` |
+
+### For polarzero to rule, added
+
+- `author-from-traffic` (#399), `main-clock-kept` (#397), `program-reports-its-own-spend` (#407).
+- `checkpoint-per-system` and `checkpoint-storage` (#411), with the rewrite above.
+- `parsers-fuzzed-and-compared` (#376), with #401 as its evidence; refuse or rewrite what a boundary cannot read exactly (#401).
+- The new-host rule narrowed by each program's documented hosts (#406).
+- Send the two libkrun commits upstream, under your sign-off (#398).
+- `ssh-keys`: a deadline after each signature (#412).
+- #404's GitHub GraphQL labels in place of #353's name list, and `setIamPolicy` read first.
+- `what-silo-sends-home` and `where-prices-come-from` as #408 edits them.
 
 ## Not done here
 

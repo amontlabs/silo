@@ -80,3 +80,47 @@ exact bytes.
 - How the app shows that the table is past its check-by day. The boundary goes on using it.
 - OpenAI charges 10% more on regional endpoints for models released on or after 5 March 2026. The
   boundary would need the day each model was released; it was not built.
+
+## How the table reaches the app, and who can change it
+
+An agent's part, 25 November 2026, from `research/2026-11-25-price-channel`. The answer above now
+holds what follows; before, it had one key and a fetch of its own.
+
+**One request home.** The table is named by the same daily file as the latest version of Silo
+(`what-silo-sends-home`), and that file's request carries nothing about the Mac that sends it. The
+table is 2.3 KB gzipped, so the app fetches a whole table when its version changes, never a
+difference, which would name the version a Mac holds.
+
+**Two keys.** With one key, whoever takes the key of the daily release can lower any price, and
+every budget lets more through from the next fetch. A test shows it: a table signed by that key
+with Opus 5.5's output at a hundredth of its price was taken. So the app takes a cut to less than
+half of a price it holds only from a table also signed by Silo's root key, which is kept offline
+(a hardware key polarzero holds) and also signs the list of daily keys and their end dates. A
+raise, a new model, a promotion at half price and a withdrawn increase need only the daily key.
+Replayed on the providers' 14 price changes since 2024, 4 cuts were deeper than half (o3's 80% cut,
+o1-mini, Gemini 1.5 Flash, Claude 3.5 Haiku): about two signatures with the root key a year. Until
+it signs, the app counts the older, higher price, so a budget stops early, never late.
+
+**What the app cannot police.** A model the app has no row for is counted at the bound, and the
+daily key can give it any price. Of 100 models released since 2025, 6 launched under half the
+cheapest price their provider then sold, Haiku 5.5 at a tenth of it, so no rule on a new row's
+price holds without refusing real launches. A stolen daily key can therefore make a model released
+since the last table count cheaply, until a root-signed list drops that key. Every table is
+published in the public repository, so a wrong row is visible to anyone who reads the history.
+
+**Offline.** The app keeps the table it has. Replayed on the same 14 changes, a table frozen before
+each one counted 4 of them high (cuts), 4 right (promotions and introductory prices carry their
+dates), 2 needed no new price (aliases are priced by the model the reply names), 1 low (Gemini 2.5
+Flash's price at its general release) and 3 in a direction not known. New models are counted at
+the bound. So a table that is not current mostly stops a budget early. The index expires two days
+after it is published, which tells "nothing new" from "cannot reach it, or is shown an old one".
+The app says so only once the table's check-by day has passed without a fresh index, so that a Mac
+offline for a weekend sees nothing. Files brought by hand (a USB key, a team share) get the same
+checks as fetched ones.
+
+**Yours.** Your own prices beside the table win, as before. A team can sign its own table with a
+key each member adds, and it counts as yours. The fetch can be turned off; prices then come from
+the version of Silo you run and from yours.
+
+**Not built:** the boundary in Zig still checks one key (#396's `prices.zig`); the two-key rule and
+the index are in Python in the research. How the app shows the table's state is not designed.

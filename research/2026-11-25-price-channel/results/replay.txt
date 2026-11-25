@@ -1,0 +1,15 @@
+floor 0.5: 4 of 14 changes needed the root key, about 1.8 a year
+   2024-09-09 Gemini 1.5 Flash cut (4.7x)
+   2025-01-31 o1-mini cut with o3-mini's launch (2.7x)
+   2025-02-27 Claude 3.5 Haiku's price cut (8.0x, direction a guess)
+   2025-06-10 o3 cut by 80% (5.0x)
+a table frozen before each change counts it:
+   high (safe): 4
+   right (dated row): 4
+   low (unsafe): 1
+      2025-06-19 gemini-2.5-flash priced again at general release
+   no new price needed: 2
+   unknown: 3
+      2026-07-30 gpt-5.6-terra and -luna repriced
+      2026-09-16 gemini-robotics-er-2-preview repriced
+      2026-09-22 gemini-robotics-er-2-streaming-preview repriced

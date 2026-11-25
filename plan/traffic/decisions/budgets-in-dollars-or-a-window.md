@@ -24,3 +24,7 @@ The options:
 Recommended: the reserve is a rule, a share per computer is a precaution. #351's "at most 30 percent
 of this week" is a share, so the rule offered first is the reserve. #355 also proposes a decision
 `budget-in-a-window` for how the two are set; it is not needed to take this one.
+
+## A plan's window provider by provider (25 November 2026)
+
+An agent's part, from `research/2026-11-25-plan-windows/`, added on merge because #407 wrote it before #376 had landed. The reserve is a rule only where the provider's figure is read. On a computer set for a Claude plan under `claude-key-or-plan` there is none. Google's share per computer is a fact, so for Google a share can be a rule. Across Macs the reserve needs nothing from `pooled-budget-ledger`; a share does.

@@ -10,8 +10,9 @@ needs no account, no sign-up and no key. It says nothing about what Silo sends.
 The options:
 
 - Nothing unless you turn it on (recommended). No usage data and no crash report leave the Mac by
-  themselves. The one request Silo makes on its own is the check for a new version, which carries
-  the version and nothing else, and can be turned off. A crash report is offered when Silo crashes:
+  themselves. The one request Silo makes on its own is a daily fetch of one public signed file
+  that names the latest version of Silo and of its price table. It carries nothing, not even the
+  version you run, and can be turned off. A crash report is offered when Silo crashes:
   you see what it holds, and you send it or not. It costs knowing how many people use Silo and which
   features they use. Downloads, stars and what people tell us are the only counts left.
 - Anonymous counts, on by default, with a setting to turn them off. Silo sends counts such as the
@@ -34,6 +35,41 @@ it comes up beside sign-in walls and closed source.
 - What the agent programs send. Claude Code and Codex send their own telemetry to their vendors
   (`reading-each-agent-program`). That is traffic of the computer, which the boundary sees and your
   rules allow or refuse.
+
+## The price table rides on the same request
+
+An agent's part, 25 November 2026, from `research/2026-11-25-price-channel`.
+
+`where-prices-come-from` recommends that the app fetch Silo's signed price table, so that a budget
+counts Gemini 4 Carbon at its new price from 1 December. That is a second request home, which the
+answer above, as first written, did not allow. The research joins the two: one file, the index,
+names the latest version of Silo and the latest table with its hash, and the app fetches it once a
+day at a random minute. A new table is a second fetch, of a file every Mac fetches alike.
+
+The version check needs no version either. The app reads the latest version in the index and
+compares it with its own. Measured on a local server: the request for the index is the path, a
+fixed `User-Agent: Silo`, and three fixed headers. Two installs at different versions, with
+different tables and histories, sent byte-identical requests. Common clients send more by default:
+curl and Python name their own version, and Node sends `sec-fetch-mode` and keep-alive. On a Mac,
+`URLSession` names the app's build and the Darwin version unless told not to (not measured here:
+no Mac). What is left is what any connection gives: the address, the time, and the TLS handshake.
+
+Where the file lives decides who sees even that. On GitHub Pages or a raw file of the public
+repository, the requests reach GitHub, and Amont Labs gets no log of them. On a server of Amont
+Labs, or a CDN it rents, it gets a log by address and time, which counts installs. A GitHub release
+asset shows a public download count, which also counts them. Recommended: a static file on GitHub
+Pages, with any other address only as a mirror, since every file is checked by its signature
+wherever it comes from. That Pages gives the owner no per-request log was not verified beyond
+GitHub's documentation.
+
+What this answer does not cover, and should name once decided: the recipes Silo ships update
+(`recipe-audit`) and would ride on the same index; the Ubuntu image (`computer-image`) and Claude
+Code (`claude-code-fetched-by-recipe`) are downloaded from Ubuntu and Anthropic, not from Amont
+Labs, when you make a computer that needs them.
+
+A property for polarzero to word, if the answer is taken: "A request Silo makes on its own carries
+nothing that tells one Mac from another." The test `test_two_macs_send_the_same_bytes` in the
+research checks it.
 
 ## The phone app's pushes (25 November 2026)
 

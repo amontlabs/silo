@@ -57,3 +57,15 @@ since a run that ends on a narrower test is the case that misleads.
 ## From option A's first-run transcript
 
 Agent, 25 November 2026, from `research/2026-11-25-first-run-option-a/` (gap 7 there). Option A has no probe, so the receipt's "processes it started that are still running" is "not known yet". That costs more than its line. #377's corpus of 49 false claims from public incidents, read again with the processes taken out (`checks/catch_rate_under_a.py`): on the 30 test cases, the receipt's outcome lines alone catch 3 instead of 7, and with `claims@0.3` they catch or flag 10 instead of 13. On all 49, 22 instead of 25. A process left running is the outcome line A loses, and it is the one `processes-in-the-record` brings back.
+
+## Still running and exit codes, without processes
+
+An agent's part, 25 November 2026, from [attribution without processes](../../../research/2026-11-25-attribution-without-processes/README.md).
+Under option A, #373 shows "still running: not known yet". The traffic says part of it. A tool call
+with no result yet is still running. A command with `nohup`, `setsid`, `disown` or a trailing `&`
+may leave a process its result does not mention. On #371's night both processes the probe found
+left running were flagged that way, as a report from the traffic, and one flag was wrong: Codex
+said `bun test --watch` was running, and `codex exec` killed it when it ended. Exit codes read
+from tool results equalled the probe's every time both existed (16 of 16), but in Codex's code
+mode they are only there when the model's script prints them (13 of 18 commands had one). The
+item "files that changed" can name the conversation as an opinion: `author-from-traffic`.

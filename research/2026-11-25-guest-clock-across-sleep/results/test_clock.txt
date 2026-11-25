@@ -1,0 +1,11 @@
+none:  2 s after the wake main is -19.999 s off the Mac: FAIL
+none: 65 s after the wake main is -19.998 s off the Mac: FAIL
+none exit 1
+periodic:  2 s after the wake main is -19.999 s off the Mac: FAIL
+periodic: 65 s after the wake main is -0.000 s off the Mac: pass
+periodic: steps [('period', -19.999, -0.0)]
+periodic exit 1
+keeper:  2 s after the wake main is +0.000 s off the Mac: pass
+keeper: 65 s after the wake main is +0.001 s off the Mac: pass
+keeper: steps [('wake', -19.998, -0.0)]
+keeper exit 0

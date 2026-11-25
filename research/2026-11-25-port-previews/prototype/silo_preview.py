@@ -108,6 +108,43 @@ async def read_head(r):
     return lines[0], [tuple(x.split(":", 1)) for x in lines[1:]]
 
 
+class BadHead(Exception):
+    """An answer head the forwarder cannot read exactly as the browser will."""
+
+
+TOKEN = r"[!#$%&'*+.^_`|~0-9A-Za-z-]+"
+
+
+async def read_answer_head(r):
+    """The app's answer head, read strictly, so that the browser reads the same head the forwarder
+    adds Silo's policy to. Lines end in CRLF only: a bare LF ends a line, or the head, for Chromium
+    and not for a reader of CRLF. No folded line, no line without a name and a colon, no bare CR,
+    no NUL, at most 64 KiB. An interim answer (1xx other than 101) is read and dropped: Chromium
+    drops it, with any policy written on it, and reads the next head. Anything else raises BadHead."""
+    while True:
+        try:
+            head = await r.readuntil(b"\r\n\r\n")
+        except (asyncio.LimitOverrunError, asyncio.IncompleteReadError):
+            raise BadHead()
+        text = head[:-4]
+        bare = text.replace(b"\r\n", b"")
+        if b"\n" in bare or b"\r" in bare or b"\0" in text:
+            raise BadHead()
+        lines = text.decode("latin-1").split("\r\n")
+        if not re.fullmatch(r"HTTP/1\.[01] [1-5]\d\d( [^\x00-\x08\x0a-\x1f\x7f]*)?", lines[0]):
+            raise BadHead()
+        hs = []
+        for line in lines[1:]:
+            m = re.fullmatch(f"({TOKEN}):(.*)", line)
+            if not m:
+                raise BadHead()
+            hs.append((m[1], m[2]))
+        code = int(lines[0][9:12])
+        if 100 <= code < 200 and code != 101:
+            continue
+        return lines[0], hs
+
+
 def hget(hs, k):
     for a, b in hs:
         if a.strip().lower() == k:
@@ -176,7 +213,10 @@ async def forward(r, w):
     await uw.drain()
     asyncio.ensure_future(pipe(r, uw))
     try:
-        rstart, rhs = await read_head(ur)
+        rstart, rhs = await read_answer_head(ur)
+    except BadHead:
+        uw.close()
+        return await reply(w, 502, b"the computer's answer could not be read")
     except Exception:
         return w.close()
     keep = []
