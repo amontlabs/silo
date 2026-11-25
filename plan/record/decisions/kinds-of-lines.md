@@ -52,3 +52,11 @@ whoever builds it.
   variants of an enum that mirrors an outside list. A test walks every action and checks its kind is
   filed; the short fixed list of line kinds is pinned by count.
   ([source](https://github.com/evmts/guillotine/blob/dbdf61bd7902c726cdfb4cf80d60ed0e02da5663/src/opcodes/REVIEW_SUMMARY.md?plain=1#L105))
+
+## One writer
+
+An agent's part, 25 November 2026, from [the record's format](../../../research/2026-11-25-record-format/format.md). #371's
+prototype broke its chain with two writers, the engine and `silo putback`. In the format, the
+recorder is the only writer: a put-back is an engine operation, so its control fact reaches the
+recorder as an engine event, like every other. No lock and no second count are needed. The format
+holds the nine kinds and its verifier refuses any other.

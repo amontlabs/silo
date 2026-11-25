@@ -22,3 +22,13 @@ The options:
 
 Recommended: settings always, files when known. Silo never fills a hole with a guess, and
 "unattributed" is the honest answer.
+
+## The author `device`, tried
+
+An agent's part, 25 November 2026, from [the record's format](../../../research/2026-11-25-record-format/format.md). The format
+writes `author` as `{"by":…,"person":…}`, with `by` one of you, rule, precaution, extension,
+silo and `device`, and `person` required when `by` is you (#362's `person-in-a-control-fact`).
+The prototype's verifier refuses a control fact with no author, an author outside the six, or "you"
+with no person. Recommended: add `device` to this entry's answer and to the property
+`every-control-fact-has-its-author`, as "you, a rule, a precaution, an extension, Silo, or the Mac
+itself". Without it, the Mac going to sleep is written as Silo's doing.

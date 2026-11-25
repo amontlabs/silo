@@ -1,0 +1,4 @@
+{"mutant":"none","points":209,"passed":209,"failed":0}
+{"mutant":"line_before_blob","points":209,"passed":183,"failed":26,"first_failure":{"k":6,"what":"a blob a line points to is missing, and no fact says it was removed"}}
+{"mutant":"head_in_place","points":203,"passed":197,"failed":6,"first_failure":{"k":38,"what":"the head cannot be read"}}
+{"mutant":"no_dedupe","points":209,"passed":13,"failed":196,"first_failure":{"k":14,"what":"after sending again, a line is missing or written twice"}}

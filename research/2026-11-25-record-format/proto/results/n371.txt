@@ -1,0 +1,14 @@
+#371's night (research/2026-11-24-morning-review, demo.sh, run 25 November 2026 on Linux with
+Claude Code and Codex 0.172.0), its record converted with scripts/from371.py and written by silorec.
+
+#371's own files: 1,524,424 bytes of JSON lines (3,573 lines with one opinion), 90,601 bytes of blobs.
+Lines by kind: report/process 1437, fact/file 1034, report/file 862, fact/control 177,
+report/owner 31, fact/model call 24, fact/connection 7, opinion 1.
+
+sent  lines  segments   gzip -6  zstd -3
+full  3570   1562883    320446   268131
+delta 3570   1551946    315780   268148
+
+silorec verify n371-full c1:  3570 lines checked in 1 segments, 273 blob references · the chain holds
+silorec verify n371-delta c1: 3570 lines checked in 1 segments, 120 blob references · the chain holds
+Shell check of the chain on two printed lines (sha256sum of one = prev of the next): ok

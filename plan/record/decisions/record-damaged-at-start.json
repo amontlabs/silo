@@ -1,0 +1,8 @@
+{
+  "asks": "What does the recorder do when it starts and finds a line of the record damaged, other than one it had not finished writing?",
+  "answer": "It keeps recording. It leaves the damaged segment as it is, starts a new segment after the last line it could read, and writes a fact that names the damaged segment and the place. `silo verify` and the first screen show the damage until you look at it.",
+  "needs": [
+    "changes-to-the-record",
+    "enforcing-and-recording"
+  ]
+}
