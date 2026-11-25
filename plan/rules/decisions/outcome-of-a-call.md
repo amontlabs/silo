@@ -59,3 +59,24 @@ worth saying, and a repository made public cannot be made private again for whoe
   Removing 2FA, a passkey or changing the account's email fit no outcome; they are a protection
   turned off. Paid resources created (a Postgres cluster, a disk grown, a read replica, static
   IPs) are the outcome the rules miss most: 17 pass. `research/2026-11-25-second-labeller/README.md`.
+- The lasting wording above, applied call by call to #383's set and to #404's (5,546 writes of AWS,
+  Google Cloud, Azure, GitHub and Kubernetes), changes 13 calls and 6. Of the 86 calls on #383's
+  set that give access to someone named, 73 give lasting access, 9 mint a credential for the
+  caller's run (`railway ssh`'s shell token, a Vercel build's OIDC token, R2 temporary
+  credentials) and 4 give nobody anything new. On #404's set, 6 of 222 are for the run, such as
+  `kubectl create token`. The request seldom says how long a credential lives, so a rule set
+  needs a list of the operations that mint run tokens. `flyctl tokens create` is the exception:
+  it sends `"expiry": "175200h0m0s"`, 20 years.
+  `research/2026-11-25-lasting-access/README.md`.
+- The answer does not say what a revocation is: a member or a role removed, a key or a token
+  deleted, a webhook or log sink deleted. #383's and #404's labels call most of them outage, and
+  both prototypes hold them. Listed by hand, they are 64 operations on #383's set and 102 on
+  #404's, and the rules hold 57 and 95 of them. Case: at night an agent deletes an IAM access key
+  it found in a log, then removes a member from the GitHub organization. Options:
+  - A revocation passes (recommended). It is an outage at most. It removes 57 and 95 asks. It
+    also lets an agent remove polarzero from the organization.
+  - A revocation is held, as both prototypes hold every outage today.
+  - A revocation passes unless it removes the user's own access. That needs to know which account
+    on the provider is the user's, which Silo could learn from the credential it holds.
+  If taken, the answer would add: "A call that only removes access someone had passes; when what
+  used it stops, it is an outage."
