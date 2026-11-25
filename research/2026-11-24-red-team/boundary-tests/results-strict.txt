@@ -1,0 +1,46 @@
+=== 0-ordinary
+-- the record (boundary) saw:
+   {'line': 'POST /v1/messages HTTP/1.1', 'bytes': 226, 'body_bytes_decoded': 88, 'results': 0}
+   {'line': 'POST /v1/messages HTTP/1.1', 'bytes': 343, 'body_bytes_decoded': 204, 'results': 0}
+-- the host parsed:
+   {'first': 'POST /v1/messages HTTP/1.1', 'host': ['api.anthropic.com'], 'body_len': 88, 'body_head': '{"model": "claude-x", "max_tokens": 10, "messages": [{"role": "user", "content": "hi"}]}', 'sha': '06fa7f99287f2dc8'}
+   {'first': 'POST /v1/messages HTTP/1.1', 'host': ['api.anthropic.com'], 'body_len': 204, 'body_head': '{"model": "claude-x", "max_tokens": 10, "tools": [{"type": "web_fetch_20250910", "name": "web_fetch"}], "messages": [{"r', 'sha': 'c75fd3be1688a185'}
+-- the program got:
+   {"host_parsed_request": 1, "line": "POST /v1/messages HTTP/1.1"}
+   {"host_parsed_request": 2, "line": "POST /v1/messages HTTP/1.1"}
+=== a-host-not-sni
+-- the record (boundary) saw:
+-- the host parsed:
+-- the program got:
+=== b-unknown-encoding
+-- the record (boundary) saw:
+-- the host parsed:
+-- the program got:
+=== c-duplicate-json-key
+-- the record (boundary) saw:
+-- the host parsed:
+-- the program got:
+=== d-two-content-lengths
+-- the record (boundary) saw:
+-- the host parsed:
+-- the program got:
+=== e-length-and-chunked
+-- the record (boundary) saw:
+-- the host parsed:
+-- the program got:
+=== f-tab-before-colon
+-- the record (boundary) saw:
+-- the host parsed:
+-- the program got:
+=== g-read-the-smuggled-reply
+-- the record (boundary) saw:
+-- the host parsed:
+-- the program got:
+0-ordinary: 
+a-host-not-sni: "why":"Host differs from the name in the handshake"
+b-unknown-encoding: "why":"a body encoding the boundary cannot read"
+c-duplicate-json-key: "why":"a body that does not parse as JSON, duplicate keys included"
+d-two-content-lengths: "why":"two Content-Length headers"
+e-length-and-chunked: "why":"both Content-Length and Transfer-Encoding"
+f-tab-before-colon: "why":"header name with whitespace, or a line without a colon"
+g-read-the-smuggled-reply: "why":"two Content-Length headers"
