@@ -50,3 +50,14 @@ whoever builds it.
   budget, counted as it streams, and settled on the provider's final usage, so two calls at once
   cannot both spend the same remainder. A call that fails midway still counts what it cost.
   ([source](https://github.com/evmts/guillotine-mini/blob/edafd394bc0aa48a9691b037da36b6f36525121a/CLAUDE.md?plain=1#L669))
+
+## A hostile test of `budget-stops-what-it-meters`
+
+Agent, 25 November 2026, from `research/2026-11-25-untrusted-parsers/` (#387). On #385's boundary,
+a computer with a $50 budget had 10 model calls served, $240 at the host's counts, and 3 counted.
+The other seven were sent to `/v1/messages` spelled as Anthropic's host also answers it
+(`//v1/messages`, `/v1/./messages`, absolute form, and three more), and two calls went inside the
+body of a request the boundary does not count, framed with a bare LF or a folded header line that
+the hosts read and the boundary does not. A patch there makes the boundary read requests strictly
+and refuse the rest with a 400; with it, the same test gives 3 served, 3 counted. The property
+holds only if the boundary reads every request exactly as the host will.

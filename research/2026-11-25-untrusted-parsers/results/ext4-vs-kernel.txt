@@ -1,0 +1,7 @@
+clean                      same            {"only_silo": [], "n_only_silo": 0, "only_kernel": [], "n_only_kernel": 0, "type": [], "kernel_errors": null}
+dir_size_below_blocks      DIFFERENT       {"only_silo": ["/c/file_with_a_long_name_32", "/c/file_with_a_long_name_33", "/c/file_with_a_long_name_34", "/c/file_with_a_long_name_35", "/c/file_with_a_long_name_36"], "n_only_silo": 9, "only_kernel": [], "n_only_kernel": 0, "type": [], 
+dir_extent_unwritten       same            {"only_silo": [], "n_only_silo": 0, "only_kernel": [], "n_only_kernel": 0, "type": [], "kernel_errors": null}
+deleted_inode_linked       same            {"only_silo": [], "n_only_silo": 0, "only_kernel": [], "n_only_kernel": 0, "type": [], "kernel_errors": null}
+dirent_name_with_nul       DIFFERENT       {"only_silo": ["/c/file\u0000with_a_long_name_07"], "n_only_silo": 1, "only_kernel": ["/c/file"], "n_only_kernel": 1, "type": [], "kernel_errors": null}
+csum_dir_block_changed     DIFFERENT       {"only_silo": ["/c/Xile_with_a_long_name_07", "/c/file_with_a_long_name_01", "/c/file_with_a_long_name_02", "/c/file_with_a_long_name_03", "/c/file_with_a_long_name_04"], "n_only_silo": 30, "only_kernel": [], "n_only_kernel": 0, "type": [],
+dirent_type_0xde           DIFFERENT       {"only_silo": [], "n_only_silo": 0, "only_kernel": ["/c/file_with_a_long_name_07"], "n_only_kernel": 1, "type": [], "kernel_errors": null}

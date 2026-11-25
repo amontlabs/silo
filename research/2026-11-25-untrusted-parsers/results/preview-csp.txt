@@ -1,0 +1,4 @@
+crlf: {"csp_header":true,"title":"ran","body_has_csp_text":false}
+lf: {"csp_header":false,"title":"ran","body_has_csp_text":true}
+requests that reached the host the policy forbids:
+/leak?mode=lf
