@@ -227,3 +227,33 @@ An agent's part, 25 November 2026, written while merging #390 and #392 to #396 o
 - #380 runs gvproxy's hand-off with `-outbound-deny private,host,host-networks`, which drops `169.254.169.254` before the boundary sees it. #379 serves cloud credentials from a metadata server at that address. #395 found the two cannot both hold. Recommended: gvproxy hands the metadata address to the boundary like any other connection, so the boundary answers it, and the deny list keeps `host` and `host-networks`. This needs #395's one-line fix of `-ec2-metadata-access`, or the same rule in #380's patch.
 - #374 tells computers apart by the address a connection comes from. Neither way in gives one: vsock has no address, and every computer behind its own gvproxy is `192.168.127.2`. Recommended, as #395 built it: one socket per computer on each way in, and one port per computer for lookups.
 - #378's relay sets no `TCP_NODELAY`, which cost 44 ms on every kept-alive request in #395's run. A one-line fix in #378's relay and in the Mac end.
+
+## A restart of the stack under a running computer (25 November 2026)
+
+An agent's part, from `research/2026-11-25-network-link-restart/`. Run on Linux, in network
+namespaces, with gvproxy v0.9.0; no virtual machine and no Mac.
+
+The case: gvproxy crashes at 3 a.m., or is upgraded, while main runs. Handed straight to gvproxy's
+socket, as silovm and vfkit do, main's network never comes back (#390). Three ways for the helper to
+hold main's end of the link brought it back within 0.1 s of gvproxy being up again, with gvproxy as
+the helper's child, one per computer:
+
+- The helper keeps its own copy of the socket it gave Apple's framework, and connects it again to
+  each new gvproxy. No patch, no copy of any frame.
+- The helper starts gvproxy with one end of a socketpair as an inherited descriptor (a 28-line patch)
+  and keeps a copy for the next one. No copy, and frames sent during the restart are not lost.
+- The helper relays every frame. One copy of each; the only way that can also reset, in main, the
+  connections the restart cut.
+
+What a restart costs either way: every connection open at that moment is lost, because gvproxy
+keeps its half in memory. A connection that sends is reset at once; one that only waits (a model's
+streamed reply, a held reply) waits until its program's own timeout, or for ever. gvproxy's forwards
+are lost too, so the helper opens Silo's way in again. A second `VFKT` reaching a gvproxy that
+already has its computer cuts that computer off for good with nothing logged, so the helper says it
+once per start.
+
+Suggested, with the gvproxy fork #380 proposes: the socketpair hand-off, and the helper's own copy
+re-connected where there is no fork. The stack is restarted on purpose only outside a night, and a
+crash in a night is a fact in the record, with the connections it cut. Four questions go to the Mac
+kit's test 36: whether the framework keeps using a socket connected again, keeps its card working
+after a second of send errors, takes a socketpair end, and lets root inside send a 4-byte frame.

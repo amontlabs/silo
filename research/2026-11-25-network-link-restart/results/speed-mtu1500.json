@@ -1,0 +1,234 @@
+{
+ "server": [
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795615874.207,
+   "t_end": 1795615879.228
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795615879.274,
+   "t_end": 1795615884.278
+  },
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795615884.482,
+   "t_end": 1795615889.506
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795615889.565,
+   "t_end": 1795615894.592
+  },
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795615894.768,
+   "t_end": 1795615899.786
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795615899.841,
+   "t_end": 1795615904.847
+  },
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795615905.385,
+   "t_end": 1795615910.409
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795615910.464,
+   "t_end": 1795615915.469
+  },
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795615915.827,
+   "t_end": 1795615920.855
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795615920.903,
+   "t_end": 1795615925.923
+  },
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795615926.176,
+   "t_end": 1795615931.2
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795615931.239,
+   "t_end": 1795615936.249
+  },
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795615936.501,
+   "t_end": 1795615941.516
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795615941.563,
+   "t_end": 1795615946.571
+  },
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795615947.12,
+   "t_end": 1795615952.143
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795615952.194,
+   "t_end": 1795615957.194
+  },
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795615957.424,
+   "t_end": 1795615962.446
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795615962.484,
+   "t_end": 1795615967.493
+  },
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795615967.787,
+   "t_end": 1795615972.814
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795615972.876,
+   "t_end": 1795615977.897
+  },
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795615978.127,
+   "t_end": 1795615983.14
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795615983.188,
+   "t_end": 1795615988.198
+  },
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795615988.733,
+   "t_end": 1795615993.753
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795615993.791,
+   "t_end": 1795615998.803
+  }
+ ],
+ "runs": [
+  {
+   "mode": "direct",
+   "mtu": 1500,
+   "up": 1.002,
+   "down": 0.812,
+   "run": 1
+  },
+  {
+   "mode": "repoint",
+   "mtu": 1500,
+   "up": 0.89,
+   "down": 0.821,
+   "run": 1
+  },
+  {
+   "mode": "fd",
+   "mtu": 1500,
+   "up": 1.604,
+   "down": 0.881,
+   "run": 1
+  },
+  {
+   "mode": "relay",
+   "mtu": 1500,
+   "up": 1.007,
+   "down": 0.827,
+   "run": 1
+  },
+  {
+   "mode": "direct",
+   "mtu": 1500,
+   "up": 0.996,
+   "down": 0.899,
+   "run": 2
+  },
+  {
+   "mode": "repoint",
+   "mtu": 1500,
+   "up": 0.831,
+   "down": 0.767,
+   "run": 2
+  },
+  {
+   "mode": "fd",
+   "mtu": 1500,
+   "up": 1.444,
+   "down": 0.905,
+   "run": 2
+  },
+  {
+   "mode": "relay",
+   "mtu": 1500,
+   "up": 0.952,
+   "down": 0.943,
+   "run": 2
+  },
+  {
+   "mode": "direct",
+   "mtu": 1500,
+   "up": 0.957,
+   "down": 0.793,
+   "run": 3
+  },
+  {
+   "mode": "repoint",
+   "mtu": 1500,
+   "up": 0.965,
+   "down": 0.853,
+   "run": 3
+  },
+  {
+   "mode": "fd",
+   "mtu": 1500,
+   "up": 1.585,
+   "down": 0.837,
+   "run": 3
+  },
+  {
+   "mode": "relay",
+   "mtu": 1500,
+   "up": 0.976,
+   "down": 0.908,
+   "run": 3
+  }
+ ]
+}
