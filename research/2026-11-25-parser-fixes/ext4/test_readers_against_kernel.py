@@ -188,6 +188,17 @@ class NeverCrashes(unittest.TestCase):
     def test_inode_size_too_small(self):
         self.answers_or_refuses(self.sb('isize8', 88, 8, '<H'))
 
+    def test_journal_with_no_blocks(self):
+        """Found by fz_readers.py on the fixed ext4read: the journal inode's extent tree is emptied,
+        so the journal has no block 0."""
+        img = os.path.join(W, 'journal.img')
+        if os.path.exists(img): os.remove(img)
+        assert sh(f'truncate -s 16M {img} && mkfs.ext4 -q -b 1024 -J size=1 {img}').returncode == 0
+        r = sh(f"debugfs -R 'imap <8>' {img}").stdout
+        o = int(r.split('located at block ')[1].split(',')[0]) * 1024 + int(r.split('offset ')[1].strip(), 16)
+        patch(img, o + 40 + 2, struct.pack('<H', 0))
+        self.answers_or_refuses(img)
+
     def test_dirent_header_past_the_block(self):
         """The last entry's length is shortened by 4: the next header would start 4 bytes before
         the block ends."""
