@@ -1,0 +1,25 @@
+night one-main · 20 tool calls · checkpoints: one in 1 · tool calls open in a window with a file fact: 1.8 on average
+facts                                              nunattr. (probe)        scored         right   named/under    right call         wrong          none
+file, agent program's own                        172            33           139           130             0             0             0             9
+file, the work                                   461             0           461           454           453           453             0             7
+connection, the work                               4             0             4             3             3             3             0             1
+connection, agent program's own                    3             0             3             2             0             0             0             1
+how, the work: {('file', 'none'): 7, ('file', 'result'): 1, ('file', 'content'): 1, ('file', 'named'): 32, ('file', 'under'): 400, ('file', 'implied'): 20, ('connection', 'none'): 1, ('connection', 'named'): 3}
+NONE  file ~/.claude/sessions/5343.ec79a2e9a47a6a6835ed0245c694240cd5603b980a381db4cf3b09518b8392e6.key own files probe: main:c2
+NONE  file ~/.claude/sessions/5343.json own files probe: main:c2
+NONE  file ~/.claude/shell-snapshots/snapshot-bash-1795606475320-dslelw.sh own files probe: main:c2
+NONE  file ~/.bashrc none probe: main:c3
+NONE  file ~/.claude/sessions/5549.0b8570c3fa0af036da0599c928a1e1efd88dc95159dd14300941d631bd5afe4d.key own files probe: main:c4
+NONE  file ~/.claude/sessions/5549.json own files probe: main:c4
+NONE  file ~/work/app/data/sessions.json none probe: main:c1
+NONE  file ~/work/app/data/sessions.json none probe: main:c3
+NONE  file ~/work/app/data/sessions.json none probe: main:c1
+NONE  file ~/.claude/shell-snapshots/snapshot-bash-1795606482068-rawq6n.sh own files probe: main:c4
+NONE  file ~/work/app/data/sessions.json none probe: main:c3
+NONE  file ~/work/app/data/sessions.json none probe: main:c2
+NONE  file ~/work/app/data/sessions.json none probe: main:c3
+NONE  file ~/.claude/sessions/5294.dd784a3733feebafefb18d4dcc62985f4c655c2fd6de4b89498e5c442ffb61e6.key own files probe: main:c1
+NONE  file ~/.claude/sessions/5294.json own files probe: main:c1
+NONE  file ~/.claude/shell-snapshots/snapshot-bash-1795606471102-g28s95.sh own files probe: main:c1
+NONE  connection github.com none probe: main:c3
+NONE  connection api.github.com none probe: main:c3

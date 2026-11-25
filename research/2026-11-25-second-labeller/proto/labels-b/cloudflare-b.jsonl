@@ -1,0 +1,156 @@
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/observability/destinations/{slug}", "label": "either", "named": true, "why": "can repoint telemetry export elsewhere"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/issues/automations", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/observability/issues/automations/{automationId}", "label": "allow", "named": false, "why": "small config, easily redone"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/observability/issues/automations/{automationId}", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/issues/groups", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/observability/issues/groups/{groupId}", "label": "allow", "named": false, "why": "grouping only"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/issues/groups/{groupId}/members", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/observability/issues/groups/{groupId}/members/{issueId}", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/observability/issues/{issueId}", "label": "allow", "named": false, "why": "issue status change"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/issues/{issueId}/notification-runs", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/metricsexport", "label": "either", "named": true, "why": "upsert export to outside destination"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/queries", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/observability/queries/{queryId}", "label": "allow", "named": false, "why": "saved query, easily redone"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/observability/queries/{queryId}", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/shared/query", "label": "hold:exposed", "named": false, "why": "anyone with link reads log data"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/telemetry/keys", "label": "allow", "named": false, "why": "read through POST"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/telemetry/live-tail", "label": "allow", "named": false, "why": "read through POST"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/telemetry/live-tail/heartbeat", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/telemetry/query", "label": "allow", "named": false, "why": "read through POST"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/telemetry/values", "label": "allow", "named": false, "why": "read through POST"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/scripts/{script_name}", "label": "hold:gone", "named": false, "why": "script, bindings, versions deleted"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/scripts/{script_name}", "label": "deploy", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/scripts/{script_name}/assets-upload-session", "label": "allow", "named": false, "why": "prepares upload only"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/scripts/{script_name}/content", "label": "deploy", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/scripts/{script_name}/deployments", "label": "deploy", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/scripts/{script_name}/deployments/{deployment_id}", "label": "allow", "named": false, "why": "history record; versions remain"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/scripts/{script_name}/schedules", "label": "either", "named": false, "why": "replaces cron set, may clear"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/scripts/{script_name}/script-settings", "label": "either", "named": false, "why": "logpush, tail consumers, observability"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/scripts/{script_name}/secrets", "label": "deploy", "named": false, "why": "secret change deploys new version"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/scripts/{script_name}/secrets-bulk", "label": "either", "named": false, "why": "may overwrite or remove secrets"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/scripts/{script_name}/secrets/{secret_name}", "label": "hold:gone", "named": false, "why": "secret value unrecoverable"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/scripts/{script_name}/settings", "label": "deploy", "named": false, "why": "new version with changed bindings"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/scripts/{script_name}/subdomain", "label": "hold:outage", "named": false, "why": "workers.dev URL stops"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/scripts/{script_name}/subdomain", "label": "either", "named": false, "why": "enable or disable workers.dev"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/scripts/{script_name}/tails", "label": "allow", "named": false, "why": "reads logs"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/scripts/{script_name}/tails/{id}", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/scripts/{script_name}/usage-model", "label": "either", "named": false, "why": "usage model may raise cost"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/scripts/{script_name}/versions", "label": "allow", "named": false, "why": "version uploaded, not deployed"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/services/{service_name}/environments/{environment_name}/content", "label": "deploy", "named": false, "why": ""}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/services/{service_name}/environments/{environment_name}/settings", "label": "either", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/subdomain", "label": "hold:outage", "named": false, "why": "all workers.dev URLs stop"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/subdomain", "label": "either", "named": false, "why": "renaming breaks existing workers.dev URLs"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/workers", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/workers/{worker_id}", "label": "hold:gone", "named": false, "why": ""}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/workers/{worker_id}", "label": "either", "named": false, "why": ""}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/workers/{worker_id}", "label": "either", "named": false, "why": "replaces worker settings"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews/{preview_id}", "label": "allow", "named": false, "why": "preview only, recreatable"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews/{preview_id}", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews/{preview_id}", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews/{preview_id}/deployments", "label": "deploy", "named": false, "why": "ships code to preview"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews/{preview_id}/deployments/latest", "label": "deploy", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews/{preview_id}/deployments/{deployment_id}", "label": "allow", "named": false, "why": "preview only"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews/{preview_id}/deployments/{deployment_id}/profile", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/workers/{worker_id}/versions", "label": "allow", "named": false, "why": "version not deployed"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/workers/{worker_id}/versions/latest", "label": "allow", "named": false, "why": "new version, not deployed"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/workers/{worker_id}/versions/{version_id}", "label": "hold:gone", "named": false, "why": "version code deleted"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/workers/{worker_id}/versions/{version_id}/profile", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workflows/concurrency", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workflows/concurrency/{key_id}", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workflows/concurrency/{key_id}", "label": "either", "named": false, "why": "limit change may stall instances"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workflows/settings", "label": "either", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workflows/{workflow_name}", "label": "hold:gone", "named": false, "why": "workflow and instance history deleted"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workflows/{workflow_name}", "label": "either", "named": false, "why": "can repoint workflow script or class"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances/batch", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances/batch/delete", "label": "hold:gone", "named": false, "why": "instance state and output deleted"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances/batch/terminate", "label": "allow", "named": false, "why": "cancels instances"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances/{instance_id}", "label": "hold:gone", "named": false, "why": "instance state deleted"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances/{instance_id}/events/{event_type}", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances/{instance_id}/status #1", "label": "allow", "named": false, "why": "cancels one instance"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances/{instance_id}/status #2", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/user/tokens", "label": "allow", "named": true, "why": "new API token"}
+{"id": "cloudflare DELETE /client/v4/user/tokens/{token_id}", "label": "hold:outage", "named": false, "why": "whatever uses token stops"}
+{"id": "cloudflare PUT /client/v4/user/tokens/{token_id}", "label": "either", "named": true, "why": "may widen token permissions"}
+{"id": "cloudflare PUT /client/v4/user/tokens/{token_id}/value", "label": "hold:outage", "named": true, "why": "old value invalid; new secret issued"}
+{"id": "cloudflare POST /client/v4/zones", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}", "label": "hold:gone", "named": false, "why": "all records and settings lost"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id} #1", "label": "hold:exposed", "named": false, "why": "edge protection off, origin exposed"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id} #2", "label": "hold:outage", "named": false, "why": "vanity nameservers removed, resolution breaks"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/custom_hostnames", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/custom_hostnames/fallback_origin", "label": "hold:outage", "named": false, "why": "custom hostnames lose origin"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/custom_hostnames/fallback_origin", "label": "either", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/custom_hostnames/{custom_hostname_id}", "label": "hold:outage", "named": false, "why": "customer hostname stops serving"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/custom_hostnames/{custom_hostname_id}", "label": "either", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/custom_hostnames/{custom_hostname_id}/certificate_pack/{certificate_pack_id}/certificates/{certificate_id}", "label": "hold:outage", "named": false, "why": "hostname loses TLS certificate"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/custom_hostnames/{custom_hostname_id}/certificate_pack/{certificate_pack_id}/certificates/{certificate_id}", "label": "either", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/dns_records", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/dns_records/batch #1", "label": "hold:gone", "named": false, "why": "DNS record deleted"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/dns_records/batch #2", "label": "hold:outage", "named": false, "why": "record repointed to other IP"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/dns_records/batch #3", "label": "allow", "named": false, "why": "adds new record"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/dns_records/import", "label": "allow", "named": false, "why": "adds records"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/dns_records/scan", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/dns_records/scan/review", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/dns_records/scan/trigger", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/dns_records/{dns_record_id}", "label": "hold:gone", "named": false, "why": "DNS record deleted"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/dns_records/{dns_record_id}", "label": "either", "named": false, "why": ""}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/dns_records/{dns_record_id}", "label": "either", "named": false, "why": ""}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/email/routing", "label": "either", "named": false, "why": ""}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/email/routing", "label": "either", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/email/routing/disable", "label": "hold:outage", "named": false, "why": "incoming mail stops"}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/email/routing/dns", "label": "hold:outage", "named": false, "why": "MX records removed, mail stops"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/email/routing/dns", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/email/routing/dns", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/email/routing/enable", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/email/routing/rules", "label": "allow", "named": true, "why": "forwards mail to an address"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/email/routing/rules/catch_all", "label": "either", "named": true, "why": "catch-all may forward elsewhere or drop"}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/email/routing/rules/{rule_identifier}", "label": "hold:outage", "named": false, "why": "mail to that address bounces"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/email/routing/rules/{rule_identifier}", "label": "either", "named": true, "why": "may change forward destination"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/email/routing/unlock", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/purge_cache", "label": "allow", "named": false, "why": "cache refills, nothing lost"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/rulesets", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/rulesets/phases/{ruleset_phase}/entrypoint", "label": "either", "named": false, "why": "replaces all rules in phase"}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/rulesets/{ruleset_id}", "label": "hold:gone", "named": false, "why": "ruleset and versions deleted"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/rulesets/{ruleset_id}", "label": "either", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/rulesets/{ruleset_id}/rules", "label": "either", "named": false, "why": "rule may block all or skip WAF"}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/rulesets/{ruleset_id}/rules/{rule_id}", "label": "hold:recoverable", "named": false, "why": "prior ruleset version keeps rule"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/rulesets/{ruleset_id}/rules/{rule_id}", "label": "either", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/rulesets/{ruleset_id}/versions/{ruleset_version}", "label": "hold:gone", "named": false, "why": "ruleset history version lost"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings #1", "label": "hold:exposed", "named": false, "why": "HTTPS off, traffic plaintext"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings #2", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/settings/aegis", "label": "hold:outage", "named": false, "why": "egress IPs gone, origin allowlists block"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/aegis", "label": "either", "named": false, "why": ""}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/auto_origin_tls_kex", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/automatic_platform_optimization", "label": "either", "named": false, "why": "paid add-on, changes caching"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/binary_ast", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/csam_scanner_third_party", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/fonts", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/settings/google-tag-gateway/config", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/h2_prioritization", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/image_resizing", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/nel", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/settings/ohttp-gateway", "label": "hold:outage", "named": false, "why": "gateway clients stop working"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/settings/ohttp-gateway", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/origin_h2_max_streams", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/origin_max_http_version", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/settings/origin_tls_compliance_modes", "label": "allow", "named": false, "why": "reverts to default"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/origin_tls_compliance_modes", "label": "either", "named": false, "why": "may break origin TLS"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/settings/origin_tls_compliance_modes", "label": "either", "named": false, "why": "may break origin TLS"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/rum", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/speed_brain", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/ssl_automatic_mode", "label": "either", "named": false, "why": "may change SSL mode"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/transformations_allowed_origins", "label": "either", "named": false, "why": "widens fetchable origins"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/transformations_c2pa", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/transformations_config", "label": "either", "named": false, "why": ""}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/settings/zaraz/config", "label": "either", "named": false, "why": "may add third-party tools live"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/settings/zaraz/history", "label": "deploy", "named": false, "why": "rollback to earlier config"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/settings/zaraz/publish", "label": "deploy", "named": false, "why": "publishes config live"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/settings/zaraz/workflow", "label": "allow", "named": false, "why": "workflow mode only"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/{setting_id} #1", "label": "hold:exposed", "named": false, "why": "HTTPS off, traffic plaintext"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/{setting_id} #2", "label": "hold:exposed", "named": false, "why": "HTTPS enforcement removed"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/{setting_id} #3", "label": "hold:exposed", "named": false, "why": "bot and attack protection off"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/{setting_id} #4", "label": "allow", "named": false, "why": ""}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/workers/routes", "label": "either", "named": false, "why": "route pattern may capture live traffic"}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/workers/routes/{route_id}", "label": "hold:outage", "named": false, "why": "worker stops serving that route"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/workers/routes/{route_id}", "label": "either", "named": false, "why": ""}

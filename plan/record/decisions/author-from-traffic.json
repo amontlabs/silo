@@ -1,0 +1,8 @@
+{
+  "asks": "Until Silo sees processes, does a file change or a connection name the conversation that made it?",
+  "answer": "Yes, as an opinion, when exactly one conversation had a tool call open between the two checkpoints of the change that sent the file's new content, named the path or a folder above it, or ran a command known to write it, such as `git commit` in that repository or `git config --global` for `~/.gitconfig`. A command that only reads, such as `ls` or `cat`, does not count, and neither does the folder it runs in. The opinion names the tool call and what it rests on. An agent program's own file is put down to the conversation whose session identifier is in its name. A connection is put down to the conversation whose open tool call names its host. In every other case the change shows as made while the named conversations ran, and none of them is picked.",
+  "needs": [
+    "the-chain",
+    "reading-each-agent-program"
+  ]
+}

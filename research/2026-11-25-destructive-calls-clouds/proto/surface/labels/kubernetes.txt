@@ -1,0 +1,601 @@
+# Kubernetes API (v1.37.2 swagger), every write operation, labelled on 2026-11-25.
+# Key: METHOD path. By action and resource (label_kubernetes.py).
+POST /api/v1/namespaces allow 
+POST /api/v1/namespaces/{namespace}/bindings allow 
+DELETE /api/v1/namespaces/{namespace}/configmaps hold:outage every object that matches
+POST /api/v1/namespaces/{namespace}/configmaps allow 
+DELETE /api/v1/namespaces/{namespace}/configmaps/{name} hold:outage 
+PATCH /api/v1/namespaces/{namespace}/configmaps/{name} either 
+PUT /api/v1/namespaces/{namespace}/configmaps/{name} either 
+DELETE /api/v1/namespaces/{namespace}/endpoints either 
+POST /api/v1/namespaces/{namespace}/endpoints allow 
+DELETE /api/v1/namespaces/{namespace}/endpoints/{name} either 
+PATCH /api/v1/namespaces/{namespace}/endpoints/{name} either 
+PUT /api/v1/namespaces/{namespace}/endpoints/{name} either 
+DELETE /api/v1/namespaces/{namespace}/events allow 
+POST /api/v1/namespaces/{namespace}/events allow 
+DELETE /api/v1/namespaces/{namespace}/events/{name} allow 
+PATCH /api/v1/namespaces/{namespace}/events/{name} allow 
+PUT /api/v1/namespaces/{namespace}/events/{name} allow 
+DELETE /api/v1/namespaces/{namespace}/limitranges hold:outage every object that matches
+POST /api/v1/namespaces/{namespace}/limitranges allow 
+DELETE /api/v1/namespaces/{namespace}/limitranges/{name} either 
+PATCH /api/v1/namespaces/{namespace}/limitranges/{name} either 
+PUT /api/v1/namespaces/{namespace}/limitranges/{name} either 
+DELETE /api/v1/namespaces/{namespace}/persistentvolumeclaims hold:gone every object that matches
+POST /api/v1/namespaces/{namespace}/persistentvolumeclaims allow 
+DELETE /api/v1/namespaces/{namespace}/persistentvolumeclaims/{name} hold:gone the volume goes if its reclaim policy is Delete
+PATCH /api/v1/namespaces/{namespace}/persistentvolumeclaims/{name} either 
+PUT /api/v1/namespaces/{namespace}/persistentvolumeclaims/{name} either 
+PATCH /api/v1/namespaces/{namespace}/persistentvolumeclaims/{name}/status allow controllers' status
+PUT /api/v1/namespaces/{namespace}/persistentvolumeclaims/{name}/status allow controllers' status
+DELETE /api/v1/namespaces/{namespace}/pods hold:outage every pod that matches
+POST /api/v1/namespaces/{namespace}/pods allow 
+DELETE /api/v1/namespaces/{namespace}/pods/{name} either a controller recreates it, a bare pod is gone
+PATCH /api/v1/namespaces/{namespace}/pods/{name} either 
+PUT /api/v1/namespaces/{namespace}/pods/{name} either 
+POST /api/v1/namespaces/{namespace}/pods/{name}/attach either 
+POST /api/v1/namespaces/{namespace}/pods/{name}/binding allow 
+PATCH /api/v1/namespaces/{namespace}/pods/{name}/ephemeralcontainers either 
+PUT /api/v1/namespaces/{namespace}/pods/{name}/ephemeralcontainers either 
+POST /api/v1/namespaces/{namespace}/pods/{name}/eviction hold:outage evicts the pod
+POST /api/v1/namespaces/{namespace}/pods/{name}/exec either a shell in a container
+POST /api/v1/namespaces/{namespace}/pods/{name}/portforward either 
+DELETE /api/v1/namespaces/{namespace}/pods/{name}/proxy either 
+PATCH /api/v1/namespaces/{namespace}/pods/{name}/proxy either 
+POST /api/v1/namespaces/{namespace}/pods/{name}/proxy either 
+PUT /api/v1/namespaces/{namespace}/pods/{name}/proxy either 
+DELETE /api/v1/namespaces/{namespace}/pods/{name}/proxy/{path} either 
+PATCH /api/v1/namespaces/{namespace}/pods/{name}/proxy/{path} either 
+POST /api/v1/namespaces/{namespace}/pods/{name}/proxy/{path} either 
+PUT /api/v1/namespaces/{namespace}/pods/{name}/proxy/{path} either 
+PATCH /api/v1/namespaces/{namespace}/pods/{name}/resize either 
+PUT /api/v1/namespaces/{namespace}/pods/{name}/resize either 
+PATCH /api/v1/namespaces/{namespace}/pods/{name}/status allow controllers' status
+PUT /api/v1/namespaces/{namespace}/pods/{name}/status allow controllers' status
+DELETE /api/v1/namespaces/{namespace}/podtemplates allow 
+POST /api/v1/namespaces/{namespace}/podtemplates allow 
+DELETE /api/v1/namespaces/{namespace}/podtemplates/{name} allow 
+PATCH /api/v1/namespaces/{namespace}/podtemplates/{name} either 
+PUT /api/v1/namespaces/{namespace}/podtemplates/{name} either 
+DELETE /api/v1/namespaces/{namespace}/replicationcontrollers hold:outage every object that matches
+POST /api/v1/namespaces/{namespace}/replicationcontrollers allow 
+DELETE /api/v1/namespaces/{namespace}/replicationcontrollers/{name} hold:outage 
+PATCH /api/v1/namespaces/{namespace}/replicationcontrollers/{name} cond 
+PUT /api/v1/namespaces/{namespace}/replicationcontrollers/{name} cond 
+PATCH /api/v1/namespaces/{namespace}/replicationcontrollers/{name}/scale cond 
+PUT /api/v1/namespaces/{namespace}/replicationcontrollers/{name}/scale cond 
+PATCH /api/v1/namespaces/{namespace}/replicationcontrollers/{name}/status allow controllers' status
+PUT /api/v1/namespaces/{namespace}/replicationcontrollers/{name}/status allow controllers' status
+DELETE /api/v1/namespaces/{namespace}/resourcequotas hold:outage every object that matches
+POST /api/v1/namespaces/{namespace}/resourcequotas allow 
+DELETE /api/v1/namespaces/{namespace}/resourcequotas/{name} either spending is no longer limited
+PATCH /api/v1/namespaces/{namespace}/resourcequotas/{name} either 
+PUT /api/v1/namespaces/{namespace}/resourcequotas/{name} either 
+PATCH /api/v1/namespaces/{namespace}/resourcequotas/{name}/status allow controllers' status
+PUT /api/v1/namespaces/{namespace}/resourcequotas/{name}/status allow controllers' status
+DELETE /api/v1/namespaces/{namespace}/secrets hold:gone every object that matches
+POST /api/v1/namespaces/{namespace}/secrets allow 
+DELETE /api/v1/namespaces/{namespace}/secrets/{name} hold:gone 
+PATCH /api/v1/namespaces/{namespace}/secrets/{name} either 
+PUT /api/v1/namespaces/{namespace}/secrets/{name} either 
+DELETE /api/v1/namespaces/{namespace}/serviceaccounts hold:outage every object that matches
+POST /api/v1/namespaces/{namespace}/serviceaccounts allow 
+DELETE /api/v1/namespaces/{namespace}/serviceaccounts/{name} hold:outage 
+PATCH /api/v1/namespaces/{namespace}/serviceaccounts/{name} either 
+PUT /api/v1/namespaces/{namespace}/serviceaccounts/{name} either 
+POST /api/v1/namespaces/{namespace}/serviceaccounts/{name}/token hold:exposed a token for the service account
+DELETE /api/v1/namespaces/{namespace}/services hold:outage every object that matches
+POST /api/v1/namespaces/{namespace}/services cond 
+DELETE /api/v1/namespaces/{namespace}/services/{name} hold:outage 
+PATCH /api/v1/namespaces/{namespace}/services/{name} cond 
+PUT /api/v1/namespaces/{namespace}/services/{name} cond 
+DELETE /api/v1/namespaces/{namespace}/services/{name}/proxy either 
+PATCH /api/v1/namespaces/{namespace}/services/{name}/proxy either 
+POST /api/v1/namespaces/{namespace}/services/{name}/proxy either 
+PUT /api/v1/namespaces/{namespace}/services/{name}/proxy either 
+DELETE /api/v1/namespaces/{namespace}/services/{name}/proxy/{path} either 
+PATCH /api/v1/namespaces/{namespace}/services/{name}/proxy/{path} either 
+POST /api/v1/namespaces/{namespace}/services/{name}/proxy/{path} either 
+PUT /api/v1/namespaces/{namespace}/services/{name}/proxy/{path} either 
+PATCH /api/v1/namespaces/{namespace}/services/{name}/status allow controllers' status
+PUT /api/v1/namespaces/{namespace}/services/{name}/status allow controllers' status
+DELETE /api/v1/namespaces/{name} hold:gone everything in the namespace
+PATCH /api/v1/namespaces/{name} either 
+PUT /api/v1/namespaces/{name} either 
+PUT /api/v1/namespaces/{name}/finalize either 
+PATCH /api/v1/namespaces/{name}/status allow controllers' status
+PUT /api/v1/namespaces/{name}/status allow controllers' status
+DELETE /api/v1/nodes hold:outage every object that matches
+POST /api/v1/nodes allow 
+DELETE /api/v1/nodes/{name} hold:outage 
+PATCH /api/v1/nodes/{name} cond 
+PUT /api/v1/nodes/{name} cond 
+DELETE /api/v1/nodes/{name}/proxy either 
+PATCH /api/v1/nodes/{name}/proxy either 
+POST /api/v1/nodes/{name}/proxy either 
+PUT /api/v1/nodes/{name}/proxy either 
+DELETE /api/v1/nodes/{name}/proxy/{path} either 
+PATCH /api/v1/nodes/{name}/proxy/{path} either 
+POST /api/v1/nodes/{name}/proxy/{path} either 
+PUT /api/v1/nodes/{name}/proxy/{path} either 
+PATCH /api/v1/nodes/{name}/status allow controllers' status
+PUT /api/v1/nodes/{name}/status allow controllers' status
+DELETE /api/v1/persistentvolumes hold:gone every object that matches
+POST /api/v1/persistentvolumes allow 
+DELETE /api/v1/persistentvolumes/{name} hold:gone 
+PATCH /api/v1/persistentvolumes/{name} either may set the reclaim policy
+PUT /api/v1/persistentvolumes/{name} either may set the reclaim policy
+PATCH /api/v1/persistentvolumes/{name}/status allow controllers' status
+PUT /api/v1/persistentvolumes/{name}/status allow controllers' status
+DELETE /apis/admissionregistration.k8s.io/v1/mutatingadmissionpolicies hold:outage every object that matches
+POST /apis/admissionregistration.k8s.io/v1/mutatingadmissionpolicies either 
+DELETE /apis/admissionregistration.k8s.io/v1/mutatingadmissionpolicies/{name} hold:outage 
+PATCH /apis/admissionregistration.k8s.io/v1/mutatingadmissionpolicies/{name} either 
+PUT /apis/admissionregistration.k8s.io/v1/mutatingadmissionpolicies/{name} either 
+DELETE /apis/admissionregistration.k8s.io/v1/mutatingadmissionpolicybindings hold:outage every object that matches
+POST /apis/admissionregistration.k8s.io/v1/mutatingadmissionpolicybindings either 
+DELETE /apis/admissionregistration.k8s.io/v1/mutatingadmissionpolicybindings/{name} hold:outage 
+PATCH /apis/admissionregistration.k8s.io/v1/mutatingadmissionpolicybindings/{name} either 
+PUT /apis/admissionregistration.k8s.io/v1/mutatingadmissionpolicybindings/{name} either 
+DELETE /apis/admissionregistration.k8s.io/v1/mutatingwebhookconfigurations hold:outage every object that matches
+POST /apis/admissionregistration.k8s.io/v1/mutatingwebhookconfigurations hold:exposed rewrites objects as they are created
+DELETE /apis/admissionregistration.k8s.io/v1/mutatingwebhookconfigurations/{name} hold:outage 
+PATCH /apis/admissionregistration.k8s.io/v1/mutatingwebhookconfigurations/{name} either 
+PUT /apis/admissionregistration.k8s.io/v1/mutatingwebhookconfigurations/{name} either 
+DELETE /apis/admissionregistration.k8s.io/v1/validatingadmissionpolicies hold:exposed every object that matches
+POST /apis/admissionregistration.k8s.io/v1/validatingadmissionpolicies allow 
+DELETE /apis/admissionregistration.k8s.io/v1/validatingadmissionpolicies/{name} hold:exposed an admission check goes
+PATCH /apis/admissionregistration.k8s.io/v1/validatingadmissionpolicies/{name} either 
+PUT /apis/admissionregistration.k8s.io/v1/validatingadmissionpolicies/{name} either 
+PATCH /apis/admissionregistration.k8s.io/v1/validatingadmissionpolicies/{name}/status allow controllers' status
+PUT /apis/admissionregistration.k8s.io/v1/validatingadmissionpolicies/{name}/status allow controllers' status
+DELETE /apis/admissionregistration.k8s.io/v1/validatingadmissionpolicybindings hold:exposed every object that matches
+POST /apis/admissionregistration.k8s.io/v1/validatingadmissionpolicybindings allow 
+DELETE /apis/admissionregistration.k8s.io/v1/validatingadmissionpolicybindings/{name} hold:exposed 
+PATCH /apis/admissionregistration.k8s.io/v1/validatingadmissionpolicybindings/{name} either 
+PUT /apis/admissionregistration.k8s.io/v1/validatingadmissionpolicybindings/{name} either 
+DELETE /apis/admissionregistration.k8s.io/v1/validatingwebhookconfigurations hold:exposed every object that matches
+POST /apis/admissionregistration.k8s.io/v1/validatingwebhookconfigurations either 
+DELETE /apis/admissionregistration.k8s.io/v1/validatingwebhookconfigurations/{name} hold:exposed an admission check goes
+PATCH /apis/admissionregistration.k8s.io/v1/validatingwebhookconfigurations/{name} either 
+PUT /apis/admissionregistration.k8s.io/v1/validatingwebhookconfigurations/{name} either 
+DELETE /apis/admissionregistration.k8s.io/v1alpha1/mutatingadmissionpolicies hold:outage every object that matches
+POST /apis/admissionregistration.k8s.io/v1alpha1/mutatingadmissionpolicies either 
+DELETE /apis/admissionregistration.k8s.io/v1alpha1/mutatingadmissionpolicies/{name} hold:outage 
+PATCH /apis/admissionregistration.k8s.io/v1alpha1/mutatingadmissionpolicies/{name} either 
+PUT /apis/admissionregistration.k8s.io/v1alpha1/mutatingadmissionpolicies/{name} either 
+DELETE /apis/admissionregistration.k8s.io/v1alpha1/mutatingadmissionpolicybindings hold:outage every object that matches
+POST /apis/admissionregistration.k8s.io/v1alpha1/mutatingadmissionpolicybindings either 
+DELETE /apis/admissionregistration.k8s.io/v1alpha1/mutatingadmissionpolicybindings/{name} hold:outage 
+PATCH /apis/admissionregistration.k8s.io/v1alpha1/mutatingadmissionpolicybindings/{name} either 
+PUT /apis/admissionregistration.k8s.io/v1alpha1/mutatingadmissionpolicybindings/{name} either 
+DELETE /apis/admissionregistration.k8s.io/v1beta1/mutatingadmissionpolicies hold:outage every object that matches
+POST /apis/admissionregistration.k8s.io/v1beta1/mutatingadmissionpolicies either 
+DELETE /apis/admissionregistration.k8s.io/v1beta1/mutatingadmissionpolicies/{name} hold:outage 
+PATCH /apis/admissionregistration.k8s.io/v1beta1/mutatingadmissionpolicies/{name} either 
+PUT /apis/admissionregistration.k8s.io/v1beta1/mutatingadmissionpolicies/{name} either 
+DELETE /apis/admissionregistration.k8s.io/v1beta1/mutatingadmissionpolicybindings hold:outage every object that matches
+POST /apis/admissionregistration.k8s.io/v1beta1/mutatingadmissionpolicybindings either 
+DELETE /apis/admissionregistration.k8s.io/v1beta1/mutatingadmissionpolicybindings/{name} hold:outage 
+PATCH /apis/admissionregistration.k8s.io/v1beta1/mutatingadmissionpolicybindings/{name} either 
+PUT /apis/admissionregistration.k8s.io/v1beta1/mutatingadmissionpolicybindings/{name} either 
+DELETE /apis/apiextensions.k8s.io/v1/customresourcedefinitions hold:gone every object that matches
+POST /apis/apiextensions.k8s.io/v1/customresourcedefinitions allow 
+DELETE /apis/apiextensions.k8s.io/v1/customresourcedefinitions/{name} hold:gone every object of the type goes
+PATCH /apis/apiextensions.k8s.io/v1/customresourcedefinitions/{name} either may drop a version
+PUT /apis/apiextensions.k8s.io/v1/customresourcedefinitions/{name} either may drop a version
+PATCH /apis/apiextensions.k8s.io/v1/customresourcedefinitions/{name}/status allow controllers' status
+PUT /apis/apiextensions.k8s.io/v1/customresourcedefinitions/{name}/status allow controllers' status
+DELETE /apis/apiregistration.k8s.io/v1/apiservices hold:outage every object that matches
+POST /apis/apiregistration.k8s.io/v1/apiservices hold:exposed routes an API group to a service
+DELETE /apis/apiregistration.k8s.io/v1/apiservices/{name} hold:outage 
+PATCH /apis/apiregistration.k8s.io/v1/apiservices/{name} hold:exposed 
+PUT /apis/apiregistration.k8s.io/v1/apiservices/{name} hold:exposed 
+PATCH /apis/apiregistration.k8s.io/v1/apiservices/{name}/status allow controllers' status
+PUT /apis/apiregistration.k8s.io/v1/apiservices/{name}/status allow controllers' status
+DELETE /apis/apps/v1/namespaces/{namespace}/controllerrevisions allow 
+POST /apis/apps/v1/namespaces/{namespace}/controllerrevisions allow 
+DELETE /apis/apps/v1/namespaces/{namespace}/controllerrevisions/{name} allow 
+PATCH /apis/apps/v1/namespaces/{namespace}/controllerrevisions/{name} either 
+PUT /apis/apps/v1/namespaces/{namespace}/controllerrevisions/{name} either 
+DELETE /apis/apps/v1/namespaces/{namespace}/daemonsets hold:outage every object that matches
+POST /apis/apps/v1/namespaces/{namespace}/daemonsets deploy 
+DELETE /apis/apps/v1/namespaces/{namespace}/daemonsets/{name} hold:outage 
+PATCH /apis/apps/v1/namespaces/{namespace}/daemonsets/{name} deploy 
+PUT /apis/apps/v1/namespaces/{namespace}/daemonsets/{name} deploy 
+PATCH /apis/apps/v1/namespaces/{namespace}/daemonsets/{name}/status allow controllers' status
+PUT /apis/apps/v1/namespaces/{namespace}/daemonsets/{name}/status allow controllers' status
+DELETE /apis/apps/v1/namespaces/{namespace}/deployments hold:outage every object that matches
+POST /apis/apps/v1/namespaces/{namespace}/deployments deploy 
+DELETE /apis/apps/v1/namespaces/{namespace}/deployments/{name} hold:outage 
+PATCH /apis/apps/v1/namespaces/{namespace}/deployments/{name} cond 
+PUT /apis/apps/v1/namespaces/{namespace}/deployments/{name} cond 
+PATCH /apis/apps/v1/namespaces/{namespace}/deployments/{name}/scale cond 
+PUT /apis/apps/v1/namespaces/{namespace}/deployments/{name}/scale cond 
+PATCH /apis/apps/v1/namespaces/{namespace}/deployments/{name}/status allow controllers' status
+PUT /apis/apps/v1/namespaces/{namespace}/deployments/{name}/status allow controllers' status
+DELETE /apis/apps/v1/namespaces/{namespace}/replicasets hold:outage every object that matches
+POST /apis/apps/v1/namespaces/{namespace}/replicasets allow 
+DELETE /apis/apps/v1/namespaces/{namespace}/replicasets/{name} hold:outage 
+PATCH /apis/apps/v1/namespaces/{namespace}/replicasets/{name} cond 
+PUT /apis/apps/v1/namespaces/{namespace}/replicasets/{name} cond 
+PATCH /apis/apps/v1/namespaces/{namespace}/replicasets/{name}/scale cond 
+PUT /apis/apps/v1/namespaces/{namespace}/replicasets/{name}/scale cond 
+PATCH /apis/apps/v1/namespaces/{namespace}/replicasets/{name}/status allow controllers' status
+PUT /apis/apps/v1/namespaces/{namespace}/replicasets/{name}/status allow controllers' status
+DELETE /apis/apps/v1/namespaces/{namespace}/statefulsets hold:outage every object that matches
+POST /apis/apps/v1/namespaces/{namespace}/statefulsets deploy 
+DELETE /apis/apps/v1/namespaces/{namespace}/statefulsets/{name} hold:outage its volumes stay
+PATCH /apis/apps/v1/namespaces/{namespace}/statefulsets/{name} cond 
+PUT /apis/apps/v1/namespaces/{namespace}/statefulsets/{name} cond 
+PATCH /apis/apps/v1/namespaces/{namespace}/statefulsets/{name}/scale cond 
+PUT /apis/apps/v1/namespaces/{namespace}/statefulsets/{name}/scale cond 
+PATCH /apis/apps/v1/namespaces/{namespace}/statefulsets/{name}/status allow controllers' status
+PUT /apis/apps/v1/namespaces/{namespace}/statefulsets/{name}/status allow controllers' status
+POST /apis/authentication.k8s.io/v1/selfsubjectreviews allow asks a question, changes nothing
+POST /apis/authentication.k8s.io/v1/tokenreviews allow asks a question, changes nothing
+POST /apis/authorization.k8s.io/v1/namespaces/{namespace}/localsubjectaccessreviews allow asks a question, changes nothing
+POST /apis/authorization.k8s.io/v1/selfsubjectaccessreviews allow asks a question, changes nothing
+POST /apis/authorization.k8s.io/v1/selfsubjectrulesreviews allow asks a question, changes nothing
+POST /apis/authorization.k8s.io/v1/subjectaccessreviews allow asks a question, changes nothing
+DELETE /apis/autoscaling/v1/namespaces/{namespace}/horizontalpodautoscalers hold:outage every object that matches
+POST /apis/autoscaling/v1/namespaces/{namespace}/horizontalpodautoscalers allow 
+DELETE /apis/autoscaling/v1/namespaces/{namespace}/horizontalpodautoscalers/{name} either 
+PATCH /apis/autoscaling/v1/namespaces/{namespace}/horizontalpodautoscalers/{name} either 
+PUT /apis/autoscaling/v1/namespaces/{namespace}/horizontalpodautoscalers/{name} either 
+PATCH /apis/autoscaling/v1/namespaces/{namespace}/horizontalpodautoscalers/{name}/status allow controllers' status
+PUT /apis/autoscaling/v1/namespaces/{namespace}/horizontalpodautoscalers/{name}/status allow controllers' status
+DELETE /apis/autoscaling/v2/namespaces/{namespace}/horizontalpodautoscalers hold:outage every object that matches
+POST /apis/autoscaling/v2/namespaces/{namespace}/horizontalpodautoscalers allow 
+DELETE /apis/autoscaling/v2/namespaces/{namespace}/horizontalpodautoscalers/{name} either 
+PATCH /apis/autoscaling/v2/namespaces/{namespace}/horizontalpodautoscalers/{name} either 
+PUT /apis/autoscaling/v2/namespaces/{namespace}/horizontalpodautoscalers/{name} either 
+PATCH /apis/autoscaling/v2/namespaces/{namespace}/horizontalpodautoscalers/{name}/status allow controllers' status
+PUT /apis/autoscaling/v2/namespaces/{namespace}/horizontalpodautoscalers/{name}/status allow controllers' status
+DELETE /apis/batch/v1/namespaces/{namespace}/cronjobs hold:outage every object that matches
+POST /apis/batch/v1/namespaces/{namespace}/cronjobs allow 
+DELETE /apis/batch/v1/namespaces/{namespace}/cronjobs/{name} hold:outage 
+PATCH /apis/batch/v1/namespaces/{namespace}/cronjobs/{name} either 
+PUT /apis/batch/v1/namespaces/{namespace}/cronjobs/{name} either 
+PATCH /apis/batch/v1/namespaces/{namespace}/cronjobs/{name}/status allow controllers' status
+PUT /apis/batch/v1/namespaces/{namespace}/cronjobs/{name}/status allow controllers' status
+DELETE /apis/batch/v1/namespaces/{namespace}/jobs hold:outage 
+POST /apis/batch/v1/namespaces/{namespace}/jobs allow 
+DELETE /apis/batch/v1/namespaces/{namespace}/jobs/{name} either a running job stops
+PATCH /apis/batch/v1/namespaces/{namespace}/jobs/{name} either 
+PUT /apis/batch/v1/namespaces/{namespace}/jobs/{name} either 
+PATCH /apis/batch/v1/namespaces/{namespace}/jobs/{name}/status allow controllers' status
+PUT /apis/batch/v1/namespaces/{namespace}/jobs/{name}/status allow controllers' status
+DELETE /apis/certificates.k8s.io/v1/certificatesigningrequests allow 
+POST /apis/certificates.k8s.io/v1/certificatesigningrequests either 
+DELETE /apis/certificates.k8s.io/v1/certificatesigningrequests/{name} allow 
+PATCH /apis/certificates.k8s.io/v1/certificatesigningrequests/{name} either 
+PUT /apis/certificates.k8s.io/v1/certificatesigningrequests/{name} either 
+PATCH /apis/certificates.k8s.io/v1/certificatesigningrequests/{name}/approval hold:exposed approves a certificate
+PUT /apis/certificates.k8s.io/v1/certificatesigningrequests/{name}/approval hold:exposed approves a certificate
+PATCH /apis/certificates.k8s.io/v1/certificatesigningrequests/{name}/status allow controllers' status
+PUT /apis/certificates.k8s.io/v1/certificatesigningrequests/{name}/status allow controllers' status
+DELETE /apis/certificates.k8s.io/v1/clustertrustbundles hold:outage every object that matches
+POST /apis/certificates.k8s.io/v1/clustertrustbundles allow 
+DELETE /apis/certificates.k8s.io/v1/clustertrustbundles/{name} hold:outage 
+PATCH /apis/certificates.k8s.io/v1/clustertrustbundles/{name} either 
+PUT /apis/certificates.k8s.io/v1/clustertrustbundles/{name} either 
+DELETE /apis/certificates.k8s.io/v1/namespaces/{namespace}/podcertificaterequests allow 
+POST /apis/certificates.k8s.io/v1/namespaces/{namespace}/podcertificaterequests allow 
+DELETE /apis/certificates.k8s.io/v1/namespaces/{namespace}/podcertificaterequests/{name} allow 
+PATCH /apis/certificates.k8s.io/v1/namespaces/{namespace}/podcertificaterequests/{name} either 
+PUT /apis/certificates.k8s.io/v1/namespaces/{namespace}/podcertificaterequests/{name} either 
+PATCH /apis/certificates.k8s.io/v1/namespaces/{namespace}/podcertificaterequests/{name}/status allow controllers' status
+PUT /apis/certificates.k8s.io/v1/namespaces/{namespace}/podcertificaterequests/{name}/status allow controllers' status
+DELETE /apis/certificates.k8s.io/v1beta1/clustertrustbundles hold:outage every object that matches
+POST /apis/certificates.k8s.io/v1beta1/clustertrustbundles allow 
+DELETE /apis/certificates.k8s.io/v1beta1/clustertrustbundles/{name} hold:outage 
+PATCH /apis/certificates.k8s.io/v1beta1/clustertrustbundles/{name} either 
+PUT /apis/certificates.k8s.io/v1beta1/clustertrustbundles/{name} either 
+DELETE /apis/certificates.k8s.io/v1beta1/namespaces/{namespace}/podcertificaterequests allow 
+POST /apis/certificates.k8s.io/v1beta1/namespaces/{namespace}/podcertificaterequests allow 
+DELETE /apis/certificates.k8s.io/v1beta1/namespaces/{namespace}/podcertificaterequests/{name} allow 
+PATCH /apis/certificates.k8s.io/v1beta1/namespaces/{namespace}/podcertificaterequests/{name} either 
+PUT /apis/certificates.k8s.io/v1beta1/namespaces/{namespace}/podcertificaterequests/{name} either 
+PATCH /apis/certificates.k8s.io/v1beta1/namespaces/{namespace}/podcertificaterequests/{name}/status allow controllers' status
+PUT /apis/certificates.k8s.io/v1beta1/namespaces/{namespace}/podcertificaterequests/{name}/status allow controllers' status
+DELETE /apis/coordination.k8s.io/v1/namespaces/{namespace}/leases allow 
+POST /apis/coordination.k8s.io/v1/namespaces/{namespace}/leases allow 
+DELETE /apis/coordination.k8s.io/v1/namespaces/{namespace}/leases/{name} allow 
+PATCH /apis/coordination.k8s.io/v1/namespaces/{namespace}/leases/{name} allow 
+PUT /apis/coordination.k8s.io/v1/namespaces/{namespace}/leases/{name} allow 
+DELETE /apis/coordination.k8s.io/v1alpha2/namespaces/{namespace}/leasecandidates allow 
+POST /apis/coordination.k8s.io/v1alpha2/namespaces/{namespace}/leasecandidates allow 
+DELETE /apis/coordination.k8s.io/v1alpha2/namespaces/{namespace}/leasecandidates/{name} allow 
+PATCH /apis/coordination.k8s.io/v1alpha2/namespaces/{namespace}/leasecandidates/{name} allow 
+PUT /apis/coordination.k8s.io/v1alpha2/namespaces/{namespace}/leasecandidates/{name} allow 
+DELETE /apis/coordination.k8s.io/v1beta1/namespaces/{namespace}/leasecandidates allow 
+POST /apis/coordination.k8s.io/v1beta1/namespaces/{namespace}/leasecandidates allow 
+DELETE /apis/coordination.k8s.io/v1beta1/namespaces/{namespace}/leasecandidates/{name} allow 
+PATCH /apis/coordination.k8s.io/v1beta1/namespaces/{namespace}/leasecandidates/{name} allow 
+PUT /apis/coordination.k8s.io/v1beta1/namespaces/{namespace}/leasecandidates/{name} allow 
+DELETE /apis/discovery.k8s.io/v1/namespaces/{namespace}/endpointslices either 
+POST /apis/discovery.k8s.io/v1/namespaces/{namespace}/endpointslices allow 
+DELETE /apis/discovery.k8s.io/v1/namespaces/{namespace}/endpointslices/{name} either 
+PATCH /apis/discovery.k8s.io/v1/namespaces/{namespace}/endpointslices/{name} either 
+PUT /apis/discovery.k8s.io/v1/namespaces/{namespace}/endpointslices/{name} either 
+DELETE /apis/events.k8s.io/v1/namespaces/{namespace}/events allow 
+POST /apis/events.k8s.io/v1/namespaces/{namespace}/events allow 
+DELETE /apis/events.k8s.io/v1/namespaces/{namespace}/events/{name} allow 
+PATCH /apis/events.k8s.io/v1/namespaces/{namespace}/events/{name} allow 
+PUT /apis/events.k8s.io/v1/namespaces/{namespace}/events/{name} allow 
+DELETE /apis/flowcontrol.apiserver.k8s.io/v1/flowschemas hold:outage every object that matches
+POST /apis/flowcontrol.apiserver.k8s.io/v1/flowschemas allow 
+DELETE /apis/flowcontrol.apiserver.k8s.io/v1/flowschemas/{name} either 
+PATCH /apis/flowcontrol.apiserver.k8s.io/v1/flowschemas/{name} either 
+PUT /apis/flowcontrol.apiserver.k8s.io/v1/flowschemas/{name} either 
+PATCH /apis/flowcontrol.apiserver.k8s.io/v1/flowschemas/{name}/status allow controllers' status
+PUT /apis/flowcontrol.apiserver.k8s.io/v1/flowschemas/{name}/status allow controllers' status
+DELETE /apis/flowcontrol.apiserver.k8s.io/v1/prioritylevelconfigurations hold:outage every object that matches
+POST /apis/flowcontrol.apiserver.k8s.io/v1/prioritylevelconfigurations allow 
+DELETE /apis/flowcontrol.apiserver.k8s.io/v1/prioritylevelconfigurations/{name} either 
+PATCH /apis/flowcontrol.apiserver.k8s.io/v1/prioritylevelconfigurations/{name} either 
+PUT /apis/flowcontrol.apiserver.k8s.io/v1/prioritylevelconfigurations/{name} either 
+PATCH /apis/flowcontrol.apiserver.k8s.io/v1/prioritylevelconfigurations/{name}/status allow controllers' status
+PUT /apis/flowcontrol.apiserver.k8s.io/v1/prioritylevelconfigurations/{name}/status allow controllers' status
+DELETE /apis/internal.apiserver.k8s.io/v1alpha1/storageversions allow 
+POST /apis/internal.apiserver.k8s.io/v1alpha1/storageversions allow 
+DELETE /apis/internal.apiserver.k8s.io/v1alpha1/storageversions/{name} allow 
+PATCH /apis/internal.apiserver.k8s.io/v1alpha1/storageversions/{name} either 
+PUT /apis/internal.apiserver.k8s.io/v1alpha1/storageversions/{name} either 
+PATCH /apis/internal.apiserver.k8s.io/v1alpha1/storageversions/{name}/status allow controllers' status
+PUT /apis/internal.apiserver.k8s.io/v1alpha1/storageversions/{name}/status allow controllers' status
+DELETE /apis/lifecycle.k8s.io/v1alpha1/namespaces/{namespace}/evictionrequests allow 
+POST /apis/lifecycle.k8s.io/v1alpha1/namespaces/{namespace}/evictionrequests allow 
+DELETE /apis/lifecycle.k8s.io/v1alpha1/namespaces/{namespace}/evictionrequests/{name} allow 
+PATCH /apis/lifecycle.k8s.io/v1alpha1/namespaces/{namespace}/evictionrequests/{name} either 
+PUT /apis/lifecycle.k8s.io/v1alpha1/namespaces/{namespace}/evictionrequests/{name} either 
+PATCH /apis/lifecycle.k8s.io/v1alpha1/namespaces/{namespace}/evictionrequests/{name}/status allow controllers' status
+PUT /apis/lifecycle.k8s.io/v1alpha1/namespaces/{namespace}/evictionrequests/{name}/status allow controllers' status
+DELETE /apis/lifecycle.k8s.io/v1alpha1/namespaces/{namespace}/evictions hold:outage every object that matches
+POST /apis/lifecycle.k8s.io/v1alpha1/namespaces/{namespace}/evictions hold:outage 
+DELETE /apis/lifecycle.k8s.io/v1alpha1/namespaces/{namespace}/evictions/{name} hold:outage deletes an object
+PATCH /apis/lifecycle.k8s.io/v1alpha1/namespaces/{namespace}/evictions/{name} either 
+PUT /apis/lifecycle.k8s.io/v1alpha1/namespaces/{namespace}/evictions/{name} either 
+PATCH /apis/lifecycle.k8s.io/v1alpha1/namespaces/{namespace}/evictions/{name}/status allow controllers' status
+PUT /apis/lifecycle.k8s.io/v1alpha1/namespaces/{namespace}/evictions/{name}/status allow controllers' status
+DELETE /apis/networking.k8s.io/v1/ingressclasses hold:outage every object that matches
+POST /apis/networking.k8s.io/v1/ingressclasses allow 
+DELETE /apis/networking.k8s.io/v1/ingressclasses/{name} hold:outage 
+PATCH /apis/networking.k8s.io/v1/ingressclasses/{name} either 
+PUT /apis/networking.k8s.io/v1/ingressclasses/{name} either 
+DELETE /apis/networking.k8s.io/v1/ipaddresses hold:outage every object that matches
+POST /apis/networking.k8s.io/v1/ipaddresses allow 
+DELETE /apis/networking.k8s.io/v1/ipaddresses/{name} either 
+PATCH /apis/networking.k8s.io/v1/ipaddresses/{name} either 
+PUT /apis/networking.k8s.io/v1/ipaddresses/{name} either 
+DELETE /apis/networking.k8s.io/v1/namespaces/{namespace}/ingresses hold:outage every object that matches
+POST /apis/networking.k8s.io/v1/namespaces/{namespace}/ingresses allow 
+DELETE /apis/networking.k8s.io/v1/namespaces/{namespace}/ingresses/{name} hold:outage 
+PATCH /apis/networking.k8s.io/v1/namespaces/{namespace}/ingresses/{name} either 
+PUT /apis/networking.k8s.io/v1/namespaces/{namespace}/ingresses/{name} either 
+PATCH /apis/networking.k8s.io/v1/namespaces/{namespace}/ingresses/{name}/status allow controllers' status
+PUT /apis/networking.k8s.io/v1/namespaces/{namespace}/ingresses/{name}/status allow controllers' status
+DELETE /apis/networking.k8s.io/v1/namespaces/{namespace}/networkpolicies hold:exposed every object that matches
+POST /apis/networking.k8s.io/v1/namespaces/{namespace}/networkpolicies allow 
+DELETE /apis/networking.k8s.io/v1/namespaces/{namespace}/networkpolicies/{name} hold:exposed traffic it blocked is let through
+PATCH /apis/networking.k8s.io/v1/namespaces/{namespace}/networkpolicies/{name} either 
+PUT /apis/networking.k8s.io/v1/namespaces/{namespace}/networkpolicies/{name} either 
+DELETE /apis/networking.k8s.io/v1/servicecidrs hold:outage every object that matches
+POST /apis/networking.k8s.io/v1/servicecidrs allow 
+DELETE /apis/networking.k8s.io/v1/servicecidrs/{name} hold:outage 
+PATCH /apis/networking.k8s.io/v1/servicecidrs/{name} either 
+PUT /apis/networking.k8s.io/v1/servicecidrs/{name} either 
+PATCH /apis/networking.k8s.io/v1/servicecidrs/{name}/status allow controllers' status
+PUT /apis/networking.k8s.io/v1/servicecidrs/{name}/status allow controllers' status
+DELETE /apis/node.k8s.io/v1/runtimeclasses hold:outage every object that matches
+POST /apis/node.k8s.io/v1/runtimeclasses allow 
+DELETE /apis/node.k8s.io/v1/runtimeclasses/{name} hold:outage 
+PATCH /apis/node.k8s.io/v1/runtimeclasses/{name} either 
+PUT /apis/node.k8s.io/v1/runtimeclasses/{name} either 
+DELETE /apis/policy/v1/namespaces/{namespace}/poddisruptionbudgets hold:outage every object that matches
+POST /apis/policy/v1/namespaces/{namespace}/poddisruptionbudgets allow 
+DELETE /apis/policy/v1/namespaces/{namespace}/poddisruptionbudgets/{name} either evictions are no longer limited
+PATCH /apis/policy/v1/namespaces/{namespace}/poddisruptionbudgets/{name} either 
+PUT /apis/policy/v1/namespaces/{namespace}/poddisruptionbudgets/{name} either 
+PATCH /apis/policy/v1/namespaces/{namespace}/poddisruptionbudgets/{name}/status allow controllers' status
+PUT /apis/policy/v1/namespaces/{namespace}/poddisruptionbudgets/{name}/status allow controllers' status
+DELETE /apis/rbac.authorization.k8s.io/v1/clusterrolebindings hold:outage every object that matches
+POST /apis/rbac.authorization.k8s.io/v1/clusterrolebindings hold:exposed gives a cluster role
+DELETE /apis/rbac.authorization.k8s.io/v1/clusterrolebindings/{name} hold:outage 
+PATCH /apis/rbac.authorization.k8s.io/v1/clusterrolebindings/{name} hold:exposed 
+PUT /apis/rbac.authorization.k8s.io/v1/clusterrolebindings/{name} hold:exposed 
+DELETE /apis/rbac.authorization.k8s.io/v1/clusterroles hold:outage every object that matches
+POST /apis/rbac.authorization.k8s.io/v1/clusterroles either 
+DELETE /apis/rbac.authorization.k8s.io/v1/clusterroles/{name} hold:outage 
+PATCH /apis/rbac.authorization.k8s.io/v1/clusterroles/{name} hold:exposed 
+PUT /apis/rbac.authorization.k8s.io/v1/clusterroles/{name} hold:exposed 
+DELETE /apis/rbac.authorization.k8s.io/v1/namespaces/{namespace}/rolebindings hold:outage every object that matches
+POST /apis/rbac.authorization.k8s.io/v1/namespaces/{namespace}/rolebindings hold:exposed gives a role
+DELETE /apis/rbac.authorization.k8s.io/v1/namespaces/{namespace}/rolebindings/{name} hold:outage 
+PATCH /apis/rbac.authorization.k8s.io/v1/namespaces/{namespace}/rolebindings/{name} hold:exposed 
+PUT /apis/rbac.authorization.k8s.io/v1/namespaces/{namespace}/rolebindings/{name} hold:exposed 
+DELETE /apis/rbac.authorization.k8s.io/v1/namespaces/{namespace}/roles hold:outage every object that matches
+POST /apis/rbac.authorization.k8s.io/v1/namespaces/{namespace}/roles either 
+DELETE /apis/rbac.authorization.k8s.io/v1/namespaces/{namespace}/roles/{name} hold:outage 
+PATCH /apis/rbac.authorization.k8s.io/v1/namespaces/{namespace}/roles/{name} hold:exposed 
+PUT /apis/rbac.authorization.k8s.io/v1/namespaces/{namespace}/roles/{name} hold:exposed 
+DELETE /apis/resource.k8s.io/v1/deviceclasses hold:outage every object that matches
+POST /apis/resource.k8s.io/v1/deviceclasses allow 
+DELETE /apis/resource.k8s.io/v1/deviceclasses/{name} either 
+PATCH /apis/resource.k8s.io/v1/deviceclasses/{name} either 
+PUT /apis/resource.k8s.io/v1/deviceclasses/{name} either 
+DELETE /apis/resource.k8s.io/v1/devicetaintrules hold:outage every object that matches
+POST /apis/resource.k8s.io/v1/devicetaintrules allow 
+DELETE /apis/resource.k8s.io/v1/devicetaintrules/{name} either 
+PATCH /apis/resource.k8s.io/v1/devicetaintrules/{name} either 
+PUT /apis/resource.k8s.io/v1/devicetaintrules/{name} either 
+PATCH /apis/resource.k8s.io/v1/devicetaintrules/{name}/status allow controllers' status
+PUT /apis/resource.k8s.io/v1/devicetaintrules/{name}/status allow controllers' status
+DELETE /apis/resource.k8s.io/v1/namespaces/{namespace}/resourceclaims hold:outage every object that matches
+POST /apis/resource.k8s.io/v1/namespaces/{namespace}/resourceclaims allow 
+DELETE /apis/resource.k8s.io/v1/namespaces/{namespace}/resourceclaims/{name} either 
+PATCH /apis/resource.k8s.io/v1/namespaces/{namespace}/resourceclaims/{name} either 
+PUT /apis/resource.k8s.io/v1/namespaces/{namespace}/resourceclaims/{name} either 
+PATCH /apis/resource.k8s.io/v1/namespaces/{namespace}/resourceclaims/{name}/status allow controllers' status
+PUT /apis/resource.k8s.io/v1/namespaces/{namespace}/resourceclaims/{name}/status allow controllers' status
+DELETE /apis/resource.k8s.io/v1/namespaces/{namespace}/resourceclaimtemplates hold:outage every object that matches
+POST /apis/resource.k8s.io/v1/namespaces/{namespace}/resourceclaimtemplates allow 
+DELETE /apis/resource.k8s.io/v1/namespaces/{namespace}/resourceclaimtemplates/{name} allow 
+PATCH /apis/resource.k8s.io/v1/namespaces/{namespace}/resourceclaimtemplates/{name} either 
+PUT /apis/resource.k8s.io/v1/namespaces/{namespace}/resourceclaimtemplates/{name} either 
+DELETE /apis/resource.k8s.io/v1/resourceslices allow 
+POST /apis/resource.k8s.io/v1/resourceslices allow 
+DELETE /apis/resource.k8s.io/v1/resourceslices/{name} allow 
+PATCH /apis/resource.k8s.io/v1/resourceslices/{name} either 
+PUT /apis/resource.k8s.io/v1/resourceslices/{name} either 
+DELETE /apis/resource.k8s.io/v1alpha3/devicetaintrules hold:outage every object that matches
+POST /apis/resource.k8s.io/v1alpha3/devicetaintrules allow 
+DELETE /apis/resource.k8s.io/v1alpha3/devicetaintrules/{name} either 
+PATCH /apis/resource.k8s.io/v1alpha3/devicetaintrules/{name} either 
+PUT /apis/resource.k8s.io/v1alpha3/devicetaintrules/{name} either 
+PATCH /apis/resource.k8s.io/v1alpha3/devicetaintrules/{name}/status allow controllers' status
+PUT /apis/resource.k8s.io/v1alpha3/devicetaintrules/{name}/status allow controllers' status
+DELETE /apis/resource.k8s.io/v1alpha3/resourcepoolstatusrequests allow 
+POST /apis/resource.k8s.io/v1alpha3/resourcepoolstatusrequests allow 
+DELETE /apis/resource.k8s.io/v1alpha3/resourcepoolstatusrequests/{name} allow 
+PATCH /apis/resource.k8s.io/v1alpha3/resourcepoolstatusrequests/{name} either 
+PUT /apis/resource.k8s.io/v1alpha3/resourcepoolstatusrequests/{name} either 
+PATCH /apis/resource.k8s.io/v1alpha3/resourcepoolstatusrequests/{name}/status allow controllers' status
+PUT /apis/resource.k8s.io/v1alpha3/resourcepoolstatusrequests/{name}/status allow controllers' status
+DELETE /apis/resource.k8s.io/v1beta1/deviceclasses hold:outage every object that matches
+POST /apis/resource.k8s.io/v1beta1/deviceclasses allow 
+DELETE /apis/resource.k8s.io/v1beta1/deviceclasses/{name} either 
+PATCH /apis/resource.k8s.io/v1beta1/deviceclasses/{name} either 
+PUT /apis/resource.k8s.io/v1beta1/deviceclasses/{name} either 
+DELETE /apis/resource.k8s.io/v1beta1/namespaces/{namespace}/resourceclaims hold:outage every object that matches
+POST /apis/resource.k8s.io/v1beta1/namespaces/{namespace}/resourceclaims allow 
+DELETE /apis/resource.k8s.io/v1beta1/namespaces/{namespace}/resourceclaims/{name} either 
+PATCH /apis/resource.k8s.io/v1beta1/namespaces/{namespace}/resourceclaims/{name} either 
+PUT /apis/resource.k8s.io/v1beta1/namespaces/{namespace}/resourceclaims/{name} either 
+PATCH /apis/resource.k8s.io/v1beta1/namespaces/{namespace}/resourceclaims/{name}/status allow controllers' status
+PUT /apis/resource.k8s.io/v1beta1/namespaces/{namespace}/resourceclaims/{name}/status allow controllers' status
+DELETE /apis/resource.k8s.io/v1beta1/namespaces/{namespace}/resourceclaimtemplates hold:outage every object that matches
+POST /apis/resource.k8s.io/v1beta1/namespaces/{namespace}/resourceclaimtemplates allow 
+DELETE /apis/resource.k8s.io/v1beta1/namespaces/{namespace}/resourceclaimtemplates/{name} allow 
+PATCH /apis/resource.k8s.io/v1beta1/namespaces/{namespace}/resourceclaimtemplates/{name} either 
+PUT /apis/resource.k8s.io/v1beta1/namespaces/{namespace}/resourceclaimtemplates/{name} either 
+DELETE /apis/resource.k8s.io/v1beta1/resourceslices allow 
+POST /apis/resource.k8s.io/v1beta1/resourceslices allow 
+DELETE /apis/resource.k8s.io/v1beta1/resourceslices/{name} allow 
+PATCH /apis/resource.k8s.io/v1beta1/resourceslices/{name} either 
+PUT /apis/resource.k8s.io/v1beta1/resourceslices/{name} either 
+DELETE /apis/resource.k8s.io/v1beta2/deviceclasses hold:outage every object that matches
+POST /apis/resource.k8s.io/v1beta2/deviceclasses allow 
+DELETE /apis/resource.k8s.io/v1beta2/deviceclasses/{name} either 
+PATCH /apis/resource.k8s.io/v1beta2/deviceclasses/{name} either 
+PUT /apis/resource.k8s.io/v1beta2/deviceclasses/{name} either 
+DELETE /apis/resource.k8s.io/v1beta2/devicetaintrules hold:outage every object that matches
+POST /apis/resource.k8s.io/v1beta2/devicetaintrules allow 
+DELETE /apis/resource.k8s.io/v1beta2/devicetaintrules/{name} either 
+PATCH /apis/resource.k8s.io/v1beta2/devicetaintrules/{name} either 
+PUT /apis/resource.k8s.io/v1beta2/devicetaintrules/{name} either 
+PATCH /apis/resource.k8s.io/v1beta2/devicetaintrules/{name}/status allow controllers' status
+PUT /apis/resource.k8s.io/v1beta2/devicetaintrules/{name}/status allow controllers' status
+DELETE /apis/resource.k8s.io/v1beta2/namespaces/{namespace}/resourceclaims hold:outage every object that matches
+POST /apis/resource.k8s.io/v1beta2/namespaces/{namespace}/resourceclaims allow 
+DELETE /apis/resource.k8s.io/v1beta2/namespaces/{namespace}/resourceclaims/{name} either 
+PATCH /apis/resource.k8s.io/v1beta2/namespaces/{namespace}/resourceclaims/{name} either 
+PUT /apis/resource.k8s.io/v1beta2/namespaces/{namespace}/resourceclaims/{name} either 
+PATCH /apis/resource.k8s.io/v1beta2/namespaces/{namespace}/resourceclaims/{name}/status allow controllers' status
+PUT /apis/resource.k8s.io/v1beta2/namespaces/{namespace}/resourceclaims/{name}/status allow controllers' status
+DELETE /apis/resource.k8s.io/v1beta2/namespaces/{namespace}/resourceclaimtemplates hold:outage every object that matches
+POST /apis/resource.k8s.io/v1beta2/namespaces/{namespace}/resourceclaimtemplates allow 
+DELETE /apis/resource.k8s.io/v1beta2/namespaces/{namespace}/resourceclaimtemplates/{name} allow 
+PATCH /apis/resource.k8s.io/v1beta2/namespaces/{namespace}/resourceclaimtemplates/{name} either 
+PUT /apis/resource.k8s.io/v1beta2/namespaces/{namespace}/resourceclaimtemplates/{name} either 
+DELETE /apis/resource.k8s.io/v1beta2/resourceslices allow 
+POST /apis/resource.k8s.io/v1beta2/resourceslices allow 
+DELETE /apis/resource.k8s.io/v1beta2/resourceslices/{name} allow 
+PATCH /apis/resource.k8s.io/v1beta2/resourceslices/{name} either 
+PUT /apis/resource.k8s.io/v1beta2/resourceslices/{name} either 
+DELETE /apis/scheduling.k8s.io/v1/priorityclasses hold:outage every object that matches
+POST /apis/scheduling.k8s.io/v1/priorityclasses allow 
+DELETE /apis/scheduling.k8s.io/v1/priorityclasses/{name} either 
+PATCH /apis/scheduling.k8s.io/v1/priorityclasses/{name} either 
+PUT /apis/scheduling.k8s.io/v1/priorityclasses/{name} either 
+DELETE /apis/scheduling.k8s.io/v1alpha3/namespaces/{namespace}/compositepodgroups hold:outage every object that matches
+POST /apis/scheduling.k8s.io/v1alpha3/namespaces/{namespace}/compositepodgroups allow 
+DELETE /apis/scheduling.k8s.io/v1alpha3/namespaces/{namespace}/compositepodgroups/{name} either 
+PATCH /apis/scheduling.k8s.io/v1alpha3/namespaces/{namespace}/compositepodgroups/{name} either 
+PUT /apis/scheduling.k8s.io/v1alpha3/namespaces/{namespace}/compositepodgroups/{name} either 
+PATCH /apis/scheduling.k8s.io/v1alpha3/namespaces/{namespace}/compositepodgroups/{name}/status allow controllers' status
+PUT /apis/scheduling.k8s.io/v1alpha3/namespaces/{namespace}/compositepodgroups/{name}/status allow controllers' status
+DELETE /apis/scheduling.k8s.io/v1alpha3/namespaces/{namespace}/podgroups hold:outage every object that matches
+POST /apis/scheduling.k8s.io/v1alpha3/namespaces/{namespace}/podgroups allow 
+DELETE /apis/scheduling.k8s.io/v1alpha3/namespaces/{namespace}/podgroups/{name} either 
+PATCH /apis/scheduling.k8s.io/v1alpha3/namespaces/{namespace}/podgroups/{name} either 
+PUT /apis/scheduling.k8s.io/v1alpha3/namespaces/{namespace}/podgroups/{name} either 
+PATCH /apis/scheduling.k8s.io/v1alpha3/namespaces/{namespace}/podgroups/{name}/status allow controllers' status
+PUT /apis/scheduling.k8s.io/v1alpha3/namespaces/{namespace}/podgroups/{name}/status allow controllers' status
+DELETE /apis/scheduling.k8s.io/v1alpha3/namespaces/{namespace}/workloads hold:outage every object that matches
+POST /apis/scheduling.k8s.io/v1alpha3/namespaces/{namespace}/workloads allow 
+DELETE /apis/scheduling.k8s.io/v1alpha3/namespaces/{namespace}/workloads/{name} either 
+PATCH /apis/scheduling.k8s.io/v1alpha3/namespaces/{namespace}/workloads/{name} either 
+PUT /apis/scheduling.k8s.io/v1alpha3/namespaces/{namespace}/workloads/{name} either 
+DELETE /apis/scheduling.k8s.io/v1beta1/namespaces/{namespace}/podgroups hold:outage every object that matches
+POST /apis/scheduling.k8s.io/v1beta1/namespaces/{namespace}/podgroups allow 
+DELETE /apis/scheduling.k8s.io/v1beta1/namespaces/{namespace}/podgroups/{name} either 
+PATCH /apis/scheduling.k8s.io/v1beta1/namespaces/{namespace}/podgroups/{name} either 
+PUT /apis/scheduling.k8s.io/v1beta1/namespaces/{namespace}/podgroups/{name} either 
+PATCH /apis/scheduling.k8s.io/v1beta1/namespaces/{namespace}/podgroups/{name}/status allow controllers' status
+PUT /apis/scheduling.k8s.io/v1beta1/namespaces/{namespace}/podgroups/{name}/status allow controllers' status
+DELETE /apis/scheduling.k8s.io/v1beta1/namespaces/{namespace}/workloads hold:outage every object that matches
+POST /apis/scheduling.k8s.io/v1beta1/namespaces/{namespace}/workloads allow 
+DELETE /apis/scheduling.k8s.io/v1beta1/namespaces/{namespace}/workloads/{name} either 
+PATCH /apis/scheduling.k8s.io/v1beta1/namespaces/{namespace}/workloads/{name} either 
+PUT /apis/scheduling.k8s.io/v1beta1/namespaces/{namespace}/workloads/{name} either 
+DELETE /apis/storage.k8s.io/v1/csidrivers hold:outage every object that matches
+POST /apis/storage.k8s.io/v1/csidrivers allow 
+DELETE /apis/storage.k8s.io/v1/csidrivers/{name} hold:outage 
+PATCH /apis/storage.k8s.io/v1/csidrivers/{name} either 
+PUT /apis/storage.k8s.io/v1/csidrivers/{name} either 
+DELETE /apis/storage.k8s.io/v1/csinodes allow 
+POST /apis/storage.k8s.io/v1/csinodes allow 
+DELETE /apis/storage.k8s.io/v1/csinodes/{name} allow 
+PATCH /apis/storage.k8s.io/v1/csinodes/{name} either 
+PUT /apis/storage.k8s.io/v1/csinodes/{name} either 
+PATCH /apis/storage.k8s.io/v1/csinodes/{name}/status allow controllers' status
+PUT /apis/storage.k8s.io/v1/csinodes/{name}/status allow controllers' status
+DELETE /apis/storage.k8s.io/v1/namespaces/{namespace}/csistoragecapacities allow 
+POST /apis/storage.k8s.io/v1/namespaces/{namespace}/csistoragecapacities allow 
+DELETE /apis/storage.k8s.io/v1/namespaces/{namespace}/csistoragecapacities/{name} allow 
+PATCH /apis/storage.k8s.io/v1/namespaces/{namespace}/csistoragecapacities/{name} either 
+PUT /apis/storage.k8s.io/v1/namespaces/{namespace}/csistoragecapacities/{name} either 
+DELETE /apis/storage.k8s.io/v1/storageclasses hold:outage every object that matches
+POST /apis/storage.k8s.io/v1/storageclasses allow 
+DELETE /apis/storage.k8s.io/v1/storageclasses/{name} hold:outage 
+PATCH /apis/storage.k8s.io/v1/storageclasses/{name} either 
+PUT /apis/storage.k8s.io/v1/storageclasses/{name} either 
+DELETE /apis/storage.k8s.io/v1/volumeattachments hold:outage every object that matches
+POST /apis/storage.k8s.io/v1/volumeattachments allow 
+DELETE /apis/storage.k8s.io/v1/volumeattachments/{name} hold:outage 
+PATCH /apis/storage.k8s.io/v1/volumeattachments/{name} either 
+PUT /apis/storage.k8s.io/v1/volumeattachments/{name} either 
+PATCH /apis/storage.k8s.io/v1/volumeattachments/{name}/status allow controllers' status
+PUT /apis/storage.k8s.io/v1/volumeattachments/{name}/status allow controllers' status
+DELETE /apis/storage.k8s.io/v1/volumeattributesclasses hold:outage every object that matches
+POST /apis/storage.k8s.io/v1/volumeattributesclasses allow 
+DELETE /apis/storage.k8s.io/v1/volumeattributesclasses/{name} allow 
+PATCH /apis/storage.k8s.io/v1/volumeattributesclasses/{name} either 
+PUT /apis/storage.k8s.io/v1/volumeattributesclasses/{name} either 
+DELETE /apis/storagemigration.k8s.io/v1/storageversionmigrations allow 
+POST /apis/storagemigration.k8s.io/v1/storageversionmigrations allow 
+DELETE /apis/storagemigration.k8s.io/v1/storageversionmigrations/{name} allow 
+PATCH /apis/storagemigration.k8s.io/v1/storageversionmigrations/{name} either 
+PUT /apis/storagemigration.k8s.io/v1/storageversionmigrations/{name} either 
+PATCH /apis/storagemigration.k8s.io/v1/storageversionmigrations/{name}/status allow controllers' status
+PUT /apis/storagemigration.k8s.io/v1/storageversionmigrations/{name}/status allow controllers' status
+DELETE /apis/storagemigration.k8s.io/v1beta1/storageversionmigrations allow 
+POST /apis/storagemigration.k8s.io/v1beta1/storageversionmigrations allow 
+DELETE /apis/storagemigration.k8s.io/v1beta1/storageversionmigrations/{name} allow 
+PATCH /apis/storagemigration.k8s.io/v1beta1/storageversionmigrations/{name} either 
+PUT /apis/storagemigration.k8s.io/v1beta1/storageversionmigrations/{name} either 
+PATCH /apis/storagemigration.k8s.io/v1beta1/storageversionmigrations/{name}/status allow controllers' status
+PUT /apis/storagemigration.k8s.io/v1beta1/storageversionmigrations/{name}/status allow controllers' status

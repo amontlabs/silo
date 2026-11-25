@@ -1,0 +1,21 @@
+# way: relay
+way-in yes
+way-in-wait-s 1.2
+copy-2MB intact 0.14s
+
+host-loopback-tcp blocked
+host-own-address-tcp blocked
+lan-neighbour-tcp blocked
+lan-neighbour-udp blocked
+lan-neighbour-ping blocked
+host-own-address-ping blocked
+metadata-tcp blocked
+zero-net-tcp blocked
+internet-tcp blocked
+internet-udp blocked
+internet-ping blocked
+dns-name none
+dns-exfil none
+ports-on 10.254.0.1 none
+dns-exfil-seen-by nobody
+frames-dropped arp who-has router, answered x3; icmp 10.77.0.2 x1; icmp 192.0.2.2 x1; icmp 203.0.113.10 x1; tcp connect 0.0.0.1 ports 7778,... x3; tcp connect 10.254.0.1 ports 1,2,3,4,5,... x65535; tcp connect 10.77.0.2 ports 7778,... x3; tcp connect 169.254.169.254 ports 80,... x3; tcp connect 192.0.2.2 ports 7778,... x3; tcp connect 192.168.127.254 ports 7777,... x3; tcp connect 203.0.113.10 ports 8088,... x3; udp 10.77.0.2 ports 7781 x1; udp 203.0.113.10 ports 7781 x1; udp 8.8.4.4 ports 53,... x6; udp 8.8.8.8 ports 53,... x6

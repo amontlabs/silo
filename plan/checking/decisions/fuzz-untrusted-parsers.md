@@ -20,3 +20,22 @@ whoever builds it.
 ## Challenged, 25 November 2026
 
 An agent's part. #352 challenge this answer on one case: a filesystem reader that reads a different tree than macOS does not crash, so fuzzing for crashes does not find it. The replacement is `parsers-fuzzed-and-compared`, which names this decision in `replaces`, for polarzero to take or drop. Until then this answer stays in force. The reasons are in `research/2026-11-25-challenged-decisions/README.md`.
+
+## The drafts' parsers, fuzzed and compared
+
+Agent, 25 November 2026, from `research/2026-11-25-untrusted-parsers/` (#401's folder). Fourteen
+parsers of eight drafts were fuzzed, coverage-guided, and each reader of a format another program
+also reads was compared with that program.
+
+- The worst findings were different readings with no crash. A path spelled `//v1/messages` or
+  `/v1/./messages`, or a header after a bare LF, is read one way by the spend boundary and another
+  by Anthropic's host, and the model call leaves uncounted. A directory entry of type 0xDE is
+  listed by Linux and skipped by #381's ext4 reader. This is the case `parsers-fuzzed-and-compared`
+  (#376) gives, measured.
+- Bounded memory per input has to count what the input unpacks to. 64 KiB of zstd in a request
+  took 5.4 GB of the spend boundary's memory, with no crash for a fuzzer to report.
+- A reader that refuses must refuse, never raise: six inputs crash #381's ext4 reader, and each
+  stops the whole comparison instead of writing a gap.
+- Zig 0.15 code can be fuzzed by libFuzzer on Linux: `zig build-obj -ffuzz` and one call that
+  registers the coverage counters (`zig/sancov_init.c` there). Which fuzzer works on the Mac is
+  still open.

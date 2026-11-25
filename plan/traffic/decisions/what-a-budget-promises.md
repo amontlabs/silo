@@ -217,3 +217,14 @@ A spend journal fixes it: each call that leaves, and each settlement, is written
 (`F_FULLFSYNC` on a Mac) before the call goes on, and a start puts every ledger back. A call that
 left and never settled counts at its reserve, the most it can cost. With it, both cases refuse the
 call after the restart. It costs two flushes per model call; the Mac kit's test 40 measures them.
+
+## A hostile test of `budget-stops-what-it-meters`
+
+Agent, 25 November 2026, from `research/2026-11-25-untrusted-parsers/` (#401). On #385's boundary,
+a computer with a $50 budget had 10 model calls served, $240 at the host's counts, and 3 counted.
+The other seven were sent to `/v1/messages` spelled as Anthropic's host also answers it
+(`//v1/messages`, `/v1/./messages`, absolute form, and three more), and two calls went inside the
+body of a request the boundary does not count, framed with a bare LF or a folded header line that
+the hosts read and the boundary does not. A patch there makes the boundary read requests strictly
+and refuse the rest with a 400; with it, the same test gives 3 served, 3 counted. The property
+holds only if the boundary reads every request exactly as the host will.

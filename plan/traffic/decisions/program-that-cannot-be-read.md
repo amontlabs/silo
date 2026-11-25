@@ -145,3 +145,24 @@ count while a budget covers the computer, inside a host Silo reads. The options 
 
 Not checked: which programs leave `include_usage` unset. Aider, Cline and OpenCode, which #369
 found can be switched to any OpenAI-compatible host, should be captured before this is ruled.
+
+## Traffic Silo reads, and reads wrongly
+
+Agent, 25 November 2026, from `research/2026-11-25-untrusted-parsers/` (#401). "Nothing goes to
+such a host unread" holds only if Silo's reading is the host's. On #385's boundary it is not:
+`/v1//messages` is no model route to the boundary and is one to Anthropic's host, and a header
+after a bare LF is part of the line before it to the boundary and a header of its own to the host.
+Both carried model calls the boundary never counted. A request the boundary cannot read exactly as
+the host will is traffic Silo cannot read, and is refused like it.
+
+## Native builds through the proxy
+
+Agent, 25 November 2026, from `research/2026-11-25-native-builds-through-the-proxy/`. The answer says a program that refuses Silo's certificate cannot reach the host. What the person sees then differs by program. Claude Code stops after 18 s and names the certificate. Codex 0.172.0 tries its WebSocket five times, falls back, then says "waiting for network" and never stops: it was still at it after 400 s and 53 refused handshakes. The proxy of #378 logs those connections as allowed, with bytes, since it cannot see inside them. Only the boundary, which ends TLS, sees each refusal (Codex sends the alert `unknown_ca`, Claude Code closes the connection). So the record should hold refused handshakes by program and host, and the morning should show them as one line, for example "Codex did not trust Silo's certificate on api.openai.com from 02:10: it did no work".
+
+## The program's own report (25 November 2026)
+
+An agent's part, from `research/2026-11-25-plan-windows`. Claude Code exports, over
+OpenTelemetry, one event per model call with its tokens, model and price, and matched the
+provider's bill call for call on a plan sign-in. That is not reading the program's files: the
+program sends it, in one format other programs share. Whether Silo may count it for traffic it
+passes unread is asked in `program-reports-its-own-spend`.

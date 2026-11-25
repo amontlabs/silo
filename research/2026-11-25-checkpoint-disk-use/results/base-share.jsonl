@@ -1,0 +1,4 @@
+{"case": "medium/mac-512", "base_share_mean_2nd_half": 0.248, "base_share_last": 0.248}
+{"case": "heavy/mac-512", "base_share_mean_2nd_half": 0.282, "base_share_last": 0.26}
+{"case": "medium/mac-1tb", "base_share_mean_2nd_half": 0.157, "base_share_last": 0.153}
+{"case": "macos-no-trim/mac-512", "base_share_mean_2nd_half": 0.675, "base_share_last": 0.677}

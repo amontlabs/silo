@@ -55,3 +55,13 @@ then take their descendants) reads that text, and a process report carries the c
 both sides of the match are in the record. Facts and reports of a computer are one chain in the
 order the recorder wrote them, so a report points to a fact by its number in that chain, and an
 opinion in the opinions chain points to both as `c1:<seq>`.
+
+## The chain without processes
+
+An agent's part, 25 November 2026, from [attribution without processes](../../../research/2026-11-25-attribution-without-processes/README.md).
+Under option A there is no process, so the table's path from a file change to its tool call (trace
+→ process → tool call) has no middle. A link straight from a file change to a tool call, known from
+the tool call's input (it sent the content, names the path or a folder above it, or runs a command
+known to write it), is an opinion of the same kind as the row "tool call → the processes it
+started". On six nights of #371's prototype it never named a wrong conversation where the probe
+named one. The rule is open in `author-from-traffic`. This adds a row; it changes none.

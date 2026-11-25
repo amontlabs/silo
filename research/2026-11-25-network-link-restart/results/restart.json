@@ -1,0 +1,2349 @@
+{
+ "server": [
+  {
+   "path": "/sink",
+   "result": "whole",
+   "t_start": 1795614947.819,
+   "t_end": 1795614952.775
+  },
+  {
+   "path": "/stream?n=60",
+   "result": "error: Broken pipe",
+   "t_start": 1795614947.829,
+   "t_end": 1795614953.333
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795614947.807,
+   "t_end": 1795614972.807
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795614947.812,
+   "t_end": 1795614972.813
+  },
+  {
+   "path": "/sink",
+   "result": "whole",
+   "t_start": 1795615017.99,
+   "t_end": 1795615022.946
+  },
+  {
+   "path": "/stream?n=60",
+   "result": "error: Broken pipe",
+   "t_start": 1795615017.996,
+   "t_end": 1795615023.498
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615017.978,
+   "t_end": 1795615042.989
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615017.989,
+   "t_end": 1795615042.989
+  },
+  {
+   "path": "/sink",
+   "result": "whole",
+   "t_start": 1795615084.672,
+   "t_end": 1795615089.63
+  },
+  {
+   "path": "/stream?n=60",
+   "result": "error: Broken pipe",
+   "t_start": 1795615084.669,
+   "t_end": 1795615090.177
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615084.648,
+   "t_end": 1795615109.648
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615084.651,
+   "t_end": 1795615109.651
+  },
+  {
+   "path": "/sink",
+   "result": "whole",
+   "t_start": 1795615150.612,
+   "t_end": 1795615155.559
+  },
+  {
+   "path": "/stream?n=60",
+   "result": "error: Broken pipe",
+   "t_start": 1795615150.608,
+   "t_end": 1795615156.113
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615150.58,
+   "t_end": 1795615175.58
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615150.587,
+   "t_end": 1795615175.588
+  },
+  {
+   "path": "/sink",
+   "result": "whole",
+   "t_start": 1795615216.515,
+   "t_end": 1795615221.482
+  },
+  {
+   "path": "/stream?n=60",
+   "result": "error: Broken pipe",
+   "t_start": 1795615216.515,
+   "t_end": 1795615222.029
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615216.499,
+   "t_end": 1795615241.5
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615216.504,
+   "t_end": 1795615241.504
+  },
+  {
+   "path": "/sink",
+   "result": "whole",
+   "t_start": 1795615257.542,
+   "t_end": 1795615262.507
+  },
+  {
+   "path": "/stream?n=60",
+   "result": "error: Broken pipe",
+   "t_start": 1795615257.541,
+   "t_end": 1795615263.045
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615257.524,
+   "t_end": 1795615282.525
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615257.526,
+   "t_end": 1795615282.526
+  },
+  {
+   "path": "/sink",
+   "result": "whole",
+   "t_start": 1795615327.704,
+   "t_end": 1795615332.662
+  },
+  {
+   "path": "/stream?n=60",
+   "result": "error: Broken pipe",
+   "t_start": 1795615327.702,
+   "t_end": 1795615333.204
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615327.689,
+   "t_end": 1795615352.689
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615327.681,
+   "t_end": 1795615352.69
+  },
+  {
+   "path": "/sink",
+   "result": "whole",
+   "t_start": 1795615393.244,
+   "t_end": 1795615398.215
+  },
+  {
+   "path": "/stream?n=60",
+   "result": "error: Broken pipe",
+   "t_start": 1795615393.244,
+   "t_end": 1795615398.747
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615393.232,
+   "t_end": 1795615418.232
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615393.236,
+   "t_end": 1795615418.237
+  },
+  {
+   "path": "/sink",
+   "result": "whole",
+   "t_start": 1795615459.087,
+   "t_end": 1795615464.045
+  },
+  {
+   "path": "/stream?n=60",
+   "result": "error: Broken pipe",
+   "t_start": 1795615459.086,
+   "t_end": 1795615464.591
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615459.065,
+   "t_end": 1795615484.067
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615459.078,
+   "t_end": 1795615484.079
+  },
+  {
+   "path": "/sink",
+   "result": "whole",
+   "t_start": 1795615524.959,
+   "t_end": 1795615529.928
+  },
+  {
+   "path": "/stream?n=60",
+   "result": "error: Broken pipe",
+   "t_start": 1795615524.957,
+   "t_end": 1795615530.46
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615524.943,
+   "t_end": 1795615549.944
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615524.952,
+   "t_end": 1795615549.953
+  },
+  {
+   "path": "/sink",
+   "result": "whole",
+   "t_start": 1795615565.934,
+   "t_end": 1795615570.899
+  },
+  {
+   "path": "/stream?n=60",
+   "result": "error: Broken pipe",
+   "t_start": 1795615565.934,
+   "t_end": 1795615571.436
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615565.918,
+   "t_end": 1795615590.918
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615565.925,
+   "t_end": 1795615590.925
+  },
+  {
+   "path": "/sink",
+   "result": "whole",
+   "t_start": 1795615636.106,
+   "t_end": 1795615641.074
+  },
+  {
+   "path": "/stream?n=60",
+   "result": "error: Broken pipe",
+   "t_start": 1795615636.102,
+   "t_end": 1795615641.604
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615636.088,
+   "t_end": 1795615661.089
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615636.096,
+   "t_end": 1795615661.096
+  },
+  {
+   "path": "/sink",
+   "result": "whole",
+   "t_start": 1795615701.702,
+   "t_end": 1795615706.667
+  },
+  {
+   "path": "/stream?n=60",
+   "result": "error: Broken pipe",
+   "t_start": 1795615701.7,
+   "t_end": 1795615707.203
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615701.688,
+   "t_end": 1795615726.688
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615701.692,
+   "t_end": 1795615726.692
+  },
+  {
+   "path": "/sink",
+   "result": "whole",
+   "t_start": 1795615767.559,
+   "t_end": 1795615772.518
+  },
+  {
+   "path": "/stream?n=60",
+   "result": "error: Broken pipe",
+   "t_start": 1795615767.559,
+   "t_end": 1795615773.063
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615767.54,
+   "t_end": 1795615792.54
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615767.554,
+   "t_end": 1795615792.555
+  },
+  {
+   "path": "/sink",
+   "result": "whole",
+   "t_start": 1795615833.418,
+   "t_end": 1795615838.366
+  },
+  {
+   "path": "/stream?n=60",
+   "result": "error: Broken pipe",
+   "t_start": 1795615833.408,
+   "t_end": 1795615838.911
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615833.392,
+   "t_end": 1795615858.392
+  },
+  {
+   "path": "/slow?s=25",
+   "result": "whole",
+   "t_start": 1795615833.398,
+   "t_end": 1795615858.399
+  }
+ ],
+ "runs": [
+  {
+   "mode": "direct",
+   "t_kill": 1795614952.774,
+   "t_up": 1795614953.828,
+   "new_connections_back_s": null,
+   "outage_seen_inside_s": null,
+   "failed_requests": 35,
+   "new_session_in_back_s": null,
+   "hold": {
+    "result": "still waiting at the cap",
+    "t_start": 1795614947.807,
+    "keepalive": false,
+    "t_end": 1795615007.873,
+    "ended_s_after_up": 54.0
+   },
+   "hold-ka": {
+    "result": "error: Connection timed out",
+    "t_start": 1795614947.806,
+    "keepalive": true,
+    "t_end": 1795614958.86,
+    "ended_s_after_up": 5.0
+   },
+   "stream": {
+    "result": "still waiting at the cap (60 s silent) after 10 of 60 events",
+    "events": 10,
+    "t_last_event": 1795614952.332,
+    "t_start": 1795614947.828,
+    "t_end": 1795615012.368,
+    "ended_s_after_up": 58.5
+   },
+   "send": {
+    "result": "still waiting at the cap (60 s) after 91 KB",
+    "kb": 91,
+    "t_start": 1795614947.818,
+    "t_end": 1795615016.979,
+    "ended_s_after_up": 63.2
+   },
+   "session_in_host_side": {
+    "result": "error: Broken pipe",
+    "echoes": 10,
+    "t_start": 1795614947.772,
+    "t_end": 1795614952.79,
+    "ended_s_after_up": -1.0
+   },
+   "session_in_guest_side": {
+    "result": "still waiting at the cap (60 s)",
+    "reads": 10,
+    "t_start": 1795614947.777,
+    "t_end": 1795615012.324,
+    "ended_s_after_up": 58.5
+   },
+   "renew": {
+    "answer": "none in 5 s",
+    "t_end": 1795614988.916
+   },
+   "events": [
+    {
+     "pid": 652,
+     "event": "gvproxy-up",
+     "t": 1795614947.404
+    },
+    {
+     "lease": {
+      "address": "192.168.127.2",
+      "type": 5,
+      "mask": "255.255.255.0",
+      "router": "192.168.127.1",
+      "dns": [
+       "192.168.127.1"
+      ],
+      "mtu": 1500,
+      "server": "192.168.127.1",
+      "lease_s": 3600,
+      "seconds": 0.001
+     },
+     "event": "computer-up",
+     "t": 1795614947.456
+    },
+    {
+     "sig": 9,
+     "event": "gvproxy-kill",
+     "t": 1795614952.772
+    },
+    {
+     "pid": 769,
+     "event": "gvproxy-up",
+     "t": 1795614953.827
+    },
+    {
+     "event": "relinked",
+     "t": 1795614953.827
+    },
+    {
+     "local": "/tmp/lk-direct/echo.sock",
+     "status": 200,
+     "event": "forward-again",
+     "t": 1795614953.828
+    }
+   ],
+   "card_log": "not connected\nsend failed (3 so far): Transport endpoint is not connected\nsend failed (1 so far): Connection refused\nsend failed (2 so far): Transport endpoint is not connected\nsend failed (3 so far): Transport endpoint is not connected\nsend failed (1 so far): Connection refused\nsend failed (2 so far): Transport endpoint is not connected\nsend failed (3 so far): Transport endpoint is not connected\n",
+   "run": 1
+  },
+  {
+   "mode": "repoint",
+   "t_kill": 1795615022.946,
+   "t_up": 1795615023.969,
+   "new_connections_back_s": 0.02,
+   "outage_seen_inside_s": 1.1,
+   "failed_requests": 1,
+   "new_session_in_back_s": 0.0,
+   "hold": {
+    "result": "still waiting at the cap",
+    "t_start": 1795615017.977,
+    "keepalive": false,
+    "t_end": 1795615078.004,
+    "ended_s_after_up": 54.0
+   },
+   "hold-ka": {
+    "result": "error: Connection reset by peer",
+    "t_start": 1795615017.988,
+    "keepalive": true,
+    "t_end": 1795615025.228,
+    "ended_s_after_up": 1.3
+   },
+   "stream": {
+    "result": "still waiting at the cap (60 s silent) after 10 of 60 events",
+    "events": 10,
+    "t_last_event": 1795615022.498,
+    "t_start": 1795615017.995,
+    "t_end": 1795615082.559,
+    "ended_s_after_up": 58.6
+   },
+   "send": {
+    "result": "error after 67 KB: Connection reset by peer",
+    "kb": 67,
+    "t_start": 1795615017.989,
+    "t_end": 1795615024.706,
+    "ended_s_after_up": 0.7
+   },
+   "session_in_host_side": {
+    "result": "error: Broken pipe",
+    "echoes": 10,
+    "t_start": 1795615017.944,
+    "t_end": 1795615022.963,
+    "ended_s_after_up": -1.0
+   },
+   "session_in_guest_side": {
+    "result": "still waiting at the cap (60 s)",
+    "reads": 10,
+    "t_start": 1795615017.952,
+    "t_end": 1795615082.468,
+    "ended_s_after_up": 58.5
+   },
+   "renew": {
+    "address": "192.168.127.2",
+    "type": 5,
+    "mask": "255.255.255.0",
+    "router": "192.168.127.1",
+    "dns": [
+     "192.168.127.1"
+    ],
+    "mtu": 1500,
+    "server": "192.168.127.1",
+    "lease_s": 3600,
+    "answer": "ACK",
+    "same_address": true,
+    "seconds": 0.001,
+    "t_end": 1795615026.029
+   },
+   "events": [
+    {
+     "pid": 1025,
+     "event": "gvproxy-up",
+     "t": 1795615017.57
+    },
+    {
+     "lease": {
+      "address": "192.168.127.2",
+      "type": 5,
+      "mask": "255.255.255.0",
+      "router": "192.168.127.1",
+      "dns": [
+       "192.168.127.1"
+      ],
+      "mtu": 1500,
+      "server": "192.168.127.1",
+      "lease_s": 3600,
+      "seconds": 0.001
+     },
+     "event": "computer-up",
+     "t": 1795615017.622
+    },
+    {
+     "sig": 9,
+     "event": "gvproxy-kill",
+     "t": 1795615022.944
+    },
+    {
+     "pid": 1131,
+     "event": "gvproxy-up",
+     "t": 1795615023.968
+    },
+    {
+     "event": "relinked",
+     "t": 1795615023.968
+    },
+    {
+     "local": "/tmp/lk-repoint/echo.sock",
+     "status": 200,
+     "event": "forward-again",
+     "t": 1795615023.969
+    }
+   ],
+   "card_log": "send failed (1 so far): Connection refused\nsend failed (2 so far): Transport endpoint is not connected\nsend failed (3 so far): Transport endpoint is not connected\n",
+   "run": 1
+  },
+  {
+   "mode": "fd",
+   "t_kill": 1795615089.63,
+   "t_up": 1795615090.652,
+   "new_connections_back_s": 0.09,
+   "outage_seen_inside_s": 1.18,
+   "failed_requests": 7,
+   "new_session_in_back_s": 0.0,
+   "hold": {
+    "result": "still waiting at the cap",
+    "t_start": 1795615084.646,
+    "keepalive": false,
+    "t_end": 1795615144.708,
+    "ended_s_after_up": 54.1
+   },
+   "hold-ka": {
+    "result": "error: Connection reset by peer",
+    "t_start": 1795615084.65,
+    "keepalive": true,
+    "t_end": 1795615090.643,
+    "ended_s_after_up": -0.0
+   },
+   "stream": {
+    "result": "still waiting at the cap (60 s silent) after 10 of 60 events",
+    "events": 10,
+    "t_last_event": 1795615089.176,
+    "t_start": 1795615084.669,
+    "t_end": 1795615149.237,
+    "ended_s_after_up": 58.6
+   },
+   "send": {
+    "result": "error after 60 KB: Connection reset by peer",
+    "kb": 60,
+    "t_start": 1795615084.67,
+    "t_end": 1795615090.688,
+    "ended_s_after_up": 0.0
+   },
+   "session_in_host_side": {
+    "result": "error: Broken pipe",
+    "echoes": 10,
+    "t_start": 1795615084.628,
+    "t_end": 1795615089.657,
+    "ended_s_after_up": -1.0
+   },
+   "session_in_guest_side": {
+    "result": "still waiting at the cap (60 s)",
+    "reads": 10,
+    "t_start": 1795615084.641,
+    "t_end": 1795615149.175,
+    "ended_s_after_up": 58.5
+   },
+   "renew": {
+    "address": "192.168.127.2",
+    "type": 5,
+    "mask": "255.255.255.0",
+    "router": "192.168.127.1",
+    "dns": [
+     "192.168.127.1"
+    ],
+    "mtu": 1500,
+    "server": "192.168.127.1",
+    "lease_s": 3600,
+    "answer": "ACK",
+    "same_address": true,
+    "seconds": 0.001,
+    "t_end": 1795615092.701
+   },
+   "events": [
+    {
+     "pid": 1491,
+     "event": "gvproxy-up",
+     "t": 1795615084.262
+    },
+    {
+     "lease": {
+      "address": "192.168.127.2",
+      "type": 5,
+      "mask": "255.255.255.0",
+      "router": "192.168.127.1",
+      "dns": [
+       "192.168.127.1"
+      ],
+      "mtu": 1500,
+      "server": "192.168.127.1",
+      "lease_s": 3600,
+      "seconds": 0.001
+     },
+     "event": "computer-up",
+     "t": 1795615084.313
+    },
+    {
+     "sig": 9,
+     "event": "gvproxy-kill",
+     "t": 1795615089.628
+    },
+    {
+     "pid": 1597,
+     "event": "gvproxy-up",
+     "t": 1795615090.652
+    },
+    {
+     "event": "relinked",
+     "t": 1795615090.652
+    },
+    {
+     "local": "/tmp/lk-fd/echo.sock",
+     "status": 200,
+     "event": "forward-again",
+     "t": 1795615090.652
+    }
+   ],
+   "card_log": "",
+   "run": 1
+  },
+  {
+   "mode": "relay",
+   "t_kill": 1795615155.559,
+   "t_up": 1795615156.572,
+   "new_connections_back_s": 0.02,
+   "outage_seen_inside_s": 1.1,
+   "failed_requests": 1,
+   "new_session_in_back_s": 0.0,
+   "hold": {
+    "result": "still waiting at the cap",
+    "t_start": 1795615150.586,
+    "keepalive": false,
+    "t_end": 1795615210.648,
+    "ended_s_after_up": 54.1
+   },
+   "hold-ka": {
+    "result": "error: Connection reset by peer",
+    "t_start": 1795615150.576,
+    "keepalive": true,
+    "t_end": 1795615157.837,
+    "ended_s_after_up": 1.3
+   },
+   "stream": {
+    "result": "still waiting at the cap (60 s silent) after 10 of 60 events",
+    "events": 10,
+    "t_last_event": 1795615155.113,
+    "t_start": 1795615150.607,
+    "t_end": 1795615215.173,
+    "ended_s_after_up": 58.6
+   },
+   "send": {
+    "result": "error after 67 KB: Connection reset by peer",
+    "kb": 67,
+    "t_start": 1795615150.61,
+    "t_end": 1795615157.33,
+    "ended_s_after_up": 0.8
+   },
+   "session_in_host_side": {
+    "result": "error: Broken pipe",
+    "echoes": 10,
+    "t_start": 1795615150.556,
+    "t_end": 1795615155.585,
+    "ended_s_after_up": -1.0
+   },
+   "session_in_guest_side": {
+    "result": "still waiting at the cap (60 s)",
+    "reads": 10,
+    "t_start": 1795615150.568,
+    "t_end": 1795615215.145,
+    "ended_s_after_up": 58.6
+   },
+   "renew": {
+    "address": "192.168.127.2",
+    "type": 5,
+    "mask": "255.255.255.0",
+    "router": "192.168.127.1",
+    "dns": [
+     "192.168.127.1"
+    ],
+    "mtu": 1500,
+    "server": "192.168.127.1",
+    "lease_s": 3600,
+    "answer": "ACK",
+    "same_address": true,
+    "seconds": 0.002,
+    "t_end": 1795615158.633
+   },
+   "events": [
+    {
+     "pid": 1889,
+     "event": "gvproxy-up",
+     "t": 1795615149.841
+    },
+    {
+     "lease": {
+      "address": "192.168.127.2",
+      "type": 5,
+      "mask": "255.255.255.0",
+      "router": "192.168.127.1",
+      "dns": [
+       "192.168.127.1"
+      ],
+      "mtu": 1500,
+      "server": "192.168.127.1",
+      "lease_s": 3600,
+      "seconds": 0.002
+     },
+     "event": "computer-up",
+     "t": 1795615150.244
+    },
+    {
+     "sig": 9,
+     "event": "gvproxy-kill",
+     "t": 1795615155.556
+    },
+    {
+     "pid": 1996,
+     "event": "gvproxy-up",
+     "t": 1795615156.571
+    },
+    {
+     "event": "relinked",
+     "t": 1795615156.571
+    },
+    {
+     "local": "/tmp/lk-relay/echo.sock",
+     "status": 200,
+     "event": "forward-again",
+     "t": 1795615156.572
+    }
+   ],
+   "relay_log": [
+    {
+     "t": 1795606602.281,
+     "event": "connected",
+     "n": 1,
+     "dropped": 0
+    },
+    {
+     "t": 1795606603.652,
+     "event": "connected",
+     "n": 2,
+     "dropped": 0
+    },
+    {
+     "t": 1795615149.843,
+     "event": "connected",
+     "n": 1,
+     "dropped": 0
+    },
+    {
+     "t": 1795615156.571,
+     "event": "connected",
+     "n": 2,
+     "dropped": 8
+    }
+   ],
+   "card_log": "",
+   "run": 1
+  },
+  {
+   "mode": "rstrelay",
+   "t_kill": 1795615221.482,
+   "t_up": 1795615222.494,
+   "new_connections_back_s": 0.14,
+   "outage_seen_inside_s": 1.2,
+   "failed_requests": 9,
+   "new_session_in_back_s": 1.1,
+   "hold": {
+    "result": "error: Connection reset by peer",
+    "t_start": 1795615216.498,
+    "keepalive": false,
+    "t_end": 1795615222.54,
+    "ended_s_after_up": 0.0
+   },
+   "hold-ka": {
+    "result": "error: Connection reset by peer",
+    "t_start": 1795615216.501,
+    "keepalive": true,
+    "t_end": 1795615222.535,
+    "ended_s_after_up": 0.0
+   },
+   "stream": {
+    "result": "error after 10 of 60 events: Connection reset by peer",
+    "events": 10,
+    "t_last_event": 1795615221.029,
+    "t_start": 1795615216.514,
+    "t_end": 1795615222.535,
+    "ended_s_after_up": 0.0
+   },
+   "send": {
+    "result": "error after 60 KB: Connection reset by peer",
+    "kb": 60,
+    "t_start": 1795615216.515,
+    "t_end": 1795615222.535,
+    "ended_s_after_up": 0.0
+   },
+   "session_in_host_side": {
+    "result": "error: Broken pipe",
+    "echoes": 10,
+    "t_start": 1795615216.48,
+    "t_end": 1795615221.503,
+    "ended_s_after_up": -1.0
+   },
+   "session_in_guest_side": {
+    "result": "error: Connection reset by peer",
+    "reads": 10,
+    "t_start": 1795615216.489,
+    "t_end": 1795615222.535,
+    "ended_s_after_up": 0.0
+   },
+   "renew": {
+    "address": "192.168.127.2",
+    "type": 5,
+    "mask": "255.255.255.0",
+    "router": "192.168.127.1",
+    "dns": [
+     "192.168.127.1"
+    ],
+    "mtu": 1500,
+    "server": "192.168.127.1",
+    "lease_s": 3600,
+    "answer": "ACK",
+    "same_address": true,
+    "seconds": 0.001,
+    "t_end": 1795615224.549
+   },
+   "events": [
+    {
+     "pid": 2356,
+     "event": "gvproxy-up",
+     "t": 1795615215.761
+    },
+    {
+     "lease": {
+      "address": "192.168.127.2",
+      "type": 5,
+      "mask": "255.255.255.0",
+      "router": "192.168.127.1",
+      "dns": [
+       "192.168.127.1"
+      ],
+      "mtu": 1500,
+      "server": "192.168.127.1",
+      "lease_s": 3600,
+      "seconds": 0.002
+     },
+     "event": "computer-up",
+     "t": 1795615216.164
+    },
+    {
+     "sig": 9,
+     "event": "gvproxy-kill",
+     "t": 1795615221.48
+    },
+    {
+     "pid": 2463,
+     "event": "gvproxy-up",
+     "t": 1795615222.493
+    },
+    {
+     "event": "relinked",
+     "t": 1795615222.493
+    },
+    {
+     "local": "/tmp/lk-rstrelay/echo.sock",
+     "status": 200,
+     "event": "forward-again",
+     "t": 1795615222.494
+    }
+   ],
+   "relay_log": [
+    {
+     "event": "connected",
+     "n": 1,
+     "dropped": 0,
+     "resets_sent": 0,
+     "t": 1795606604.709
+    },
+    {
+     "event": "connected",
+     "n": 2,
+     "dropped": 0,
+     "resets_sent": 0,
+     "t": 1795606606.153
+    },
+    {
+     "event": "connected",
+     "n": 1,
+     "dropped": 0,
+     "resets_sent": 0,
+     "t": 1795606755.259
+    },
+    {
+     "event": "connected",
+     "n": 2,
+     "dropped": 8,
+     "resets_sent": 6,
+     "t": 1795606761.91
+    },
+    {
+     "event": "connected",
+     "n": 3,
+     "dropped": 8,
+     "resets_sent": 0,
+     "t": 1795606761.919
+    },
+    {
+     "event": "connected",
+     "n": 1,
+     "dropped": 0,
+     "resets_sent": 0,
+     "t": 1795615215.792
+    },
+    {
+     "event": "connected",
+     "n": 2,
+     "dropped": 9,
+     "resets_sent": 7,
+     "t": 1795615222.535
+    }
+   ],
+   "card_log": "",
+   "run": 1
+  },
+  {
+   "mode": "direct",
+   "t_kill": 1795615262.508,
+   "t_up": 1795615263.53,
+   "new_connections_back_s": null,
+   "outage_seen_inside_s": null,
+   "failed_requests": 35,
+   "new_session_in_back_s": null,
+   "hold": {
+    "result": "still waiting at the cap",
+    "t_start": 1795615257.524,
+    "keepalive": false,
+    "t_end": 1795615317.532,
+    "ended_s_after_up": 54.0
+   },
+   "hold-ka": {
+    "result": "error: Connection timed out",
+    "t_start": 1795615257.525,
+    "keepalive": true,
+    "t_end": 1795615268.62,
+    "ended_s_after_up": 5.1
+   },
+   "stream": {
+    "result": "still waiting at the cap (60 s silent) after 10 of 60 events",
+    "events": 10,
+    "t_last_event": 1795615262.044,
+    "t_start": 1795615257.541,
+    "t_end": 1795615322.091,
+    "ended_s_after_up": 58.6
+   },
+   "send": {
+    "result": "still waiting at the cap (60 s) after 91 KB",
+    "kb": 91,
+    "t_start": 1795615257.541,
+    "t_end": 1795615326.722,
+    "ended_s_after_up": 63.2
+   },
+   "session_in_host_side": {
+    "result": "error: Broken pipe",
+    "echoes": 10,
+    "t_start": 1795615257.504,
+    "t_end": 1795615262.531,
+    "ended_s_after_up": -1.0
+   },
+   "session_in_guest_side": {
+    "result": "still waiting at the cap (60 s)",
+    "reads": 10,
+    "t_start": 1795615257.52,
+    "t_end": 1795615322.091,
+    "ended_s_after_up": 58.6
+   },
+   "renew": {
+    "answer": "none in 5 s",
+    "t_end": 1795615298.712
+   },
+   "events": [
+    {
+     "pid": 2744,
+     "event": "gvproxy-up",
+     "t": 1795615257.14
+    },
+    {
+     "lease": {
+      "address": "192.168.127.2",
+      "type": 5,
+      "mask": "255.255.255.0",
+      "router": "192.168.127.1",
+      "dns": [
+       "192.168.127.1"
+      ],
+      "mtu": 1500,
+      "server": "192.168.127.1",
+      "lease_s": 3600,
+      "seconds": 0.001
+     },
+     "event": "computer-up",
+     "t": 1795615257.191
+    },
+    {
+     "sig": 9,
+     "event": "gvproxy-kill",
+     "t": 1795615262.504
+    },
+    {
+     "pid": 2850,
+     "event": "gvproxy-up",
+     "t": 1795615263.529
+    },
+    {
+     "event": "relinked",
+     "t": 1795615263.529
+    },
+    {
+     "local": "/tmp/lk-direct/echo.sock",
+     "status": 200,
+     "event": "forward-again",
+     "t": 1795615263.53
+    }
+   ],
+   "card_log": "not connected\nsend failed (3 so far): Transport endpoint is not connected\nsend failed (1 so far): Connection refused\nsend failed (2 so far): Transport endpoint is not connected\nsend failed (3 so far): Transport endpoint is not connected\nsend failed (1 so far): Connection refused\nsend failed (2 so far): Transport endpoint is not connected\nsend failed (3 so far): Transport endpoint is not connected\n",
+   "run": 2
+  },
+  {
+   "mode": "repoint",
+   "t_kill": 1795615332.662,
+   "t_up": 1795615333.674,
+   "new_connections_back_s": 0.03,
+   "outage_seen_inside_s": 1.1,
+   "failed_requests": 1,
+   "new_session_in_back_s": 0.0,
+   "hold": {
+    "result": "still waiting at the cap",
+    "t_start": 1795615327.684,
+    "keepalive": false,
+    "t_end": 1795615387.697,
+    "ended_s_after_up": 54.0
+   },
+   "hold-ka": {
+    "result": "error: Connection reset by peer",
+    "t_start": 1795615327.681,
+    "keepalive": true,
+    "t_end": 1795615334.732,
+    "ended_s_after_up": 1.1
+   },
+   "stream": {
+    "result": "still waiting at the cap (60 s silent) after 10 of 60 events",
+    "events": 10,
+    "t_last_event": 1795615332.204,
+    "t_start": 1795615327.701,
+    "t_end": 1795615392.264,
+    "ended_s_after_up": 58.6
+   },
+   "send": {
+    "result": "error after 67 KB: Connection reset by peer",
+    "kb": 67,
+    "t_start": 1795615327.703,
+    "t_end": 1795615334.416,
+    "ended_s_after_up": 0.7
+   },
+   "session_in_host_side": {
+    "result": "error: Broken pipe",
+    "echoes": 10,
+    "t_start": 1795615327.66,
+    "t_end": 1795615332.683,
+    "ended_s_after_up": -1.0
+   },
+   "session_in_guest_side": {
+    "result": "still waiting at the cap (60 s)",
+    "reads": 10,
+    "t_start": 1795615327.672,
+    "t_end": 1795615392.243,
+    "ended_s_after_up": 58.6
+   },
+   "renew": {
+    "address": "192.168.127.2",
+    "type": 5,
+    "mask": "255.255.255.0",
+    "router": "192.168.127.1",
+    "dns": [
+     "192.168.127.1"
+    ],
+    "mtu": 1500,
+    "server": "192.168.127.1",
+    "lease_s": 3600,
+    "answer": "ACK",
+    "same_address": true,
+    "seconds": 0.001,
+    "t_end": 1795615335.716
+   },
+   "events": [
+    {
+     "pid": 2868,
+     "event": "gvproxy-up",
+     "t": 1795615327.296
+    },
+    {
+     "lease": {
+      "address": "192.168.127.2",
+      "type": 5,
+      "mask": "255.255.255.0",
+      "router": "192.168.127.1",
+      "dns": [
+       "192.168.127.1"
+      ],
+      "mtu": 1500,
+      "server": "192.168.127.1",
+      "lease_s": 3600,
+      "seconds": 0.001
+     },
+     "event": "computer-up",
+     "t": 1795615327.347
+    },
+    {
+     "sig": 9,
+     "event": "gvproxy-kill",
+     "t": 1795615332.66
+    },
+    {
+     "pid": 2989,
+     "event": "gvproxy-up",
+     "t": 1795615333.674
+    },
+    {
+     "event": "relinked",
+     "t": 1795615333.674
+    },
+    {
+     "local": "/tmp/lk-repoint/echo.sock",
+     "status": 200,
+     "event": "forward-again",
+     "t": 1795615333.674
+    }
+   ],
+   "card_log": "send failed (1 so far): Connection refused\nsend failed (2 so far): Transport endpoint is not connected\nsend failed (3 so far): Transport endpoint is not connected\nsend failed (1 so far): Connection refused\nsend failed (2 so far): Transport endpoint is not connected\nsend failed (3 so far): Transport endpoint is not connected\n",
+   "run": 2
+  },
+  {
+   "mode": "fd",
+   "t_kill": 1795615398.215,
+   "t_up": 1795615399.238,
+   "new_connections_back_s": 0.09,
+   "outage_seen_inside_s": 1.18,
+   "failed_requests": 0,
+   "new_session_in_back_s": 0.0,
+   "hold": {
+    "result": "still waiting at the cap",
+    "t_start": 1795615393.232,
+    "keepalive": false,
+    "t_end": 1795615453.297,
+    "ended_s_after_up": 54.1
+   },
+   "hold-ka": {
+    "result": "error: Connection reset by peer",
+    "t_start": 1795615393.224,
+    "keepalive": true,
+    "t_end": 1795615399.228,
+    "ended_s_after_up": -0.0
+   },
+   "stream": {
+    "result": "still waiting at the cap (60 s silent) after 10 of 60 events",
+    "events": 10,
+    "t_last_event": 1795615397.747,
+    "t_start": 1795615393.243,
+    "t_end": 1795615457.788,
+    "ended_s_after_up": 58.6
+   },
+   "send": {
+    "result": "error after 60 KB: Connection reset by peer",
+    "kb": 60,
+    "t_start": 1795615393.243,
+    "t_end": 1795615399.263,
+    "ended_s_after_up": 0.0
+   },
+   "session_in_host_side": {
+    "result": "error: Broken pipe",
+    "echoes": 10,
+    "t_start": 1795615393.208,
+    "t_end": 1795615398.228,
+    "ended_s_after_up": -1.0
+   },
+   "session_in_guest_side": {
+    "result": "still waiting at the cap (60 s)",
+    "reads": 10,
+    "t_start": 1795615393.216,
+    "t_end": 1795615457.788,
+    "ended_s_after_up": 58.6
+   },
+   "renew": {
+    "address": "192.168.127.2",
+    "type": 5,
+    "mask": "255.255.255.0",
+    "router": "192.168.127.1",
+    "dns": [
+     "192.168.127.1"
+    ],
+    "mtu": 1500,
+    "server": "192.168.127.1",
+    "lease_s": 3600,
+    "answer": "ACK",
+    "same_address": true,
+    "seconds": 0.001,
+    "t_end": 1795615401.281
+   },
+   "events": [
+    {
+     "pid": 3377,
+     "event": "gvproxy-up",
+     "t": 1795615392.833
+    },
+    {
+     "lease": {
+      "address": "192.168.127.2",
+      "type": 5,
+      "mask": "255.255.255.0",
+      "router": "192.168.127.1",
+      "dns": [
+       "192.168.127.1"
+      ],
+      "mtu": 1500,
+      "server": "192.168.127.1",
+      "lease_s": 3600,
+      "seconds": 0.001
+     },
+     "event": "computer-up",
+     "t": 1795615392.885
+    },
+    {
+     "sig": 9,
+     "event": "gvproxy-kill",
+     "t": 1795615398.209
+    },
+    {
+     "pid": 3486,
+     "event": "gvproxy-up",
+     "t": 1795615399.237
+    },
+    {
+     "event": "relinked",
+     "t": 1795615399.237
+    },
+    {
+     "local": "/tmp/lk-fd/echo.sock",
+     "status": 200,
+     "event": "forward-again",
+     "t": 1795615399.238
+    }
+   ],
+   "card_log": "",
+   "run": 2
+  },
+  {
+   "mode": "relay",
+   "t_kill": 1795615464.046,
+   "t_up": 1795615465.058,
+   "new_connections_back_s": 0.02,
+   "outage_seen_inside_s": 1.1,
+   "failed_requests": 1,
+   "new_session_in_back_s": 0.0,
+   "hold": {
+    "result": "still waiting at the cap",
+    "t_start": 1795615459.065,
+    "keepalive": false,
+    "t_end": 1795615519.081,
+    "ended_s_after_up": 54.0
+   },
+   "hold-ka": {
+    "result": "error: Connection reset by peer",
+    "t_start": 1795615459.077,
+    "keepalive": true,
+    "t_end": 1795615466.317,
+    "ended_s_after_up": 1.3
+   },
+   "stream": {
+    "result": "still waiting at the cap (60 s silent) after 10 of 60 events",
+    "events": 10,
+    "t_last_event": 1795615463.591,
+    "t_start": 1795615459.085,
+    "t_end": 1795615523.648,
+    "ended_s_after_up": 58.6
+   },
+   "send": {
+    "result": "error after 67 KB: Connection reset by peer",
+    "kb": 67,
+    "t_start": 1795615459.086,
+    "t_end": 1795615465.809,
+    "ended_s_after_up": 0.8
+   },
+   "session_in_host_side": {
+    "result": "error: Broken pipe",
+    "echoes": 10,
+    "t_start": 1795615459.044,
+    "t_end": 1795615464.072,
+    "ended_s_after_up": -1.0
+   },
+   "session_in_guest_side": {
+    "result": "still waiting at the cap (60 s)",
+    "reads": 10,
+    "t_start": 1795615459.053,
+    "t_end": 1795615523.632,
+    "ended_s_after_up": 58.6
+   },
+   "renew": {
+    "address": "192.168.127.2",
+    "type": 5,
+    "mask": "255.255.255.0",
+    "router": "192.168.127.1",
+    "dns": [
+     "192.168.127.1"
+    ],
+    "mtu": 1500,
+    "server": "192.168.127.1",
+    "lease_s": 3600,
+    "answer": "ACK",
+    "same_address": true,
+    "seconds": 0.001,
+    "t_end": 1795615467.109
+   },
+   "events": [
+    {
+     "pid": 3846,
+     "event": "gvproxy-up",
+     "t": 1795615458.378
+    },
+    {
+     "lease": {
+      "address": "192.168.127.2",
+      "type": 5,
+      "mask": "255.255.255.0",
+      "router": "192.168.127.1",
+      "dns": [
+       "192.168.127.1"
+      ],
+      "mtu": 1500,
+      "server": "192.168.127.1",
+      "lease_s": 3600,
+      "seconds": 0.001
+     },
+     "event": "computer-up",
+     "t": 1795615458.73
+    },
+    {
+     "sig": 9,
+     "event": "gvproxy-kill",
+     "t": 1795615464.044
+    },
+    {
+     "pid": 3954,
+     "event": "gvproxy-up",
+     "t": 1795615465.057
+    },
+    {
+     "event": "relinked",
+     "t": 1795615465.057
+    },
+    {
+     "local": "/tmp/lk-relay/echo.sock",
+     "status": 200,
+     "event": "forward-again",
+     "t": 1795615465.058
+    }
+   ],
+   "relay_log": [
+    {
+     "t": 1795606602.281,
+     "event": "connected",
+     "n": 1,
+     "dropped": 0
+    },
+    {
+     "t": 1795606603.652,
+     "event": "connected",
+     "n": 2,
+     "dropped": 0
+    },
+    {
+     "t": 1795615149.843,
+     "event": "connected",
+     "n": 1,
+     "dropped": 0
+    },
+    {
+     "t": 1795615156.571,
+     "event": "connected",
+     "n": 2,
+     "dropped": 8
+    },
+    {
+     "t": 1795615458.38,
+     "event": "connected",
+     "n": 1,
+     "dropped": 0
+    },
+    {
+     "t": 1795615465.057,
+     "event": "connected",
+     "n": 2,
+     "dropped": 8
+    }
+   ],
+   "card_log": "",
+   "run": 2
+  },
+  {
+   "mode": "rstrelay",
+   "t_kill": 1795615529.928,
+   "t_up": 1795615530.94,
+   "new_connections_back_s": 0.11,
+   "outage_seen_inside_s": 1.2,
+   "failed_requests": 2,
+   "new_session_in_back_s": 1.11,
+   "hold": {
+    "result": "error: Connection reset by peer",
+    "t_start": 1795615524.951,
+    "keepalive": false,
+    "t_end": 1795615530.953,
+    "ended_s_after_up": 0.0
+   },
+   "hold-ka": {
+    "result": "error: Connection reset by peer",
+    "t_start": 1795615524.942,
+    "keepalive": true,
+    "t_end": 1795615530.953,
+    "ended_s_after_up": 0.0
+   },
+   "stream": {
+    "result": "error after 10 of 60 events: Connection reset by peer",
+    "events": 10,
+    "t_last_event": 1795615529.46,
+    "t_start": 1795615524.956,
+    "t_end": 1795615530.953,
+    "ended_s_after_up": 0.0
+   },
+   "send": {
+    "result": "error after 60 KB: Connection reset by peer",
+    "kb": 60,
+    "t_start": 1795615524.958,
+    "t_end": 1795615530.975,
+    "ended_s_after_up": 0.0
+   },
+   "session_in_host_side": {
+    "result": "error: Broken pipe",
+    "echoes": 10,
+    "t_start": 1795615524.924,
+    "t_end": 1795615529.948,
+    "ended_s_after_up": -1.0
+   },
+   "session_in_guest_side": {
+    "result": "error: Connection reset by peer",
+    "reads": 10,
+    "t_start": 1795615524.936,
+    "t_end": 1795615530.953,
+    "ended_s_after_up": 0.0
+   },
+   "renew": {
+    "address": "192.168.127.2",
+    "type": 5,
+    "mask": "255.255.255.0",
+    "router": "192.168.127.1",
+    "dns": [
+     "192.168.127.1"
+    ],
+    "mtu": 1500,
+    "server": "192.168.127.1",
+    "lease_s": 3600,
+    "answer": "ACK",
+    "same_address": true,
+    "seconds": 0.001,
+    "t_end": 1795615533.005
+   },
+   "events": [
+    {
+     "pid": 4313,
+     "event": "gvproxy-up",
+     "t": 1795615524.256
+    },
+    {
+     "lease": {
+      "address": "192.168.127.2",
+      "type": 5,
+      "mask": "255.255.255.0",
+      "router": "192.168.127.1",
+      "dns": [
+       "192.168.127.1"
+      ],
+      "mtu": 1500,
+      "server": "192.168.127.1",
+      "lease_s": 3600,
+      "seconds": 0.002
+     },
+     "event": "computer-up",
+     "t": 1795615524.609
+    },
+    {
+     "sig": 9,
+     "event": "gvproxy-kill",
+     "t": 1795615529.924
+    },
+    {
+     "pid": 4423,
+     "event": "gvproxy-up",
+     "t": 1795615530.939
+    },
+    {
+     "event": "relinked",
+     "t": 1795615530.939
+    },
+    {
+     "local": "/tmp/lk-rstrelay/echo.sock",
+     "status": 200,
+     "event": "forward-again",
+     "t": 1795615530.94
+    }
+   ],
+   "relay_log": [
+    {
+     "event": "connected",
+     "n": 1,
+     "dropped": 0,
+     "resets_sent": 0,
+     "t": 1795606604.709
+    },
+    {
+     "event": "connected",
+     "n": 2,
+     "dropped": 0,
+     "resets_sent": 0,
+     "t": 1795606606.153
+    },
+    {
+     "event": "connected",
+     "n": 1,
+     "dropped": 0,
+     "resets_sent": 0,
+     "t": 1795606755.259
+    },
+    {
+     "event": "connected",
+     "n": 2,
+     "dropped": 8,
+     "resets_sent": 6,
+     "t": 1795606761.91
+    },
+    {
+     "event": "connected",
+     "n": 3,
+     "dropped": 8,
+     "resets_sent": 0,
+     "t": 1795606761.919
+    },
+    {
+     "event": "connected",
+     "n": 1,
+     "dropped": 0,
+     "resets_sent": 0,
+     "t": 1795615215.792
+    },
+    {
+     "event": "connected",
+     "n": 2,
+     "dropped": 9,
+     "resets_sent": 7,
+     "t": 1795615222.535
+    },
+    {
+     "event": "connected",
+     "n": 1,
+     "dropped": 0,
+     "resets_sent": 0,
+     "t": 1795615524.282
+    },
+    {
+     "event": "connected",
+     "n": 2,
+     "dropped": 9,
+     "resets_sent": 7,
+     "t": 1795615530.952
+    }
+   ],
+   "card_log": "",
+   "run": 2
+  },
+  {
+   "mode": "direct",
+   "t_kill": 1795615570.899,
+   "t_up": 1795615571.921,
+   "new_connections_back_s": null,
+   "outage_seen_inside_s": null,
+   "failed_requests": 35,
+   "new_session_in_back_s": null,
+   "hold": {
+    "result": "still waiting at the cap",
+    "t_start": 1795615565.917,
+    "keepalive": false,
+    "t_end": 1795615625.936,
+    "ended_s_after_up": 54.0
+   },
+   "hold-ka": {
+    "result": "error: Connection timed out",
+    "t_start": 1795615565.924,
+    "keepalive": true,
+    "t_end": 1795615577.1,
+    "ended_s_after_up": 5.2
+   },
+   "stream": {
+    "result": "still waiting at the cap (60 s silent) after 10 of 60 events",
+    "events": 10,
+    "t_last_event": 1795615570.436,
+    "t_start": 1795615565.933,
+    "t_end": 1795615630.475,
+    "ended_s_after_up": 58.6
+   },
+   "send": {
+    "result": "still waiting at the cap (60 s) after 91 KB",
+    "kb": 91,
+    "t_start": 1795615565.934,
+    "t_end": 1795615635.116,
+    "ended_s_after_up": 63.2
+   },
+   "session_in_host_side": {
+    "result": "error: Broken pipe",
+    "echoes": 10,
+    "t_start": 1795615565.896,
+    "t_end": 1795615570.915,
+    "ended_s_after_up": -1.0
+   },
+   "session_in_guest_side": {
+    "result": "still waiting at the cap (60 s)",
+    "reads": 10,
+    "t_start": 1795615565.904,
+    "t_end": 1795615630.475,
+    "ended_s_after_up": 58.6
+   },
+   "renew": {
+    "answer": "none in 5 s",
+    "t_end": 1795615607.008
+   },
+   "events": [
+    {
+     "pid": 4770,
+     "event": "gvproxy-up",
+     "t": 1795615565.534
+    },
+    {
+     "lease": {
+      "address": "192.168.127.2",
+      "type": 5,
+      "mask": "255.255.255.0",
+      "router": "192.168.127.1",
+      "dns": [
+       "192.168.127.1"
+      ],
+      "mtu": 1500,
+      "server": "192.168.127.1",
+      "lease_s": 3600,
+      "seconds": 0.002
+     },
+     "event": "computer-up",
+     "t": 1795615565.585
+    },
+    {
+     "sig": 9,
+     "event": "gvproxy-kill",
+     "t": 1795615570.896
+    },
+    {
+     "pid": 4875,
+     "event": "gvproxy-up",
+     "t": 1795615571.92
+    },
+    {
+     "event": "relinked",
+     "t": 1795615571.921
+    },
+    {
+     "local": "/tmp/lk-direct/echo.sock",
+     "status": 200,
+     "event": "forward-again",
+     "t": 1795615571.921
+    }
+   ],
+   "card_log": "not connected\nsend failed (3 so far): Transport endpoint is not connected\nsend failed (1 so far): Connection refused\nsend failed (2 so far): Transport endpoint is not connected\nsend failed (3 so far): Transport endpoint is not connected\nsend failed (1 so far): Connection refused\nsend failed (2 so far): Transport endpoint is not connected\nsend failed (3 so far): Transport endpoint is not connected\n",
+   "run": 3
+  },
+  {
+   "mode": "repoint",
+   "t_kill": 1795615641.074,
+   "t_up": 1795615642.096,
+   "new_connections_back_s": 0.01,
+   "outage_seen_inside_s": 1.1,
+   "failed_requests": 1,
+   "new_session_in_back_s": 0.0,
+   "hold": {
+    "result": "still waiting at the cap",
+    "t_start": 1795615636.087,
+    "keepalive": false,
+    "t_end": 1795615696.149,
+    "ended_s_after_up": 54.1
+   },
+   "hold-ka": {
+    "result": "error: Connection reset by peer",
+    "t_start": 1795615636.092,
+    "keepalive": true,
+    "t_end": 1795615643.212,
+    "ended_s_after_up": 1.1
+   },
+   "stream": {
+    "result": "still waiting at the cap (60 s silent) after 10 of 60 events",
+    "events": 10,
+    "t_last_event": 1795615640.604,
+    "t_start": 1795615636.101,
+    "t_end": 1795615700.652,
+    "ended_s_after_up": 58.6
+   },
+   "send": {
+    "result": "error after 67 KB: Connection reset by peer",
+    "kb": 67,
+    "t_start": 1795615636.106,
+    "t_end": 1795615642.823,
+    "ended_s_after_up": 0.7
+   },
+   "session_in_host_side": {
+    "result": "error: Broken pipe",
+    "echoes": 10,
+    "t_start": 1795615636.072,
+    "t_end": 1795615641.105,
+    "ended_s_after_up": -1.0
+   },
+   "session_in_guest_side": {
+    "result": "still waiting at the cap (60 s)",
+    "reads": 10,
+    "t_start": 1795615636.088,
+    "t_end": 1795615700.652,
+    "ended_s_after_up": 58.6
+   },
+   "renew": {
+    "address": "192.168.127.2",
+    "type": 5,
+    "mask": "255.255.255.0",
+    "router": "192.168.127.1",
+    "dns": [
+     "192.168.127.1"
+    ],
+    "mtu": 1500,
+    "server": "192.168.127.1",
+    "lease_s": 3600,
+    "answer": "ACK",
+    "same_address": true,
+    "seconds": 0.001,
+    "t_end": 1795615644.145
+   },
+   "events": [
+    {
+     "pid": 4894,
+     "event": "gvproxy-up",
+     "t": 1795615635.706
+    },
+    {
+     "lease": {
+      "address": "192.168.127.2",
+      "type": 5,
+      "mask": "255.255.255.0",
+      "router": "192.168.127.1",
+      "dns": [
+       "192.168.127.1"
+      ],
+      "mtu": 1500,
+      "server": "192.168.127.1",
+      "lease_s": 3600,
+      "seconds": 0.001
+     },
+     "event": "computer-up",
+     "t": 1795615635.758
+    },
+    {
+     "sig": 9,
+     "event": "gvproxy-kill",
+     "t": 1795615641.072
+    },
+    {
+     "pid": 4973,
+     "event": "gvproxy-up",
+     "t": 1795615642.096
+    },
+    {
+     "event": "relinked",
+     "t": 1795615642.096
+    },
+    {
+     "local": "/tmp/lk-repoint/echo.sock",
+     "status": 200,
+     "event": "forward-again",
+     "t": 1795615642.096
+    }
+   ],
+   "card_log": "not connected\nsend failed (3 so far): Transport endpoint is not connected\nsend failed (1 so far): Connection refused\nsend failed (2 so far): Transport endpoint is not connected\nsend failed (3 so far): Transport endpoint is not connected\nsend failed (1 so far): Connection refused\nsend failed (2 so far): Transport endpoint is not connected\nsend failed (3 so far): Transport endpoint is not connected\n",
+   "run": 3
+  },
+  {
+   "mode": "fd",
+   "t_kill": 1795615706.667,
+   "t_up": 1795615707.679,
+   "new_connections_back_s": 0.0,
+   "outage_seen_inside_s": 1.08,
+   "failed_requests": 0,
+   "new_session_in_back_s": 0.0,
+   "hold": {
+    "result": "still waiting at the cap",
+    "t_start": 1795615701.687,
+    "keepalive": false,
+    "t_end": 1795615761.748,
+    "ended_s_after_up": 54.1
+   },
+   "hold-ka": {
+    "result": "error: Connection reset by peer",
+    "t_start": 1795615701.688,
+    "keepalive": true,
+    "t_end": 1795615707.679,
+    "ended_s_after_up": 0.0
+   },
+   "stream": {
+    "result": "still waiting at the cap (60 s silent) after 10 of 60 events",
+    "events": 10,
+    "t_last_event": 1795615706.203,
+    "t_start": 1795615701.7,
+    "t_end": 1795615766.263,
+    "ended_s_after_up": 58.6
+   },
+   "send": {
+    "result": "error after 60 KB: Connection reset by peer",
+    "kb": 60,
+    "t_start": 1795615701.701,
+    "t_end": 1795615707.714,
+    "ended_s_after_up": 0.0
+   },
+   "session_in_host_side": {
+    "result": "error: Broken pipe",
+    "echoes": 10,
+    "t_start": 1795615701.664,
+    "t_end": 1795615706.694,
+    "ended_s_after_up": -1.0
+   },
+   "session_in_guest_side": {
+    "result": "still waiting at the cap (60 s)",
+    "reads": 10,
+    "t_start": 1795615701.676,
+    "t_end": 1795615766.254,
+    "ended_s_after_up": 58.6
+   },
+   "renew": {
+    "address": "192.168.127.2",
+    "type": 5,
+    "mask": "255.255.255.0",
+    "router": "192.168.127.1",
+    "dns": [
+     "192.168.127.1"
+    ],
+    "mtu": 1500,
+    "server": "192.168.127.1",
+    "lease_s": 3600,
+    "answer": "ACK",
+    "same_address": true,
+    "seconds": 0.002,
+    "t_end": 1795615709.73
+   },
+   "events": [
+    {
+     "pid": 5359,
+     "event": "gvproxy-up",
+     "t": 1795615701.25
+    },
+    {
+     "lease": {
+      "address": "192.168.127.2",
+      "type": 5,
+      "mask": "255.255.255.0",
+      "router": "192.168.127.1",
+      "dns": [
+       "192.168.127.1"
+      ],
+      "mtu": 1500,
+      "server": "192.168.127.1",
+      "lease_s": 3600,
+      "seconds": 0.001
+     },
+     "event": "computer-up",
+     "t": 1795615701.353
+    },
+    {
+     "sig": 9,
+     "event": "gvproxy-kill",
+     "t": 1795615706.664
+    },
+    {
+     "pid": 5468,
+     "event": "gvproxy-up",
+     "t": 1795615707.678
+    },
+    {
+     "event": "relinked",
+     "t": 1795615707.678
+    },
+    {
+     "local": "/tmp/lk-fd/echo.sock",
+     "status": 200,
+     "event": "forward-again",
+     "t": 1795615707.679
+    }
+   ],
+   "card_log": "",
+   "run": 3
+  },
+  {
+   "mode": "relay",
+   "t_kill": 1795615772.519,
+   "t_up": 1795615773.541,
+   "new_connections_back_s": 0.01,
+   "outage_seen_inside_s": 1.1,
+   "failed_requests": 1,
+   "new_session_in_back_s": 0.0,
+   "hold": {
+    "result": "still waiting at the cap",
+    "t_start": 1795615767.553,
+    "keepalive": false,
+    "t_end": 1795615827.6,
+    "ended_s_after_up": 54.1
+   },
+   "hold-ka": {
+    "result": "error: Connection reset by peer",
+    "t_start": 1795615767.538,
+    "keepalive": true,
+    "t_end": 1795615774.797,
+    "ended_s_after_up": 1.3
+   },
+   "stream": {
+    "result": "still waiting at the cap (60 s silent) after 10 of 60 events",
+    "events": 10,
+    "t_last_event": 1795615772.062,
+    "t_start": 1795615767.559,
+    "t_end": 1795615832.123,
+    "ended_s_after_up": 58.6
+   },
+   "send": {
+    "result": "error after 67 KB: Connection reset by peer",
+    "kb": 67,
+    "t_start": 1795615767.558,
+    "t_end": 1795615774.277,
+    "ended_s_after_up": 0.7
+   },
+   "session_in_host_side": {
+    "result": "error: Broken pipe",
+    "echoes": 10,
+    "t_start": 1795615767.516,
+    "t_end": 1795615772.54,
+    "ended_s_after_up": -1.0
+   },
+   "session_in_guest_side": {
+    "result": "still waiting at the cap (60 s)",
+    "reads": 10,
+    "t_start": 1795615767.524,
+    "t_end": 1795615832.1,
+    "ended_s_after_up": 58.6
+   },
+   "renew": {
+    "address": "192.168.127.2",
+    "type": 5,
+    "mask": "255.255.255.0",
+    "router": "192.168.127.1",
+    "dns": [
+     "192.168.127.1"
+    ],
+    "mtu": 1500,
+    "server": "192.168.127.1",
+    "lease_s": 3600,
+    "answer": "ACK",
+    "same_address": true,
+    "seconds": 0.001,
+    "t_end": 1795615775.585
+   },
+   "events": [
+    {
+     "pid": 5828,
+     "event": "gvproxy-up",
+     "t": 1795615766.848
+    },
+    {
+     "lease": {
+      "address": "192.168.127.2",
+      "type": 5,
+      "mask": "255.255.255.0",
+      "router": "192.168.127.1",
+      "dns": [
+       "192.168.127.1"
+      ],
+      "mtu": 1500,
+      "server": "192.168.127.1",
+      "lease_s": 3600,
+      "seconds": 0.002
+     },
+     "event": "computer-up",
+     "t": 1795615767.2
+    },
+    {
+     "sig": 9,
+     "event": "gvproxy-kill",
+     "t": 1795615772.517
+    },
+    {
+     "pid": 5936,
+     "event": "gvproxy-up",
+     "t": 1795615773.54
+    },
+    {
+     "event": "relinked",
+     "t": 1795615773.54
+    },
+    {
+     "local": "/tmp/lk-relay/echo.sock",
+     "status": 200,
+     "event": "forward-again",
+     "t": 1795615773.541
+    }
+   ],
+   "relay_log": [
+    {
+     "t": 1795606602.281,
+     "event": "connected",
+     "n": 1,
+     "dropped": 0
+    },
+    {
+     "t": 1795606603.652,
+     "event": "connected",
+     "n": 2,
+     "dropped": 0
+    },
+    {
+     "t": 1795615149.843,
+     "event": "connected",
+     "n": 1,
+     "dropped": 0
+    },
+    {
+     "t": 1795615156.571,
+     "event": "connected",
+     "n": 2,
+     "dropped": 8
+    },
+    {
+     "t": 1795615458.38,
+     "event": "connected",
+     "n": 1,
+     "dropped": 0
+    },
+    {
+     "t": 1795615465.057,
+     "event": "connected",
+     "n": 2,
+     "dropped": 8
+    },
+    {
+     "t": 1795615766.849,
+     "event": "connected",
+     "n": 1,
+     "dropped": 0
+    },
+    {
+     "t": 1795615773.54,
+     "event": "connected",
+     "n": 2,
+     "dropped": 8
+    }
+   ],
+   "card_log": "",
+   "run": 3
+  },
+  {
+   "mode": "rstrelay",
+   "t_kill": 1795615838.366,
+   "t_up": 1795615839.389,
+   "new_connections_back_s": 0.11,
+   "outage_seen_inside_s": 1.2,
+   "failed_requests": 2,
+   "new_session_in_back_s": 1.1,
+   "hold": {
+    "result": "error: Connection reset by peer",
+    "t_start": 1795615833.39,
+    "keepalive": false,
+    "t_end": 1795615839.401,
+    "ended_s_after_up": 0.0
+   },
+   "hold-ka": {
+    "result": "error: Connection reset by peer",
+    "t_start": 1795615833.398,
+    "keepalive": true,
+    "t_end": 1795615839.401,
+    "ended_s_after_up": 0.0
+   },
+   "stream": {
+    "result": "error after 10 of 60 events: Connection reset by peer",
+    "events": 10,
+    "t_last_event": 1795615837.91,
+    "t_start": 1795615833.407,
+    "t_end": 1795615839.401,
+    "ended_s_after_up": 0.0
+   },
+   "send": {
+    "result": "error after 60 KB: Connection reset by peer",
+    "kb": 60,
+    "t_start": 1795615833.417,
+    "t_end": 1795615839.432,
+    "ended_s_after_up": 0.0
+   },
+   "session_in_host_side": {
+    "result": "error: Broken pipe",
+    "echoes": 10,
+    "t_start": 1795615833.364,
+    "t_end": 1795615838.398,
+    "ended_s_after_up": -1.0
+   },
+   "session_in_guest_side": {
+    "result": "error: Connection reset by peer",
+    "reads": 10,
+    "t_start": 1795615833.384,
+    "t_end": 1795615839.401,
+    "ended_s_after_up": 0.0
+   },
+   "renew": {
+    "address": "192.168.127.2",
+    "type": 5,
+    "mask": "255.255.255.0",
+    "router": "192.168.127.1",
+    "dns": [
+     "192.168.127.1"
+    ],
+    "mtu": 1500,
+    "server": "192.168.127.1",
+    "lease_s": 3600,
+    "answer": "ACK",
+    "same_address": true,
+    "seconds": 0.001,
+    "t_end": 1795615841.433
+   },
+   "events": [
+    {
+     "pid": 6295,
+     "event": "gvproxy-up",
+     "t": 1795615832.697
+    },
+    {
+     "lease": {
+      "address": "192.168.127.2",
+      "type": 5,
+      "mask": "255.255.255.0",
+      "router": "192.168.127.1",
+      "dns": [
+       "192.168.127.1"
+      ],
+      "mtu": 1500,
+      "server": "192.168.127.1",
+      "lease_s": 3600,
+      "seconds": 0.002
+     },
+     "event": "computer-up",
+     "t": 1795615833.05
+    },
+    {
+     "sig": 9,
+     "event": "gvproxy-kill",
+     "t": 1795615838.364
+    },
+    {
+     "pid": 6402,
+     "event": "gvproxy-up",
+     "t": 1795615839.388
+    },
+    {
+     "event": "relinked",
+     "t": 1795615839.388
+    },
+    {
+     "local": "/tmp/lk-rstrelay/echo.sock",
+     "status": 200,
+     "event": "forward-again",
+     "t": 1795615839.389
+    }
+   ],
+   "relay_log": [
+    {
+     "event": "connected",
+     "n": 1,
+     "dropped": 0,
+     "resets_sent": 0,
+     "t": 1795606604.709
+    },
+    {
+     "event": "connected",
+     "n": 2,
+     "dropped": 0,
+     "resets_sent": 0,
+     "t": 1795606606.153
+    },
+    {
+     "event": "connected",
+     "n": 1,
+     "dropped": 0,
+     "resets_sent": 0,
+     "t": 1795606755.259
+    },
+    {
+     "event": "connected",
+     "n": 2,
+     "dropped": 8,
+     "resets_sent": 6,
+     "t": 1795606761.91
+    },
+    {
+     "event": "connected",
+     "n": 3,
+     "dropped": 8,
+     "resets_sent": 0,
+     "t": 1795606761.919
+    },
+    {
+     "event": "connected",
+     "n": 1,
+     "dropped": 0,
+     "resets_sent": 0,
+     "t": 1795615215.792
+    },
+    {
+     "event": "connected",
+     "n": 2,
+     "dropped": 9,
+     "resets_sent": 7,
+     "t": 1795615222.535
+    },
+    {
+     "event": "connected",
+     "n": 1,
+     "dropped": 0,
+     "resets_sent": 0,
+     "t": 1795615524.282
+    },
+    {
+     "event": "connected",
+     "n": 2,
+     "dropped": 9,
+     "resets_sent": 7,
+     "t": 1795615530.952
+    },
+    {
+     "event": "connected",
+     "n": 1,
+     "dropped": 0,
+     "resets_sent": 0,
+     "t": 1795615832.725
+    },
+    {
+     "event": "connected",
+     "n": 2,
+     "dropped": 9,
+     "resets_sent": 7,
+     "t": 1795615839.4
+    }
+   ],
+   "card_log": "",
+   "run": 3
+  }
+ ]
+}

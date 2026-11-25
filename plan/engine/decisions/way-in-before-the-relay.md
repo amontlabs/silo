@@ -10,29 +10,66 @@ by the same relay. Apple's provisioning (`mac-silo-needs`) creates the user and 
 Login, which listens on the network card. On a card that leads nowhere, the first SSH has no road,
 and the relay that would carry it must be installed over SSH.
 
-The options:
+The options, each run on Linux in `research/2026-11-25-way-in-before-the-relay/` (a network
+namespace stood for main, with sshd on port 22 as provisioning leaves it, and a service on the
+Mac's loopback, one on every address of the Mac, a neighbour on the local network and an internet
+host around it):
 
-- Apple's NAT for the first start only (recommended). Main starts on Apple's NAT, Silo connects over
-  SSH, installs the relay and writes the proxy settings, then stops main and starts it again on the
-  dead-end card. Every installer and every agent program runs after that, behind the proxy. It costs
-  one more start (about two minutes, not measured), and a first two minutes in which main reaches
-  your local network. Only Apple's setup and Silo's own steps run then. It goes against the letter
-  of `network-stack`'s answer ("Never Apple's NAT") for those two minutes, so the record says so.
-- gvproxy for the first start only. gvproxy with no outbound connection, forwarding only SSH in, as
-  #370 describes its closed mode. It keeps `network-stack`'s answer, and costs #359's test 07
-  (gvproxy under a macOS computer) as a blocker of the first run, which #378 freed option A from.
-- A Mac end of the card that carries one TCP connection in, to main's port 22, and nothing out. It
-  keeps both, and costs a small TCP implementation of Silo's own for one connection, built and
-  fuzzed before the first run.
+- The Mac end of the card makes the one connection (recommended). The program on the Mac end of
+  #378's card, which answers ARP for one router address and drops the rest, also opens one TCP
+  connection to main's port 22 when Silo asks. Main finds no DHCP server, so macOS gives itself a
+  169.254 address and announces it by ARP; the Mac end learns it from that frame. The TCP code is
+  gVisor's netstack, the one gvproxy uses, and it sees only the frames of that connection: every
+  other frame is dropped and counted before it. Measured: SSH got in and copied 2 MB intact; from
+  inside, main reached nothing (13 of 13 cases blocked, no name lookup, no port open on the Mac end
+  in a scan of all 65,535). It keeps `network-stack`'s answer, needs neither Apple's NAT nor gvproxy
+  nor test 07, and needs no second start, since the card stays the same. It costs a program of
+  about 370 lines in Go with gVisor's netstack, and three Mac facts not checked yet: that a
+  provisioned macOS 27 main gives itself a 169.254 address on a card with no DHCP, how long that
+  takes, and that Remote Login listens on it.
+- Apple's NAT for the first start only. Main starts on Apple's NAT, Silo connects over SSH, installs
+  the relay and writes the proxy settings, then stops main and starts it again on the dead-end
+  card. Measured on a stand-in for Apple's NAT: during that start, main reached the Mac's own
+  addresses and the services listening on them, every machine of the local network (TCP, UDP and
+  ping), the internet, and the Mac's resolver, which saw a made-up name looked up from inside. It
+  costs one more start and goes against `network-stack`'s "Never Apple's NAT", so the record says
+  so. Only Apple's setup and Silo's own steps run then.
+- gvproxy with `-closed` (#380) for the first start only. Measured: main reached nothing, SSH got in
+  through the forward on gvproxy's socket, and gvproxy's DNS port 53 stayed open on the gateway,
+  refusing every name. It keeps `network-stack`'s answer and costs a second start, gvproxy in the
+  first build, and #359's test 07 as a blocker, which #378 freed option A from.
+- The relay written onto main's disk before its first start, as the open-source tool cove does with
+  its vsock agent. Nothing would ever reach main over a network card. It goes against
+  `mac-silo-needs`' "nothing written to its disk from outside", and Lume starts a computer once
+  before writing, so it may still need one of the ways above. Not run.
+- The serial console. A Linux main gets a shell there from its kernel's command line, and 2 MB
+  went through it intact in 37 s with no network card at all. A macOS computer runs no login on its
+  console (`/dev/cu.virtio`) unless something writes that setting first, so it is no way into a
+  macOS main.
 
-Recommended: Apple's NAT for the first start only. Nothing of yours has run in main yet, and it is
-the only option that needs nothing new.
+Recommended: the Mac end of the card makes the one connection. It is the only option that keeps
+`network-stack`'s answer without a second component, and the program is the dead-end card's,
+which the first build needs anyway. If the Mac test shows main does not take a 169.254 address in
+time, Apple's NAT for the first start is the fallback.
 
 What is not known: whether Apple's provisioning can start a program given in its options, which
-would let the relay start with no SSH at all. Neither #352 file 10 nor #378 found such an option.
+would let the relay start with no SSH at all. Neither #352 file 10, #378 nor this research found
+such an option.
+
+Once the relay is in, Silo reaches main only through it: each vsock connection gets its own
+`sshd -i`, so Remote Login on the card can be turned off and main listens on no TCP port for
+SSH. Measured on Linux with a Unix socket standing in for vsock.
 
 ## Where the drafts of 25 November disagree (integration)
 
 An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
 
 #380 measured the second option of the choice above on Linux: gvproxy with its `-closed` flag reached nothing from inside the computer, and SSH still got in. That makes the option that keeps `network-stack`'s "never Apple's NAT" measured, though not on a Mac. Recommended: keep Apple's NAT for the first start, as above, until test 07 has run on a Mac. If test 07 passes with #380's patch, take the gvproxy option, so no packet of main ever goes through Apple's NAT.
+
+## The ways in, measured
+
+An agent's part, 25 November 2026, from `research/2026-11-25-way-in-before-the-relay/`. The choice
+above now holds the measured options, and its recommendation replaces the one in the section
+before this: the Mac end of the card makes the one connection, so main is never on Apple's NAT and
+gvproxy is not needed for the first start either. The section before stays as the integration
+wrote it.

@@ -1,0 +1,110 @@
+Run on 25 November 2026 in a Linux cloud container: kernel 6.18.44, no KVM, e2fsprogs 1.47.0,
+Python 3.13, atheris, Node with Playwright's Chromium. "Before" is the drafts' code: #381 and #398 at
+ca459ee, #384 at 4b6cf69, #378 at 08e74ee. "After" is this branch.
+
+== ext4/test_readers_against_kernel.py, before
+ERROR: test_dirent_header_past_the_block (reader='ckptread')
+ERROR: test_dirent_header_past_the_block (reader='ext4read')
+ERROR: test_inode_in_a_group_past_the_end (reader='ckptread')
+ERROR: test_inode_in_a_group_past_the_end (reader='ext4read')
+ERROR: test_inode_size_too_small (reader='ckptread')
+ERROR: test_inode_size_too_small (reader='ext4read')
+ERROR: test_journal_with_no_blocks (reader='ext4read')
+ERROR: test_zero_blocks_per_group (reader='ext4read')
+ERROR: test_zero_inodes_per_group (reader='ext4read')
+FAIL: test_dir_block_whose_checksum_fails (reader='ckptread')
+FAIL: test_dir_block_whose_checksum_fails (reader='ext4read')
+FAIL: test_dir_size_below_its_blocks (reader='ckptread')
+FAIL: test_dir_size_below_its_blocks (reader='ext4read')
+FAIL: test_dirent_type_0xde_is_listed_by_linux (reader='ckptread')
+FAIL: test_dirent_type_0xde_is_listed_by_linux (reader='ext4read')
+FAIL: test_htree_leaf_the_index_does_not_name (reader='ckptread')
+FAIL: test_htree_leaf_the_index_does_not_name (reader='ext4read')
+FAIL: test_name_with_nul (reader='ckptread')
+FAIL: test_name_with_nul (reader='ext4read')
+FAILED (failures=10, errors=9)
+Ran 17 tests in 1.556s
+
+== ext4/test_readers_against_kernel.py, after (what each reader read)
+OK
+Ran 17 tests in 1.511s
+test_clean                                       ckptread  as Linux, 43 paths
+test_clean                                       ext4read  as Linux, 43 paths
+test_clean_with_checksums                        ckptread  as Linux, 43 paths
+test_clean_with_checksums                        ext4read  as Linux, 43 paths
+test_dir_block_whose_checksum_fails              ckptread  refused dir-block-checksum
+test_dir_block_whose_checksum_fails              ext4read  refused dir-block-checksum
+test_dir_extent_unwritten                        ckptread  as Linux, 43 paths
+test_dir_extent_unwritten                        ext4read  as Linux, 43 paths
+test_dir_size_below_its_blocks                   ckptread  as Linux, 34 paths
+test_dir_size_below_its_blocks                   ext4read  as Linux, 34 paths
+test_dirent_type_0xde_is_listed_by_linux         ckptread  as Linux, 43 paths
+test_dirent_type_0xde_is_listed_by_linux         ext4read  as Linux, 43 paths
+test_htree                                       ckptread  as Linux, 304 paths
+test_htree                                       ext4read  as Linux, 304 paths
+test_htree_leaf_the_index_does_not_name          ckptread  as Linux, 284 paths
+test_htree_leaf_the_index_does_not_name          ext4read  as Linux, 284 paths
+test_htree_with_checksums                        ckptread  as Linux, 304 paths
+test_htree_with_checksums                        ext4read  as Linux, 304 paths
+test_name_with_nul                               ckptread  refused name
+test_name_with_nul                               ext4read  refused name
+
+== ext4/fz_readers.py, after: 20 minutes per reader and seed image, no crash and no hang
+ckptread-seed          Done 130842 runs, peak 741 MiB, cov 232
+ckptread-seedj-live    Done 181568 runs, peak 2084 MiB, cov 207
+ext4read-seed          Done 138754 runs, peak 614 MiB, cov 196
+ext4read-seedj-live    Done 172435 runs, peak 697 MiB, cov 203
+seed: 4 MiB, 1 KiB blocks, metadata_csum, an htree directory of 300 names, no journal
+seedj-live: 16 MiB, a 1 MiB journal, metadata_csum, an htree directory, copied while mounted
+An earlier run on ext4read before its journal fix found the IndexError named in the README.
+
+== preview/test.sh, before
+crlf     {"status":200,"csp_header":true,"script_ran":true}
+lf       {"status":200,"csp_header":false,"script_ran":true}
+interim  {"status":200,"csp_header":false,"script_ran":true}
+hints    {"status":200,"csp_header":false,"script_ran":true}
+fold     {"status":"error page.goto: net::ERR_EMPTY_RESPONSE at http://3000.c1a7.localhost:7000/","csp_header":false,"script_ran":false}
+requests that reached the host the policy forbids: /leak?mode=lf /leak?mode=interim /leak?mode=hints 
+
+== preview/test.sh, after
+crlf     {"status":200,"csp_header":true,"script_ran":true}
+lf       {"status":502,"csp_header":false,"script_ran":false}
+interim  {"status":200,"csp_header":true,"script_ran":true}
+hints    {"status":200,"csp_header":true,"script_ran":true}
+fold     {"status":502,"csp_header":false,"script_ran":false}
+requests that reached the host the policy forbids: 
+
+== closed-network/test_proxy.py, before
+FAIL: test_a_header_ended_by_a_bare_lf
+FAIL: test_a_host_header_other_than_the_url
+FAIL: test_a_request_after_a_body_of_declared_length
+FAIL: test_a_request_hidden_after_a_chunked_body
+FAIL: test_a_second_request_on_the_connection
+Ran 6 tests in 6.700s
+FAILED (failures=5)
+
+== closed-network/test_proxy.py, after
+The proxy and the host must agree where the head ends and what each header is. ... ok
+A front that serves many names and reads the Host header serves collector.example. ... ok
+test_a_request_after_a_body_of_declared_length ... ok
+test_a_request_hidden_after_a_chunked_body ... ok
+Finding 12: the second request names another host. ... ok
+test_an_allowed_request_is_answered ... ok
+Ran 6 tests in 5.202s
+OK
+
+== #381 proto/check.sh, after
+a: kernel 3350 paths; reader with replay: 0 differing lines; without replay: 0
+b: kernel 1700 paths; reader with replay: 0 differing lines; without replay: 1958
+journal blocks replayed in b: 240
+-- diff a b, with replay:
+end	files	1960	blocks-read	751
+changed 5
+deleted 1803
+created 153
+-- diff a b, without replay:
+end	files	0	blocks-read	6814
+
+== #398 reader/test_ckptread.py, after
+Ran 12 tests in 359.728s
+OK

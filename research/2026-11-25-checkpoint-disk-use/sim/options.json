@@ -1,0 +1,53 @@
+{
+ "baseline": {},
+ "lz4": {
+  "store_ratio": 0.34
+ },
+ "zstd": {
+  "store_ratio": 0.24
+ },
+ "zstd-pessimistic": {
+  "store_ratio": 0.5
+ },
+ "dedup": {
+  "store_ratio": 0.6
+ },
+ "dedup+zstd": {
+  "store_ratio": 0.16
+ },
+ "zstd, base a clone": {
+  "store_ratio": 0.43
+ },
+ "dedup+zstd, base a clone": {
+  "store_ratio": 0.37
+ },
+ "zstd, base a clone, no TRIM": {
+  "store_ratio": 0.76
+ },
+ "exclude-redirectable": {
+  "excluded": 0.63
+ },
+ "exclude-all-rebuildable": {
+  "excluded": 0.87
+ },
+ "exclude-redirectable+zstd": {
+  "excluded": 0.63,
+  "store_ratio": 0.25
+ },
+ "exclude-all+zstd": {
+  "excluded": 0.87,
+  "store_ratio": 0.25
+ },
+ "external-500": {
+  "external_gib": 500
+ },
+ "external-500+zstd": {
+  "external_gib": 500,
+  "store_ratio": 0.24
+ },
+ "all": {
+  "excluded": 0.87,
+  "store_ratio": 0.25,
+  "external_gib": 500
+ }
+}

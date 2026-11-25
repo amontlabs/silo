@@ -1,0 +1,51 @@
+{
+ "TLS through the boundary, leaf dated now": {
+  "0": "ok",
+  "5": "refused: certificate is not yet valid",
+  "60": "refused: certificate is not yet valid",
+  "900": "refused: certificate is not yet valid",
+  "5400": "refused: certificate is not yet valid"
+ },
+ "TLS through the boundary, leaf dated a day back": {
+  "0": "ok",
+  "5": "ok",
+  "60": "ok",
+  "900": "ok",
+  "5400": "ok"
+ },
+ "TOTP code made in main": {
+  "0": "ok",
+  "5": "ok",
+  "60": "code refused (outside the server's +/-1 step)",
+  "900": "code refused (outside the server's +/-1 step)",
+  "5400": "code refused (outside the server's +/-1 step)"
+ },
+ "GPG commit signature, key made on the Mac today": {
+  "0": "ok",
+  "5": "refused: key 2035BC798BF856F6 was created 5 seconds in the future (time warp or clock problem)",
+  "60": "refused: key 4F527E60EC381CA7 was created 60 seconds in the future (time warp or clock problem)",
+  "900": "refused: key 05BC3D9D3D0B8A12 was created 900 seconds in the future (time warp or clock problem)",
+  "5400": "refused: key 01C24B3D0F284819 was created 5400 seconds in the future (time warp or clock problem)"
+ },
+ "GitHub App JWT made in main": {
+  "0": "ok",
+  "5": "ok",
+  "60": "ok",
+  "900": "refused: 'exp' is in the past for GitHub",
+  "5400": "refused: 'exp' is in the past for GitHub"
+ },
+ "AWS SigV4 request signed in main": {
+  "0": "ok",
+  "5": "ok",
+  "60": "ok",
+  "900": "ok",
+  "5400": "refused: RequestTimeTooSkewed"
+ },
+ "make after main edits a source of a target the Mac wrote": {
+  "0": "ok",
+  "5": "stale: make thinks out is up to date after src changed",
+  "60": "stale: make thinks out is up to date after src changed",
+  "900": "stale: make thinks out is up to date after src changed",
+  "5400": "stale: make thinks out is up to date after src changed"
+ }
+}

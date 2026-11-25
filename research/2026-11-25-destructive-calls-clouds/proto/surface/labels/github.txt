@@ -1,0 +1,616 @@
+# GitHub REST (api.github.com.json 1.1.4), every write operation, labelled on 2026-11-25.
+# Key: METHOD path. An ordered table (label_github.py), first match wins.
+POST /agents/repos/{owner}/{repo}/automations allow 
+PATCH /agents/repos/{owner}/{repo}/automations/{automation_id} allow 
+DELETE /agents/repos/{owner}/{repo}/automations/{automation_id} hold:outage 
+POST /agents/repos/{owner}/{repo}/automations/{automation_id}/tasks allow 
+PUT /agents/repos/{owner}/{repo}/pulls/{pull_number}/agent-merge deploy 
+DELETE /agents/repos/{owner}/{repo}/pulls/{pull_number}/agent-merge allow 
+POST /agents/repos/{owner}/{repo}/tasks allow 
+POST /app-manifests/{code}/conversions allow 
+PATCH /app/hook/config either 
+POST /app/hook/deliveries/{delivery_id}/attempts allow 
+DELETE /app/installations/{installation_id} hold:outage 
+POST /app/installations/{installation_id}/access_tokens hold:exposed 
+PUT /app/installations/{installation_id}/suspended hold:outage 
+DELETE /app/installations/{installation_id}/suspended allow 
+DELETE /applications/{client_id}/grant hold:outage 
+POST /applications/{client_id}/token allow 
+PATCH /applications/{client_id}/token allow 
+DELETE /applications/{client_id}/token hold:outage 
+POST /applications/{client_id}/token/scoped hold:exposed 
+POST /credentials/revoke hold:outage 
+PUT /enterprises/{enterprise}/actions/cache/retention-limit either 
+PUT /enterprises/{enterprise}/actions/cache/storage-limit either 
+POST /enterprises/{enterprise}/actions/oidc/customization/properties/repo either 
+DELETE /enterprises/{enterprise}/actions/oidc/customization/properties/repo/{custom_property_name} either 
+POST /enterprises/{enterprise}/code-security/configurations allow 
+PATCH /enterprises/{enterprise}/code-security/configurations/{configuration_id} either 
+DELETE /enterprises/{enterprise}/code-security/configurations/{configuration_id} either 
+POST /enterprises/{enterprise}/code-security/configurations/{configuration_id}/attach allow 
+PUT /enterprises/{enterprise}/code-security/configurations/{configuration_id}/defaults either 
+PUT /enterprises/{enterprise}/copilot/policies/code-review either 
+PUT /enterprises/{enterprise}/copilot/policies/coding_agent either 
+POST /enterprises/{enterprise}/copilot/policies/coding_agent/organizations allow 
+DELETE /enterprises/{enterprise}/copilot/policies/coding_agent/organizations allow 
+PATCH /enterprises/{enterprise}/dependabot/repository-access allow 
+PUT /enterprises/{enterprise}/dependabot/repository-access/default-level allow 
+POST /gists allow 
+PATCH /gists/{gist_id} allow 
+DELETE /gists/{gist_id} hold:gone 
+POST /gists/{gist_id}/comments allow 
+PATCH /gists/{gist_id}/comments/{comment_id} allow 
+DELETE /gists/{gist_id}/comments/{comment_id} either someone's comment
+POST /gists/{gist_id}/forks either copies the code under another owner
+PUT /gists/{gist_id}/star allow small
+DELETE /gists/{gist_id}/star allow small
+DELETE /installation/token allow 
+POST /markdown allow 
+POST /markdown/raw allow 
+PUT /notifications allow small
+PATCH /notifications/threads/{thread_id} allow small
+DELETE /notifications/threads/{thread_id} allow small
+PUT /notifications/threads/{thread_id}/subscription allow small
+DELETE /notifications/threads/{thread_id}/subscription allow small
+PUT /organizations/{org}/actions/cache/retention-limit either 
+PUT /organizations/{org}/actions/cache/storage-limit either 
+POST /organizations/{org}/settings/billing/budgets allow 
+PATCH /organizations/{org}/settings/billing/budgets/{budget_id} hold:money may raise a spending cap
+DELETE /organizations/{org}/settings/billing/budgets/{budget_id} hold:money removes a spending cap
+PATCH /orgs/{org} either member and repository defaults
+DELETE /orgs/{org} hold:gone the organization and its repositories
+POST /orgs/{org}/actions/hosted-runners hold:money 
+DELETE /orgs/{org}/actions/hosted-runners/images/custom/{image_definition_id} either 
+DELETE /orgs/{org}/actions/hosted-runners/images/custom/{image_definition_id}/versions/{version} either 
+PATCH /orgs/{org}/actions/hosted-runners/{hosted_runner_id} allow 
+DELETE /orgs/{org}/actions/hosted-runners/{hosted_runner_id} hold:outage 
+POST /orgs/{org}/actions/oidc/customization/properties/repo either 
+DELETE /orgs/{org}/actions/oidc/customization/properties/repo/{custom_property_name} either 
+PUT /orgs/{org}/actions/oidc/customization/sub either 
+PUT /orgs/{org}/actions/permissions either 
+PUT /orgs/{org}/actions/permissions/artifact-and-log-retention either 
+PUT /orgs/{org}/actions/permissions/fork-pr-contributor-approval hold:exposed 
+PUT /orgs/{org}/actions/permissions/fork-pr-workflows-private-repos hold:exposed 
+PUT /orgs/{org}/actions/permissions/repositories either 
+PUT /orgs/{org}/actions/permissions/repositories/{repository_id} either 
+DELETE /orgs/{org}/actions/permissions/repositories/{repository_id} hold:outage 
+PUT /orgs/{org}/actions/permissions/selected-actions either 
+PUT /orgs/{org}/actions/permissions/self-hosted-runners either 
+PUT /orgs/{org}/actions/permissions/self-hosted-runners/repositories either 
+PUT /orgs/{org}/actions/permissions/self-hosted-runners/repositories/{repository_id} either 
+DELETE /orgs/{org}/actions/permissions/self-hosted-runners/repositories/{repository_id} hold:outage 
+PUT /orgs/{org}/actions/permissions/workflow cond 
+POST /orgs/{org}/actions/policies allow 
+PUT /orgs/{org}/actions/policies/{policy_id} either 
+DELETE /orgs/{org}/actions/policies/{policy_id} either 
+POST /orgs/{org}/actions/runner-groups allow 
+PATCH /orgs/{org}/actions/runner-groups/{runner_group_id} allow 
+DELETE /orgs/{org}/actions/runner-groups/{runner_group_id} hold:outage 
+PUT /orgs/{org}/actions/runner-groups/{runner_group_id}/repositories either 
+PUT /orgs/{org}/actions/runner-groups/{runner_group_id}/repositories/{repository_id} either 
+DELETE /orgs/{org}/actions/runner-groups/{runner_group_id}/repositories/{repository_id} hold:outage 
+PUT /orgs/{org}/actions/runner-groups/{runner_group_id}/runners allow 
+PUT /orgs/{org}/actions/runner-groups/{runner_group_id}/runners/{runner_id} allow 
+DELETE /orgs/{org}/actions/runner-groups/{runner_group_id}/runners/{runner_id} hold:outage 
+POST /orgs/{org}/actions/runners/generate-jitconfig hold:exposed lets a machine run jobs
+POST /orgs/{org}/actions/runners/registration-token hold:exposed lets a machine run jobs
+POST /orgs/{org}/actions/runners/remove-token allow 
+DELETE /orgs/{org}/actions/runners/{runner_id} hold:outage 
+POST /orgs/{org}/actions/runners/{runner_id}/labels allow small
+PUT /orgs/{org}/actions/runners/{runner_id}/labels allow small
+DELETE /orgs/{org}/actions/runners/{runner_id}/labels allow small
+DELETE /orgs/{org}/actions/runners/{runner_id}/labels/{name} allow 
+PUT /orgs/{org}/actions/secrets/{secret_name} either 
+DELETE /orgs/{org}/actions/secrets/{secret_name} hold:outage workflows that use it fail
+PUT /orgs/{org}/actions/secrets/{secret_name}/repositories hold:exposed shares a secret with more repositories
+PUT /orgs/{org}/actions/secrets/{secret_name}/repositories/{repository_id} hold:exposed shares a secret with more repositories
+DELETE /orgs/{org}/actions/secrets/{secret_name}/repositories/{repository_id} hold:outage 
+POST /orgs/{org}/actions/variables allow 
+PATCH /orgs/{org}/actions/variables/{name} either 
+DELETE /orgs/{org}/actions/variables/{name} hold:outage 
+PUT /orgs/{org}/actions/variables/{name}/repositories either 
+PUT /orgs/{org}/actions/variables/{name}/repositories/{repository_id} either 
+DELETE /orgs/{org}/actions/variables/{name}/repositories/{repository_id} hold:outage 
+PUT /orgs/{org}/agents/secrets/{secret_name} either 
+DELETE /orgs/{org}/agents/secrets/{secret_name} hold:outage workflows that use it fail
+PUT /orgs/{org}/agents/secrets/{secret_name}/repositories hold:exposed shares a secret with more repositories
+PUT /orgs/{org}/agents/secrets/{secret_name}/repositories/{repository_id} hold:exposed shares a secret with more repositories
+DELETE /orgs/{org}/agents/secrets/{secret_name}/repositories/{repository_id} hold:outage 
+POST /orgs/{org}/agents/variables allow 
+PATCH /orgs/{org}/agents/variables/{name} either 
+DELETE /orgs/{org}/agents/variables/{name} hold:outage 
+PUT /orgs/{org}/agents/variables/{name}/repositories either 
+PUT /orgs/{org}/agents/variables/{name}/repositories/{repository_id} either 
+DELETE /orgs/{org}/agents/variables/{name}/repositories/{repository_id} hold:outage 
+POST /orgs/{org}/artifacts/metadata/deployment-record allow small
+POST /orgs/{org}/artifacts/metadata/deployment-record/cluster/{cluster} allow small
+POST /orgs/{org}/artifacts/metadata/deployment-record/cluster/{cluster}/jobs allow small
+POST /orgs/{org}/artifacts/metadata/storage-record allow small
+POST /orgs/{org}/attestations/bulk-list allow 
+POST /orgs/{org}/attestations/delete-request either 
+DELETE /orgs/{org}/attestations/digest/{subject_digest} either 
+DELETE /orgs/{org}/attestations/{attestation_id} either 
+PUT /orgs/{org}/blocks/{username} allow 
+DELETE /orgs/{org}/blocks/{username} allow 
+POST /orgs/{org}/campaigns allow 
+PATCH /orgs/{org}/campaigns/{campaign_number} allow 
+DELETE /orgs/{org}/campaigns/{campaign_number} allow 
+PATCH /orgs/{org}/code-scanning/ai-scan allow 
+POST /orgs/{org}/code-security/configurations allow 
+DELETE /orgs/{org}/code-security/configurations/detach either 
+PATCH /orgs/{org}/code-security/configurations/{configuration_id} either 
+DELETE /orgs/{org}/code-security/configurations/{configuration_id} either 
+POST /orgs/{org}/code-security/configurations/{configuration_id}/attach allow 
+PUT /orgs/{org}/code-security/configurations/{configuration_id}/defaults either 
+PUT /orgs/{org}/codespaces/access hold:exposed 
+POST /orgs/{org}/codespaces/access/selected_users hold:exposed 
+DELETE /orgs/{org}/codespaces/access/selected_users either removes something
+PUT /orgs/{org}/codespaces/secrets/{secret_name} either 
+DELETE /orgs/{org}/codespaces/secrets/{secret_name} hold:outage workflows that use it fail
+PUT /orgs/{org}/codespaces/secrets/{secret_name}/repositories hold:exposed shares a secret with more repositories
+PUT /orgs/{org}/codespaces/secrets/{secret_name}/repositories/{repository_id} hold:exposed shares a secret with more repositories
+DELETE /orgs/{org}/codespaces/secrets/{secret_name}/repositories/{repository_id} hold:outage 
+POST /orgs/{org}/copilot-spaces allow 
+PUT /orgs/{org}/copilot-spaces/{space_number} allow 
+DELETE /orgs/{org}/copilot-spaces/{space_number} hold:gone 
+POST /orgs/{org}/copilot-spaces/{space_number}/collaborators hold:exposed 
+PUT /orgs/{org}/copilot-spaces/{space_number}/collaborators/{actor_type}/{actor_identifier} hold:exposed 
+DELETE /orgs/{org}/copilot-spaces/{space_number}/collaborators/{actor_type}/{actor_identifier} hold:outage 
+POST /orgs/{org}/copilot-spaces/{space_number}/resources allow 
+PUT /orgs/{org}/copilot-spaces/{space_number}/resources/{space_resource_id} allow 
+DELETE /orgs/{org}/copilot-spaces/{space_number}/resources/{space_resource_id} hold:outage 
+POST /orgs/{org}/copilot/billing/selected_teams hold:money adds paid seats
+DELETE /orgs/{org}/copilot/billing/selected_teams allow 
+POST /orgs/{org}/copilot/billing/selected_users hold:money adds paid seats
+DELETE /orgs/{org}/copilot/billing/selected_users allow 
+PUT /orgs/{org}/copilot/code-review/runner allow 
+PATCH /orgs/{org}/copilot/code-review/settings either 
+PUT /orgs/{org}/copilot/coding-agent/permissions either 
+PUT /orgs/{org}/copilot/coding-agent/permissions/repositories either 
+PUT /orgs/{org}/copilot/coding-agent/permissions/repositories/{repository_id} either 
+DELETE /orgs/{org}/copilot/coding-agent/permissions/repositories/{repository_id} allow 
+PUT /orgs/{org}/copilot/content_exclusion allow 
+PUT /orgs/{org}/copilot/policies/code-review either 
+PATCH /orgs/{org}/dependabot/repository-access allow 
+PUT /orgs/{org}/dependabot/repository-access/default-level allow 
+PUT /orgs/{org}/dependabot/secrets/{secret_name} either 
+DELETE /orgs/{org}/dependabot/secrets/{secret_name} hold:outage workflows that use it fail
+PUT /orgs/{org}/dependabot/secrets/{secret_name}/repositories hold:exposed shares a secret with more repositories
+PUT /orgs/{org}/dependabot/secrets/{secret_name}/repositories/{repository_id} hold:exposed shares a secret with more repositories
+DELETE /orgs/{org}/dependabot/secrets/{secret_name}/repositories/{repository_id} hold:outage 
+POST /orgs/{org}/hooks hold:exposed sends events to a URL
+PATCH /orgs/{org}/hooks/{hook_id} hold:exposed may change where events go
+DELETE /orgs/{org}/hooks/{hook_id} hold:outage 
+PATCH /orgs/{org}/hooks/{hook_id}/config hold:exposed may change where events go
+POST /orgs/{org}/hooks/{hook_id}/deliveries/{delivery_id}/attempts allow 
+POST /orgs/{org}/hooks/{hook_id}/pings allow 
+PUT /orgs/{org}/interaction-limits allow small
+DELETE /orgs/{org}/interaction-limits allow 
+PATCH /orgs/{org}/interaction-limits/pulls/creation-cap allow small
+POST /orgs/{org}/invitations hold:exposed 
+DELETE /orgs/{org}/invitations/{invitation_id} allow 
+POST /orgs/{org}/issue-fields allow 
+PATCH /orgs/{org}/issue-fields/{issue_field_id} allow 
+DELETE /orgs/{org}/issue-fields/{issue_field_id} either 
+POST /orgs/{org}/issue-types allow 
+PUT /orgs/{org}/issue-types/{issue_type_id} allow 
+DELETE /orgs/{org}/issue-types/{issue_type_id} either 
+DELETE /orgs/{org}/members/{username} hold:outage 
+DELETE /orgs/{org}/members/{username}/codespaces/{codespace_name} hold:gone unpushed work in it
+POST /orgs/{org}/members/{username}/codespaces/{codespace_name}/stop hold:outage 
+PUT /orgs/{org}/memberships/{username} hold:exposed 
+DELETE /orgs/{org}/memberships/{username} hold:outage 
+POST /orgs/{org}/migrations either exports repositories to an archive
+DELETE /orgs/{org}/migrations/{migration_id}/archive allow 
+DELETE /orgs/{org}/migrations/{migration_id}/repos/{repo_name}/lock allow 
+DELETE /orgs/{org}/organization-roles/teams/{team_slug} hold:outage 
+PUT /orgs/{org}/organization-roles/teams/{team_slug}/{role_id} hold:exposed 
+DELETE /orgs/{org}/organization-roles/teams/{team_slug}/{role_id} hold:outage 
+DELETE /orgs/{org}/organization-roles/users/{username} hold:outage 
+PUT /orgs/{org}/organization-roles/users/{username}/{role_id} hold:exposed 
+DELETE /orgs/{org}/organization-roles/users/{username}/{role_id} hold:outage 
+PUT /orgs/{org}/outside_collaborators/{username} hold:exposed 
+DELETE /orgs/{org}/outside_collaborators/{username} hold:outage 
+DELETE /orgs/{org}/packages/{package_type}/{package_name} hold:recoverable 30 days to restore
+POST /orgs/{org}/packages/{package_type}/{package_name}/restore allow 
+DELETE /orgs/{org}/packages/{package_type}/{package_name}/versions/{package_version_id} hold:recoverable 30 days to restore
+POST /orgs/{org}/packages/{package_type}/{package_name}/versions/{package_version_id}/restore allow 
+POST /orgs/{org}/personal-access-token-requests hold:exposed approves a token's access
+POST /orgs/{org}/personal-access-token-requests/{pat_request_id} hold:exposed approves a token's access
+POST /orgs/{org}/personal-access-tokens either 
+POST /orgs/{org}/personal-access-tokens/{pat_id} either 
+POST /orgs/{org}/private-registries allow 
+PATCH /orgs/{org}/private-registries/{secret_name} allow 
+DELETE /orgs/{org}/private-registries/{secret_name} hold:outage 
+POST /orgs/{org}/projectsV2/{project_number}/drafts allow 
+POST /orgs/{org}/projectsV2/{project_number}/fields allow 
+POST /orgs/{org}/projectsV2/{project_number}/items allow 
+PATCH /orgs/{org}/projectsV2/{project_number}/items/{item_id} allow 
+DELETE /orgs/{org}/projectsV2/{project_number}/items/{item_id} either 
+POST /orgs/{org}/projectsV2/{project_number}/views allow 
+POST /orgs/{org}/properties/installations allow 
+PATCH /orgs/{org}/properties/installations/values allow 
+PATCH /orgs/{org}/properties/installations/values/{property_name} allow 
+DELETE /orgs/{org}/properties/installations/values/{property_name} allow 
+PATCH /orgs/{org}/properties/schema allow 
+PUT /orgs/{org}/properties/schema/{custom_property_name} allow 
+DELETE /orgs/{org}/properties/schema/{custom_property_name} either 
+PATCH /orgs/{org}/properties/values allow 
+PUT /orgs/{org}/public_members/{username} either 
+DELETE /orgs/{org}/public_members/{username} allow 
+POST /orgs/{org}/repos allow 
+POST /orgs/{org}/rulesets allow 
+PUT /orgs/{org}/rulesets/{ruleset_id} either may weaken it
+DELETE /orgs/{org}/rulesets/{ruleset_id} hold:outage the ruleset goes
+POST /orgs/{org}/secret-scanning/custom-patterns allow 
+DELETE /orgs/{org}/secret-scanning/custom-patterns either 
+PATCH /orgs/{org}/secret-scanning/custom-patterns/{pattern_id} allow 
+PATCH /orgs/{org}/secret-scanning/pattern-configurations either 
+PUT /orgs/{org}/security-managers/teams/{team_slug} hold:exposed 
+DELETE /orgs/{org}/security-managers/teams/{team_slug} hold:outage 
+PUT /orgs/{org}/settings/immutable-releases either 
+PUT /orgs/{org}/settings/immutable-releases/repositories either 
+PUT /orgs/{org}/settings/immutable-releases/repositories/{repository_id} either 
+DELETE /orgs/{org}/settings/immutable-releases/repositories/{repository_id} either 
+POST /orgs/{org}/settings/network-configurations allow 
+PATCH /orgs/{org}/settings/network-configurations/{network_configuration_id} either 
+DELETE /orgs/{org}/settings/network-configurations/{network_configuration_id} hold:outage 
+POST /orgs/{org}/teams allow 
+PATCH /orgs/{org}/teams/{team_slug} allow 
+DELETE /orgs/{org}/teams/{team_slug} hold:outage 
+PUT /orgs/{org}/teams/{team_slug}/copilot/customizations allow small
+DELETE /orgs/{org}/teams/{team_slug}/copilot/customizations allow 
+PUT /orgs/{org}/teams/{team_slug}/memberships/{username} hold:exposed 
+DELETE /orgs/{org}/teams/{team_slug}/memberships/{username} hold:outage 
+PUT /orgs/{org}/teams/{team_slug}/repos/{owner}/{repo} hold:exposed 
+DELETE /orgs/{org}/teams/{team_slug}/repos/{owner}/{repo} hold:outage 
+POST /orgs/{org}/{security_product}/{enablement} allow 
+PATCH /repos/{owner}/{repo} cond 
+DELETE /repos/{owner}/{repo} hold:gone the repository; 90 days to restore for some
+DELETE /repos/{owner}/{repo}/actions/artifacts/{artifact_id} allow 
+PUT /repos/{owner}/{repo}/actions/cache/retention-limit either 
+PUT /repos/{owner}/{repo}/actions/cache/storage-limit either 
+DELETE /repos/{owner}/{repo}/actions/caches allow 
+DELETE /repos/{owner}/{repo}/actions/caches/{cache_id} allow 
+POST /repos/{owner}/{repo}/actions/jobs/{job_id}/rerun deploy 
+PUT /repos/{owner}/{repo}/actions/oidc/customization/sub either 
+PUT /repos/{owner}/{repo}/actions/permissions either 
+PUT /repos/{owner}/{repo}/actions/permissions/access hold:exposed 
+PUT /repos/{owner}/{repo}/actions/permissions/artifact-and-log-retention either 
+PUT /repos/{owner}/{repo}/actions/permissions/fork-pr-contributor-approval hold:exposed 
+PUT /repos/{owner}/{repo}/actions/permissions/fork-pr-workflows-private-repos hold:exposed 
+PUT /repos/{owner}/{repo}/actions/permissions/selected-actions either 
+PUT /repos/{owner}/{repo}/actions/permissions/workflow cond 
+POST /repos/{owner}/{repo}/actions/policies allow 
+PUT /repos/{owner}/{repo}/actions/policies/{policy_id} either 
+DELETE /repos/{owner}/{repo}/actions/policies/{policy_id} either 
+POST /repos/{owner}/{repo}/actions/runners/generate-jitconfig hold:exposed lets a machine run jobs
+POST /repos/{owner}/{repo}/actions/runners/registration-token hold:exposed lets a machine run jobs
+POST /repos/{owner}/{repo}/actions/runners/remove-token allow 
+DELETE /repos/{owner}/{repo}/actions/runners/{runner_id} hold:outage 
+POST /repos/{owner}/{repo}/actions/runners/{runner_id}/labels allow small
+PUT /repos/{owner}/{repo}/actions/runners/{runner_id}/labels allow small
+DELETE /repos/{owner}/{repo}/actions/runners/{runner_id}/labels allow small
+DELETE /repos/{owner}/{repo}/actions/runners/{runner_id}/labels/{name} allow 
+DELETE /repos/{owner}/{repo}/actions/runs/{run_id} hold:gone the run and its logs
+POST /repos/{owner}/{repo}/actions/runs/{run_id}/approve deploy 
+POST /repos/{owner}/{repo}/actions/runs/{run_id}/cancel allow 
+POST /repos/{owner}/{repo}/actions/runs/{run_id}/deployment_protection_rule deploy approves a deployment
+POST /repos/{owner}/{repo}/actions/runs/{run_id}/force-cancel allow 
+DELETE /repos/{owner}/{repo}/actions/runs/{run_id}/logs hold:gone the run's logs
+POST /repos/{owner}/{repo}/actions/runs/{run_id}/pending_deployments deploy approves a deployment
+POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun deploy 
+POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun-failed-jobs deploy 
+PUT /repos/{owner}/{repo}/actions/secrets/{secret_name} either 
+DELETE /repos/{owner}/{repo}/actions/secrets/{secret_name} hold:outage workflows that use it fail
+POST /repos/{owner}/{repo}/actions/variables allow 
+PATCH /repos/{owner}/{repo}/actions/variables/{name} either 
+DELETE /repos/{owner}/{repo}/actions/variables/{name} hold:outage 
+PUT /repos/{owner}/{repo}/actions/workflows/{workflow_id}/disable hold:outage 
+POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches deploy starts a workflow
+PUT /repos/{owner}/{repo}/actions/workflows/{workflow_id}/enable allow 
+PUT /repos/{owner}/{repo}/agents/secrets/{secret_name} either 
+DELETE /repos/{owner}/{repo}/agents/secrets/{secret_name} hold:outage workflows that use it fail
+POST /repos/{owner}/{repo}/agents/variables allow 
+PATCH /repos/{owner}/{repo}/agents/variables/{name} either 
+DELETE /repos/{owner}/{repo}/agents/variables/{name} hold:outage 
+POST /repos/{owner}/{repo}/attestations allow 
+POST /repos/{owner}/{repo}/autolinks allow 
+DELETE /repos/{owner}/{repo}/autolinks/{autolink_id} allow 
+PUT /repos/{owner}/{repo}/automated-security-fixes allow 
+DELETE /repos/{owner}/{repo}/automated-security-fixes allow 
+PUT /repos/{owner}/{repo}/branches/{branch}/protection either replaces the protection, may weaken it
+DELETE /repos/{owner}/{repo}/branches/{branch}/protection hold:outage branch protection goes
+POST /repos/{owner}/{repo}/branches/{branch}/protection/enforce_admins allow 
+DELETE /repos/{owner}/{repo}/branches/{branch}/protection/enforce_admins hold:outage a branch protection rule goes
+PATCH /repos/{owner}/{repo}/branches/{branch}/protection/required_pull_request_reviews either 
+DELETE /repos/{owner}/{repo}/branches/{branch}/protection/required_pull_request_reviews hold:outage a branch protection rule goes
+POST /repos/{owner}/{repo}/branches/{branch}/protection/required_signatures allow 
+DELETE /repos/{owner}/{repo}/branches/{branch}/protection/required_signatures hold:outage a branch protection rule goes
+PATCH /repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks either 
+DELETE /repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks hold:outage a branch protection rule goes
+POST /repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks/contexts allow 
+PUT /repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks/contexts either 
+DELETE /repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks/contexts hold:outage a branch protection rule goes
+DELETE /repos/{owner}/{repo}/branches/{branch}/protection/restrictions hold:exposed anyone with write may push
+POST /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/apps allow 
+PUT /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/apps either 
+DELETE /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/apps hold:outage a branch protection rule goes
+POST /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/teams allow 
+PUT /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/teams either 
+DELETE /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/teams hold:outage a branch protection rule goes
+POST /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/users allow 
+PUT /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/users either 
+DELETE /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/users hold:outage a branch protection rule goes
+POST /repos/{owner}/{repo}/branches/{branch}/rename either 
+POST /repos/{owner}/{repo}/check-runs allow 
+PATCH /repos/{owner}/{repo}/check-runs/{check_run_id} allow 
+POST /repos/{owner}/{repo}/check-runs/{check_run_id}/rerequest allow 
+POST /repos/{owner}/{repo}/check-suites allow 
+PATCH /repos/{owner}/{repo}/check-suites/preferences allow 
+POST /repos/{owner}/{repo}/check-suites/{check_suite_id}/rerequest allow 
+PATCH /repos/{owner}/{repo}/code-quality/setup allow 
+PATCH /repos/{owner}/{repo}/code-scanning/ai-scan allow 
+PATCH /repos/{owner}/{repo}/code-scanning/alerts/{alert_number} either 
+POST /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}/autofix allow 
+POST /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}/autofix/commits allow 
+DELETE /repos/{owner}/{repo}/code-scanning/analyses/{analysis_id} allow 
+DELETE /repos/{owner}/{repo}/code-scanning/codeql/databases/{language} allow 
+POST /repos/{owner}/{repo}/code-scanning/codeql/variant-analyses allow 
+PATCH /repos/{owner}/{repo}/code-scanning/default-setup allow 
+POST /repos/{owner}/{repo}/code-scanning/sarifs allow 
+POST /repos/{owner}/{repo}/codespaces allow 
+PUT /repos/{owner}/{repo}/codespaces/secrets/{secret_name} either 
+DELETE /repos/{owner}/{repo}/codespaces/secrets/{secret_name} hold:outage workflows that use it fail
+PUT /repos/{owner}/{repo}/collaborators/{username} hold:exposed 
+DELETE /repos/{owner}/{repo}/collaborators/{username} hold:outage 
+PATCH /repos/{owner}/{repo}/comments/{comment_id} allow 
+DELETE /repos/{owner}/{repo}/comments/{comment_id} either someone's comment
+POST /repos/{owner}/{repo}/comments/{comment_id}/reactions allow small
+DELETE /repos/{owner}/{repo}/comments/{comment_id}/reactions/{reaction_id} allow small
+POST /repos/{owner}/{repo}/commits/{commit_sha}/comments allow 
+PUT /repos/{owner}/{repo}/contents/{path} either a commit that overwrites the file
+DELETE /repos/{owner}/{repo}/contents/{path} either a commit that removes the file
+PATCH /repos/{owner}/{repo}/copilot/code-review/settings either 
+PATCH /repos/{owner}/{repo}/dependabot/alerts/{alert_number} either 
+PUT /repos/{owner}/{repo}/dependabot/runner-settings either 
+PUT /repos/{owner}/{repo}/dependabot/secrets/{secret_name} either 
+DELETE /repos/{owner}/{repo}/dependabot/secrets/{secret_name} hold:outage workflows that use it fail
+POST /repos/{owner}/{repo}/dependency-graph/snapshots allow 
+POST /repos/{owner}/{repo}/deployments deploy 
+DELETE /repos/{owner}/{repo}/deployments/{deployment_id} allow only an inactive one
+POST /repos/{owner}/{repo}/deployments/{deployment_id}/statuses allow 
+POST /repos/{owner}/{repo}/dispatches deploy starts a workflow
+PUT /repos/{owner}/{repo}/environments/{environment_name} either may drop its reviewers
+DELETE /repos/{owner}/{repo}/environments/{environment_name} hold:gone its secrets and protection rules go
+POST /repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies allow 
+PUT /repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies/{branch_policy_id} either 
+DELETE /repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies/{branch_policy_id} either 
+POST /repos/{owner}/{repo}/environments/{environment_name}/deployment_protection_rules allow 
+DELETE /repos/{owner}/{repo}/environments/{environment_name}/deployment_protection_rules/{protection_rule_id} hold:outage 
+PUT /repos/{owner}/{repo}/environments/{environment_name}/secrets/{secret_name} either 
+DELETE /repos/{owner}/{repo}/environments/{environment_name}/secrets/{secret_name} hold:outage workflows that use it fail
+POST /repos/{owner}/{repo}/environments/{environment_name}/variables allow 
+PATCH /repos/{owner}/{repo}/environments/{environment_name}/variables/{name} either 
+DELETE /repos/{owner}/{repo}/environments/{environment_name}/variables/{name} hold:outage 
+POST /repos/{owner}/{repo}/forks either copies the code under another owner
+POST /repos/{owner}/{repo}/git/blobs allow 
+POST /repos/{owner}/{repo}/git/commits allow 
+POST /repos/{owner}/{repo}/git/refs allow 
+PATCH /repos/{owner}/{repo}/git/refs/{ref} cond 
+DELETE /repos/{owner}/{repo}/git/refs/{ref} hold:recoverable the commits stay reachable for a while
+POST /repos/{owner}/{repo}/git/tags allow 
+POST /repos/{owner}/{repo}/git/trees allow 
+POST /repos/{owner}/{repo}/hooks hold:exposed sends events to a URL
+PATCH /repos/{owner}/{repo}/hooks/{hook_id} hold:exposed may change where events go
+DELETE /repos/{owner}/{repo}/hooks/{hook_id} hold:outage 
+PATCH /repos/{owner}/{repo}/hooks/{hook_id}/config hold:exposed may change where events go
+POST /repos/{owner}/{repo}/hooks/{hook_id}/deliveries/{delivery_id}/attempts allow 
+POST /repos/{owner}/{repo}/hooks/{hook_id}/pings allow 
+POST /repos/{owner}/{repo}/hooks/{hook_id}/tests allow 
+PUT /repos/{owner}/{repo}/immutable-releases allow 
+DELETE /repos/{owner}/{repo}/immutable-releases either 
+PUT /repos/{owner}/{repo}/import either 
+PATCH /repos/{owner}/{repo}/import either 
+DELETE /repos/{owner}/{repo}/import allow 
+PATCH /repos/{owner}/{repo}/import/authors/{author_id} either 
+PATCH /repos/{owner}/{repo}/import/lfs either 
+PUT /repos/{owner}/{repo}/interaction-limits allow small
+DELETE /repos/{owner}/{repo}/interaction-limits allow 
+PUT /repos/{owner}/{repo}/interaction-limits/pulls/bypass-list allow small
+DELETE /repos/{owner}/{repo}/interaction-limits/pulls/bypass-list allow 
+PATCH /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap allow small
+PATCH /repos/{owner}/{repo}/invitations/{invitation_id} hold:exposed changes the invitation's permission
+DELETE /repos/{owner}/{repo}/invitations/{invitation_id} allow 
+POST /repos/{owner}/{repo}/issues allow 
+PATCH /repos/{owner}/{repo}/issues/comments/{comment_id} allow 
+DELETE /repos/{owner}/{repo}/issues/comments/{comment_id} either someone's comment
+PUT /repos/{owner}/{repo}/issues/comments/{comment_id}/pin allow small
+DELETE /repos/{owner}/{repo}/issues/comments/{comment_id}/pin allow small
+POST /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions allow small
+DELETE /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions/{reaction_id} allow small
+PATCH /repos/{owner}/{repo}/issues/{issue_number} allow 
+POST /repos/{owner}/{repo}/issues/{issue_number}/artifacts allow small
+PATCH /repos/{owner}/{repo}/issues/{issue_number}/artifacts/{artifact_number} allow small
+DELETE /repos/{owner}/{repo}/issues/{issue_number}/artifacts/{artifact_number} allow small
+POST /repos/{owner}/{repo}/issues/{issue_number}/assignees allow small
+DELETE /repos/{owner}/{repo}/issues/{issue_number}/assignees allow small
+POST /repos/{owner}/{repo}/issues/{issue_number}/comments allow 
+POST /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by allow small
+DELETE /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by/{issue_id} allow small
+POST /repos/{owner}/{repo}/issues/{issue_number}/issue-field-values allow small
+PUT /repos/{owner}/{repo}/issues/{issue_number}/issue-field-values allow small
+DELETE /repos/{owner}/{repo}/issues/{issue_number}/issue-field-values/{issue_field_id} allow small
+POST /repos/{owner}/{repo}/issues/{issue_number}/labels allow small
+PUT /repos/{owner}/{repo}/issues/{issue_number}/labels allow small
+DELETE /repos/{owner}/{repo}/issues/{issue_number}/labels allow small
+DELETE /repos/{owner}/{repo}/issues/{issue_number}/labels/{name} allow 
+PUT /repos/{owner}/{repo}/issues/{issue_number}/lock allow small
+DELETE /repos/{owner}/{repo}/issues/{issue_number}/lock allow small
+POST /repos/{owner}/{repo}/issues/{issue_number}/reactions allow small
+DELETE /repos/{owner}/{repo}/issues/{issue_number}/reactions/{reaction_id} allow small
+POST /repos/{owner}/{repo}/issues/{issue_number}/relates_to allow small
+DELETE /repos/{owner}/{repo}/issues/{issue_number}/relates_to/{issue_id} allow small
+DELETE /repos/{owner}/{repo}/issues/{issue_number}/sub_issue allow small
+POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues allow 
+PATCH /repos/{owner}/{repo}/issues/{issue_number}/sub_issues/priority allow 
+POST /repos/{owner}/{repo}/issues/{issue_number}/suggestions/{suggestion_id}/approve allow 
+POST /repos/{owner}/{repo}/issues/{issue_number}/suggestions/{suggestion_id}/dismiss allow 
+POST /repos/{owner}/{repo}/keys hold:exposed a deploy or SSH key
+DELETE /repos/{owner}/{repo}/keys/{key_id} hold:outage 
+POST /repos/{owner}/{repo}/labels allow small
+PATCH /repos/{owner}/{repo}/labels/{name} allow small
+DELETE /repos/{owner}/{repo}/labels/{name} allow 
+POST /repos/{owner}/{repo}/merge-upstream deploy 
+POST /repos/{owner}/{repo}/merges deploy 
+POST /repos/{owner}/{repo}/milestones allow 
+PATCH /repos/{owner}/{repo}/milestones/{milestone_number} allow 
+DELETE /repos/{owner}/{repo}/milestones/{milestone_number} allow 
+PUT /repos/{owner}/{repo}/notifications allow small
+POST /repos/{owner}/{repo}/pages either a public site, maybe from a private repository
+PUT /repos/{owner}/{repo}/pages either 
+DELETE /repos/{owner}/{repo}/pages hold:outage the site goes offline
+POST /repos/{owner}/{repo}/pages/builds deploy 
+POST /repos/{owner}/{repo}/pages/deployments deploy 
+POST /repos/{owner}/{repo}/pages/deployments/{pages_deployment_id}/cancel allow 
+PUT /repos/{owner}/{repo}/private-vulnerability-reporting allow 
+DELETE /repos/{owner}/{repo}/private-vulnerability-reporting allow 
+PATCH /repos/{owner}/{repo}/properties/values allow 
+POST /repos/{owner}/{repo}/pulls allow 
+PATCH /repos/{owner}/{repo}/pulls/comments/{comment_id} allow 
+DELETE /repos/{owner}/{repo}/pulls/comments/{comment_id} either someone's comment
+POST /repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions allow small
+DELETE /repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions/{reaction_id} allow small
+PATCH /repos/{owner}/{repo}/pulls/{pull_number} allow 
+POST /repos/{owner}/{repo}/pulls/{pull_number}/codespaces allow 
+POST /repos/{owner}/{repo}/pulls/{pull_number}/comments allow 
+POST /repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies allow 
+POST /repos/{owner}/{repo}/pulls/{pull_number}/copilot-code-review allow 
+PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge deploy 
+PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge-async deploy 
+POST /repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers allow small
+DELETE /repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers allow small
+POST /repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers/rerequest allow small
+POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews allow 
+PUT /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id} allow 
+DELETE /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id} allow a pending review
+PUT /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/dismissals either removes an approval
+POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/events allow 
+PUT /repos/{owner}/{repo}/pulls/{pull_number}/update-branch allow 
+POST /repos/{owner}/{repo}/releases allow 
+PATCH /repos/{owner}/{repo}/releases/assets/{asset_id} allow 
+DELETE /repos/{owner}/{repo}/releases/assets/{asset_id} hold:gone 
+POST /repos/{owner}/{repo}/releases/generate-notes allow 
+PATCH /repos/{owner}/{repo}/releases/{release_id} allow 
+DELETE /repos/{owner}/{repo}/releases/{release_id} hold:gone its assets go
+POST /repos/{owner}/{repo}/releases/{release_id}/assets allow 
+POST /repos/{owner}/{repo}/releases/{release_id}/reactions allow small
+DELETE /repos/{owner}/{repo}/releases/{release_id}/reactions/{reaction_id} allow small
+POST /repos/{owner}/{repo}/rulesets allow 
+PUT /repos/{owner}/{repo}/rulesets/{ruleset_id} either may weaken it
+DELETE /repos/{owner}/{repo}/rulesets/{ruleset_id} hold:outage the ruleset goes
+PATCH /repos/{owner}/{repo}/secret-scanning/alerts/{alert_number} either may dismiss an alert
+POST /repos/{owner}/{repo}/secret-scanning/custom-patterns allow 
+DELETE /repos/{owner}/{repo}/secret-scanning/custom-patterns either 
+PATCH /repos/{owner}/{repo}/secret-scanning/custom-patterns/{pattern_id} allow 
+POST /repos/{owner}/{repo}/secret-scanning/push-protection-bypasses hold:exposed lets a secret be pushed
+POST /repos/{owner}/{repo}/security-advisories allow 
+POST /repos/{owner}/{repo}/security-advisories/reports allow 
+PATCH /repos/{owner}/{repo}/security-advisories/{ghsa_id} allow 
+POST /repos/{owner}/{repo}/security-advisories/{ghsa_id}/comments allow 
+PATCH /repos/{owner}/{repo}/security-advisories/{ghsa_id}/comments/{comment_id} allow 
+POST /repos/{owner}/{repo}/security-advisories/{ghsa_id}/cve allow 
+POST /repos/{owner}/{repo}/security-advisories/{ghsa_id}/forks either copies the code under another owner
+POST /repos/{owner}/{repo}/stacks allow 
+POST /repos/{owner}/{repo}/stacks/{stack_number}/add allow 
+POST /repos/{owner}/{repo}/stacks/{stack_number}/unstack allow 
+POST /repos/{owner}/{repo}/statuses/{sha} allow 
+PUT /repos/{owner}/{repo}/subscription allow small
+DELETE /repos/{owner}/{repo}/subscription allow small
+PUT /repos/{owner}/{repo}/topics allow 
+POST /repos/{owner}/{repo}/transfer hold:exposed another owner gets the repository
+PUT /repos/{owner}/{repo}/vulnerability-alerts allow 
+DELETE /repos/{owner}/{repo}/vulnerability-alerts either 
+POST /repos/{template_owner}/{template_repo}/generate allow 
+PATCH /teams/{team_id} allow 
+DELETE /teams/{team_id} hold:outage 
+PUT /teams/{team_id}/members/{username} hold:exposed 
+DELETE /teams/{team_id}/members/{username} hold:outage 
+PUT /teams/{team_id}/memberships/{username} hold:exposed 
+DELETE /teams/{team_id}/memberships/{username} hold:outage 
+PUT /teams/{team_id}/repos/{owner}/{repo} hold:exposed 
+DELETE /teams/{team_id}/repos/{owner}/{repo} hold:outage 
+PATCH /user allow 
+PUT /user/blocks/{username} allow 
+DELETE /user/blocks/{username} allow 
+POST /user/codespaces allow 
+PUT /user/codespaces/secrets/{secret_name} either 
+DELETE /user/codespaces/secrets/{secret_name} hold:outage workflows that use it fail
+PUT /user/codespaces/secrets/{secret_name}/repositories hold:exposed shares a secret with more repositories
+PUT /user/codespaces/secrets/{secret_name}/repositories/{repository_id} hold:exposed shares a secret with more repositories
+DELETE /user/codespaces/secrets/{secret_name}/repositories/{repository_id} hold:outage 
+PATCH /user/codespaces/{codespace_name} allow 
+DELETE /user/codespaces/{codespace_name} hold:gone unpushed work in it
+POST /user/codespaces/{codespace_name}/exports allow 
+POST /user/codespaces/{codespace_name}/publish allow 
+POST /user/codespaces/{codespace_name}/start allow 
+POST /user/codespaces/{codespace_name}/stop hold:outage 
+PATCH /user/email/visibility either 
+POST /user/emails allow 
+DELETE /user/emails allow 
+PUT /user/following/{username} allow 
+DELETE /user/following/{username} allow 
+POST /user/gpg_keys allow 
+DELETE /user/gpg_keys/{gpg_key_id} hold:outage 
+PUT /user/installations/{installation_id}/repositories/{repository_id} allow 
+DELETE /user/installations/{installation_id}/repositories/{repository_id} either removes something
+PUT /user/interaction-limits allow small
+DELETE /user/interaction-limits allow 
+POST /user/issue-fields allow 
+PATCH /user/issue-fields/{issue_field_id} allow 
+DELETE /user/issue-fields/{issue_field_id} either 
+POST /user/issue-types allow 
+PUT /user/issue-types/{issue_type_id} allow 
+DELETE /user/issue-types/{issue_type_id} either 
+POST /user/keys hold:exposed a deploy or SSH key
+DELETE /user/keys/{key_id} hold:outage 
+PATCH /user/memberships/orgs/{org} allow 
+POST /user/migrations either exports repositories to an archive
+DELETE /user/migrations/{migration_id}/archive allow 
+DELETE /user/migrations/{migration_id}/repos/{repo_name}/lock allow 
+DELETE /user/packages/{package_type}/{package_name} hold:recoverable 30 days to restore
+POST /user/packages/{package_type}/{package_name}/restore allow 
+DELETE /user/packages/{package_type}/{package_name}/versions/{package_version_id} hold:recoverable 30 days to restore
+POST /user/packages/{package_type}/{package_name}/versions/{package_version_id}/restore allow 
+POST /user/repos allow 
+PATCH /user/repository_invitations/{invitation_id} allow 
+DELETE /user/repository_invitations/{invitation_id} allow 
+POST /user/social_accounts allow 
+DELETE /user/social_accounts allow 
+POST /user/ssh_signing_keys allow 
+DELETE /user/ssh_signing_keys/{ssh_signing_key_id} hold:outage 
+PUT /user/starred/{owner}/{repo} allow 
+DELETE /user/starred/{owner}/{repo} allow 
+POST /user/{user_id}/projectsV2/{project_number}/drafts allow 
+POST /users/{user_id}/projectsV2/{project_number}/views allow 
+POST /users/{username}/attestations/bulk-list allow 
+POST /users/{username}/attestations/delete-request either 
+DELETE /users/{username}/attestations/digest/{subject_digest} either 
+DELETE /users/{username}/attestations/{attestation_id} either 
+POST /users/{username}/copilot-spaces allow 
+PUT /users/{username}/copilot-spaces/{space_number} allow 
+DELETE /users/{username}/copilot-spaces/{space_number} hold:gone 
+POST /users/{username}/copilot-spaces/{space_number}/collaborators hold:exposed 
+PUT /users/{username}/copilot-spaces/{space_number}/collaborators/{actor_type}/{actor_identifier} hold:exposed 
+DELETE /users/{username}/copilot-spaces/{space_number}/collaborators/{actor_type}/{actor_identifier} hold:outage 
+POST /users/{username}/copilot-spaces/{space_number}/resources allow 
+PUT /users/{username}/copilot-spaces/{space_number}/resources/{space_resource_id} allow 
+DELETE /users/{username}/copilot-spaces/{space_number}/resources/{space_resource_id} hold:outage 
+DELETE /users/{username}/packages/{package_type}/{package_name} hold:recoverable 30 days to restore
+POST /users/{username}/packages/{package_type}/{package_name}/restore allow 
+DELETE /users/{username}/packages/{package_type}/{package_name}/versions/{package_version_id} hold:recoverable 30 days to restore
+POST /users/{username}/packages/{package_type}/{package_name}/versions/{package_version_id}/restore allow 
+POST /users/{username}/projectsV2/{project_number}/fields allow 
+POST /users/{username}/projectsV2/{project_number}/items allow 
+PATCH /users/{username}/projectsV2/{project_number}/items/{item_id} allow 
+DELETE /users/{username}/projectsV2/{project_number}/items/{item_id} either 
