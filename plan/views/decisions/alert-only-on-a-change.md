@@ -23,3 +23,13 @@ Marked Notes in the design record.
 ## From option A's first-run transcript
 
 Agent, 25 November 2026, from `research/2026-11-25-first-run-option-a/` (gap 4 there). `new-host-raises-an-alert` (in force) gives an alert for each host seen for the first time. On a first night every host is new: #371 saw Codex reach four hosts at start, before any work. The first morning then opens on about twenty such alerts, and the paste site an agent sent a log to is one of them. Two things no entry says: hosts reached by the first run's own installers count as seen, and the first-seen hosts of one night are merged into one line with their count, each still an alert. This entry merges repeats of one alert; it does not say how alerts of one kind on many hosts are merged.
+
+## One night's first-seen hosts
+
+Agent, 25 November 2026, from `research/2026-11-25-first-morning-hosts/` (#382's gap 4). "Alerts of
+one kind in one computer that come close together" does not say whether hosts reached hours apart
+in one night are close together. On the measured first night they are about 57 hosts over the
+night. Read as one night, they are one alert with its count, and the paste site comes first when
+the hosts in it are ordered by the bytes sent to each. Read as minutes, they are dozens of alerts.
+Recommended: while you are away, alerts of one kind merge until you next look. Ordering inside the
+merged alert is in `new-host-alert-is-a-rule`'s notes.
