@@ -93,11 +93,18 @@ class Loop:
         anth = self.i % 3 != 2
         host = "api.anthropic.com" if anth else "api.openai.com"
         if anth:
-            body = {"model": "claude-opus-5-5", "max_tokens": 2000, "stream": True, "messages": self.convo[-40:]}
+            # An agent (every fourth loop) or one of its three subagents, as the stand-in tells
+            # them apart; tools and a cached system prompt, as Claude Code sends them.
+            role = "Main agent." if self.i % 4 == 0 else f"SUBAGENT {self.i % 4}: do your part."
+            msgs = [{"role": "user", "content": role}, {"role": "assistant", "content": "ok"}] + self.convo[-40:]
+            body = {"model": "claude-opus-5-5", "max_tokens": 8000, "stream": True, "messages": msgs,
+                    "system": [{"type": "text", "text": "You are an agent. " * 400, "cache_control": {"type": "ephemeral"}}],
+                    "tools": [{"name": "Bash", "description": "run a command", "input_schema": {"type": "object"}}]}
             hdr = {"x-api-key": ANTH, "anthropic-version": "2023-06-01", "content-type": "application/json"}
             path = "/v1/messages"
         else:
-            body = {"model": "gpt-5.5", "stream": True, "input": [{"role": m["role"], "content": m["content"]} for m in self.convo[-40:]]}
+            body = {"model": "gpt-6.2-sol", "stream": True, "input": [{"role": m["role"], "content": m["content"]} for m in self.convo[-40:]],
+                    "tools": [{"type": "function", "name": "shell", "parameters": {"type": "object"}}]}
             hdr = {"authorization": "Bearer " + OPENAI, "content-type": "application/json"}
             path = "/v1/responses"
         t0 = time.time()
