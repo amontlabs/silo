@@ -1,0 +1,1450 @@
+# AWS (20 services), from botocore 1.43.62's models, labelled by hand on 2026-11-25.
+# Key: service Operation. A default by first word (label_aws.py), every operation read and corrected.
+s3 AbortMultipartUpload allow 
+s3 CompleteMultipartUpload either overwrites the key
+s3 CopyObject either overwrites the target key
+s3 CreateBucket allow 
+s3 CreateBucketMetadataConfiguration allow 
+s3 CreateBucketMetadataTableConfiguration allow 
+s3 CreateMultipartUpload allow 
+s3 CreateSession allow 
+s3 DeleteBucket hold:outage only an empty bucket; the name can be taken by someone else
+s3 DeleteBucketAnalyticsConfiguration allow 
+s3 DeleteBucketCors either browsers on other origins stop
+s3 DeleteBucketEncryption either 
+s3 DeleteBucketIntelligentTieringConfiguration allow 
+s3 DeleteBucketInventoryConfiguration allow 
+s3 DeleteBucketLifecycle allow keeps objects longer
+s3 DeleteBucketMetadataConfiguration allow 
+s3 DeleteBucketMetadataTableConfiguration allow 
+s3 DeleteBucketMetricsConfiguration allow 
+s3 DeleteBucketOwnershipControls either ACLs come back
+s3 DeleteBucketPolicy either may open or close access
+s3 DeleteBucketReplication hold:outage stops the copy to another region
+s3 DeleteBucketTagging allow tags
+s3 DeleteBucketWebsite hold:outage the website stops
+s3 DeleteObject hold:gone unless versioning keeps a previous version
+s3 DeleteObjectAnnotation allow 
+s3 DeleteObjectTagging allow tags
+s3 DeleteObjects hold:gone up to 1,000 objects
+s3 DeletePublicAccessBlock hold:exposed removes the guard against public buckets
+s3 PutBucketAbac either changes a setting
+s3 PutBucketAccelerateConfiguration allow 
+s3 PutBucketAcl cond 
+s3 PutBucketAnalyticsConfiguration allow 
+s3 PutBucketCors either changes a setting
+s3 PutBucketEncryption either changes a setting
+s3 PutBucketIntelligentTieringConfiguration allow 
+s3 PutBucketInventoryConfiguration allow 
+s3 PutBucketLifecycle either may expire objects
+s3 PutBucketLifecycleConfiguration cond 
+s3 PutBucketLogging either 
+s3 PutBucketMetricsConfiguration allow 
+s3 PutBucketNotification either 
+s3 PutBucketNotificationConfiguration either sends events to a target
+s3 PutBucketOwnershipControls either 
+s3 PutBucketPolicy cond 
+s3 PutBucketReplication either copies objects to a bucket that may be another account's
+s3 PutBucketRequestPayment allow 
+s3 PutBucketTagging allow tags
+s3 PutBucketVersioning cond 
+s3 PutBucketWebsite either changes a setting
+s3 PutObject either overwrites the key if it exists
+s3 PutObjectAcl cond 
+s3 PutObjectAnnotation allow 
+s3 PutObjectLegalHold allow protects
+s3 PutObjectLockConfiguration either 
+s3 PutObjectRetention allow protects
+s3 PutObjectTagging allow tags
+s3 PutPublicAccessBlock cond 
+s3 RenameObject either overwrites the target key
+s3 RestoreObject allow 
+s3 UpdateBucketMetadataAnnotationTableConfiguration either changes a setting
+s3 UpdateBucketMetadataInventoryTableConfiguration either changes a setting
+s3 UpdateBucketMetadataJournalTableConfiguration either changes a setting
+s3 UpdateObjectEncryption either changes a setting
+s3 UploadPart allow 
+s3 UploadPartCopy allow 
+s3 WriteGetObjectResponse allow 
+ec2 AcceptAddressTransfer allow 
+ec2 AcceptCapacityReservationBillingOwnership allow 
+ec2 AcceptReservedInstancesExchangeQuote hold:money 
+ec2 AcceptTransitGatewayClientVpnAttachment allow 
+ec2 AcceptTransitGatewayMulticastDomainAssociations allow 
+ec2 AcceptTransitGatewayPeeringAttachment hold:exposed 
+ec2 AcceptTransitGatewayVpcAttachment hold:exposed 
+ec2 AcceptVpcEndpointConnections hold:exposed 
+ec2 AcceptVpcPeeringConnection hold:exposed 
+ec2 AdvertiseByoipCidr allow 
+ec2 AllocateAddress allow 
+ec2 AllocateHosts hold:money 
+ec2 AllocateIpamPoolCidr allow 
+ec2 ApplySecurityGroupsToClientVpnTargetNetwork allow 
+ec2 AssignIpv6Addresses allow 
+ec2 AssignPrivateIpAddresses allow 
+ec2 AssignPrivateNatGatewayAddress allow 
+ec2 AssociateAddress allow 
+ec2 AssociateCapacityReservationBillingOwner allow 
+ec2 AssociateClientVpnTargetNetwork allow 
+ec2 AssociateDhcpOptions allow 
+ec2 AssociateEnclaveCertificateIamRole allow 
+ec2 AssociateIamInstanceProfile allow 
+ec2 AssociateInstanceEventWindow allow 
+ec2 AssociateIpamByoasn allow 
+ec2 AssociateIpamResourceDiscovery allow 
+ec2 AssociateNatGatewayAddress allow 
+ec2 AssociateRouteServer allow 
+ec2 AssociateRouteTable allow 
+ec2 AssociateSecurityGroupVpc allow 
+ec2 AssociateSubnetCidrBlock allow 
+ec2 AssociateTransitGatewayMulticastDomain allow 
+ec2 AssociateTransitGatewayPolicyTable allow 
+ec2 AssociateTransitGatewayRouteTable allow 
+ec2 AssociateTrunkInterface allow 
+ec2 AssociateVpcCidrBlock allow 
+ec2 AttachClassicLinkVpc allow 
+ec2 AttachImageWatermark allow 
+ec2 AttachInternetGateway allow 
+ec2 AttachNetworkInterface allow 
+ec2 AttachVerifiedAccessTrustProvider allow 
+ec2 AttachVolume allow 
+ec2 AttachVpnGateway allow 
+ec2 AuthorizeClientVpnIngress hold:exposed 
+ec2 AuthorizeSecurityGroupEgress either 
+ec2 AuthorizeSecurityGroupIngress cond 
+ec2 BundleInstance allow 
+ec2 CancelBundleTask allow 
+ec2 CancelCapacityReservation hold:outage 
+ec2 CancelCapacityReservationFleets hold:outage 
+ec2 CancelConversionTask allow 
+ec2 CancelDeclarativePoliciesReport allow 
+ec2 CancelExportTask allow 
+ec2 CancelImageLaunchPermission allow 
+ec2 CancelImportTask allow 
+ec2 CancelReservedInstancesListing allow 
+ec2 CancelSpotFleetRequests cond 
+ec2 CancelSpotInstanceRequests allow running instances stay
+ec2 ConfirmProductInstance allow 
+ec2 CopyFpgaImage allow 
+ec2 CopyImage allow 
+ec2 CopySnapshot allow 
+ec2 CopyVolumes allow 
+ec2 CreateCapacityManagerDataExport allow 
+ec2 CreateCapacityReservation hold:money 
+ec2 CreateCapacityReservationBySplitting allow 
+ec2 CreateCapacityReservationCancellationQuote allow 
+ec2 CreateCapacityReservationFleet hold:money 
+ec2 CreateCarrierGateway allow 
+ec2 CreateClientVpnEndpoint allow 
+ec2 CreateClientVpnRoute allow 
+ec2 CreateCoipCidr allow 
+ec2 CreateCoipPool allow 
+ec2 CreateCustomerGateway allow 
+ec2 CreateDefaultSubnet allow 
+ec2 CreateDefaultVpc allow 
+ec2 CreateDelegateMacVolumeOwnershipTask allow 
+ec2 CreateDhcpOptions allow 
+ec2 CreateEgressOnlyInternetGateway allow 
+ec2 CreateFleet allow 
+ec2 CreateFlowLogs allow 
+ec2 CreateFpgaImage allow 
+ec2 CreateImage allow 
+ec2 CreateImageUsageReport allow 
+ec2 CreateInstanceConnectEndpoint hold:exposed 
+ec2 CreateInstanceEventWindow allow 
+ec2 CreateInstanceExportTask allow 
+ec2 CreateInternetGateway allow 
+ec2 CreateInterruptibleCapacityReservationAllocation allow 
+ec2 CreateIpam allow 
+ec2 CreateIpamExternalResourceVerificationToken allow 
+ec2 CreateIpamPolicy allow 
+ec2 CreateIpamPool allow 
+ec2 CreateIpamPrefixListResolver allow 
+ec2 CreateIpamPrefixListResolverTarget allow 
+ec2 CreateIpamResourceDiscovery allow 
+ec2 CreateIpamScope allow 
+ec2 CreateKeyPair allow 
+ec2 CreateLaunchTemplate allow 
+ec2 CreateLaunchTemplateVersion allow 
+ec2 CreateLocalGatewayRoute allow 
+ec2 CreateLocalGatewayRouteTable allow 
+ec2 CreateLocalGatewayRouteTableVirtualInterfaceGroupAssociation allow 
+ec2 CreateLocalGatewayRouteTableVpcAssociation allow 
+ec2 CreateLocalGatewayVirtualInterface allow 
+ec2 CreateLocalGatewayVirtualInterfaceGroup allow 
+ec2 CreateMacSystemIntegrityProtectionModificationTask allow 
+ec2 CreateManagedPrefixList allow 
+ec2 CreateNatGateway allow 
+ec2 CreateNetworkAcl allow 
+ec2 CreateNetworkAclEntry either may allow traffic
+ec2 CreateNetworkInsightsAccessScope allow 
+ec2 CreateNetworkInsightsPath allow 
+ec2 CreateNetworkInterface allow 
+ec2 CreateNetworkInterfacePermission hold:exposed 
+ec2 CreatePlacementGroup allow 
+ec2 CreatePublicIpv4Pool allow 
+ec2 CreateReplaceRootVolumeTask hold:gone replaces the root volume; its data goes unless kept
+ec2 CreateReservedInstancesListing hold:money 
+ec2 CreateRestoreImageTask allow 
+ec2 CreateRoute either 
+ec2 CreateRouteServer allow 
+ec2 CreateRouteServerEndpoint allow 
+ec2 CreateRouteServerPeer allow 
+ec2 CreateRouteTable allow 
+ec2 CreateSecondaryNetwork allow 
+ec2 CreateSecondarySubnet allow 
+ec2 CreateSecurityGroup allow 
+ec2 CreateSnapshot allow 
+ec2 CreateSnapshots allow 
+ec2 CreateSpotDatafeedSubscription allow 
+ec2 CreateStoreImageTask allow 
+ec2 CreateSubnet allow 
+ec2 CreateSubnetCidrReservation allow 
+ec2 CreateTags allow tags
+ec2 CreateTrafficMirrorFilter allow 
+ec2 CreateTrafficMirrorFilterRule allow 
+ec2 CreateTrafficMirrorSession allow 
+ec2 CreateTrafficMirrorTarget allow 
+ec2 CreateTransitGateway allow 
+ec2 CreateTransitGatewayConnect allow 
+ec2 CreateTransitGatewayConnectPeer allow 
+ec2 CreateTransitGatewayMeteringPolicy allow 
+ec2 CreateTransitGatewayMeteringPolicyEntry allow 
+ec2 CreateTransitGatewayMulticastDomain allow 
+ec2 CreateTransitGatewayPeeringAttachment allow 
+ec2 CreateTransitGatewayPolicyTable allow 
+ec2 CreateTransitGatewayPolicyTableEntry allow 
+ec2 CreateTransitGatewayPrefixListReference allow 
+ec2 CreateTransitGatewayRoute allow 
+ec2 CreateTransitGatewayRouteTable allow 
+ec2 CreateTransitGatewayRouteTableAnnouncement allow 
+ec2 CreateTransitGatewayVpcAttachment allow 
+ec2 CreateVerifiedAccessEndpoint allow 
+ec2 CreateVerifiedAccessGroup allow 
+ec2 CreateVerifiedAccessInstance allow 
+ec2 CreateVerifiedAccessTrustProvider allow 
+ec2 CreateVolume allow 
+ec2 CreateVpc allow 
+ec2 CreateVpcBlockPublicAccessExclusion hold:exposed 
+ec2 CreateVpcEncryptionControl allow 
+ec2 CreateVpcEndpoint allow 
+ec2 CreateVpcEndpointConnectionNotification allow 
+ec2 CreateVpcEndpointServiceConfiguration allow 
+ec2 CreateVpcPeeringConnection allow 
+ec2 CreateVpnConcentrator allow 
+ec2 CreateVpnConnection allow 
+ec2 CreateVpnConnectionRoute allow 
+ec2 CreateVpnGateway allow 
+ec2 DeleteCapacityManagerDataExport allow 
+ec2 DeleteCarrierGateway hold:outage deletes a configuration or resource
+ec2 DeleteClientVpnEndpoint hold:outage deletes a configuration or resource
+ec2 DeleteClientVpnRoute hold:outage deletes a configuration or resource
+ec2 DeleteCoipCidr hold:outage deletes a configuration or resource
+ec2 DeleteCoipPool hold:outage deletes a configuration or resource
+ec2 DeleteCustomerGateway hold:outage deletes a configuration or resource
+ec2 DeleteDhcpOptions allow only when unused
+ec2 DeleteEgressOnlyInternetGateway hold:outage deletes a configuration or resource
+ec2 DeleteFleets cond 
+ec2 DeleteFlowLogs either stops a record of traffic
+ec2 DeleteFpgaImage hold:gone 
+ec2 DeleteImageUsageReport allow 
+ec2 DeleteInstanceConnectEndpoint hold:outage deletes a configuration or resource
+ec2 DeleteInstanceEventWindow allow 
+ec2 DeleteInternetGateway hold:outage deletes a configuration or resource
+ec2 DeleteIpam hold:outage deletes a configuration or resource
+ec2 DeleteIpamExternalResourceVerificationToken allow 
+ec2 DeleteIpamPolicy hold:outage deletes a configuration or resource
+ec2 DeleteIpamPool hold:outage deletes a configuration or resource
+ec2 DeleteIpamPrefixListResolver hold:outage deletes a configuration or resource
+ec2 DeleteIpamPrefixListResolverTarget hold:outage deletes a configuration or resource
+ec2 DeleteIpamResourceDiscovery hold:outage deletes a configuration or resource
+ec2 DeleteIpamScope hold:outage deletes a configuration or resource
+ec2 DeleteKeyPair allow the private key is not at AWS; instances keep working
+ec2 DeleteLaunchTemplate either 
+ec2 DeleteLaunchTemplateVersions either 
+ec2 DeleteLocalGatewayRoute hold:outage deletes a configuration or resource
+ec2 DeleteLocalGatewayRouteTable hold:outage deletes a configuration or resource
+ec2 DeleteLocalGatewayRouteTableVirtualInterfaceGroupAssociation hold:outage deletes a configuration or resource
+ec2 DeleteLocalGatewayRouteTableVpcAssociation hold:outage deletes a configuration or resource
+ec2 DeleteLocalGatewayVirtualInterface hold:outage deletes a configuration or resource
+ec2 DeleteLocalGatewayVirtualInterfaceGroup hold:outage deletes a configuration or resource
+ec2 DeleteManagedPrefixList hold:outage deletes a configuration or resource
+ec2 DeleteNatGateway hold:outage deletes a configuration or resource
+ec2 DeleteNetworkAcl hold:outage deletes a configuration or resource
+ec2 DeleteNetworkAclEntry hold:outage deletes a configuration or resource
+ec2 DeleteNetworkInsightsAccessScope allow 
+ec2 DeleteNetworkInsightsAccessScopeAnalysis allow 
+ec2 DeleteNetworkInsightsAnalysis allow 
+ec2 DeleteNetworkInsightsPath allow 
+ec2 DeleteNetworkInterface hold:outage deletes a configuration or resource
+ec2 DeleteNetworkInterfacePermission allow takes access back
+ec2 DeletePlacementGroup allow 
+ec2 DeletePublicIpv4Pool hold:outage deletes a configuration or resource
+ec2 DeleteQueuedReservedInstances allow 
+ec2 DeleteRoute hold:outage deletes a configuration or resource
+ec2 DeleteRouteServer hold:outage deletes a configuration or resource
+ec2 DeleteRouteServerEndpoint hold:outage deletes a configuration or resource
+ec2 DeleteRouteServerPeer hold:outage deletes a configuration or resource
+ec2 DeleteRouteTable hold:outage deletes a configuration or resource
+ec2 DeleteSecondaryNetwork hold:outage deletes a configuration or resource
+ec2 DeleteSecondarySubnet hold:outage deletes a configuration or resource
+ec2 DeleteSecurityGroup allow only when unused
+ec2 DeleteSnapshot hold:gone unless the Recycle Bin keeps it
+ec2 DeleteSpotDatafeedSubscription allow 
+ec2 DeleteSubnet hold:outage 
+ec2 DeleteSubnetCidrReservation hold:outage deletes a configuration or resource
+ec2 DeleteTags allow 
+ec2 DeleteTrafficMirrorFilter allow 
+ec2 DeleteTrafficMirrorFilterRule allow 
+ec2 DeleteTrafficMirrorSession allow 
+ec2 DeleteTrafficMirrorTarget allow 
+ec2 DeleteTransitGateway hold:outage deletes a configuration or resource
+ec2 DeleteTransitGatewayClientVpnAttachment hold:outage deletes a configuration or resource
+ec2 DeleteTransitGatewayConnect hold:outage deletes a configuration or resource
+ec2 DeleteTransitGatewayConnectPeer hold:outage deletes a configuration or resource
+ec2 DeleteTransitGatewayMeteringPolicy hold:outage deletes a configuration or resource
+ec2 DeleteTransitGatewayMeteringPolicyEntry hold:outage deletes a configuration or resource
+ec2 DeleteTransitGatewayMulticastDomain hold:outage deletes a configuration or resource
+ec2 DeleteTransitGatewayPeeringAttachment hold:outage deletes a configuration or resource
+ec2 DeleteTransitGatewayPolicyTable hold:outage deletes a configuration or resource
+ec2 DeleteTransitGatewayPolicyTableEntry hold:outage deletes a configuration or resource
+ec2 DeleteTransitGatewayPrefixListReference hold:outage deletes a configuration or resource
+ec2 DeleteTransitGatewayRoute hold:outage deletes a configuration or resource
+ec2 DeleteTransitGatewayRouteTable hold:outage deletes a configuration or resource
+ec2 DeleteTransitGatewayRouteTableAnnouncement hold:outage deletes a configuration or resource
+ec2 DeleteTransitGatewayVpcAttachment hold:outage deletes a configuration or resource
+ec2 DeleteVerifiedAccessEndpoint hold:outage deletes a configuration or resource
+ec2 DeleteVerifiedAccessGroup hold:outage deletes a configuration or resource
+ec2 DeleteVerifiedAccessInstance hold:outage deletes a configuration or resource
+ec2 DeleteVerifiedAccessTrustProvider hold:outage deletes a configuration or resource
+ec2 DeleteVolume hold:gone 
+ec2 DeleteVpc hold:outage 
+ec2 DeleteVpcBlockPublicAccessExclusion allow closes
+ec2 DeleteVpcEncryptionControl hold:outage deletes a configuration or resource
+ec2 DeleteVpcEndpointConnectionNotifications allow 
+ec2 DeleteVpcEndpointServiceConfigurations hold:outage deletes a configuration or resource
+ec2 DeleteVpcEndpoints hold:outage deletes a configuration or resource
+ec2 DeleteVpcPeeringConnection hold:outage deletes a configuration or resource
+ec2 DeleteVpnConcentrator hold:outage deletes a configuration or resource
+ec2 DeleteVpnConnection hold:outage deletes a configuration or resource
+ec2 DeleteVpnConnectionRoute hold:outage deletes a configuration or resource
+ec2 DeleteVpnGateway hold:outage deletes a configuration or resource
+ec2 DeprovisionByoipCidr hold:outage 
+ec2 DeprovisionIpamByoasn hold:outage 
+ec2 DeprovisionIpamPoolCidr hold:outage 
+ec2 DeprovisionPublicIpv4PoolCidr hold:outage 
+ec2 DeregisterImage hold:gone unless the Recycle Bin keeps it
+ec2 DeregisterInstanceEventNotificationAttributes allow 
+ec2 DeregisterTransitGatewayMulticastGroupMembers hold:outage 
+ec2 DeregisterTransitGatewayMulticastGroupSources hold:outage 
+ec2 DetachClassicLinkVpc hold:outage 
+ec2 DetachImageWatermark allow 
+ec2 DetachInternetGateway hold:outage 
+ec2 DetachNetworkInterface hold:outage 
+ec2 DetachVerifiedAccessTrustProvider hold:outage 
+ec2 DetachVolume hold:outage 
+ec2 DetachVpnGateway hold:outage 
+ec2 DisableAddressTransfer allow 
+ec2 DisableAllowedImagesSettings hold:exposed any image may be launched
+ec2 DisableAwsNetworkPerformanceMetricSubscription allow 
+ec2 DisableCapacityManager allow 
+ec2 DisableEbsEncryptionByDefault either 
+ec2 DisableFastLaunch allow 
+ec2 DisableFastSnapshotRestores allow 
+ec2 DisableImage either 
+ec2 DisableImageBlockPublicAccess hold:exposed 
+ec2 DisableImageDeprecation allow 
+ec2 DisableImageDeregistrationProtection hold:outage a protection off
+ec2 DisableInstanceSqlHaStandbyDetections allow 
+ec2 DisableIpamOrganizationAdminAccount either 
+ec2 DisableIpamPolicy hold:outage 
+ec2 DisableRouteServerPropagation hold:outage 
+ec2 DisableSerialConsoleAccess allow closes
+ec2 DisableSnapshotBlockPublicAccess hold:exposed 
+ec2 DisableTransitGatewayRouteTablePropagation hold:outage 
+ec2 DisableVgwRoutePropagation hold:outage 
+ec2 DisableVpcClassicLink either 
+ec2 DisableVpcClassicLinkDnsSupport either 
+ec2 DisassociateAddress hold:outage 
+ec2 DisassociateCapacityReservationBillingOwner hold:outage 
+ec2 DisassociateClientVpnTargetNetwork hold:outage 
+ec2 DisassociateEnclaveCertificateIamRole hold:outage 
+ec2 DisassociateIamInstanceProfile hold:outage 
+ec2 DisassociateInstanceEventWindow hold:outage 
+ec2 DisassociateIpamByoasn hold:outage 
+ec2 DisassociateIpamResourceDiscovery hold:outage 
+ec2 DisassociateNatGatewayAddress hold:outage 
+ec2 DisassociateRouteServer hold:outage 
+ec2 DisassociateRouteTable hold:outage 
+ec2 DisassociateSecurityGroupVpc hold:outage 
+ec2 DisassociateSubnetCidrBlock hold:outage 
+ec2 DisassociateTransitGatewayMulticastDomain hold:outage 
+ec2 DisassociateTransitGatewayPolicyTable hold:outage 
+ec2 DisassociateTransitGatewayRouteTable hold:outage 
+ec2 DisassociateTrunkInterface hold:outage 
+ec2 DisassociateVpcCidrBlock hold:outage 
+ec2 EnableAddressTransfer hold:exposed gives an Elastic IP to another account
+ec2 EnableAllowedImagesSettings allow 
+ec2 EnableAwsNetworkPerformanceMetricSubscription allow 
+ec2 EnableCapacityManager allow 
+ec2 EnableEbsEncryptionByDefault allow 
+ec2 EnableFastLaunch allow 
+ec2 EnableFastSnapshotRestores allow 
+ec2 EnableImage allow 
+ec2 EnableImageBlockPublicAccess allow 
+ec2 EnableImageDeprecation allow 
+ec2 EnableImageDeregistrationProtection allow 
+ec2 EnableInstanceSqlHaStandbyDetections allow 
+ec2 EnableIpamOrganizationAdminAccount allow 
+ec2 EnableIpamPolicy allow 
+ec2 EnableReachabilityAnalyzerOrganizationSharing allow 
+ec2 EnableRouteServerPropagation allow 
+ec2 EnableSerialConsoleAccess hold:exposed 
+ec2 EnableSnapshotBlockPublicAccess allow 
+ec2 EnableTransitGatewayRouteTablePropagation allow 
+ec2 EnableVgwRoutePropagation allow 
+ec2 EnableVolumeIO allow 
+ec2 EnableVpcClassicLink allow 
+ec2 EnableVpcClassicLinkDnsSupport allow 
+ec2 ExportClientVpnClientCertificateRevocationList allow 
+ec2 ExportClientVpnClientConfiguration allow 
+ec2 ExportImage either 
+ec2 ExportTransitGatewayRoutes allow 
+ec2 ExportVerifiedAccessInstanceClientConfiguration allow 
+ec2 ImportClientVpnClientCertificateRevocationList either 
+ec2 ImportImage allow 
+ec2 ImportInstance allow 
+ec2 ImportKeyPair allow 
+ec2 ImportSnapshot allow 
+ec2 ImportVolume allow 
+ec2 LockSnapshot allow protects
+ec2 ModifyAccountVpcEncryptionControl either 
+ec2 ModifyAddressAttribute either changes a setting
+ec2 ModifyAvailabilityZoneGroup allow 
+ec2 ModifyCapacityReservation either changes a setting
+ec2 ModifyCapacityReservationFleet either changes a setting
+ec2 ModifyClientVpnEndpoint either changes a setting
+ec2 ModifyDefaultCreditSpecification allow 
+ec2 ModifyEbsDefaultKmsKeyId either changes a setting
+ec2 ModifyFleet cond 
+ec2 ModifyFpgaImageAttribute either 
+ec2 ModifyHosts either 
+ec2 ModifyIdFormat allow 
+ec2 ModifyIdentityIdFormat allow 
+ec2 ModifyImageAttribute cond 
+ec2 ModifyInstanceAttribute cond 
+ec2 ModifyInstanceCapacityReservationAttributes either changes a setting
+ec2 ModifyInstanceConnectEndpoint either changes a setting
+ec2 ModifyInstanceCpuOptions either changes a setting
+ec2 ModifyInstanceCreditSpecification allow 
+ec2 ModifyInstanceEventStartTime allow 
+ec2 ModifyInstanceEventWindow allow 
+ec2 ModifyInstanceMaintenanceOptions allow 
+ec2 ModifyInstanceMetadataDefaults either 
+ec2 ModifyInstanceMetadataOptions cond 
+ec2 ModifyInstanceNetworkPerformanceOptions either changes a setting
+ec2 ModifyInstancePlacement either changes a setting
+ec2 ModifyIpam either changes a setting
+ec2 ModifyIpamPolicyAllocationRules either changes a setting
+ec2 ModifyIpamPool either changes a setting
+ec2 ModifyIpamPoolAllocation either changes a setting
+ec2 ModifyIpamPrefixListResolver either changes a setting
+ec2 ModifyIpamPrefixListResolverTarget either changes a setting
+ec2 ModifyIpamResourceCidr either changes a setting
+ec2 ModifyIpamResourceDiscovery either changes a setting
+ec2 ModifyIpamScope either changes a setting
+ec2 ModifyLaunchTemplate either changes a setting
+ec2 ModifyLocalGatewayRoute either changes a setting
+ec2 ModifyManagedPrefixList either changes a setting
+ec2 ModifyManagedResourceVisibility either 
+ec2 ModifyNetworkInterfaceAttribute either changes a setting
+ec2 ModifyPrivateDnsNameOptions either changes a setting
+ec2 ModifyPublicIpDnsNameOptions either changes a setting
+ec2 ModifyReservedInstances either changes a setting
+ec2 ModifyRouteServer either changes a setting
+ec2 ModifySecurityGroupRules either may open a port
+ec2 ModifySnapshotAttribute cond 
+ec2 ModifySnapshotTier either archived snapshots take hours to restore
+ec2 ModifySpotFleetRequest cond 
+ec2 ModifySubnetAttribute either may give public IPs
+ec2 ModifyTrafficMirrorFilterNetworkServices either changes a setting
+ec2 ModifyTrafficMirrorFilterRule either changes a setting
+ec2 ModifyTrafficMirrorSession either changes a setting
+ec2 ModifyTransitGateway either changes a setting
+ec2 ModifyTransitGatewayMeteringPolicy either changes a setting
+ec2 ModifyTransitGatewayPolicyTableEntry either changes a setting
+ec2 ModifyTransitGatewayPrefixListReference either changes a setting
+ec2 ModifyTransitGatewayVpcAttachment either changes a setting
+ec2 ModifyVerifiedAccessEndpoint either changes a setting
+ec2 ModifyVerifiedAccessEndpointPolicy either changes a setting
+ec2 ModifyVerifiedAccessGroup either changes a setting
+ec2 ModifyVerifiedAccessGroupPolicy either changes a setting
+ec2 ModifyVerifiedAccessInstance either changes a setting
+ec2 ModifyVerifiedAccessInstanceLoggingConfiguration either changes a setting
+ec2 ModifyVerifiedAccessTrustProvider either changes a setting
+ec2 ModifyVolume either 
+ec2 ModifyVolumeAttribute either changes a setting
+ec2 ModifyVpcAttribute either 
+ec2 ModifyVpcBlockPublicAccessExclusion either changes a setting
+ec2 ModifyVpcBlockPublicAccessOptions either 
+ec2 ModifyVpcEncryptionControl either 
+ec2 ModifyVpcEndpoint either changes a setting
+ec2 ModifyVpcEndpointConnectionNotification either changes a setting
+ec2 ModifyVpcEndpointPayerResponsibility either changes a setting
+ec2 ModifyVpcEndpointServiceConfiguration either changes a setting
+ec2 ModifyVpcEndpointServicePayerResponsibility either changes a setting
+ec2 ModifyVpcEndpointServicePermissions hold:exposed 
+ec2 ModifyVpcPeeringConnectionOptions either changes a setting
+ec2 ModifyVpcTenancy either changes a setting
+ec2 ModifyVpnConnection either changes a setting
+ec2 ModifyVpnConnectionOptions either changes a setting
+ec2 ModifyVpnTunnelCertificate either changes a setting
+ec2 ModifyVpnTunnelOptions either changes a setting
+ec2 MonitorInstances allow 
+ec2 MoveAddressToVpc either 
+ec2 MoveByoipCidrToIpam either 
+ec2 MoveCapacityReservationInstances allow 
+ec2 ProvisionByoipCidr allow 
+ec2 ProvisionIpamByoasn allow 
+ec2 ProvisionIpamPoolCidr allow 
+ec2 ProvisionPublicIpv4PoolCidr allow 
+ec2 PurchaseCapacityBlock hold:money 
+ec2 PurchaseCapacityBlockExtension hold:money 
+ec2 PurchaseHostReservation hold:money 
+ec2 PurchaseReservedInstancesOffering hold:money 
+ec2 PurchaseScheduledInstances hold:money 
+ec2 RebootInstances either 
+ec2 RegisterImage allow 
+ec2 RegisterInstanceEventNotificationAttributes allow 
+ec2 RegisterTransitGatewayMulticastGroupMembers allow 
+ec2 RegisterTransitGatewayMulticastGroupSources allow 
+ec2 RejectCapacityReservationBillingOwnership allow 
+ec2 RejectTransitGatewayClientVpnAttachment allow 
+ec2 RejectTransitGatewayMulticastDomainAssociations allow 
+ec2 RejectTransitGatewayPeeringAttachment allow 
+ec2 RejectTransitGatewayVpcAttachment allow 
+ec2 RejectVpcEndpointConnections allow 
+ec2 RejectVpcPeeringConnection allow 
+ec2 ReleaseAddress hold:outage 
+ec2 ReleaseHosts hold:outage 
+ec2 ReleaseIpamPoolAllocation hold:outage 
+ec2 ReplaceIamInstanceProfileAssociation either 
+ec2 ReplaceImageCriteriaInAllowedImagesSettings either 
+ec2 ReplaceNetworkAclAssociation either 
+ec2 ReplaceNetworkAclEntry either 
+ec2 ReplaceRoute either 
+ec2 ReplaceRouteTableAssociation either 
+ec2 ReplaceTransitGatewayRoute either 
+ec2 ReplaceVpnTunnel either 
+ec2 ReportInstanceStatus allow 
+ec2 RequestSpotFleet allow 
+ec2 RequestSpotInstances allow 
+ec2 ResetAddressAttribute allow 
+ec2 ResetEbsDefaultKmsKeyId either 
+ec2 ResetFpgaImageAttribute allow 
+ec2 ResetImageAttribute allow makes private
+ec2 ResetInstanceAttribute either 
+ec2 ResetNetworkInterfaceAttribute either 
+ec2 ResetSnapshotAttribute allow makes private
+ec2 RestoreAddressToClassic either 
+ec2 RestoreImageFromRecycleBin allow 
+ec2 RestoreManagedPrefixListVersion either 
+ec2 RestoreSnapshotFromRecycleBin allow 
+ec2 RestoreSnapshotTier allow 
+ec2 RestoreVolumeFromRecycleBin allow 
+ec2 RevokeClientVpnIngress hold:outage 
+ec2 RevokeSecurityGroupEgress hold:outage 
+ec2 RevokeSecurityGroupIngress hold:outage traffic it allowed stops
+ec2 RunInstances allow 
+ec2 RunScheduledInstances allow 
+ec2 SendDiagnosticInterrupt hold:outage crashes the instance's OS
+ec2 StartDeclarativePoliciesReport allow 
+ec2 StartInstances allow 
+ec2 StartNetworkInsightsAccessScopeAnalysis allow 
+ec2 StartNetworkInsightsAnalysis allow 
+ec2 StartVpcEndpointServicePrivateDnsVerification allow 
+ec2 StopInstances hold:outage 
+ec2 TerminateClientVpnConnections hold:outage 
+ec2 TerminateInstances hold:gone instance-store data and volumes with DeleteOnTermination
+ec2 UnassignIpv6Addresses hold:outage 
+ec2 UnassignPrivateIpAddresses hold:outage 
+ec2 UnassignPrivateNatGatewayAddress hold:outage 
+ec2 UnlockSnapshot hold:outage a protection off
+ec2 UnmonitorInstances allow 
+ec2 UpdateCapacityManagerMonitoredTagKeys allow 
+ec2 UpdateCapacityManagerOrganizationsAccess either changes a setting
+ec2 UpdateInterruptibleCapacityReservationAllocation either changes a setting
+ec2 UpdateSecurityGroupRuleDescriptionsEgress allow 
+ec2 UpdateSecurityGroupRuleDescriptionsIngress allow 
+ec2 WithdrawByoipCidr hold:outage 
+rds AddRoleToDBCluster allow 
+rds AddRoleToDBInstance allow 
+rds AddSourceIdentifierToSubscription allow 
+rds AddTagsToResource allow tags
+rds ApplyPendingMaintenanceAction either 
+rds AuthorizeDBSecurityGroupIngress hold:exposed 
+rds BacktrackDBCluster hold:gone rewinds the database; writes after the point are lost
+rds CancelExportTask allow 
+rds CopyDBClusterParameterGroup allow 
+rds CopyDBClusterSnapshot allow 
+rds CopyDBParameterGroup allow 
+rds CopyDBSnapshot allow 
+rds CopyOptionGroup allow 
+rds CreateBlueGreenDeployment allow 
+rds CreateCustomDBEngineVersion allow 
+rds CreateDBCluster allow 
+rds CreateDBClusterEndpoint allow 
+rds CreateDBClusterParameterGroup allow 
+rds CreateDBClusterSnapshot allow 
+rds CreateDBInstance allow 
+rds CreateDBInstanceReadReplica allow 
+rds CreateDBParameterGroup allow 
+rds CreateDBProxy allow 
+rds CreateDBProxyEndpoint allow 
+rds CreateDBSecurityGroup allow 
+rds CreateDBShardGroup allow 
+rds CreateDBSnapshot allow 
+rds CreateDBSubnetGroup allow 
+rds CreateEventSubscription allow 
+rds CreateGlobalCluster allow 
+rds CreateIntegration allow 
+rds CreateOptionGroup allow 
+rds CreateTenantDatabase allow 
+rds DeleteBlueGreenDeployment cond 
+rds DeleteCustomDBEngineVersion allow 
+rds DeleteDBCluster cond 
+rds DeleteDBClusterAutomatedBackup hold:gone 
+rds DeleteDBClusterEndpoint hold:outage deletes a configuration or resource
+rds DeleteDBClusterParameterGroup allow only when unused
+rds DeleteDBClusterSnapshot hold:gone 
+rds DeleteDBInstance cond 
+rds DeleteDBInstanceAutomatedBackup hold:gone 
+rds DeleteDBParameterGroup allow only when unused
+rds DeleteDBProxy hold:outage deletes a configuration or resource
+rds DeleteDBProxyEndpoint hold:outage deletes a configuration or resource
+rds DeleteDBSecurityGroup allow 
+rds DeleteDBShardGroup hold:gone 
+rds DeleteDBSnapshot hold:gone 
+rds DeleteDBSubnetGroup allow only when unused
+rds DeleteEventSubscription allow 
+rds DeleteGlobalCluster hold:outage 
+rds DeleteIntegration hold:outage 
+rds DeleteOptionGroup allow only when unused
+rds DeleteTenantDatabase hold:gone 
+rds DeregisterDBProxyTargets hold:outage 
+rds DisableHttpEndpoint hold:outage 
+rds EnableHttpEndpoint hold:exposed opens the Data API
+rds FailoverDBCluster either a short interruption
+rds FailoverGlobalCluster either a short interruption
+rds ModifyActivityStream either 
+rds ModifyCertificates either 
+rds ModifyCurrentDBClusterCapacity either 
+rds ModifyCustomDBEngineVersion either changes a setting
+rds ModifyDBCluster cond 
+rds ModifyDBClusterEndpoint either changes a setting
+rds ModifyDBClusterParameterGroup either changes a setting
+rds ModifyDBClusterSnapshotAttribute cond 
+rds ModifyDBInstance cond 
+rds ModifyDBParameterGroup either changes a setting
+rds ModifyDBProxy either changes a setting
+rds ModifyDBProxyEndpoint either changes a setting
+rds ModifyDBProxyTargetGroup either changes a setting
+rds ModifyDBRecommendation allow 
+rds ModifyDBShardGroup either changes a setting
+rds ModifyDBSnapshot either changes a setting
+rds ModifyDBSnapshotAttribute cond 
+rds ModifyDBSubnetGroup either changes a setting
+rds ModifyEventSubscription allow 
+rds ModifyGlobalCluster either changes a setting
+rds ModifyIntegration either changes a setting
+rds ModifyOptionGroup either changes a setting
+rds ModifyTenantDatabase either changes a setting
+rds PromoteReadReplica either 
+rds PromoteReadReplicaDBCluster either 
+rds PurchaseReservedDBInstancesOffering hold:money 
+rds RebootDBCluster either a short interruption
+rds RebootDBInstance either a short interruption
+rds RebootDBShardGroup either a short interruption
+rds RegisterDBProxyTargets allow 
+rds RemoveFromGlobalCluster hold:outage 
+rds RemoveRoleFromDBCluster hold:outage 
+rds RemoveRoleFromDBInstance hold:outage 
+rds RemoveSourceIdentifierFromSubscription allow 
+rds RemoveTagsFromResource allow tags
+rds ResetDBClusterParameterGroup hold:outage back to defaults
+rds ResetDBParameterGroup hold:outage back to defaults
+rds RestoreDBClusterFromS3 allow 
+rds RestoreDBClusterFromSnapshot allow 
+rds RestoreDBClusterToPointInTime allow a new cluster
+rds RestoreDBInstanceFromDBSnapshot allow 
+rds RestoreDBInstanceFromS3 allow 
+rds RestoreDBInstanceToPointInTime allow a new instance
+rds RevokeDBSecurityGroupIngress hold:outage 
+rds StartActivityStream allow 
+rds StartDBCluster allow 
+rds StartDBInstance allow 
+rds StartDBInstanceAutomatedBackupsReplication allow 
+rds StartExportTask allow 
+rds StopActivityStream either stops an audit stream
+rds StopDBCluster hold:outage 
+rds StopDBInstance hold:outage 
+rds StopDBInstanceAutomatedBackupsReplication either 
+rds SwitchoverBlueGreenDeployment either a short interruption
+rds SwitchoverGlobalCluster either a short interruption
+rds SwitchoverReadReplica either a short interruption
+dynamodb BatchExecuteStatement cond 
+dynamodb BatchWriteItem cond 
+dynamodb CreateBackup allow 
+dynamodb CreateGlobalTable allow 
+dynamodb CreateTable allow 
+dynamodb DeleteBackup hold:gone 
+dynamodb DeleteItem hold:gone one item
+dynamodb DeleteResourcePolicy either 
+dynamodb DeleteTable hold:gone 
+dynamodb DisableKinesisStreamingDestination hold:outage 
+dynamodb EnableKinesisStreamingDestination allow 
+dynamodb ExecuteStatement cond 
+dynamodb ExecuteTransaction cond 
+dynamodb ExportTableToPointInTime either to a bucket that may be another account's
+dynamodb ImportTable allow 
+dynamodb PutItem either overwrites the item
+dynamodb PutResourcePolicy either may give another account access
+dynamodb RestoreTableFromBackup allow 
+dynamodb RestoreTableToPointInTime allow a new table
+dynamodb TagResource allow tags
+dynamodb TransactGetItems allow reads
+dynamodb TransactWriteItems cond 
+dynamodb UntagResource allow tags
+dynamodb UpdateContinuousBackups cond 
+dynamodb UpdateContributorInsights either changes a setting
+dynamodb UpdateGlobalTable either changes a setting
+dynamodb UpdateGlobalTableSettings either changes a setting
+dynamodb UpdateItem either 
+dynamodb UpdateKinesisStreamingDestination either changes a setting
+dynamodb UpdateTable cond 
+dynamodb UpdateTableReplicaAutoScaling either changes a setting
+dynamodb UpdateTimeToLive either items past the attribute's time are deleted
+lambda AddLayerVersionPermission hold:exposed 
+lambda AddPermission hold:exposed lets another principal invoke
+lambda CreateAlias allow 
+lambda CreateCapacityProvider allow 
+lambda CreateCodeSigningConfig allow 
+lambda CreateEventSourceMapping allow 
+lambda CreateFunction deploy 
+lambda CreateFunctionUrlConfig cond 
+lambda DeleteAlias hold:outage 
+lambda DeleteCapacityProvider hold:outage 
+lambda DeleteCodeSigningConfig either 
+lambda DeleteEventSourceMapping hold:outage 
+lambda DeleteFunction hold:outage code and configuration go
+lambda DeleteFunctionCodeSigningConfig either unsigned code may deploy
+lambda DeleteFunctionConcurrency allow 
+lambda DeleteFunctionEventInvokeConfig allow 
+lambda DeleteFunctionUrlConfig hold:outage 
+lambda DeleteLayerVersion hold:outage new deploys that use it fail
+lambda DeleteProvisionedConcurrencyConfig allow 
+lambda Invoke either runs the function
+lambda InvokeAsync either 
+lambda InvokeWithResponseStream either 
+lambda PublishLayerVersion allow 
+lambda PublishVersion deploy 
+lambda PutFunctionCodeSigningConfig either changes a setting
+lambda PutFunctionConcurrency cond 
+lambda PutFunctionEventInvokeConfig either changes a setting
+lambda PutFunctionRecursionConfig either changes a setting
+lambda PutFunctionScalingConfig either changes a setting
+lambda PutProvisionedConcurrencyConfig either changes a setting
+lambda PutRuntimeManagementConfig either changes a setting
+lambda RemoveLayerVersionPermission hold:outage 
+lambda RemovePermission hold:outage 
+lambda SendDurableExecutionCallbackFailure allow 
+lambda SendDurableExecutionCallbackHeartbeat allow 
+lambda SendDurableExecutionCallbackSuccess allow 
+lambda StopDurableExecution either 
+lambda TagResource allow tags
+lambda UntagResource allow tags
+lambda UpdateAlias deploy 
+lambda UpdateCapacityProvider either changes a setting
+lambda UpdateCodeSigningConfig either changes a setting
+lambda UpdateEventSourceMapping either changes a setting
+lambda UpdateFunctionCode deploy 
+lambda UpdateFunctionConfiguration either changes a setting
+lambda UpdateFunctionEventInvokeConfig either changes a setting
+lambda UpdateFunctionUrlConfig cond 
+iam AcceptDelegationRequest hold:exposed 
+iam AddClientIDToOpenIDConnectProvider hold:exposed 
+iam AddRoleToInstanceProfile hold:exposed 
+iam AddUserToGroup hold:exposed 
+iam AssociateDelegationRequest hold:exposed 
+iam AttachGroupPolicy hold:exposed 
+iam AttachRolePolicy hold:exposed 
+iam AttachUserPolicy hold:exposed 
+iam ChangePassword allow 
+iam CreateAccessKey hold:exposed 
+iam CreateAccountAlias allow 
+iam CreateDelegationRequest hold:exposed 
+iam CreateGroup allow 
+iam CreateInstanceProfile allow 
+iam CreateLoginProfile hold:exposed 
+iam CreateOpenIDConnectProvider hold:exposed 
+iam CreatePolicy allow attached elsewhere
+iam CreatePolicyVersion hold:exposed 
+iam CreateRole either its trust policy says who may take it
+iam CreateSAMLProvider hold:exposed 
+iam CreateServiceLinkedRole allow 
+iam CreateServiceSpecificCredential hold:exposed 
+iam CreateUser allow 
+iam CreateVirtualMFADevice allow 
+iam DeactivateMFADevice hold:exposed 
+iam DeleteAccessKey hold:outage deletes a configuration or resource
+iam DeleteAccountAlias either the sign-in URL changes
+iam DeleteAccountPasswordPolicy hold:exposed 
+iam DeleteGroup hold:outage deletes a configuration or resource
+iam DeleteGroupPolicy hold:outage deletes a configuration or resource
+iam DeleteInstanceProfile hold:outage deletes a configuration or resource
+iam DeleteLoginProfile hold:outage deletes a configuration or resource
+iam DeleteOpenIDConnectProvider hold:outage CI that signs in with it stops
+iam DeletePolicy hold:outage deletes a configuration or resource
+iam DeletePolicyVersion allow not the default one
+iam DeleteRole hold:outage deletes a configuration or resource
+iam DeleteRolePermissionsBoundary hold:exposed removes a limit
+iam DeleteRolePolicy hold:outage deletes a configuration or resource
+iam DeleteSAMLProvider hold:outage deletes a configuration or resource
+iam DeleteSSHPublicKey hold:outage 
+iam DeleteServerCertificate hold:outage 
+iam DeleteServiceLinkedRole hold:outage deletes a configuration or resource
+iam DeleteServiceSpecificCredential hold:outage deletes a configuration or resource
+iam DeleteSigningCertificate hold:outage 
+iam DeleteUser hold:outage deletes a configuration or resource
+iam DeleteUserPermissionsBoundary hold:exposed removes a limit
+iam DeleteUserPolicy hold:outage deletes a configuration or resource
+iam DeleteVirtualMFADevice hold:exposed 
+iam DetachGroupPolicy hold:outage 
+iam DetachRolePolicy hold:outage 
+iam DetachUserPolicy hold:outage 
+iam DisableOrganizationsRootCredentialsManagement either 
+iam DisableOrganizationsRootSessions allow 
+iam DisableOutboundWebIdentityFederation hold:outage 
+iam EnableMFADevice allow 
+iam EnableOrganizationsRootCredentialsManagement allow 
+iam EnableOrganizationsRootSessions hold:exposed 
+iam EnableOutboundWebIdentityFederation hold:exposed 
+iam GenerateCredentialReport allow 
+iam GenerateOrganizationsAccessReport allow 
+iam GenerateServiceLastAccessedDetails allow 
+iam PutGroupPolicy hold:exposed 
+iam PutRolePermissionsBoundary either 
+iam PutRolePolicy hold:exposed 
+iam PutUserPermissionsBoundary either 
+iam PutUserPolicy hold:exposed 
+iam RejectDelegationRequest allow 
+iam RemoveClientIDFromOpenIDConnectProvider hold:outage 
+iam RemoveRoleFromInstanceProfile hold:outage 
+iam RemoveUserFromGroup hold:outage 
+iam ResetServiceSpecificCredential hold:exposed 
+iam ResyncMFADevice allow 
+iam SendDelegationToken hold:exposed 
+iam SetDefaultPolicyVersion hold:exposed 
+iam SetSecurityTokenServicePreferences allow 
+iam TagInstanceProfile allow tags
+iam TagMFADevice allow tags
+iam TagOpenIDConnectProvider allow tags
+iam TagPolicy allow tags
+iam TagRole allow tags
+iam TagSAMLProvider allow tags
+iam TagServerCertificate allow tags
+iam TagUser allow tags
+iam UntagInstanceProfile allow tags
+iam UntagMFADevice allow tags
+iam UntagOpenIDConnectProvider allow tags
+iam UntagPolicy allow tags
+iam UntagRole allow tags
+iam UntagSAMLProvider allow tags
+iam UntagServerCertificate allow tags
+iam UntagUser allow tags
+iam UpdateAccessKey cond 
+iam UpdateAccountPasswordPolicy either 
+iam UpdateAssumeRolePolicy hold:exposed changes who may take the role
+iam UpdateDelegationRequest either 
+iam UpdateGroup allow 
+iam UpdateLoginProfile hold:exposed 
+iam UpdateOpenIDConnectProviderThumbprint hold:exposed 
+iam UpdateRole either session length
+iam UpdateRoleDescription allow 
+iam UpdateSAMLProvider hold:exposed 
+iam UpdateSSHPublicKey cond 
+iam UpdateServerCertificate allow 
+iam UpdateServiceSpecificCredential cond 
+iam UpdateSigningCertificate cond 
+iam UpdateUser allow 
+iam UploadSSHPublicKey hold:exposed 
+iam UploadServerCertificate allow 
+iam UploadSigningCertificate hold:exposed 
+ecs ContinueServiceDeployment deploy 
+ecs CreateCapacityProvider allow 
+ecs CreateCluster allow 
+ecs CreateDaemon allow 
+ecs CreateExpressGatewayService allow 
+ecs CreateService deploy 
+ecs CreateTaskSet allow 
+ecs DeleteAccountSetting allow 
+ecs DeleteAttributes allow 
+ecs DeleteCapacityProvider hold:outage deletes a configuration or resource
+ecs DeleteCluster hold:outage only without services
+ecs DeleteDaemon hold:outage 
+ecs DeleteDaemonTaskDefinition allow 
+ecs DeleteExpressGatewayService hold:outage 
+ecs DeleteService hold:outage 
+ecs DeleteTaskDefinitions allow only inactive ones
+ecs DeleteTaskSet hold:outage 
+ecs DeregisterContainerInstance hold:outage 
+ecs DeregisterTaskDefinition allow running tasks stay
+ecs ExecuteCommand either a shell in a running container
+ecs PutAccountSetting either changes a setting
+ecs PutAccountSettingDefault either changes a setting
+ecs PutAttributes either changes a setting
+ecs PutClusterCapacityProviders either changes a setting
+ecs RegisterContainerInstance allow 
+ecs RegisterDaemonTaskDefinition allow 
+ecs RegisterTaskDefinition allow 
+ecs RunTask allow 
+ecs StartTask allow 
+ecs StopServiceDeployment either 
+ecs StopTask hold:outage 
+ecs SubmitAttachmentStateChanges allow 
+ecs SubmitContainerStateChange allow 
+ecs SubmitTaskStateChange allow 
+ecs TagResource allow tags
+ecs UntagResource allow tags
+ecs UpdateCapacityProvider either changes a setting
+ecs UpdateCluster either changes a setting
+ecs UpdateClusterSettings either changes a setting
+ecs UpdateContainerAgent either 
+ecs UpdateContainerInstancesState either DRAINING stops its tasks
+ecs UpdateDaemon either changes a setting
+ecs UpdateExpressGatewayService deploy 
+ecs UpdateService cond 
+ecs UpdateServicePrimaryTaskSet deploy 
+ecs UpdateTaskProtection allow 
+ecs UpdateTaskSet either 
+eks AssociateAccessPolicy hold:exposed 
+eks AssociateEncryptionConfig allow 
+eks AssociateIdentityProviderConfig hold:exposed 
+eks CancelUpdate allow 
+eks CreateAccessEntry hold:exposed 
+eks CreateAddon allow 
+eks CreateCapability allow 
+eks CreateCluster allow 
+eks CreateEksAnywhereSubscription hold:money 
+eks CreateFargateProfile allow 
+eks CreateNodegroup allow 
+eks CreatePodIdentityAssociation hold:exposed 
+eks DeleteAccessEntry hold:outage deletes a configuration or resource
+eks DeleteAddon hold:outage 
+eks DeleteCapability hold:outage deletes a configuration or resource
+eks DeleteCluster hold:gone the cluster's state goes with it
+eks DeleteEksAnywhereSubscription allow 
+eks DeleteFargateProfile hold:outage 
+eks DeleteNodegroup hold:outage 
+eks DeletePodIdentityAssociation hold:outage deletes a configuration or resource
+eks DeregisterCluster hold:outage 
+eks DisassociateAccessPolicy hold:outage 
+eks DisassociateIdentityProviderConfig hold:outage 
+eks RegisterCluster allow 
+eks StartInsightsRefresh allow 
+eks TagResource allow tags
+eks UntagResource allow tags
+eks UpdateAccessEntry hold:exposed 
+eks UpdateAddon either changes a setting
+eks UpdateCapability either changes a setting
+eks UpdateClusterConfig cond 
+eks UpdateClusterVersion either 
+eks UpdateEksAnywhereSubscription hold:money 
+eks UpdateNodegroupConfig cond 
+eks UpdateNodegroupVersion either 
+eks UpdatePodIdentityAssociation hold:exposed 
+ecr BatchCheckLayerAvailability allow 
+ecr BatchDeleteImage hold:gone 
+ecr CompleteLayerUpload allow 
+ecr CreatePullThroughCacheRule allow 
+ecr CreateRepository allow 
+ecr CreateRepositoryCreationTemplate allow 
+ecr DeleteLifecyclePolicy allow 
+ecr DeletePullThroughCacheRule allow 
+ecr DeleteRegistryPolicy either 
+ecr DeleteRepository hold:gone with force, its images too
+ecr DeleteRepositoryCreationTemplate allow 
+ecr DeleteRepositoryPolicy either 
+ecr DeleteSigningConfiguration either 
+ecr DeregisterPullTimeUpdateExclusion allow 
+ecr InitiateLayerUpload allow 
+ecr PutAccountSetting either changes a setting
+ecr PutImage deploy moves a tag
+ecr PutImageScanningConfiguration either changes a setting
+ecr PutImageTagMutability either 
+ecr PutLifecyclePolicy either may expire images
+ecr PutRegistryPolicy either 
+ecr PutRegistryScanningConfiguration either changes a setting
+ecr PutReplicationConfiguration either changes a setting
+ecr PutSigningConfiguration either changes a setting
+ecr RegisterPullTimeUpdateExclusion allow 
+ecr SetRepositoryPolicy either may give another account access
+ecr StartImageScan allow 
+ecr StartLifecyclePolicyPreview allow 
+ecr TagResource allow tags
+ecr UntagResource allow tags
+ecr UpdateImageStorageClass either 
+ecr UpdatePullThroughCacheRule either changes a setting
+ecr UpdateRepositoryCreationTemplate either changes a setting
+ecr UploadLayerPart allow 
+cloudformation ActivateOrganizationsAccess allow 
+cloudformation ActivateType allow 
+cloudformation BatchDescribeTypeConfigurations allow 
+cloudformation CancelUpdateStack allow 
+cloudformation ContinueUpdateRollback deploy 
+cloudformation CreateChangeSet allow 
+cloudformation CreateGeneratedTemplate allow 
+cloudformation CreateStack deploy 
+cloudformation CreateStackInstances deploy 
+cloudformation CreateStackRefactor allow 
+cloudformation CreateStackSet allow 
+cloudformation DeactivateOrganizationsAccess either 
+cloudformation DeactivateType either 
+cloudformation DeleteChangeSet allow 
+cloudformation DeleteGeneratedTemplate allow 
+cloudformation DeleteStack hold:gone deletes every resource the stack holds
+cloudformation DeleteStackInstances cond 
+cloudformation DeleteStackSet allow only when empty
+cloudformation DeregisterType allow 
+cloudformation ExecuteChangeSet deploy 
+cloudformation ExecuteStackRefactor deploy 
+cloudformation ImportStacksToStackSet either 
+cloudformation PublishType allow 
+cloudformation RecordHandlerProgress allow 
+cloudformation RegisterPublisher allow 
+cloudformation RegisterType allow 
+cloudformation RollbackStack deploy 
+cloudformation SetStackPolicy either 
+cloudformation SetTypeConfiguration either 
+cloudformation SetTypeDefaultVersion either 
+cloudformation SignalResource allow 
+cloudformation StartResourceScan allow 
+cloudformation StopStackSetOperation allow 
+cloudformation UpdateGeneratedTemplate allow 
+cloudformation UpdateStack deploy 
+cloudformation UpdateStackInstances deploy 
+cloudformation UpdateStackSet deploy 
+cloudformation UpdateTerminationProtection cond 
+route53 ActivateKeySigningKey allow 
+route53 AssociateVPCWithHostedZone allow 
+route53 ChangeCidrCollection either 
+route53 ChangeResourceRecordSets cond 
+route53 ChangeTagsForResource allow 
+route53 CreateCidrCollection allow 
+route53 CreateHealthCheck allow 
+route53 CreateHostedZone allow 
+route53 CreateKeySigningKey allow 
+route53 CreateQueryLoggingConfig allow 
+route53 CreateReusableDelegationSet allow 
+route53 CreateTrafficPolicy allow 
+route53 CreateTrafficPolicyInstance allow 
+route53 CreateTrafficPolicyVersion allow 
+route53 CreateVPCAssociationAuthorization hold:exposed 
+route53 DeactivateKeySigningKey hold:outage 
+route53 DeleteCidrCollection allow 
+route53 DeleteHealthCheck hold:outage failover that uses it stops
+route53 DeleteHostedZone hold:outage only when empty; the name servers change if recreated
+route53 DeleteKeySigningKey hold:outage 
+route53 DeleteQueryLoggingConfig allow 
+route53 DeleteReusableDelegationSet allow 
+route53 DeleteTrafficPolicy allow 
+route53 DeleteTrafficPolicyInstance hold:outage 
+route53 DeleteVPCAssociationAuthorization allow 
+route53 DisableHostedZoneDNSSEC hold:outage 
+route53 DisassociateVPCFromHostedZone hold:outage 
+route53 EnableHostedZoneDNSSEC allow 
+route53 UpdateHealthCheck either 
+route53 UpdateHostedZoneComment allow 
+route53 UpdateHostedZoneFeatures either changes a setting
+route53 UpdateTrafficPolicyComment allow 
+route53 UpdateTrafficPolicyInstance either changes a setting
+secretsmanager CancelRotateSecret allow 
+secretsmanager CreateSecret allow 
+secretsmanager DeleteResourcePolicy either 
+secretsmanager DeleteSecret cond 
+secretsmanager PutResourcePolicy either may give another account access
+secretsmanager PutSecretValue either the previous value stays as AWSPREVIOUS
+secretsmanager RemoveRegionsFromReplication hold:outage 
+secretsmanager ReplicateSecretToRegions allow 
+secretsmanager RestoreSecret allow 
+secretsmanager RotateSecret either 
+secretsmanager StopReplicationToReplica hold:outage 
+secretsmanager TagResource allow tags
+secretsmanager UntagResource allow tags
+secretsmanager UpdateSecret either 
+secretsmanager UpdateSecretVersionStage either 
+ssm AddTagsToResource allow tags
+ssm AssociateOpsItemRelatedItem allow 
+ssm CancelCommand allow 
+ssm CancelMaintenanceWindowExecution allow 
+ssm CreateActivation hold:exposed lets a new machine register
+ssm CreateAssociation allow 
+ssm CreateAssociationBatch allow 
+ssm CreateCloudConnector allow 
+ssm CreateDocument allow 
+ssm CreateMaintenanceWindow allow 
+ssm CreateOpsItem allow 
+ssm CreateOpsMetadata allow 
+ssm CreatePatchBaseline allow 
+ssm CreateResourceDataSync allow 
+ssm DeleteActivation allow 
+ssm DeleteAssociation either 
+ssm DeleteCloudConnector either 
+ssm DeleteDocument either 
+ssm DeleteInventory allow 
+ssm DeleteMaintenanceWindow allow 
+ssm DeleteOpsItem allow 
+ssm DeleteOpsMetadata allow 
+ssm DeleteParameter hold:gone 
+ssm DeleteParameters hold:gone 
+ssm DeletePatchBaseline allow 
+ssm DeleteResourceDataSync allow 
+ssm DeleteResourcePolicy either 
+ssm DeregisterManagedInstance hold:outage 
+ssm DeregisterPatchBaselineForPatchGroup allow 
+ssm DeregisterTargetFromMaintenanceWindow allow 
+ssm DeregisterTaskFromMaintenanceWindow allow 
+ssm DisassociateOpsItemRelatedItem allow 
+ssm LabelParameterVersion either 
+ssm ModifyDocumentPermission hold:exposed may share a document publicly
+ssm PutComplianceItems allow 
+ssm PutInventory allow 
+ssm PutParameter either Overwrite replaces it
+ssm PutResourcePolicy either 
+ssm RegisterDefaultPatchBaseline allow 
+ssm RegisterPatchBaselineForPatchGroup allow 
+ssm RegisterTargetWithMaintenanceWindow allow 
+ssm RegisterTaskWithMaintenanceWindow allow 
+ssm RemoveTagsFromResource allow tags
+ssm ResetServiceSetting either 
+ssm ResumeSession allow 
+ssm SendAutomationSignal allow 
+ssm SendCommand either runs a command on instances
+ssm StartAccessRequest allow 
+ssm StartAssociationsOnce allow 
+ssm StartAutomationExecution either runs a runbook
+ssm StartChangeRequestExecution either 
+ssm StartExecutionPreview allow 
+ssm StartSession either a shell on an instance
+ssm StopAutomationExecution allow 
+ssm TerminateSession allow 
+ssm UnlabelParameterVersion either 
+ssm UpdateAssociation either changes a setting
+ssm UpdateAssociationStatus allow 
+ssm UpdateCloudConnector either changes a setting
+ssm UpdateDocument either changes a setting
+ssm UpdateDocumentDefaultVersion either changes a setting
+ssm UpdateDocumentMetadata allow 
+ssm UpdateMaintenanceWindow either changes a setting
+ssm UpdateMaintenanceWindowTarget either changes a setting
+ssm UpdateMaintenanceWindowTask either changes a setting
+ssm UpdateManagedInstanceRole either 
+ssm UpdateOpsItem allow 
+ssm UpdateOpsMetadata allow 
+ssm UpdatePatchBaseline either changes a setting
+ssm UpdateResourceDataSync either changes a setting
+ssm UpdateServiceSetting either changes a setting
+kms CancelKeyDeletion allow 
+kms ConnectCustomKeyStore allow 
+kms CreateAlias allow 
+kms CreateCustomKeyStore allow 
+kms CreateGrant hold:exposed 
+kms CreateKey allow 
+kms Decrypt allow 
+kms DeleteAlias hold:outage code that names the alias fails
+kms DeleteCustomKeyStore hold:outage 
+kms DeleteImportedKeyMaterial hold:outage 
+kms DeriveSharedSecret allow 
+kms DisableKey hold:outage 
+kms DisableKeyRotation either 
+kms DisconnectCustomKeyStore hold:outage 
+kms EnableKey allow 
+kms EnableKeyRotation allow 
+kms Encrypt allow 
+kms GenerateDataKey allow 
+kms GenerateDataKeyPair allow 
+kms GenerateDataKeyPairWithoutPlaintext allow 
+kms GenerateDataKeyWithoutPlaintext allow 
+kms GenerateMac allow 
+kms GenerateRandom allow 
+kms ImportKeyMaterial either 
+kms PutKeyPolicy either may give another account use
+kms ReEncrypt allow 
+kms ReplicateKey allow 
+kms RetireGrant allow the grantee gives it up
+kms RevokeGrant hold:outage 
+kms RotateKeyOnDemand allow 
+kms ScheduleKeyDeletion hold:recoverable 7 to 30 days; then whatever it encrypted is lost
+kms Sign allow 
+kms TagResource allow tags
+kms UntagResource allow tags
+kms UpdateAlias either 
+kms UpdateCustomKeyStore either 
+kms UpdateKeyDescription allow 
+kms UpdatePrimaryRegion either 
+sqs AddPermission hold:exposed 
+sqs CancelMessageMoveTask allow 
+sqs ChangeMessageVisibility allow 
+sqs ChangeMessageVisibilityBatch allow 
+sqs CreateQueue allow 
+sqs DeleteMessage allow a consumer's normal work
+sqs DeleteMessageBatch allow a consumer's normal work
+sqs DeleteQueue hold:gone its messages go
+sqs PurgeQueue hold:gone 
+sqs RemovePermission hold:outage 
+sqs SendMessage allow 
+sqs SendMessageBatch allow 
+sqs SetQueueAttributes cond 
+sqs StartMessageMoveTask allow 
+sqs TagQueue allow tags
+sqs UntagQueue allow tags
+sns AddPermission hold:exposed 
+sns ConfirmSubscription allow 
+sns CreatePlatformApplication allow 
+sns CreatePlatformEndpoint allow 
+sns CreateSMSSandboxPhoneNumber allow 
+sns CreateTopic allow 
+sns DeleteEndpoint hold:outage 
+sns DeletePlatformApplication hold:outage 
+sns DeleteSMSSandboxPhoneNumber allow 
+sns DeleteTopic hold:outage 
+sns OptInPhoneNumber allow 
+sns Publish allow 
+sns PublishBatch allow 
+sns PutDataProtectionPolicy either 
+sns RemovePermission hold:outage 
+sns SetEndpointAttributes either 
+sns SetPlatformApplicationAttributes either 
+sns SetSMSAttributes either 
+sns SetSubscriptionAttributes either 
+sns SetTopicAttributes cond 
+sns Subscribe hold:exposed sends every message to an endpoint
+sns TagResource allow tags
+sns Unsubscribe hold:outage 
+sns UntagResource allow tags
+logs AssociateKmsKey allow 
+logs AssociateSourceToS3TableIntegration allow 
+logs CancelExportTask allow 
+logs CancelImportTask allow 
+logs CreateDelivery either 
+logs CreateExportTask either to a bucket
+logs CreateImportTask allow 
+logs CreateLogAnomalyDetector allow 
+logs CreateLogGroup allow 
+logs CreateLogStream allow 
+logs CreateLookupTable allow 
+logs CreateScheduledQuery allow 
+logs DeleteAccountPolicy either 
+logs DeleteDataProtectionPolicy hold:exposed stops masking
+logs DeleteDelivery hold:outage 
+logs DeleteDeliveryDestination hold:outage 
+logs DeleteDeliveryDestinationPolicy allow 
+logs DeleteDeliverySource hold:outage 
+logs DeleteDestination hold:outage 
+logs DeleteIndexPolicy allow 
+logs DeleteIntegration hold:outage 
+logs DeleteLogAnomalyDetector allow 
+logs DeleteLogGroup hold:gone 
+logs DeleteLogStream hold:gone 
+logs DeleteLookupTable allow 
+logs DeleteMetricFilter hold:outage alarms on it stop
+logs DeleteQueryDefinition allow 
+logs DeleteResourcePolicy either 
+logs DeleteRetentionPolicy allow keeps logs longer
+logs DeleteScheduledQuery allow 
+logs DeleteSubscriptionFilter hold:outage 
+logs DeleteSyslogConfiguration either 
+logs DeleteTransformer either 
+logs DisassociateKmsKey either 
+logs DisassociateSourceFromS3TableIntegration allow 
+logs PutAccountPolicy either 
+logs PutBearerTokenAuthentication hold:exposed 
+logs PutDataProtectionPolicy either 
+logs PutDeliveryDestination either 
+logs PutDeliveryDestinationPolicy hold:exposed 
+logs PutDeliverySource either changes a setting
+logs PutDestination either 
+logs PutDestinationPolicy hold:exposed 
+logs PutIndexPolicy allow 
+logs PutIntegration either changes a setting
+logs PutLogEvents allow 
+logs PutLogGroupDeletionProtection cond 
+logs PutMetricFilter either 
+logs PutQueryDefinition allow 
+logs PutResourcePolicy either 
+logs PutRetentionPolicy either a shorter one deletes older events
+logs PutStorageTierPolicy either 
+logs PutSubscriptionFilter hold:exposed streams every event to a destination
+logs PutSyslogConfiguration either changes a setting
+logs PutTransformer either changes a setting
+logs StartLiveTail allow 
+logs StartQuery allow 
+logs StopQuery allow 
+logs TagLogGroup allow tags
+logs TagResource allow tags
+logs UntagLogGroup allow tags
+logs UntagResource allow tags
+logs UpdateAnomaly allow 
+logs UpdateDeliveryConfiguration either changes a setting
+logs UpdateLogAnomalyDetector either changes a setting
+logs UpdateLookupTable either changes a setting
+logs UpdateScheduledQuery either changes a setting
+cloudfront AssociateAlias either moves a domain from another distribution
+cloudfront AssociateDistributionTenantWebACL allow 
+cloudfront AssociateDistributionWebACL allow 
+cloudfront CopyDistribution allow 
+cloudfront CreateAnycastIpList allow 
+cloudfront CreateCachePolicy allow 
+cloudfront CreateCloudFrontOriginAccessIdentity allow 
+cloudfront CreateConnectionFunction allow 
+cloudfront CreateConnectionGroup allow 
+cloudfront CreateContinuousDeploymentPolicy allow 
+cloudfront CreateDistribution allow 
+cloudfront CreateDistributionTenant allow 
+cloudfront CreateDistributionWithTags allow 
+cloudfront CreateFieldLevelEncryptionConfig allow 
+cloudfront CreateFieldLevelEncryptionProfile allow 
+cloudfront CreateFunction allow 
+cloudfront CreateInvalidation allow 
+cloudfront CreateInvalidationForDistributionTenant allow 
+cloudfront CreateKeyGroup either 
+cloudfront CreateKeyValueStore allow 
+cloudfront CreateMonitoringSubscription allow 
+cloudfront CreateOriginAccessControl allow 
+cloudfront CreateOriginRequestPolicy allow 
+cloudfront CreatePublicKey hold:exposed a key that signs URLs
+cloudfront CreateRealtimeLogConfig allow 
+cloudfront CreateResponseHeadersPolicy allow 
+cloudfront CreateStreamingDistribution allow 
+cloudfront CreateStreamingDistributionWithTags allow 
+cloudfront CreateTrustStore allow 
+cloudfront CreateVpcOrigin allow 
+cloudfront DeleteAnycastIpList hold:outage deletes a configuration or resource
+cloudfront DeleteCachePolicy allow only when unused
+cloudfront DeleteCloudFrontOriginAccessIdentity either only when unused
+cloudfront DeleteConnectionFunction hold:outage deletes a configuration or resource
+cloudfront DeleteConnectionGroup hold:outage deletes a configuration or resource
+cloudfront DeleteContinuousDeploymentPolicy allow 
+cloudfront DeleteDistribution hold:outage only when disabled
+cloudfront DeleteDistributionTenant hold:outage deletes a configuration or resource
+cloudfront DeleteFieldLevelEncryptionConfig either 
+cloudfront DeleteFieldLevelEncryptionProfile either 
+cloudfront DeleteFunction hold:outage 
+cloudfront DeleteKeyGroup either 
+cloudfront DeleteKeyValueStore hold:gone 
+cloudfront DeleteMonitoringSubscription allow 
+cloudfront DeleteOriginAccessControl either only when unused
+cloudfront DeleteOriginRequestPolicy allow only when unused
+cloudfront DeletePublicKey hold:outage 
+cloudfront DeleteRealtimeLogConfig allow 
+cloudfront DeleteResourcePolicy either 
+cloudfront DeleteResponseHeadersPolicy allow only when unused
+cloudfront DeleteStreamingDistribution hold:outage deletes a configuration or resource
+cloudfront DeleteTrustStore hold:outage deletes a configuration or resource
+cloudfront DeleteVpcOrigin hold:outage deletes a configuration or resource
+cloudfront DisassociateDistributionTenantWebACL hold:exposed 
+cloudfront DisassociateDistributionWebACL hold:exposed its firewall goes
+cloudfront PublishConnectionFunction deploy 
+cloudfront PublishFunction deploy 
+cloudfront PutResourcePolicy either 
+cloudfront TagResource allow tags
+cloudfront UntagResource allow tags
+cloudfront UpdateAnycastIpList either changes a setting
+cloudfront UpdateCachePolicy either changes a setting
+cloudfront UpdateCloudFrontOriginAccessIdentity either changes a setting
+cloudfront UpdateConnectionFunction either changes a setting
+cloudfront UpdateConnectionGroup either changes a setting
+cloudfront UpdateContinuousDeploymentPolicy either changes a setting
+cloudfront UpdateDistribution deploy 
+cloudfront UpdateDistributionTenant either changes a setting
+cloudfront UpdateDistributionWithStagingConfig deploy 
+cloudfront UpdateDomainAssociation either 
+cloudfront UpdateFieldLevelEncryptionConfig either changes a setting
+cloudfront UpdateFieldLevelEncryptionProfile either changes a setting
+cloudfront UpdateFunction deploy 
+cloudfront UpdateKeyGroup either 
+cloudfront UpdateKeyValueStore either 
+cloudfront UpdateOriginAccessControl either changes a setting
+cloudfront UpdateOriginRequestPolicy either changes a setting
+cloudfront UpdatePublicKey allow 
+cloudfront UpdateRealtimeLogConfig either changes a setting
+cloudfront UpdateResponseHeadersPolicy either changes a setting
+cloudfront UpdateStreamingDistribution either changes a setting
+cloudfront UpdateTrustStore either changes a setting
+cloudfront UpdateVpcOrigin either changes a setting
+elbv2 AddListenerCertificates allow 
+elbv2 AddTags allow tags
+elbv2 AddTrustStoreRevocations allow 
+elbv2 CreateListener allow 
+elbv2 CreateLoadBalancer allow 
+elbv2 CreateRule allow 
+elbv2 CreateTargetGroup allow 
+elbv2 CreateTrustStore allow 
+elbv2 DeleteListener hold:outage 
+elbv2 DeleteLoadBalancer hold:outage 
+elbv2 DeleteRule either 
+elbv2 DeleteSharedTrustStoreAssociation hold:outage 
+elbv2 DeleteTargetGroup hold:outage 
+elbv2 DeleteTrustStore hold:outage 
+elbv2 DeregisterTargets hold:outage 
+elbv2 ModifyCapacityReservation either changes a setting
+elbv2 ModifyIpPools either changes a setting
+elbv2 ModifyListener either 
+elbv2 ModifyListenerAttributes either changes a setting
+elbv2 ModifyLoadBalancerAttributes cond 
+elbv2 ModifyRule either changes a setting
+elbv2 ModifyTargetGroup either changes a setting
+elbv2 ModifyTargetGroupAttributes either changes a setting
+elbv2 ModifyTrustStore either changes a setting
+elbv2 RegisterTargets allow 
+elbv2 RemoveListenerCertificates hold:outage 
+elbv2 RemoveTags allow 
+elbv2 RemoveTrustStoreRevocations hold:exposed revoked client certificates work again
+elbv2 SetIpAddressType either 
+elbv2 SetRulePriorities either 
+elbv2 SetSecurityGroups either 
+elbv2 SetSubnets either 
+organizations AcceptHandshake hold:exposed 
+organizations AttachPolicy either 
+organizations CancelHandshake allow 
+organizations CloseAccount hold:gone 90 days to reopen, then gone
+organizations CreateAccount hold:money 
+organizations CreateGovCloudAccount hold:money 
+organizations CreateOrganization allow 
+organizations CreateOrganizationalUnit allow 
+organizations CreatePolicy allow 
+organizations DeclineHandshake allow 
+organizations DeleteOrganization hold:outage 
+organizations DeleteOrganizationalUnit allow only when empty
+organizations DeletePolicy either only when detached
+organizations DeleteResourcePolicy either 
+organizations DeregisterDelegatedAdministrator hold:outage 
+organizations DetachPolicy hold:exposed a guardrail goes
+organizations DisableAWSServiceAccess hold:outage 
+organizations DisablePolicyType hold:exposed every policy of the type goes
+organizations EnableAWSServiceAccess either 
+organizations EnableAllFeatures either 
+organizations EnablePolicyType allow 
+organizations InviteAccountToOrganization hold:exposed 
+organizations InviteOrganizationToTransferResponsibility hold:exposed 
+organizations LeaveOrganization hold:outage 
+organizations MoveAccount either 
+organizations PutResourcePolicy either 
+organizations RegisterDelegatedAdministrator hold:exposed 
+organizations RemoveAccountFromOrganization hold:outage 
+organizations TagResource allow tags
+organizations TerminateResponsibilityTransfer hold:outage 
+organizations UntagResource allow tags
+organizations UpdateOrganizationalUnit either changes a setting
+organizations UpdatePolicy either 
+organizations UpdateResponsibilityTransfer either 
