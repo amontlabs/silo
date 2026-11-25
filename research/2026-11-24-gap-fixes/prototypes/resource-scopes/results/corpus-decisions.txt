@@ -1,0 +1,54 @@
+git-clone                  GET    github.com               /victim/app.git/info/refs?service=git-upload -> read    allow | Git refs (git-upload-pack)
+git-clone                  POST   github.com               /victim/app.git/git-upload-pack              -> read    allow | Git fetch
+git-clone                  POST   github.com               /victim/app.git/git-upload-pack              -> read    allow | Git fetch
+git-push-branch            GET    github.com               /victim/app.git/info/refs?service=git-receiv -> read    allow | Git refs (git-receive-pack)
+git-push-branch            POST   github.com               /victim/app.git/git-receive-pack             -> change  allow | push refs/heads/agent/fix
+git-push-workflow          GET    github.com               /victim/app.git/info/refs?service=git-receiv -> read    allow | Git refs (git-receive-pack)
+git-push-workflow          POST   github.com               /victim/app.git/git-receive-pack             -> runs    hold  | push refs/heads/agent/wf; changes .github/workflows
+git-push-new-workflow-file GET    github.com               /victim/app.git/info/refs?service=git-receiv -> read    allow | Git refs (git-receive-pack)
+git-push-new-workflow-file POST   github.com               /victim/app.git/git-receive-pack             -> runs    hold  | push refs/heads/agent/evil; changes .github/workflows
+git-push-default           GET    github.com               /victim/app.git/info/refs?service=git-receiv -> read    allow | Git refs (git-receive-pack)
+git-push-default           POST   github.com               /victim/app.git/git-receive-pack             -> change  allow | push refs/heads/main
+git-push-force             GET    github.com               /victim/app.git/info/refs?service=git-receiv -> read    allow | Git refs (git-receive-pack)
+git-push-force             POST   github.com               /victim/app.git/git-receive-pack             -> destroy hold  | push refs/heads/main that may rewrite it: c05f4c0 is not an ancestor in the pack
+git-push-tag               GET    github.com               /victim/app.git/info/refs?service=git-receiv -> read    allow | Git refs (git-receive-pack)
+git-push-tag               POST   github.com               /victim/app.git/git-receive-pack             -> change  allow | push refs/tags/v1
+git-delete-branch          GET    github.com               /victim/app.git/info/refs?service=git-receiv -> read    allow | Git refs (git-receive-pack)
+git-delete-branch          POST   github.com               /victim/app.git/git-receive-pack             -> destroy hold  | push deletes refs/heads/agent/fix
+git-push-other-repo        GET    github.com               /victim/loot.git/info/refs?service=git-recei -> read    deny  | read outside the named places: Git refs (git-receive-pack)
+git-push-other-repo        POST   github.com               /victim/loot.git/git-receive-pack            -> change  deny  | change outside the named places: push refs/heads/main
+git-push-no-dotgit         GET    github.com               /victim/app/info/refs?service=git-receive-pa -> read    allow | Git refs (git-receive-pack)
+git-push-no-dotgit         POST   github.com               /victim/app/git-receive-pack                 -> change  allow | push refs/heads/agent/nodotgit
+gh-auth-status             POST   api.github.com           /graphql                                     -> read    allow | GraphQL query viewer (own fields only)
+gh-repo-create             POST   api.github.com           /graphql                                     -> create  hold  | GraphQL createRepository
+gh-api-user-repos          POST   api.github.com           /user/repos                                  -> create  hold  | REST repos/create-for-authenticated-user
+gh-gist-create             POST   api.github.com           /gists                                       -> create  hold  | REST gists/create
+gh-issue-create            POST   api.github.com           /graphql                                     -> read    allow | GraphQL query repository
+gh-issue-create            POST   api.github.com           /graphql                                     -> change  allow | GraphQL createIssue
+gh-repo-edit-visibility    PATCH  api.github.com           /repos/victim/app                            -> expose  hold  | REST repos/update (names visibility)
+gh-release-create          HEAD   api.github.com           /repos/victim/app/releases/tags/v1           -> read    allow | REST repos/get-release-by-tag
+gh-api-release-create      POST   api.github.com           /repos/victim/app/releases                   -> expose  hold  | REST repos/create-release
+gh-release-upload          GET    api.github.com           /repos/victim/app/releases/tags/v1           -> read    allow | REST repos/get-release-by-tag
+gh-release-upload          POST   api.github.com           /graphql                                     -> read    allow | GraphQL query repository
+gh-repo-fork               POST   api.github.com           /repos/other/proj/forks                      -> create  hold  | REST repos/create-fork
+gh-secret-set              GET    api.github.com           /repos/victim/app/actions/secrets/public-key -> read    allow | REST actions/get-repo-public-key
+gh-secret-set              PUT    api.github.com           /repos/victim/app/actions/secrets/FOO        -> change  allow | REST actions/create-or-update-repo-secret
+gh-workflow-run            POST   api.github.com           /graphql                                     -> read    allow | GraphQL query repository
+gh-workflow-run            GET    api.github.com           /repos/victim/app/actions/workflows/ci.yml   -> read    allow | REST actions/get-workflow
+gh-workflow-run            POST   api.github.com           /repos/victim/app/actions/workflows/0/dispat -> runs    hold  | REST actions/create-workflow-dispatch
+gh-repo-delete             DELETE api.github.com           /repos/victim/app                            -> destroy hold  | REST repos/delete
+gh-ssh-key-add             GET    api.github.com           /user/keys?per_page=100                      -> read    allow | REST users/list-public-ssh-keys-for-authenticated-user
+gh-ssh-key-add             POST   api.github.com           /user/keys                                   -> expose  deny  | expose outside the named places: REST users/create-public-ssh-key-for-authenticated-user
+gh-deploy-key-add          POST   api.github.com           /repos/victim/app/keys                       -> expose  hold  | REST repos/create-deploy-key
+gh-api-graphql-createrepo  POST   api.github.com           /graphql                                     -> create  hold  | GraphQL createRepository
+gh-api-graphql-alias       POST   api.github.com           /graphql                                     -> change  allow | GraphQL createIssue
+gh-pr-list                 POST   api.github.com           /graphql                                     -> read    allow | GraphQL query repository
+gh-api-with-override       GET    api.github.com           /repos/victim/app                            -> unknown hold  | not classified: the request asks the host to read it as another method
+npm-publish                GET    registry.npmjs.org       /npm                                         -> read    allow | npm metadata or tarball
+npm-publish                GET    registry.npmjs.org       /npm                                         -> read    allow | npm metadata or tarball
+npm-publish                PUT    registry.npmjs.org       /victim-pkg                                  -> expose  hold  | npm publish
+twine-upload               POST   upload.pypi.org          /legacy/                                     -> expose  hold  | PyPI upload
+boto3-put-object           PUT    attacker-drop.s3.amazonaws.com /loot.txt                                    -> change  deny  | change outside the named places: S3 write
+boto3-put-object           PUT    victim-builds.s3.amazonaws.com /ok.txt                                      -> change  allow | S3 write
+decisions: {'allow': 31, 'hold': 17, 'deny': 4}
+tree lookups made by the boundary: 10 [('repo:victim/app', 'default-br'), ('repo:victim/app', 'default-br'), ('repo:victim/app', 'default-br'), ('repo:victim/app', '8d88cf2a34'), ('repo:victim/app', 'c05f4c00c1'), ('repo:victim/app', '43aa08f025'), ('repo:victim/app', 'default-br'), ('repo:victim/loot', 'default-br'), ('repo:victim/app', '43aa08f025'), ('repo:victim/app', 'default-br')]

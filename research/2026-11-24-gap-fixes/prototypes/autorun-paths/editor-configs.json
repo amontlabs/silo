@@ -1,0 +1,9 @@
+{
+  "about": "Measured apart: configuration files that are themselves code, which editor extensions load when the folder opens (ESLint, Prettier, Tailwind CSS IntelliSense, the Jest extension). Kept out of autorun-paths.json; see the doc for why.",
+  "entries": [
+    {"id": "editor-code-configs", "paths": ["**/eslint.config.*", "**/.eslintrc.js", "**/.eslintrc.cjs", "**/prettier.config.*", "**/.prettierrc.js", "**/.prettierrc.cjs", "**/.prettierrc.mjs", "**/tailwind.config.*", "**/jest.config.*", "**/vitest.config.*", "**/postcss.config.*"],
+     "tool": "VS Code extensions (ESLint, Prettier, Tailwind CSS, Jest, Vitest)", "class": "runs",
+     "trigger": "the extension loads the configuration, which is JavaScript, when a file of the folder opens", "gate": "Workspace Trust",
+     "check": {"kind": "any"}, "source": "https://eslint.org/docs/latest/use/configure/configuration-files"}
+  ]
+}

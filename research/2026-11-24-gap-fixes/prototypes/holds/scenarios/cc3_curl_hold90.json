@@ -1,0 +1,1 @@
+{"probe": false, "steps": [{"calls": [{"name": "Bash", "input": {"command": "curl -sS -X POST http://127.0.0.1:8711/v1/charges -d amount=4000; echo \"exit=$?\"", "description": "charge"}}]}]}

@@ -1,0 +1,82 @@
+
+== (a) git clone and push, the computer holding only the placeholder
+PASS git clone through the boundary
+PASS the clone's .git/config holds the placeholder, not the real token
+PASS git push of a 3 MiB commit through the boundary
+PASS the server's main is the pushed commit  [8d319025f296]
+PASS every authenticated git request carried the real token, in Basic only  [6 authenticated of 8 requests; encodings seen ['None/None', 'None/chunked']]
+PASS no git request reached the server with the placeholder
+PASS the record shows each swap as a fact, slot named  [6 swaps of 8 requests]
+PASS the 3 MiB push body was forwarded as it came  [3148914 bytes framed]
+
+== (b) bodies that hold placeholders are forwarded byte for byte
+PASS plain JSON over HTTP: body hash equal before and after  [7befe50907036291]
+PASS plain JSON over HTTP: real token only in the Authorization header, placeholders still in the body  [real:REAL_GH->['header Authorization']]
+PASS plain JSON over HTTPS: body hash equal before and after  [7befe50907036291]
+PASS plain JSON over HTTPS: real token only in the Authorization header, placeholders still in the body  [real:REAL_GH->['header Authorization']]
+PASS gzip JSON over HTTP: body hash equal before and after  [2fa7240559715a26]
+PASS gzip JSON over HTTP: real token only in the Authorization header, placeholders still in the body  [real:REAL_GH->['header Authorization']]
+PASS gzip JSON over HTTPS: body hash equal before and after  [2fa7240559715a26]
+PASS gzip JSON over HTTPS: real token only in the Authorization header, placeholders still in the body  [real:REAL_GH->['header Authorization']]
+PASS the record lists the placeholders seen in the bodies, as facts  [7 sightings in the last request]
+
+== (c) replies that send the real value back
+PASS      plain (http): no real value reaches the computer  [placeholder form returned; 238 bytes]
+PASS      plain (https): no real value reaches the computer  [placeholder form returned; 277 bytes]
+PASS       gzip (http): no real value reaches the computer  [placeholder form returned; 200 bytes]
+PASS    chunked (http): no real value reaches the computer  [placeholder form returned; 168 bytes]
+PASS     base64 (http): no real value reaches the computer  [neither form found; 180 bytes]
+PASS first-half (http): no real value reaches the computer  [placeholder form returned; 147 bytes]
+PASS     masked (http): no real value reaches the computer  [neither form found; 217 bytes]
+PASS the record lists each scrub, by secret and form  [base64/0 in reply body; plain in reply body; plain in reply body (decoded); plain in reply header x-echo-auth; run of 20 in reply body]
+PASS a reversed echo is NOT caught (known limit)  [the reversed real token reached the computer]
+PASS redirect to another host, client resending Authorization: the other host gets placeholders only  [[{"ph:PH_GH": ["header Authorization", "path"]}]]
+
+== bad paths
+PASS placeholder in another header of an allowed host: forwarded as is
+PASS the slot header sent twice: neither is swapped
+PASS Host header names another host than the request (fronting): not swapped
+PASS placeholder split over an obs-fold line: refused with 400, nothing forwarded
+PASS bare CR inside a header line: refused with 400
+PASS Basic password that only contains the placeholder: not swapped
+PASS another secret's placeholder in this host's slot: not swapped
+PASS the slot, towards a host not allowed for the secret: placeholder forwarded, nothing denied
+PASS query slot ?key= swapped on its host
+PASS placeholder in another query parameter: not swapped
+PASS cookie slot sid= swapped, other cookies untouched
+PASS the record never holds a real value
+
+== AWS SigV4: the computer signs with a placeholder secret key, the boundary re-signs
+PASS HTTP put_object 1000 bytes, checksums when_supported: object round-trips  [{"roundtrip": true} | payload: GET sha256 of body, PUT sha256 of body]
+PASS HTTP put_object 1000 bytes, checksums when_required: object round-trips  [{"roundtrip": true} | payload: GET sha256 of body, PUT sha256 of body]
+PASS HTTP put_object 9437184 bytes, checksums when_supported: object round-trips  [{"roundtrip": true} | payload: GET sha256 of body, PUT sha256 of body]
+PASS HTTP upload_fileobj 20 MiB (multipart): round-trips  [{"roundtrip": true} | GET sha256 of body, POST sha256 of body, PUT sha256 of body | 6 requests]
+PASS HTTPS put_object 1000 bytes, checksums when_supported: object round-trips  [{"roundtrip": true} | payload: GET sha256 of body, PUT STREAMING-UNSIGNED-PAYLOAD-TRAILER]
+PASS HTTPS put_object 1000 bytes, checksums when_required: object round-trips  [{"roundtrip": true} | payload: GET sha256 of body, PUT sha256 of body]
+PASS HTTPS put_object 9437184 bytes, checksums when_supported: object round-trips  [{"roundtrip": true} | payload: GET sha256 of body, PUT STREAMING-UNSIGNED-PAYLOAD-TRAILER]
+PASS HTTPS upload_fileobj 20 MiB (multipart): round-trips  [{"roundtrip": true} | GET sha256 of body, POST sha256 of body, PUT STREAMING-UNSIGNED-PAYLOAD-TRAILER | 6 requests]
+PASS before re-signing, the boundary verified the computer's signature with the placeholder key  [24 requests re-signed]
+PASS a presigned URL made inside, SigV2 (boto3's default for presign): works through the boundary  [200]
+PASS the same SigV2 (boto3's default for presign) URL used outside the boundary is refused  [403]
+PASS a presigned URL made inside, SigV4: works through the boundary  [200]
+PASS the same SigV4 URL used outside the boundary is refused  [403]
+PASS AWS SDK for JavaScript v3 over HTTPS: buffer and stream PutObject round-trip  [{"buffer":true,"stream":true} | GET sha256 of body, PUT STREAMING-UNSIGNED-PAYLOAD-TRAILER, PUT sha256 of body]
+INFO signed aws-chunked bodies (STREAMING-AWS4-HMAC-SHA256-PAYLOAD) seen: 0
+PASS a region outside the secret's scopes is not signed: AWS answers 403  [{"error": "SignatureDoesNotMatch"}]
+
+== gh, the GitHub CLI, with a placeholder token for an enterprise host
+PASS gh sends the token in a slot the boundary swaps  [slot [{'secret': 'GITHUB_TOKEN', 'slot': 'authorization: token'}], path /api/v3/user]
+
+== (d) Claude Code against the fake Messages API, with placeholders only
+PASS Claude Code finished its turn  [exit 0, 2 requests, 0.7s]
+PASS every request reached the provider with the real key in x-api-key
+PASS the real key was never anywhere else in a request
+PASS after `env`, the placeholders travel in the body and arrive as placeholders  [1 requests; e.g. {'real:REAL_ANTHROPIC': ['header x-api-key'], 'ph:PH_GH': ['body'], 'ph:PH_ANTHROPIC': ['body'], 'ph:PH_OPENAI': ['body']}]
+PASS each body arrived with the hash it left with  [encodings ['None']]
+PASS the conversation Claude Code kept holds no real value
+
+61 of 61 checks passed. Work folder: <scratch>/cslots-8ghv7amd
+seed signature matches the documentation: True
+chunk signatures match: [True, True, True]
+body length is the documented Content-Length: True
+re-signed 3 chunks; old chain valid: True; new chain valid: True; length kept: True; bytes changed: 181 (all inside the three 64-digit signatures)

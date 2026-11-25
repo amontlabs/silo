@@ -1,0 +1,37 @@
+{"t": 0.0, "host": "registry.npmjs.org", "port": 443, "proc": {"cmd": "npm install  ", "parent": "bash -c npm install --no-audit --no-fund --foreground-scripts; echo npm-exit=$?; npx playwright inst"}}
+{"t": 0.02, "host": "registry.npmjs.org", "port": 443, "proc": {"cmd": "npm install  ", "parent": "bash -c npm install --no-audit --no-fund --foreground-scripts; echo npm-exit=$?; npx playwright inst"}}
+{"t": 11.33, "host": "registry.npmjs.org", "port": 443, "proc": {"cmd": "npm install  ", "parent": "bash -c npm install --no-audit --no-fund --foreground-scripts; echo npm-exit=$?; npx playwright inst"}}
+{"t": 36.68, "host": "registry.npmjs.org", "port": 443, "proc": {"cmd": "npm install  ", "parent": "bash -c npm install --no-audit --no-fund --foreground-scripts; echo npm-exit=$?; npx playwright inst"}}
+{"t": 36.69, "host": "registry.npmjs.org", "port": 443, "proc": {"cmd": "npm install  ", "parent": "bash -c npm install --no-audit --no-fund --foreground-scripts; echo npm-exit=$?; npx playwright inst"}}
+{"t": 36.69, "host": "registry.npmjs.org", "port": 443, "proc": {"cmd": "npm install  ", "parent": "bash -c npm install --no-audit --no-fund --foreground-scripts; echo npm-exit=$?; npx playwright inst"}}
+{"t": 36.7, "host": "registry.npmjs.org", "port": 443, "proc": {"cmd": "npm install  ", "parent": "bash -c npm install --no-audit --no-fund --foreground-scripts; echo npm-exit=$?; npx playwright inst"}}
+{"t": 36.71, "host": "registry.npmjs.org", "port": 443, "proc": {"cmd": "npm install  ", "parent": "bash -c npm install --no-audit --no-fund --foreground-scripts; echo npm-exit=$?; npx playwright inst"}}
+{"t": 36.72, "host": "registry.npmjs.org", "port": 443, "proc": {"cmd": "npm install  ", "parent": "bash -c npm install --no-audit --no-fund --foreground-scripts; echo npm-exit=$?; npx playwright inst"}}
+{"t": 36.73, "host": "registry.npmjs.org", "port": 443, "proc": {"cmd": "npm install  ", "parent": "bash -c npm install --no-audit --no-fund --foreground-scripts; echo npm-exit=$?; npx playwright inst"}}
+{"t": 36.73, "host": "registry.npmjs.org", "port": 443, "proc": {"cmd": "npm install  ", "parent": "bash -c npm install --no-audit --no-fund --foreground-scripts; echo npm-exit=$?; npx playwright inst"}}
+{"t": 36.74, "host": "registry.npmjs.org", "port": 443, "proc": {"cmd": "npm install  ", "parent": "bash -c npm install --no-audit --no-fund --foreground-scripts; echo npm-exit=$?; npx playwright inst"}}
+{"t": 36.75, "host": "registry.npmjs.org", "port": 443, "proc": {"cmd": "npm install  ", "parent": "bash -c npm install --no-audit --no-fund --foreground-scripts; echo npm-exit=$?; npx playwright inst"}}
+{"t": 36.76, "host": "registry.npmjs.org", "port": 443, "proc": {"cmd": "npm install  ", "parent": "bash -c npm install --no-audit --no-fund --foreground-scripts; echo npm-exit=$?; npx playwright inst"}}
+{"t": 36.77, "host": "registry.npmjs.org", "port": 443, "proc": {"cmd": "npm install  ", "parent": "bash -c npm install --no-audit --no-fund --foreground-scripts; echo npm-exit=$?; npx playwright inst"}}
+{"t": 55.67, "host": "github.com", "port": 443, "proc": {"cmd": "node <dir>/hosts/npm2/node_modules/.bin/prebuild-install ", "parent": "sh -c prebuild-install || node-gyp rebuild --release"}}
+{"t": 56.09, "host": "release-assets.githubusercontent.com", "port": 443, "proc": {"cmd": "node <dir>/hosts/npm2/node_modules/.bin/prebuild-install ", "parent": "sh -c prebuild-install || node-gyp rebuild --release"}}
+{"t": 56.67, "host": "github.com", "port": 443, "proc": {"cmd": "node <dir>/hosts/npm2/node_modules/.bin/prebuild-install -r", "parent": "sh -c prebuild-install -r napi || node-gyp rebuild"}}
+{"t": 56.87, "host": "release-assets.githubusercontent.com", "port": 443, "proc": {"cmd": "node <dir>/hosts/npm2/node_modules/.bin/prebuild-install -r", "parent": "sh -c prebuild-install -r napi || node-gyp rebuild"}}
+{"t": 57.96, "host": "github.com", "port": 443, "proc": {"cmd": "node <dir>/hosts/npm2/node_modules/.bin/prebuild-install -r", "parent": "sh -c prebuild-install -r napi || node-gyp rebuild"}}
+{"t": 58.14, "host": "release-assets.githubusercontent.com", "port": 443, "proc": {"cmd": "node <dir>/hosts/npm2/node_modules/.bin/prebuild-install -r", "parent": "sh -c prebuild-install -r napi || node-gyp rebuild"}}
+{"t": 59.94, "host": "binaries.prisma.sh", "port": 443, "proc": {"cmd": "/opt/claude-code/bin/claude --preload /home/claude/.claude/remote/spare.sock", "parent": "/usr/local/bin/environment-manager task-run --stdin"}}
+{"t": 59.95, "host": "binaries.prisma.sh", "port": 443, "proc": {"cmd": "node <dir>/hosts/npm2/node_modules/.bin/prisma -v", "parent": "/bin/sh -c prisma -v"}}
+{"t": 59.96, "host": "binaries.prisma.sh", "port": 443, "proc": {"cmd": "node <dir>/hosts/npm2/node_modules/.bin/prisma -v", "parent": "/bin/sh -c prisma -v"}}
+{"t": 59.96, "host": "binaries.prisma.sh", "port": 443, "proc": {"cmd": "node <dir>/hosts/npm2/node_modules/.bin/prisma -v", "parent": "/bin/sh -c prisma -v"}}
+{"t": 60.38, "host": "binaries.prisma.sh", "port": 443, "proc": {"cmd": "node <dir>/hosts/npm2/node_modules/.bin/prisma -v", "parent": "/bin/sh -c prisma -v"}}
+{"t": 60.39, "host": "binaries.prisma.sh", "port": 443, "proc": {"cmd": "node <dir>/hosts/npm2/node_modules/.bin/prisma -v", "parent": "/bin/sh -c prisma -v"}}
+{"t": 64.04, "host": "download.cypress.io", "port": 443, "proc": {"cmd": "node dist/index.js --exec", "parent": "sh -c node dist/index.js --exec install"}}
+{"t": 64.25, "host": "cdn.cypress.io", "port": 443, "proc": {"cmd": "node dist/index.js --exec", "parent": "sh -c node dist/index.js --exec install"}}
+{"t": 92.79, "host": "storage.googleapis.com", "port": 443, "proc": {"cmd": "node install.mjs ", "parent": "sh -c node install.mjs"}}
+{"t": 92.81, "host": "storage.googleapis.com", "port": 443, "proc": {"cmd": "node install.mjs ", "parent": "sh -c node install.mjs"}}
+{"t": 107.9, "host": "cdn.playwright.dev", "port": 443, "proc": {"cmd": "/opt/node22/bin/node <dir>/hosts/npm2/node_modules/playwright-core/lib/server/registry/oopDow", "parent": "node <dir>/hosts/npm2/node_modules/.bin/playwright install"}}
+{"t": 108.34, "host": "playwright.download.prss.microsoft.com", "port": 443, "proc": {"cmd": "/opt/node22/bin/node <dir>/hosts/npm2/node_modules/playwright-core/lib/server/registry/oopDow", "parent": "node <dir>/hosts/npm2/node_modules/.bin/playwright install"}}
+{"t": 127.31, "host": "cdn.playwright.dev", "port": 443, "proc": {"cmd": "/opt/node22/bin/node <dir>/hosts/npm2/node_modules/playwright-core/lib/server/registry/oopDow", "parent": "node <dir>/hosts/npm2/node_modules/.bin/playwright install"}}
+{"t": 127.77, "host": "playwright.download.prss.microsoft.com", "port": 443, "proc": {"cmd": "/opt/node22/bin/node <dir>/hosts/npm2/node_modules/playwright-core/lib/server/registry/oopDow", "parent": "node <dir>/hosts/npm2/node_modules/.bin/playwright install"}}
+{"t": 128.45, "host": "cdn.playwright.dev", "port": 443, "proc": {"cmd": "/opt/node22/bin/node <dir>/hosts/npm2/node_modules/playwright-core/lib/server/registry/oopDow", "parent": "node <dir>/hosts/npm2/node_modules/.bin/playwright install"}}
+{"t": 128.63, "host": "playwright.download.prss.microsoft.com", "port": 443, "proc": {"cmd": "/opt/node22/bin/node <dir>/hosts/npm2/node_modules/playwright-core/lib/server/registry/oopDow", "parent": "node <dir>/hosts/npm2/node_modules/.bin/playwright install"}}

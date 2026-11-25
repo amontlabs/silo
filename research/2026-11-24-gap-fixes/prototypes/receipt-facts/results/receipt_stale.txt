@@ -1,0 +1,29 @@
+# scenario: stale — with the probe (collector.bt)
+Test runs
+  $ python3 -m pytest 2>&1 | head -4   [seen: the command the model asked for]
+    pytest (python3 -m pytest): output cut, outcome unknown, exit 1   [told by the probe]
+    no test count in the output shown to the agent
+  $ python3 -m pytest -q 2>&1 | tail -2   [seen: the command the model asked for]
+    pytest (python3 -m pytest -q): passed, exit 0   [told by the probe]
+    the output shown to the agent says: 5 passed   [seen; who printed it is not]
+    STALE: changed after this pass: calc.py   [seen: checkpoints request 3 and request 4]
+
+The agent said (its own words, beside the receipt):
+  "Fixed div and tidied mean. All tests pass."
+Against the record: STALE   [Silo's classifier thinks]
+  - a pass (`python3 -m pytest -q`) was followed by changes to calc.py
+
+# scenario: stale — traffic and checkpoints only, no probe
+Test runs
+  $ python3 -m pytest 2>&1 | head -4   [seen: the command the model asked for]
+    unknown: no summary in what the agent was shown   [seen: the output shown to the agent]
+    no test count in the output shown to the agent
+  $ python3 -m pytest -q 2>&1 | tail -2   [seen: the command the model asked for]
+    passed, as the output shown says   [seen: the output shown to the agent]
+    the output shown to the agent says: 5 passed   [seen; who printed it is not]
+    STALE: changed after this pass: calc.py   [seen: checkpoints request 3 and request 4]
+
+The agent said (its own words, beside the receipt):
+  "Fixed div and tidied mean. All tests pass."
+Against the record: STALE   [Silo's classifier thinks]
+  - a pass (`python3 -m pytest -q 2>&1 | tail -2`) was followed by changes to calc.py

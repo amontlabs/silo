@@ -1,0 +1,15 @@
+1281 operations
+effects: {'read': 671, 'expose': 229, 'change': 173, 'destroy': 164, 'runs': 32, 'create': 10, 'unknown': 2}
+classes: {'within': 844, 'creates or exposes': 271, 'destroys': 164, 'unknown': 2}
+decided for a token limited to victim/app, on victim/app or outside any repository:
+   creates or exposes   deny  178
+   creates or exposes   hold  93
+   destroys             deny  100
+   destroys             hold  64
+   unknown              hold  2
+   within               allow 522
+   within               deny  316
+   within               hold  6
+the same repository operations on attacker/inbox: {'deny': 561, 'hold': 3}
+requests not read as the operation they were made from: 1
+    POST /orgs/{org}/attestations/bulk-list POST /orgs/acme/attestations/bulk-list matches operations with different effects: orgs/list-attestat

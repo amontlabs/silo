@@ -1,0 +1,181 @@
+1281 operations from 1.1.4
+  read     672
+  expose   230
+  change   172
+  destroy  164
+  runs     32
+  create   10
+  unknown  1
+by what decided it: {'method': 667, 'rule': 491, 'fallback': 123}
+scopes: {'global': 64, 'repo': 564, 'app': 22, 'enterprise': 31, 'gist': 19, 'account': 106, 'org': 386, 'repo-id': 26, 'other-user': 63}
+writes whose body names another place: 46
+    POST /app/installations/{installation_id}/access_tokens ['repositories', 'repository_ids']
+    POST /applications/{client_id}/token/scoped ['repositories', 'repository_ids', 'target']
+    PUT /orgs/{org}/actions/permissions/repositories ['selected_repository_ids']
+    PUT /orgs/{org}/actions/permissions/self-hosted-runners/repositories ['selected_repository_ids']
+    POST /orgs/{org}/actions/runner-groups ['selected_repository_ids']
+    PUT /orgs/{org}/actions/runner-groups/{runner_group_id}/repositories ['selected_repository_ids']
+    PUT /orgs/{org}/actions/secrets/{secret_name} ['selected_repository_ids']
+    PUT /orgs/{org}/actions/secrets/{secret_name}/repositories ['selected_repository_ids']
+    POST /orgs/{org}/actions/variables ['selected_repository_ids']
+    PATCH /orgs/{org}/actions/variables/{name} ['selected_repository_ids']
+    PUT /orgs/{org}/actions/variables/{name}/repositories ['selected_repository_ids']
+    PUT /orgs/{org}/agents/secrets/{secret_name} ['selected_repository_ids']
+    PUT /orgs/{org}/agents/secrets/{secret_name}/repositories ['selected_repository_ids']
+    POST /orgs/{org}/agents/variables ['selected_repository_ids']
+    PATCH /orgs/{org}/agents/variables/{name} ['selected_repository_ids']
+    PUT /orgs/{org}/agents/variables/{name}/repositories ['selected_repository_ids']
+    POST /orgs/{org}/artifacts/metadata/storage-record ['repository']
+    DELETE /orgs/{org}/code-security/configurations/detach ['selected_repository_ids']
+    POST /orgs/{org}/code-security/configurations/{configuration_id}/attach ['selected_repository_ids']
+    PUT /orgs/{org}/codespaces/secrets/{secret_name} ['selected_repository_ids']
+    PUT /orgs/{org}/codespaces/secrets/{secret_name}/repositories ['selected_repository_ids']
+    PUT /orgs/{org}/copilot/coding-agent/permissions/repositories ['selected_repository_ids']
+    PUT /orgs/{org}/dependabot/secrets/{secret_name} ['selected_repository_ids']
+    PUT /orgs/{org}/dependabot/secrets/{secret_name}/repositories ['selected_repository_ids']
+    POST /orgs/{org}/migrations ['repositories']
+    POST /orgs/{org}/private-registries ['selected_repository_ids']
+    PATCH /orgs/{org}/private-registries/{secret_name} ['selected_repository_ids']
+    POST /orgs/{org}/projectsV2/{project_number}/items ['owner', 'repo']
+    POST /orgs/{org}/rulesets ['target']
+    PUT /orgs/{org}/rulesets/{ruleset_id} ['target']
+    PUT /orgs/{org}/settings/immutable-releases ['selected_repository_ids']
+    PUT /orgs/{org}/settings/immutable-releases/repositories ['selected_repository_ids']
+    POST /repos/{owner}/{repo}/branches/{branch}/rename ['new_name']
+    POST /repos/{owner}/{repo}/code-scanning/codeql/variant-analyses ['repositories']
+    POST /repos/{owner}/{repo}/forks ['organization']
+    PATCH /repos/{owner}/{repo}/labels/{name} ['new_name']
+    POST /repos/{owner}/{repo}/merges ['head']
+    POST /repos/{owner}/{repo}/pulls ['head']
+    POST /repos/{owner}/{repo}/rulesets ['target']
+    PUT /repos/{owner}/{repo}/rulesets/{ruleset_id} ['target']
+    POST /repos/{owner}/{repo}/transfer ['new_name', 'new_owner']
+    POST /repos/{template_owner}/{template_repo}/generate ['owner']
+    PUT /user/codespaces/secrets/{secret_name} ['selected_repository_ids']
+    PUT /user/codespaces/secrets/{secret_name}/repositories ['selected_repository_ids']
+    POST /user/migrations ['repositories']
+    POST /users/{username}/projectsV2/{project_number}/items ['owner', 'repo']
+fallbacks:
+    expose POST /app-manifests/{code}/conversions | fallback: category apps
+    expose PATCH /app/hook/config | fallback: category apps
+    expose PUT /app/installations/{installation_id}/suspended | fallback: category apps
+    expose POST /credentials/revoke | fallback: category credentials
+    change PUT /repos/{owner}/{repo}/actions/cache/retention-limit | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/actions/cache/storage-limit | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/actions/policies | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/actions/policies/{policy_id} | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/actions/runners/{runner_id}/labels | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/actions/runners/{runner_id}/labels | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/actions/runs/{run_id}/cancel | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/actions/runs/{run_id}/force-cancel | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/actions/secrets/{secret_name} | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/actions/variables | fallback: write inside a repository
+    change PATCH /repos/{owner}/{repo}/actions/variables/{name} | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/actions/workflows/{workflow_id}/disable | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/agents/secrets/{secret_name} | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/agents/variables | fallback: write inside a repository
+    change PATCH /repos/{owner}/{repo}/agents/variables/{name} | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/attestations | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/autolinks | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/automated-security-fixes | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/branches/{branch}/rename | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/check-runs | fallback: write inside a repository
+    change PATCH /repos/{owner}/{repo}/check-runs/{check_run_id} | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/check-suites | fallback: write inside a repository
+    change PATCH /repos/{owner}/{repo}/check-suites/preferences | fallback: write inside a repository
+    change PATCH /repos/{owner}/{repo}/code-quality/setup | fallback: write inside a repository
+    change PATCH /repos/{owner}/{repo}/code-scanning/ai-scan | fallback: write inside a repository
+    change PATCH /repos/{owner}/{repo}/code-scanning/alerts/{alert_number} | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}/autofix | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}/autofix/commits | fallback: write inside a repository
+    change PATCH /repos/{owner}/{repo}/code-scanning/default-setup | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/code-scanning/sarifs | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/codespaces/secrets/{secret_name} | fallback: write inside a repository
+    change PATCH /repos/{owner}/{repo}/comments/{comment_id} | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/comments/{comment_id}/reactions | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/commits/{commit_sha}/comments | fallback: write inside a repository
+    expose PATCH /repos/{owner}/{repo}/copilot/code-review/settings | fallback: category copilot
+    change PATCH /repos/{owner}/{repo}/dependabot/alerts/{alert_number} | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/dependabot/runner-settings | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/dependabot/secrets/{secret_name} | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/dependency-graph/snapshots | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/environments/{environment_name}/secrets/{secret_name} | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/environments/{environment_name}/variables | fallback: write inside a repository
+    change PATCH /repos/{owner}/{repo}/environments/{environment_name}/variables/{name} | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/git/blobs | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/git/commits | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/git/refs | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/git/tags | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/git/trees | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/immutable-releases | fallback: write inside a repository
+    expose PUT /repos/{owner}/{repo}/import | fallback: category migrations
+    expose PATCH /repos/{owner}/{repo}/import | fallback: category migrations
+    expose PATCH /repos/{owner}/{repo}/import/authors/{author_id} | fallback: category migrations
+    expose PATCH /repos/{owner}/{repo}/import/lfs | fallback: category migrations
+    expose PUT /repos/{owner}/{repo}/interaction-limits | fallback: category interactions
+    expose PUT /repos/{owner}/{repo}/interaction-limits/pulls/bypass-list | fallback: category interactions
+    expose PATCH /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap | fallback: category interactions
+    change POST /repos/{owner}/{repo}/issues | fallback: write inside a repository
+    change PATCH /repos/{owner}/{repo}/issues/comments/{comment_id} | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/issues/comments/{comment_id}/pin | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions | fallback: write inside a repository
+    change PATCH /repos/{owner}/{repo}/issues/{issue_number} | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/issues/{issue_number}/artifacts | fallback: write inside a repository
+    change PATCH /repos/{owner}/{repo}/issues/{issue_number}/artifacts/{artifact_number} | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/issues/{issue_number}/assignees | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/issues/{issue_number}/comments | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/issues/{issue_number}/issue-field-values | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/issues/{issue_number}/issue-field-values | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/issues/{issue_number}/labels | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/issues/{issue_number}/labels | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/issues/{issue_number}/lock | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/issues/{issue_number}/reactions | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/issues/{issue_number}/relates_to | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues | fallback: write inside a repository
+    change PATCH /repos/{owner}/{repo}/issues/{issue_number}/sub_issues/priority | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/issues/{issue_number}/suggestions/{suggestion_id}/approve | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/issues/{issue_number}/suggestions/{suggestion_id}/dismiss | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/labels | fallback: write inside a repository
+    change PATCH /repos/{owner}/{repo}/labels/{name} | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/milestones | fallback: write inside a repository
+    change PATCH /repos/{owner}/{repo}/milestones/{milestone_number} | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/notifications | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/pages/deployments/{pages_deployment_id}/cancel | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/private-vulnerability-reporting | fallback: write inside a repository
+    change PATCH /repos/{owner}/{repo}/properties/values | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/pulls | fallback: write inside a repository
+    change PATCH /repos/{owner}/{repo}/pulls/comments/{comment_id} | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions | fallback: write inside a repository
+    change PATCH /repos/{owner}/{repo}/pulls/{pull_number} | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/pulls/{pull_number}/comments | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/pulls/{pull_number}/copilot-code-review | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id} | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/dismissals | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/events | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/pulls/{pull_number}/update-branch | fallback: write inside a repository
+    change PATCH /repos/{owner}/{repo}/releases/assets/{asset_id} | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/releases/generate-notes | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/releases/{release_id}/reactions | fallback: write inside a repository
+    change PATCH /repos/{owner}/{repo}/secret-scanning/alerts/{alert_number} | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/secret-scanning/custom-patterns | fallback: write inside a repository
+    change PATCH /repos/{owner}/{repo}/secret-scanning/custom-patterns/{pattern_id} | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/stacks | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/stacks/{stack_number}/add | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/stacks/{stack_number}/unstack | fallback: write inside a repository
+    change POST /repos/{owner}/{repo}/statuses/{sha} | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/subscription | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/topics | fallback: write inside a repository
+    change PUT /repos/{owner}/{repo}/vulnerability-alerts | fallback: write inside a repository
+    expose PATCH /teams/{team_id} | fallback: category teams
+    unknown POST /users/{username}/attestations/delete-request | fallback: no rule
+    expose POST /users/{username}/copilot-spaces | fallback: category copilot-spaces
+    expose PUT /users/{username}/copilot-spaces/{space_number} | fallback: category copilot-spaces
+    expose POST /users/{username}/copilot-spaces/{space_number}/collaborators | fallback: category copilot-spaces
+    expose POST /users/{username}/copilot-spaces/{space_number}/resources | fallback: category copilot-spaces
+    expose PUT /users/{username}/copilot-spaces/{space_number}/resources/{space_resource_id} | fallback: category copilot-spaces
+    expose POST /users/{username}/packages/{package_type}/{package_name}/restore | fallback: category packages
+    expose POST /users/{username}/packages/{package_type}/{package_name}/versions/{package_version_id}/restore | fallback: category packages

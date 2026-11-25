@@ -1,0 +1,271 @@
+[
+ {
+  "url": "https://nextjs.org/docs/app/getting-started/installation",
+  "final_host": "nextjs.org",
+  "link_hosts": {
+   "vercel.com": 13,
+   "nextjs.org": 66,
+   "eve.dev": 2,
+   "svelte.dev": 2,
+   "nuxt.com": 2,
+   "nitro.build": 2,
+   "ai-sdk.dev": 2,
+   "chat-sdk.dev": 2,
+   "flags-sdk.dev": 2,
+   "workflow-sdk.dev": 2,
+   "turborepo.dev": 2,
+   "ui.shadcn.com": 2,
+   "swr.vercel.app": 2,
+   "justbash.dev": 2,
+   "deepsec.sh": 2,
+   "github.com": 6,
+   "nodejs.org": 1,
+   "react.dev": 1,
+   "preview.nextjs.org": 1,
+   "community.vercel.com": 1,
+   "bsky.app": 1,
+   "x.com": 1
+  }
+ },
+ {
+  "url": "https://nextjs.org/docs/app/api-reference/file-conventions/route",
+  "final_host": "nextjs.org",
+  "link_hosts": {
+   "vercel.com": 13,
+   "nextjs.org": 69,
+   "eve.dev": 2,
+   "svelte.dev": 2,
+   "nuxt.com": 2,
+   "nitro.build": 2,
+   "ai-sdk.dev": 2,
+   "chat-sdk.dev": 2,
+   "flags-sdk.dev": 2,
+   "workflow-sdk.dev": 2,
+   "turborepo.dev": 2,
+   "ui.shadcn.com": 2,
+   "swr.vercel.app": 2,
+   "justbash.dev": 2,
+   "deepsec.sh": 2,
+   "github.com": 6,
+   "developer.mozilla.org": 5,
+   "sdk.vercel.ai": 1,
+   "www.npmjs.com": 1,
+   "community.vercel.com": 1,
+   "bsky.app": 1,
+   "x.com": 1
+  }
+ },
+ {
+  "url": "https://react.dev/reference/react/useActionState",
+  "final_host": "react.dev",
+  "link_hosts": {
+   "react.dev": 164,
+   "github.com": 3,
+   "codesandbox.io": 8,
+   "opensource.fb.com": 2,
+   "twitter.com": 2,
+   "reactnative.dev": 1,
+   "opensource.facebook.com": 1,
+   "www.facebook.com": 1,
+   "bsky.app": 1
+  }
+ },
+ {
+  "url": "https://docs.stripe.com/checkout/quickstart",
+  "final_host": "docs.stripe.com",
+  "link_hosts": {
+   "dashboard.stripe.com": 4,
+   "docs.stripe.com": 71
+  }
+ },
+ {
+  "url": "https://docs.stripe.com/webhooks",
+  "final_host": "docs.stripe.com",
+  "link_hosts": {
+   "dashboard.stripe.com": 10,
+   "docs.stripe.com": 84,
+   "ngrok.com": 1,
+   "www.ssllabs.com": 1,
+   "www.owasp.org": 1,
+   "en.wikipedia.org": 2,
+   "support.stripe.com": 1,
+   "stripe.com": 2,
+   "markdoc.dev": 1
+  }
+ },
+ {
+  "url": "https://docs.stripe.com/api/checkout/sessions/create",
+  "final_host": "docs.stripe.com",
+  "link_hosts": {
+   "stripe.com": 3,
+   "docs.stripe.com": 129,
+   "support.stripe.com": 2,
+   "dashboard.stripe.com": 1,
+   "markdoc.dev": 1
+  }
+ },
+ {
+  "url": "https://www.prisma.io/docs/getting-started/quickstart-sqlite",
+  "final_host": "www.prisma.io",
+  "link_hosts": {
+   "www.prisma.io": 30,
+   "pris.ly": 3,
+   "console.prisma.io": 2,
+   "sqlite.org": 1,
+   "bun.com": 1,
+   "docs.deno.com": 1,
+   "github.com": 1,
+   "chatgpt.com": 1,
+   "claude.ai": 1
+  }
+ },
+ {
+  "url": "https://www.prisma.io/docs/orm/prisma-schema/data-model/models",
+  "final_host": "www.prisma.io",
+  "link_hosts": {
+   "www.prisma.io": 69,
+   "pris.ly": 2,
+   "console.prisma.io": 2,
+   "github.com": 1,
+   "chatgpt.com": 1,
+   "claude.ai": 1
+  }
+ },
+ {
+  "url": "https://vercel.com/docs/environment-variables",
+  "final_host": "vercel.com",
+  "link_hosts": {
+   "vercel.com": 237,
+   "v0.app": 3,
+   "community.vercel.com": 3,
+   "skills.sh": 1,
+   "eve.dev": 1,
+   "streamdown.ai": 1,
+   "is-agentic.com": 1,
+   "security.vercel.com": 1,
+   "www.vercel-status.com": 1,
+   "github.com": 1,
+   "x.com": 1,
+   "linkedin.com": 1,
+   "youtube.com": 1,
+   "www.instagram.com": 1
+  }
+ },
+ {
+  "url": "https://vercel.com/docs/functions",
+  "final_host": "vercel.com",
+  "link_hosts": {
+   "vercel.com": 266,
+   "v0.app": 3,
+   "community.vercel.com": 3,
+   "skills.sh": 1,
+   "eve.dev": 1,
+   "streamdown.ai": 1,
+   "is-agentic.com": 1,
+   "security.vercel.com": 1,
+   "www.vercel-status.com": 1,
+   "github.com": 1,
+   "x.com": 1,
+   "linkedin.com": 1,
+   "youtube.com": 1,
+   "www.instagram.com": 1
+  }
+ },
+ {
+  "url": "https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch",
+  "final_host": "developer.mozilla.org",
+  "link_hosts": {
+   "developer.mozilla.org": 209,
+   "scrimba.com": 1,
+   "github.com": 7,
+   "bsky.app": 1,
+   "x.com": 1,
+   "mastodon.social": 1,
+   "www.mozilla.org": 6,
+   "support.mozilla.org": 1,
+   "hacks.mozilla.org": 1
+  }
+ },
+ {
+  "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy",
+  "final_host": "developer.mozilla.org",
+  "link_hosts": {
+   "developer.mozilla.org": 606,
+   "scrimba.com": 1,
+   "github.com": 7,
+   "csp.withgoogle.com": 1,
+   "bsky.app": 1,
+   "x.com": 1,
+   "mastodon.social": 1,
+   "www.mozilla.org": 6,
+   "support.mozilla.org": 1,
+   "hacks.mozilla.org": 1
+  }
+ },
+ {
+  "url": "https://www.typescriptlang.org/docs/handbook/2/narrowing.html",
+  "final_host": "www.typescriptlang.org",
+  "link_hosts": {
+   "www.typescriptlang.org": 145,
+   "github.com": 2,
+   "go.microsoft.com": 2,
+   "devblogs.microsoft.com": 1,
+   "discord.gg": 1,
+   "twitter.com": 1,
+   "fosstodon.org": 1,
+   "stackoverflow.com": 1
+  }
+ },
+ {
+  "url": "https://tailwindcss.com/docs/installation/using-postcss",
+  "final_host": "tailwindcss.com",
+  "link_hosts": {
+   "tailwindcss.com": 217,
+   "play.tailwindcss.com": 3,
+   "github.com": 3,
+   "www.refactoringui.com": 2,
+   "headlessui.com": 2,
+   "heroicons.com": 2,
+   "heropatterns.com": 2,
+   "x.com": 2
+  }
+ },
+ {
+  "url": "https://nodejs.org/api/crypto.html",
+  "final_host": "nodejs.org",
+  "link_hosts": {
+   "cve.mitre.org": 1
+  }
+ },
+ {
+  "url": "https://docs.github.com/en/actions/writing-workflows/quickstart",
+  "final_host": "docs.github.com",
+  "link_hosts": {
+   "docs.github.com": 231,
+   "github.com": 11,
+   "support.github.com": 1,
+   "services.github.com": 1,
+   "github.blog": 1,
+   "www.githubstatus.com": 1
+  }
+ },
+ {
+  "url": "https://github.com/stripe/stripe-node",
+  "error": "HTTP Error 403: Forbidden"
+ },
+ {
+  "url": "https://www.npmjs.com/package/stripe",
+  "error": "HTTP Error 403: Forbidden"
+ },
+ {
+  "url": "https://stackoverflow.com/questions/76389957/nextjs-13-api-route-with-stripe-webhook",
+  "error": "HTTP Error 403: Forbidden"
+ },
+ {
+  "url": "https://www.postgresql.org/docs/current/sql-createindex.html",
+  "final_host": "www.postgresql.org",
+  "link_hosts": {
+   "www.postgresql.org": 68
+  }
+ }
+]

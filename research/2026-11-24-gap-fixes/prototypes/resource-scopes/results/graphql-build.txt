@@ -1,0 +1,8 @@
+285 mutations
+  change   160
+  expose   93
+  destroy  24
+  create   5
+  runs     3
+by what decided it: {'name names a setting of who may do what': 80, 'name starts with a verb that edits': 141, 'exact': 40, 'name starts with delete': 24}
+how a mutation names its place: {'names a place only by another node id': 243, 'repositoryId': 40, 'names no place': 2}
