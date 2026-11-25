@@ -329,3 +329,18 @@ signing in and byte for byte were not tried.
 ## From option A's first-run transcript
 
 Agent, 25 November 2026, from `research/2026-11-25-first-run-option-a/` (gap 6 and 11 there). Two shapes no check covers yet. First, the exit code of a command is a report the program sends to its model, and #377 finds it with a text pattern on the tool result ("Exit code", "Process exited with code"). Codex 0.172.0 now sends its commands as JavaScript to one `exec` tool, which returns `JSON.stringify(result)` (#374). The command is then JavaScript source and the exit a field of JSON, so the receipt's commands, its last whole test run and the side-by-side link to a deleted path can all be empty for Codex. The check of each program should cover the shape of its tool calls and results, not only its hosts and format. Second, every trial of the boundary ran Claude Code from npm (#347, #374, #377), while `main-set-up-for-agents` installs it with `claude.ai/install.sh`. That build has not run through the boundary, through `HTTPS_PROXY`, or with `NODE_EXTRA_CA_CERTS`, and Codex's WebSocket has not run through a `CONNECT` proxy. A program that ignores the settings does not fail at once: Claude Code retried for 193 s (#378). So the first run should run each program once, signed in, through the boundary before it says main is ready.
+
+## Codex's code mode, measured
+
+An agent's part, 25 November 2026, from [attribution without processes](../../../research/2026-11-25-attribution-without-processes/README.md).
+Which shape Codex 0.172.0 uses depends on the model. For gpt-5.5, o3 and gpt-5.2-codex it sends
+`exec_command` as a function tool, and for gpt-5.5 also `apply_patch` as a custom tool. For
+gpt-6.2-sol it sends no `tools` at all: the tools come in an `additional_tools` input item, as one
+custom JavaScript tool `exec` and functions such as `wait` and `spawn_agent`. #371's boundary
+read none of that night's 4 tool calls and marked the conversation as a side one. Reading
+`custom_tool_call` items, their `custom_tool_call_output` results and the tools in
+`additional_tools` fixed it. A check of Codex should cover both shapes. What a code-mode result
+holds is what the model's script prints: with `text(r.output)` the exit code and the session id of
+a process still running are not in the traffic, with `text(JSON.stringify(r))` they are. The task
+`spawn_agent` gives a subagent is marked `encrypted` in its schema, so the boundary may not be able
+to read what a Codex subagent was asked.

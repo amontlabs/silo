@@ -1,0 +1,27 @@
+night one-main · 20 tool calls · checkpoints: one in 16 · tool calls open in a window with a file fact: 11.5 on average
+facts                                              nunattr. (probe)        scored         right   named/under    right call         wrong          none
+file, agent program's own                        122            16           106            89             0             0             0            17
+file, the work                                   456             1           455           454           454           452             0             1
+connection, the work                               4             0             4             3             3             3             0             1
+connection, agent program's own                    3             0             3             2             0             0             0             1
+how, the work: {('file', 'none'): 2, ('file', 'named'): 33, ('file', 'content'): 1, ('file', 'under'): 400, ('file', 'implied'): 20, ('connection', 'none'): 1, ('connection', 'named'): 3}
+NONE  file ~/.claude.json own files probe: main:c1
+NONE  file ~/.claude/backups/.claude.json.backup.1795606467984 own files probe: main:c1
+NONE  file ~/.claude/sessions/5294.dd784a3733feebafefb18d4dcc62985f4c655c2fd6de4b89498e5c442ffb61e6.key own files probe: main:c1
+NONE  file ~/.claude/sessions/5294.json own files probe: main:c1
+NONE  file ~/.claude/shell-snapshots/snapshot-bash-1795606471102-g28s95.sh own files probe: main:c1
+NONE  file ~/.claude/sessions/5343.ec79a2e9a47a6a6835ed0245c694240cd5603b980a381db4cf3b09518b8392e6.key own files probe: main:c2
+NONE  file ~/.claude/sessions/5343.json own files probe: main:c2
+NONE  file ~/.claude/shell-snapshots/snapshot-bash-1795606475320-dslelw.sh own files probe: main:c2
+NONE  file ~/.bashrc none probe: main:c3
+NONE  file ~/.claude/sessions/5549.0b8570c3fa0af036da0599c928a1e1efd88dc95159dd14300941d631bd5afe4d.key own files probe: main:c4
+NONE  file ~/.claude/sessions/5549.json own files probe: main:c4
+NONE  file ~/.claude/shell-snapshots/snapshot-bash-1795606482068-rawq6n.sh own files probe: main:c4
+NONE  file ~/.claude/sessions/5294.dd784a3733feebafefb18d4dcc62985f4c655c2fd6de4b89498e5c442ffb61e6.key own files probe: main:c1
+NONE  file ~/.claude/sessions/5294.json own files probe: main:c1
+NONE  file ~/.claude/shell-snapshots/snapshot-bash-1795606471102-g28s95.sh own files probe: main:c1
+NONE  file ~/.claude/sessions/5343.ec79a2e9a47a6a6835ed0245c694240cd5603b980a381db4cf3b09518b8392e6.key own files probe: main:c2
+NONE  file ~/.claude/sessions/5343.json own files probe: main:c2
+NONE  file ~/.claude/shell-snapshots/snapshot-bash-1795606475320-dslelw.sh own files probe: main:c2
+NONE  connection github.com none probe: main:c3
+NONE  connection api.github.com none probe: main:c3
