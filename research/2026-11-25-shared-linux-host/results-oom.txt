@@ -1,0 +1,10 @@
+== shared
+B's computer stopped
+A's computer 1 running
+A's computer 2 running
+A's computer 3 running
+== per-member
+B's computer running
+A's computer 1 running
+A's computer 2 stopped
+A's computer 3 running

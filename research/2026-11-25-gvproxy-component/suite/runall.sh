@@ -14,12 +14,12 @@ for m in $MODES; do
       L=${WORK:-/tmp/gvsuite}/boundary.log; rm -f $L
       $B/standin-boundary -sock /tmp/silo-boundary.sock -log $L -dns 127.0.0.1:5353 -answer allowed.example=203.0.113.10 & BP=$!
       sleep 0.3
-      BOUNDARY_LOG=$L $H/run.sh $m $B/gvproxy-silo -no-gateway-api -no-host-loopback -outbound-deny private,host \
+      BOUNDARY_LOG=$L $H/run.sh $m $B/gvproxy-silo -no-gateway-api -no-host-loopback -outbound-deny private,host,host-networks \
         -outbound-handoff /tmp/silo-boundary.sock -dns-upstream 127.0.0.1:5353
       kill $BP ;;
     boundary-down)
       rm -f /tmp/silo-boundary.sock
-      $H/run.sh $m $B/gvproxy-silo -no-gateway-api -no-host-loopback -outbound-deny private,host \
+      $H/run.sh $m $B/gvproxy-silo -no-gateway-api -no-host-loopback -outbound-deny private,host,host-networks \
         -outbound-handoff /tmp/silo-boundary.sock -dns-upstream 127.0.0.1:5353 ;;
   esac > $OUT/$m.txt 2>&1
 done

@@ -1,5 +1,5 @@
-gateway-ports 53,80
-host-loopback-ports 2024,2222,7777,7778,40613,45431
+gateway-ports 53,80,443
+host-loopback-ports 2024,2222,7777,7778,37119,45053
 api-list reached
 api-expose reached
 host-loopback-tcp reached
@@ -8,6 +8,8 @@ lan-neighbour-tcp reached
 lan-neighbour-udp reached
 lan-neighbour-ping reached
 host-own-address-ping reached
+public-lan-neighbour-tcp reached
+public-lan-neighbour-ping reached
 metadata-tcp blocked
 zero-net-tcp blocked
 internet-tcp reached

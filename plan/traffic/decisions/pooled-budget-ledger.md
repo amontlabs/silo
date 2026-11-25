@@ -56,9 +56,24 @@ keep the budget as exact as one boundary, need the ledger only every dozen calls
 ledger that is down for a minute or two. A longer outage outlasts a slice, and calls then wait
 for the ledger like any held model request (#364).
 
+With #385's options for `what-a-budget-promises`, the recommendation holds, with one difference.
+Cutting calls under way once the budget is passed held a team of five to its budget through one
+boundary, a ledger or leases. Under leases a Mac cannot see what the others spend, so it cuts on
+its own slice after asking the ledger once more: never more than 0.2% over, but it cut more answers
+than one boundary ($1.85 a run against $1.43) and, through a Git repository's 2 s pushes, ended up
+to 10% under. Holding the typical output with a cut behind it (`typical-cut`) cut $0.09 a run and
+ended within 2.2% of the budget. A batch whose bound is larger than a Mac's slice is asked for:
+under leases a $4 batch was admitted in every run, where fixed $3 shares refused it every time.
+
 Not built yet: a lease that expires, so a slice held by a Mac that went to sleep comes back; and
 admitting each call at the ledger once less than a slice per Mac is free, which would remove the
 recalls at the end of a budget (they made calls wait up to 48 s through a Git repository).
+
+## Where the drafts disagree, second pass (integration)
+
+An agent's part, 25 November 2026, written while merging #390 and #392 to #396 onto #391 (`research/2026-11-25-integration-2/`).
+
+#392's `pooled-budget-on-a-host` answers the same question for a team on one host, with one exact count. The note there proposes that the host's count is this ledger, so one team budget has one count wherever its computers run.
 
 ## The ledger's commit on a Mac
 

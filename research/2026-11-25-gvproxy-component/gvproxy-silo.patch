@@ -1,4 +1,4 @@
-From 0dabac023a97a3e3c9ae6dfe94f3da80db6b006a Mon Sep 17 00:00:00 2001
+From 0722af487f54c2c5dd90abc84faa8e09add3acc9 Mon Sep 17 00:00:00 2001
 From: silo-research <noreply@anthropic.com>
 Date: Wed, 25 Nov 2026 10:32:52 +0000
 Subject: [PATCH] gvproxy for Silo: no gateway API, no host loopback, outbound
@@ -8,21 +8,21 @@ Subject: [PATCH] gvproxy for Silo: no gateway API, no host loopback, outbound
  cmd/gvproxy/config.go                   |  46 ++++++-
  cmd/gvproxy/config_test.go              |  37 ++++++
  cmd/gvproxy/main.go                     |  10 +-
- pkg/services/dns/dns.go                 |  43 +++++++
+ pkg/services/dns/dns.go                 |  43 ++++++
  pkg/services/dns/dns_test.go            |  52 ++++++++
  pkg/services/forwarder/icmp.go          |  11 ++
- pkg/services/forwarder/outbound.go      | 161 ++++++++++++++++++++++++
- pkg/services/forwarder/outbound_test.go |  93 ++++++++++++++
+ pkg/services/forwarder/outbound.go      | 169 ++++++++++++++++++++++++
+ pkg/services/forwarder/outbound_test.go | 113 ++++++++++++++++
  pkg/services/forwarder/tcp.go           |  26 +++-
  pkg/services/forwarder/udp.go           |   8 ++
- pkg/types/configuration.go              |  12 ++
+ pkg/types/configuration.go              |  13 ++
  pkg/virtualnetwork/services.go          |  19 ++-
- 12 files changed, 505 insertions(+), 13 deletions(-)
+ 12 files changed, 534 insertions(+), 13 deletions(-)
  create mode 100644 pkg/services/forwarder/outbound.go
  create mode 100644 pkg/services/forwarder/outbound_test.go
 
 diff --git a/cmd/gvproxy/config.go b/cmd/gvproxy/config.go
-index 9413b173..f92300ae 100644
+index 9413b173..381124dc 100644
 --- a/cmd/gvproxy/config.go
 +++ b/cmd/gvproxy/config.go
 @@ -50,6 +50,13 @@ type GvproxyArgs struct {
@@ -54,10 +54,10 @@ index 9413b173..f92300ae 100644
  	flagSet.StringVar(&args.apiTokenFile, "api-token-file", "", "Path to file where API token will be read from (needs 0600 permissions on macOS and Linux)")
 +	flagSet.BoolVar(&args.noGatewayAPI, "no-gateway-api", false, "Do not serve the HTTP API on the gateway address inside the virtual network (it stays on -listen and -services)")
 +	flagSet.BoolVar(&args.noHostLoopback, "no-host-loopback", false, "Map no address of the virtual network to the host's loopback (no default NAT entry, no gateway virtual IP)")
-+	flagSet.Var(&args.outboundDeny, "outbound-deny", "Destinations no outbound TCP, UDP or ICMP may reach: a CIDR, an address, private, host or all (repeatable, or comma-separated)")
++	flagSet.Var(&args.outboundDeny, "outbound-deny", "Destinations no outbound TCP, UDP or ICMP may reach: a CIDR, an address, private, host, host-networks or all (repeatable, or comma-separated)")
 +	flagSet.StringVar(&args.outboundHandoff, "outbound-handoff", "", "Unix socket path: hand every outbound TCP connection to it after a PROXY v2 header, dial nothing, drop outbound UDP and ICMP")
 +	flagSet.StringVar(&args.dnsUpstream, "dns-upstream", "", "Where names outside the DNS zones are asked: empty for the host's resolver, none, or ip:port")
-+	flagSet.BoolVar(&args.sealed, "sealed", false, "Nothing inside reaches gvproxy, the host or a private network: -no-gateway-api -no-host-loopback -outbound-deny private,host")
++	flagSet.BoolVar(&args.sealed, "sealed", false, "Nothing inside reaches gvproxy, the host or a private network: -no-gateway-api -no-host-loopback -outbound-deny private,host,host-networks")
 +	flagSet.BoolVar(&args.closed, "closed", false, "No way out at all: -sealed, -outbound-deny all and -dns-upstream none. Forwards into the guest still work")
  	if err := flagSet.Parse(argv); err != nil {
  		return nil, err
@@ -69,7 +69,7 @@ index 9413b173..f92300ae 100644
 -	if len(config.Stack.NAT) == 0 {
 +	if args.sealed || args.closed {
 +		args.noGatewayAPI, args.noHostLoopback = true, true
-+		args.outboundDeny = append(args.outboundDeny, "private", "host")
++		args.outboundDeny = append(args.outboundDeny, "private", "host", "host-networks")
 +	}
 +	if args.closed {
 +		args.outboundDeny = append(args.outboundDeny, "all")
@@ -104,7 +104,7 @@ index 9413b173..f92300ae 100644
  			config.Stack.HostIP,
  		}
 diff --git a/cmd/gvproxy/config_test.go b/cmd/gvproxy/config_test.go
-index 2fcbf3ac..c03f8aef 100644
+index 2fcbf3ac..7f19dd38 100644
 --- a/cmd/gvproxy/config_test.go
 +++ b/cmd/gvproxy/config_test.go
 @@ -743,3 +743,40 @@ stack:
@@ -134,7 +134,7 @@ index 2fcbf3ac..c03f8aef 100644
 +	assert.True(t, sealed.NoGatewayAPI)
 +	assert.Empty(t, sealed.Stack.NAT, "no address may lead to the host's loopback")
 +	assert.Empty(t, sealed.Stack.GatewayVirtualIPs)
-+	assert.Equal(t, []string{"private", "host"}, sealed.Stack.OutboundDeny)
++	assert.Equal(t, []string{"private", "host", "host-networks"}, sealed.Stack.OutboundDeny)
 +	assert.Empty(t, sealed.Stack.DNSUpstream, "a sealed computer still resolves names through the host")
 +
 +	closed := configureArgs(t, "-closed")
@@ -336,10 +336,10 @@ index cd09cd8e..de11967a 100644
  		if pkt == nil {
 diff --git a/pkg/services/forwarder/outbound.go b/pkg/services/forwarder/outbound.go
 new file mode 100644
-index 00000000..b9da257a
+index 00000000..76c10ee1
 --- /dev/null
 +++ b/pkg/services/forwarder/outbound.go
-@@ -0,0 +1,161 @@
+@@ -0,0 +1,169 @@
 +package forwarder
 +
 +import (
@@ -382,11 +382,12 @@ index 00000000..b9da257a
 +
 +// DenyList is a list of networks no outbound connection may reach.
 +type DenyList struct {
-+	nets []*net.IPNet
-+	host bool
++	nets         []*net.IPNet
++	host         bool
++	hostNetworks bool
 +
 +	mu       sync.Mutex
-+	hostAddr []net.IP
++	hostAddr []*net.IPNet
 +	readAt   time.Time
 +}
 +
@@ -404,7 +405,9 @@ index 00000000..b9da257a
 +var hostAddrTTL = time.Second
 +
 +// ParseDenyList reads entries that are each a CIDR, a single address, "private" (see privateNets),
-+// "host" (every address of the host's own interfaces, read again as they change) or "all".
++// "host" (every address of the host's own interfaces, read again as they change), "host-networks"
++// (every network the host's interfaces are attached to, such as an office network on public
++// addresses or a global IPv6 network) or "all".
 +func ParseDenyList(entries []string) (*DenyList, error) {
 +	d := &DenyList{}
 +	for _, e := range entries {
@@ -414,6 +417,8 @@ index 00000000..b9da257a
 +			case "":
 +			case "host":
 +				d.host = true
++			case "host-networks":
++				d.hostNetworks = true
 +			case "private":
 +				for _, c := range privateNets {
 +					_, n, _ := net.ParseCIDR(c)
@@ -457,9 +462,12 @@ index 00000000..b9da257a
 +			return true
 +		}
 +	}
-+	if d.host {
++	if d.host || d.hostNetworks {
 +		for _, a := range d.hostAddrs() {
-+			if a.Equal(ip) {
++			if d.host && a.IP.Equal(ip) {
++				return true
++			}
++			if d.hostNetworks && a.Contains(ip) {
 +				return true
 +			}
 +		}
@@ -467,7 +475,7 @@ index 00000000..b9da257a
 +	return false
 +}
 +
-+func (d *DenyList) hostAddrs() []net.IP {
++func (d *DenyList) hostAddrs() []*net.IPNet {
 +	d.mu.Lock()
 +	defer d.mu.Unlock()
 +	if d.hostAddr != nil && time.Since(d.readAt) < hostAddrTTL {
@@ -477,10 +485,10 @@ index 00000000..b9da257a
 +	if err != nil {
 +		log.Warnf("outbound deny: cannot read the host's addresses: %v", err)
 +	}
-+	list := []net.IP{}
++	list := []*net.IPNet{}
 +	for _, a := range addrs {
 +		if n, ok := a.(*net.IPNet); ok {
-+			list = append(list, n.IP)
++			list = append(list, n)
 +		}
 +	}
 +	d.hostAddr, d.readAt = list, time.Now()
@@ -503,10 +511,10 @@ index 00000000..b9da257a
 +}
 diff --git a/pkg/services/forwarder/outbound_test.go b/pkg/services/forwarder/outbound_test.go
 new file mode 100644
-index 00000000..f9760197
+index 00000000..f7edd092
 --- /dev/null
 +++ b/pkg/services/forwarder/outbound_test.go
-@@ -0,0 +1,93 @@
+@@ -0,0 +1,113 @@
 +package forwarder
 +
 +import (
@@ -551,6 +559,26 @@ index 00000000..f9760197
 +		gomega.Expect(err).ToNot(gomega.HaveOccurred())
 +		for _, a := range addrs {
 +			gomega.Expect(d.Contains(a.(*net.IPNet).IP)).To(gomega.BeTrue(), a.String())
++		}
++		gomega.Expect(d.Contains(net.ParseIP("203.0.113.10"))).To(gomega.BeFalse())
++	})
++
++	ginkgo.It("host-networks denies every network the host is attached to", func() {
++		d, err := ParseDenyList([]string{"host-networks"})
++		gomega.Expect(err).ToNot(gomega.HaveOccurred())
++		addrs, err := net.InterfaceAddrs()
++		gomega.Expect(err).ToNot(gomega.HaveOccurred())
++		for _, a := range addrs {
++			n := a.(*net.IPNet)
++			ones, bits := n.Mask.Size()
++			if bits-ones < 2 {
++				continue
++			}
++			// another address of the same network than the host's own
++			other := make(net.IP, len(n.IP))
++			copy(other, n.IP)
++			other[len(other)-1] ^= 1
++			gomega.Expect(d.Contains(other)).To(gomega.BeTrue(), other.String())
 +		}
 +		gomega.Expect(d.Contains(net.ParseIP("203.0.113.10"))).To(gomega.BeFalse())
 +	})
@@ -672,16 +700,17 @@ index 12694496..0050b34c 100644
  		var wq waiter.Queue
  		ep, tcpErr := r.CreateEndpoint(&wq)
 diff --git a/pkg/types/configuration.go b/pkg/types/configuration.go
-index 4005e32f..7fd9729a 100644
+index 4005e32f..31f34c75 100644
 --- a/pkg/types/configuration.go
 +++ b/pkg/types/configuration.go
-@@ -68,6 +68,18 @@ type Configuration struct {
+@@ -68,6 +68,19 @@ type Configuration struct {
  
  	// Timeout in seconds for outbound TCP connection attempts (default: 30)
  	TCPConnectTimeout int `yaml:"tcpConnectTimeout,omitempty"`
 +
 +	// Destinations no outbound connection may reach, checked after NAT for TCP, UDP and ICMP.
-+	// Each entry is a CIDR, an address, "private", "host" (the host's own addresses) or "all".
++	// Each entry is a CIDR, an address, "private", "host" (the host's own addresses), "host-networks"
++	// (the networks the host is attached to) or "all".
 +	OutboundDeny []string `yaml:"outboundDeny,omitempty"`
 +
 +	// When set, a unix socket path: every outbound TCP connection is handed to it after a PROXY

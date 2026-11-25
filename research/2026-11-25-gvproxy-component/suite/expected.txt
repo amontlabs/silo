@@ -9,6 +9,8 @@ lan-neighbour-tcp       reached        blocked        blocked        blocked    
 lan-neighbour-udp       reached        blocked        blocked        blocked        blocked        blocked
 lan-neighbour-ping      reached        blocked        blocked        blocked        blocked        blocked
 host-own-address-ping   reached        blocked        blocked        blocked        blocked        blocked
+public-lan-neighbour-tcp reached        blocked        blocked        blocked        blocked        blocked
+public-lan-neighbour-ping reached       blocked        blocked        blocked        blocked        blocked
 metadata-tcp            blocked        blocked        blocked        blocked        blocked        blocked
 zero-net-tcp            blocked        blocked        blocked        blocked        blocked        blocked
 internet-tcp            reached        reached        reached        blocked        reached        blocked

@@ -34,3 +34,13 @@ Read on 24 November 2026 (an agent's reading, not a lawyer's):
 
 This also covers an extension's computer that runs an agent program in the background: it signs
 in with its own key, not with your plan.
+
+## Linked billing, a way with no key in Silo (25 November 2026)
+
+An agent's part. Anthropic's support article 18467148 (beta, updated 24 November 2026) describes
+linked billing: a user links their own Console organization to an app and pays Anthropic directly,
+and never gives the app a key. For Silo's own model calls it is a second way beside a key you
+paste. It costs Silo its own Anthropic organization, since the app runs the model in its own
+organization and not yours; your own organization's settings, zero data retention included, do not
+apply to those calls; it is a beta with a $50 limit while the app is in testing; and plans cannot be
+linked. Not for the first build.

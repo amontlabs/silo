@@ -164,11 +164,13 @@ An agent's part, 25 November 2026, from `research/2026-11-25-gvproxy-component/`
 network namespaces, with no virtual machine and no Mac.
 
 - #363's `-sealed` patch filters TCP and UDP. gvproxy 0.9.0 added ping forwarding, so a sealed
-  computer still pings the Mac's own address and every machine on the local network.
-- A patch of about 320 lines adds five options to gvproxy: no API on the computer's gateway, no
+  computer still pings the Mac's own address and every machine on the local network. It also
+  refuses only private ranges, so a local network on public addresses, as in an office, stays in
+  reach.
+- A patch of about 330 lines adds five options to gvproxy: no API on the computer's gateway, no
   address that leads to the Mac's loopback, a list of destinations that no TCP, UDP or ping may
   reach, lookups sent to a server Silo names or refused, and a hand-off of every TCP connection to
-  Silo's boundary, after a PROXY protocol v2 header, so that gvproxy dials nothing. In 21 cases
+  Silo's boundary, after a PROXY protocol v2 header, so that gvproxy dials nothing. In 23 cases
   from inside a computer, it reaches nothing of the Mac or the local network. Closed, it reaches
   nothing at all and SSH still gets in. With the boundary stopped, it reaches nothing.
 - The options cost nothing measurable against stock gvproxy: 1.4 Gbit/s out and 1.1 Gbit/s in at
@@ -200,6 +202,8 @@ An agent's part, 25 November 2026, written while merging every draft into one br
 - #363's `-sealed` patch was said to close the Mac's loopback, its addresses and the local network. #380 found that gvproxy 0.9.0 forwards ping, which `-sealed` does not filter, so a sealed computer still pings the Mac and the local network. Recommended: where gvproxy is used, #380's patch with `-outbound-deny` replaces #363's, and test 07 of the Mac kit adds a ping to the Mac's address and to a machine on the local network.
 - #382 puts main on Apple's NAT for its first start, for about two minutes, because the relay that carries SSH over vsock has to be installed over SSH. That goes against this answer's "never Apple's NAT". It is its own open entry, `way-in-before-the-relay`, and its notes say what each way costs.
 
+## The boundary end to end (25 November 2026)
+
 An agent's part, 25 November 2026 (`research/2026-11-25-boundary-end-to-end`). One Zig boundary
 took both ways in on Linux: #378's `CONNECT` and #380's hand-off. A request on a kept-alive
 connection took 0.22 ms with no boundary, 0.53 ms by `CONNECT` and 0.71 ms by the hand-off. Three
@@ -215,3 +219,11 @@ faults came up between the drafts.
 - #374 tells computers apart by the address a connection comes from. Neither way in gives one: vsock
   has none, and every computer behind its own gvproxy is `192.168.127.2`. The boundary gave each
   computer its own socket on each way in, and its own port for lookups.
+
+## Where the drafts disagree, second pass (integration)
+
+An agent's part, 25 November 2026, written while merging #390 and #392 to #396 onto #391 (`research/2026-11-25-integration-2/`).
+
+- #380 runs gvproxy's hand-off with `-outbound-deny private,host,host-networks`, which drops `169.254.169.254` before the boundary sees it. #379 serves cloud credentials from a metadata server at that address. #395 found the two cannot both hold. Recommended: gvproxy hands the metadata address to the boundary like any other connection, so the boundary answers it, and the deny list keeps `host` and `host-networks`. This needs #395's one-line fix of `-ec2-metadata-access`, or the same rule in #380's patch.
+- #374 tells computers apart by the address a connection comes from. Neither way in gives one: vsock has no address, and every computer behind its own gvproxy is `192.168.127.2`. Recommended, as #395 built it: one socket per computer on each way in, and one port per computer for lookups.
+- #378's relay sets no `TCP_NODELAY`, which cost 44 ms on every kept-alive request in #395's run. A one-line fix in #378's relay and in the Mac end.

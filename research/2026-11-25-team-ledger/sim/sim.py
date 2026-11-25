@@ -99,7 +99,7 @@ class Bill:
 # ---- ways to share a budget ----
 
 class Way:
-    """admit() returns a Future of True or False; started() and settled() tell the way about a call."""
+    """admit() and admit_whole() return a Future of True or False; started() and settled() tell the way about a call."""
     waits: list
 
     def __init__(self, loop, team, budget, policy, tps):
@@ -107,11 +107,17 @@ class Way:
         self.waits = []  # seconds each admitted call waited for its answer
         self.messages = 0
 
+    cut_calls = False
+    crew = None  # the Team whose calls this way admits
+
     def book(self, limit):
         return Book(limit, self.policy, self.tps, P_OUT)
 
     def done(self, mac):
         pass
+
+    def running_macs(self):
+        return {r[0] for r in self.crew.running.values()}
 
 
 class Exact(Way):
@@ -131,6 +137,22 @@ class Exact(Way):
 
     def settled(self, mac, cid, cost):
         self.b.settle(cid, cost)
+
+    def admit_whole(self, mac, wid, bound):
+        f = Future(self.loop)
+        ok = self.b.admits_whole(self.loop.t, bound)
+        if ok:
+            self.b.start_whole(wid, bound)
+        f.resolve(ok)
+        return f
+
+    def settled_whole(self, mac, wid, cost):
+        self.b.settle_whole(wid, cost)
+
+    def watch(self):
+        if self.b.counted(self.loop.t) >= self.budget:
+            for m in self.running_macs():
+                self.crew.cut_mac(m)
 
 
 class Static(Way):
@@ -153,6 +175,23 @@ class Static(Way):
 
     def settled(self, mac, cid, cost):
         self.books[mac].settle(cid, cost)
+
+    def admit_whole(self, mac, wid, bound):
+        f, b = Future(self.loop), self.books[mac]
+        ok = b.admits_whole(self.loop.t, bound)
+        if ok:
+            b.start_whole(wid, bound)
+        f.resolve(ok)
+        return f
+
+    def settled_whole(self, mac, wid, cost):
+        self.books[mac].settle_whole(wid, cost)
+
+    def watch(self):
+        for m in self.running_macs():
+            b = self.books[m]
+            if b.counted(self.loop.t) >= b.limit:
+                self.crew.cut_mac(m)
 
 
 class Down:
@@ -216,6 +255,42 @@ class Central(Way):
                 self.b.settle(cid, cost)
         self.loop.after(self.rtt[mac] / 2, at_ledger)
 
+    def admit_whole(self, mac, wid, bound):
+        f, half = Future(self.loop), self.rtt[mac] / 2
+        self.messages += 2
+
+        def at_ledger():
+            up = self.down.up_at(self.loop.t)
+            if up > self.loop.t:
+                self.loop.at(up, at_ledger)
+                return
+            ok = self.b.admits_whole(self.loop.t, bound)
+            if ok:
+                self.b.start_whole(wid, bound)
+            self.loop.after(half, lambda: f.resolve(ok))
+        self.loop.after(half, at_ledger)
+        return f
+
+    def settled_whole(self, mac, wid, cost):
+        self.messages += 1
+
+        def at_ledger():
+            up = self.down.up_at(self.loop.t)
+            if up > self.loop.t:
+                self.loop.at(up, at_ledger)
+            else:
+                self.b.settle_whole(wid, cost)
+        self.loop.after(self.rtt[mac] / 2, at_ledger)
+
+    def watch(self):
+        """The ledger sees the total pass and tells each Mac with calls under way to cut them."""
+        if self.down.up_at(self.loop.t) > self.loop.t:
+            return
+        if self.b.counted(self.loop.t) >= self.budget:
+            for m in self.running_macs():
+                self.messages += 1
+                self.loop.after(self.rtt[m] / 2, lambda m=m: self.crew.cut_mac(m))
+
 
 class Lease(Way):
     """The ledger hands out slices of the budget. Each Mac admits locally, with #374's rule, against
@@ -238,12 +313,13 @@ class Lease(Way):
         self.asked_at = [-1e9] * n
         self.pending = [None] * n    # the Future of an ask under way
         self.empty = [False] * n     # the ledger's last answer was: nothing left
+        self.over_since = [None] * n  # with a cut: since when this Mac counts past its slice
 
     def free(self):
         used = sum(max(g - r, s) for g, r, s in zip(self.granted, self.returned, self.reported))
         return max(0.0, self.budget - used)
 
-    def ask(self, mac):
+    def ask(self, mac, want=0.0):
         if self.pending[mac]:
             return self.pending[mac]
         f = Future(self.loop)
@@ -276,7 +352,7 @@ class Lease(Way):
                 return
             active = sum(1 for t in self.asked_at if self.loop.t - t < 60)
             free = self.free()
-            g = min(free, max(self.chunk, free / (self.share * max(1, active))))
+            g = min(free, max(self.chunk, free / (self.share * max(1, active)), want))
             self.granted[mac] += g
 
             def back():
@@ -325,6 +401,41 @@ class Lease(Way):
 
     def settled(self, mac, cid, cost):
         self.books[mac].settle(cid, cost)
+
+    def admit_whole(self, mac, wid, bound):
+        """A bound larger than the slice asks the ledger for what is missing."""
+        f, b = Future(self.loop), self.books[mac]
+
+        def attempt(_=None):
+            if b.admits_whole(self.loop.t, bound):
+                b.start_whole(wid, bound)
+                f.resolve(True)
+            elif self.empty[mac] and not self.pending[mac]:
+                f.resolve(False)
+            else:
+                self.ask(mac, want=bound - self.room(mac)).then(attempt)
+        attempt()
+        return f
+
+    def settled_whole(self, mac, wid, cost):
+        self.books[mac].settle_whole(wid, cost)
+
+    def watch(self):
+        """Each Mac cuts on its own. Once what it counts passes its slice, it asks the ledger once
+        more; it cuts when the ledger answers that nothing is left, or when no answer came within
+        a second and a round trip, since it cannot know what the others spent."""
+        now = self.loop.t
+        for m in self.running_macs():
+            b = self.books[m]
+            if b.counted(now) < b.limit:
+                self.over_since[m] = None
+                continue
+            if self.over_since[m] is None:
+                self.over_since[m] = now
+                self.empty[m] = False
+                self.ask(m)
+            if (self.empty[m] and not self.pending[m]) or now - self.over_since[m] > 1 + self.rtt[m]:
+                self.crew.cut_mac(m)
 
     def done(self, mac):
         b = self.books[mac]
@@ -410,6 +521,27 @@ class Gossip(Way):
     def settled(self, mac, cid, cost):
         self.books[mac].settle(cid, cost)
 
+    def admit_whole(self, mac, wid, bound):
+        f, b = Future(self.loop), self.books[mac]
+        ok = b.admits_whole(self.loop.t, bound, extra=self.others(mac))
+        if ok:
+            b.start_whole(wid, bound)
+        f.resolve(ok)
+        return f
+
+    def settled_whole(self, mac, wid, cost):
+        self.books[mac].settle_whole(wid, cost)
+
+    def watch(self):
+        for m in self.running_macs():
+            b, now = self.books[m], self.loop.t
+            if self.allowance[m] is not None:
+                over = b.counted(now) >= self.allowance[m]
+            else:
+                over = b.counted(now) + self.others(m) >= self.budget
+            if over:
+                self.crew.cut_mac(m)
+
     def done(self, mac):
         # A Mac whose agents ended keeps telling the others its count: it may wake again.
         pass
@@ -424,8 +556,12 @@ KINDS = {"heavy": 8, "medium": 2, "light": 0}
 
 
 class Team:
-    def __init__(self, loop, way, members, seed, tps, main_steps=40, sub_steps=14, tool_s=(0.2, 1.0), stagger=30.0):
+    def __init__(self, loop, way, members, seed, tps, main_steps=40, sub_steps=14, tool_s=(0.2, 1.0), stagger=30.0, batch=None):
         self.loop, self.way, self.tps = loop, way, tps
+        way.crew = self
+        self.running = {}   # call id -> (mac, start, input cost, tokens, the Future of its end)
+        self.cut_paid = 0.0  # what was billed for answers cut midway
+        self.batch_ok = None
         self.bill = Bill()
         self.rng = random.Random(seed)
         self.refused, self.calls, self.cid = 0, 0, 0
@@ -439,6 +575,50 @@ class Team:
             self.live[mac] += 1
             start = self.rng.uniform(0, stagger)
             loop.after(start, lambda mac=mac, kind=kind: loop.spawn(self.main(mac, KINDS[kind])))
+        if batch:
+            self.live[batch["mac"]] += 1
+            loop.after(batch["at"], lambda: loop.spawn(self.batch(**batch)))
+        if way.cut_calls:
+            loop.after(0.5, self.watch)
+
+    def watch(self):
+        """#385's cut: every half second, each way says which running calls end now."""
+        self.way.watch()
+        self.loop.after(0.5, self.watch)
+
+    def batch(self, mac, at, bound, cost, result_at):
+        """Work out of sight (#385): admitted only if its whole bound fits, held at that bound until
+        its result passes, then settled at its cost."""
+        wid = ("batch", mac)
+        ok = yield self.way.admit_whole(mac, wid, bound)
+        self.batch_ok = ok
+        if ok:
+            t0 = self.loop.t
+            yield result_at - t0
+            self.bill.calls.append((mac, t0, self.loop.t, cost))
+            self.way.settled_whole(mac, wid, cost)
+        self.ended(mac)
+
+    def cut(self, cid):
+        if cid in self.running:
+            self.finish(cid, cut=True)
+
+    def cut_mac(self, mac):
+        for cid in [c for c, r in self.running.items() if r[0] == mac]:
+            self.finish(cid, cut=True)
+
+    def finish(self, cid, cut=False):
+        mac, t0, inp, tokens, end = self.running.pop(cid)
+        if cut:
+            tokens = min(tokens, max(0.0, self.loop.t - t0 - 0.3) * self.tps)
+        cost = inp + tokens * P_OUT
+        self.bill.calls.append((mac, t0, self.loop.t, cost))
+        if cut:
+            self.cut_paid += cost - inp
+        else:
+            self.calls += 1
+        self.way.settled(mac, cid, cost)
+        end.resolve(not cut)
 
     def ended(self, mac):
         self.live[mac] -= 1
@@ -467,14 +647,16 @@ class Team:
             if self.first_refusal is None:
                 self.first_refusal = self.loop.t
             return False
-        t0 = self.loop.t
-        dur = 0.3 + (think + out) / self.tps
-        yield dur
-        cost = inp + (think + out) * P_OUT
-        self.bill.calls.append((mac, t0, self.loop.t, cost))
-        self.calls += 1
-        self.way.settled(mac, cid, cost)
-        return True
+        end = Future(self.loop)
+        self.running[cid] = (mac, self.loop.t, inp, think + out, end)
+        self.loop.after(0.3 + (think + out) / self.tps, lambda: cid in self.running and self.finish(cid))
+        done = yield end
+        if not done:
+            # Cut midway: Claude Code retries at once, gets the 400 and stops (#385).
+            self.refused += 1
+            if self.first_refusal is None:
+                self.first_refusal = self.loop.t
+        return done
 
     def conv(self):
         return {"ctx": 15000, "first": True}
@@ -511,11 +693,12 @@ class Team:
         self.ended(mac)
 
 
-def run_one(way, members, budget, policy, seed, tps, until, **kw):
+def run_one(way, members, budget, policy, seed, tps, until, cut_calls=False, batch=None, **kw):
     random.seed(seed)
     loop = Loop()
     w = WAYS[way](loop, members, budget, policy, tps, **kw)
-    team = Team(loop, w, members, seed, tps)
+    w.cut_calls = cut_calls
+    team = Team(loop, w, members, seed, tps, batch=batch)
     loop.run(until)
     spent = team.bill.total()
     # The moment the provider's bill truly passed the budget, and what was billed for calls that
@@ -541,6 +724,8 @@ def run_one(way, members, budget, policy, seed, tps, until, **kw):
         "waited_10s": sum(1 for x in waits if x > 10),
         "messages_per_call": round(w.messages / max(1, team.calls), 2),
         "ended_s": None if team.end is None else round(team.end, 1),
+        "cut_paid": round(team.cut_paid, 4),
+        "batch_ok": team.batch_ok,
         "first_refusal_s": None if team.first_refusal is None else round(team.first_refusal, 1),
     }
 
@@ -554,10 +739,11 @@ def main():
     ap.add_argument("--tps", type=float, default=500, help="the model's speed, tokens a second")
     ap.add_argument("--seeds", default="1,2,3")
     ap.add_argument("--until", type=float, default=3600)
+    ap.add_argument("--cut", action="store_true", help="#385's cut: end calls under way once the budget is passed")
     ap.add_argument("--kw", default="{}", help="JSON options of the way, such as {\"rtt\": 0.1}")
     a = ap.parse_args()
     for s in a.seeds.split(","):
-        r = run_one(a.way, a.members.split(","), a.budget, a.policy, int(s), a.tps, a.until, **json.loads(a.kw))
+        r = run_one(a.way, a.members.split(","), a.budget, a.policy, int(s), a.tps, a.until, cut_calls=a.cut, **json.loads(a.kw))
         print(json.dumps(r))
 
 

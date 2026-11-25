@@ -29,3 +29,7 @@ version, or a later change has to rewrite them.
 ## A head kept next to the record (25 November 2026)
 
 An agent's part, from `research/2026-11-25-record-format/`, added on merge because #386 wrote it before #362 had landed. A head kept next to the record shows accidents, not someone with your user's rights: another program running as you on the Mac can rewrite the record and the head together. Only a copy of the head kept elsewhere shows a rewrite. Agents inside a computer cannot reach the record, which is on the Mac.
+
+## Every head kept, not only the last (25 November 2026)
+
+An agent's part, from `research/2026-11-25-record-head-off-the-mac/`, added on merge because #394 wrote it before #362 had landed. The "place the user chooses" must keep every head it receives, not only the last, or a rewrite of the record replaces it. `record-head-off-the-mac` proposes where that place is.
