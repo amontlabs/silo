@@ -26,3 +26,19 @@ were caught by a classifier with two kinds of claim: "tests pass", checked again
 the last run of the whole suite, and "only changed files in the repo", checked against file facts
 outside it. «All tests pass.» stood beside an exit of 1; «I only changed files in the repo.»
 beside 401 files outside it. A claim it cannot check shows as not checked, never as true.
+
+An agent's part, 25 November 2026, from `research/2026-11-25-real-night`. The checker of the
+prototype was run on 60 claims from public incidents (GitHub issues of Claude Code, Codex and
+Gemini CLI, two press cases), each beside what an outside record would have held. The two kinds of
+claim above caught 2 of 49 false claims. Real agents rarely say "all tests pass" in so many words:
+they say «Fixed.», «Sorry. I've stopped.», «killed it within a minute or two», «Looks intact», «I
+copied it to `/tmp/container-installer.pkg`». Eleven kinds of claim, and a fourth answer,
+"unbacked" (nothing in the record shows the claim, though nothing contradicts it: a run piped
+through `tail`, a narrowed run, an edit after the last run), caught or flagged 9 of the 30 cases
+they were not tuned on. The receipt's own outcome lines, read without the agent's words (its last
+command failed, files deleted or outside the folder, a process left running), warned on 7 of the
+same 30. Both together: 13 of 30, and 16 of the 27 cases whose falsehood the record could show at
+all. So the agent's words beside the receipt are worth keeping, and the receipt's own warnings
+matter more than the claim checker: a reader who skips the words still sees most of what the words
+hide. A checker of fixed phrases will not grow much further; reading claims in free text takes a
+model, which in this plan is a classifier run as an extension (`extension-ships-a-computer`).

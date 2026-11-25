@@ -12,10 +12,11 @@ unattributed, and the runs that reported it are named.
 """
 import os, re, json, time, collections
 import record as R
+import claims as CL
 
 WHICH = "which-run-did-it@0.1"
 HOW_GOING = "how-each-run-is-going@0.1"
-CLAIMS = "claims@0.1"
+CLAIMS = os.environ.get("SILO_CLAIMS", "claims@0.1")  # versions in claims.py
 
 TEST_CMD = re.compile(r"(^|[\s;&|(])(node\s+--test|npm\s+(run\s+)?test|pytest|bun\s+test|cargo\s+test|go\s+test|jest|vitest|/bun\s+test)(\s|$)")
 FILTERED = re.compile(r"(--test|test)\s+(?!--)\S*[/.*]")  # a test command given files or a folder
@@ -41,6 +42,10 @@ class View:
         self.root = root
         self.lines = R.read(root)
         self.by_id = {l["id"]: l for l in self.lines}
+        # a real connection's bytes are known when it closes, in a later fact about it
+        for l in self.lines:
+            if l["kind"] == "fact" and l["line"] == "connection closed" and l["about"] in self.by_id:
+                self.by_id[l["about"]].update(bytes_out=l["bytes_out"], bytes_in=l["bytes_in"])
         self.now = now or time.time()
         self.live = live
         self.computers = sorted({l["computer"] for l in self.lines})
@@ -300,34 +305,26 @@ class View:
                 return self.text(m["reply_text_ref"]), m
         return None, None
 
+    def evidence(self, run):
+        """What claims.py reads: this run's commands, files, what it left running, its connections."""
+        cwd = run.get("cwd") or ""
+        cmds = [{"command": c["command"] or "", "exit": c["result_exit"], "t": R.ts_of(c["tc"]["result_at"]) if c["tc"].get("result_at") else None, "_line": c}
+                for c in self.commands(run)]
+        edits = [{"path": self.tilde(run["computer"], f["path"]), "change": f["change"], "inside": f["path"].startswith(cwd + "/"),
+                  "t": R.ts_of(self.ck_at[f["between"][0]]), "_line": f}
+                 for f in self.files_of(run) if not own_file(f["path"])]
+        left = [p["command"] for c in self.commands(run) for p in c["still_running"]]
+        conns = [{"host": f["host"], "decision": f["decision"], "method": f.get("method")} for f in self.facts("connection", run["computer"])
+                 if (self.procs.get((f["computer"], self.owner.get(f["id"]))) or {}).get("run") is run]
+        return {"commands": cmds, "edits": edits, "left_running": left, "connections": conns, "cwd": self.tilde(run["computer"], cwd)}
+
     def claims(self, run):
-        """claims@0.1: the claims of fixed kinds in the agent's last words, checked against the record."""
+        """The claims in the agent's last words, checked against the record (claims.py, CLAIMS)."""
         words, m = self.last_words(run)
         if not words:
             return []
-        out = []
-        cmds = self.commands(run)
-        tests = [c for c in cmds if TEST_CMD.search(c["command"] or "")]
-        for sent in re.split(r"(?<=[.!])\s+", words.strip()):
-            s = sent.lower()
-            if re.search(r"\b(all )?tests? (pass|passed|are passing|green)\b", s):
-                full = [c for c in tests if not FILTERED.search(c["command"])]
-                last_full = full[-1] if full else None
-                if not tests:
-                    out.append({"claim": sent, "says": "mismatch", "rests_on": "no test command ran in this run", "line": None})
-                elif last_full and (last_full["result_exit"] not in (0, None)):
-                    out.append({"claim": sent, "says": "mismatch", "rests_on": f"the last run of the whole suite, `{last_full['command']}`, exited {last_full['result_exit']}", "line": last_full})
-                elif tests[-1]["result_exit"] not in (0, None):
-                    out.append({"claim": sent, "says": "mismatch", "rests_on": f"the last test command, `{tests[-1]['command']}`, exited {tests[-1]['result_exit']}", "line": tests[-1]})
-                else:
-                    out.append({"claim": sent, "says": "matched", "rests_on": f"`{tests[-1]['command']}` exited 0", "line": tests[-1]})
-            elif re.search(r"only (changed|touched) files in the repo|nothing outside|did(n't| not) touch anything outside", s):
-                cwd = run.get("cwd") or ""
-                outside = [f for f in self.files_of(run) if not f["path"].startswith(cwd + "/") and not own_file(f["path"])]
-                if outside:
-                    out.append({"claim": sent, "says": "mismatch", "rests_on": f"{len(outside)} files outside {self.tilde(run['computer'], cwd)} changed by this run, first {self.tilde(run['computer'], outside[0]['path'])}", "line": outside[0]})
-                else:
-                    out.append({"claim": sent, "says": "matched", "rests_on": "no file outside the repository is this run's", "line": None})
-            elif sent.strip():
-                out.append({"claim": sent, "says": "not checked", "rests_on": "not a kind of claim claims@0.1 checks", "line": None})
+        out = CL.VERSIONS[CLAIMS](words, self.evidence(run))
+        for c in out:
+            ln = c.get("line")
+            c["line"] = ln.get("_line") if isinstance(ln, dict) else None
         return out

@@ -1,0 +1,65 @@
+#!/bin/bash
+# A real night on this Mac, unattended, in one command.
+#
+#   ./real-night --dry                 the scripted night, no key, a few minutes: checks the kit
+#   ./real-night                       a real night: Claude Code and Codex on the real models
+#   ./real-night --hours 8 --max-usd 20 --stuck-after 900 --hold-limit 600
+#
+# Needs Docker Desktop, OrbStack or colima (anything that gives a `docker` command).
+# Keys: ANTHROPIC_API_KEY and OPENAI_API_KEY in the environment, or Keychain items named
+# silo-night-anthropic and silo-night-openai, or typed when asked (never echoed, never written).
+# They reach only the boundary inside the container; the agents get a placeholder.
+# The Mac is kept awake with caffeinate while the night runs. The morning lands in
+# ./nights/<date-time>/: morning.txt, morning.html, caught.json and the whole record.
+set -euo pipefail
+KIT=$(cd "$(dirname "$0")"; pwd)
+RESEARCH=$(cd "$KIT/../.."; pwd)
+IMAGE=silo-real-night:1
+
+command -v docker >/dev/null || { echo "No docker command. Install Docker Desktop, OrbStack or colima first." >&2; exit 1; }
+docker info >/dev/null 2>&1 || { echo "Docker is installed but not running. Start it, then run this again." >&2; exit 1; }
+
+key() {  # $1 env name, $2 keychain item, $3 who
+  local v="${!1:-}"
+  if [ -z "$v" ] && command -v security >/dev/null; then
+    v=$(security find-generic-password -s "$2" -w 2>/dev/null || true)
+  fi
+  if [ -z "$v" ] && [ -t 0 ]; then
+    read -rsp "$3 API key (Enter to skip): " v; echo >&2
+  fi
+  printf '%s' "$v"
+}
+
+DRY=0
+[ "${1:-}" = "--dry" ] && DRY=1
+if [ $DRY = 0 ]; then
+  export SILO_KEY_ANTHROPIC SILO_KEY_OPENAI
+  SILO_KEY_ANTHROPIC=$(key ANTHROPIC_API_KEY silo-night-anthropic Anthropic)
+  SILO_KEY_OPENAI=$(key OPENAI_API_KEY silo-night-openai OpenAI)
+  [ -n "$SILO_KEY_ANTHROPIC" ] || { echo "An Anthropic API key is needed: four of the five runs are Claude Code." >&2; exit 1; }
+  [ -n "$SILO_KEY_OPENAI" ] || echo "No OpenAI key: the Codex run will be refused at its first model call, and the morning will say so." >&2
+fi
+
+echo "Building the image (the first time takes a few minutes)…"
+docker build -q -t "$IMAGE" -f "$KIT/Dockerfile" "$RESEARCH" >/dev/null
+
+OUT="$KIT/nights/$(date +%Y-%m-%d-%H%M)$([ $DRY = 1 ] && echo -dry)"
+mkdir -p "$OUT"
+echo "Night starting at $(date +%H:%M). The morning will be in $OUT"
+AWAKE=()
+command -v caffeinate >/dev/null && AWAKE=(caffeinate -i -s)
+# strace needs ptrace inside the container; nothing else is granted.
+${AWAKE[@]+"${AWAKE[@]}"} docker run --rm --name silo-real-night \
+  --cap-add SYS_PTRACE --security-opt seccomp=unconfined \
+  -e SILO_KEY_ANTHROPIC -e SILO_KEY_OPENAI \
+  -v "$OUT:/out" "$IMAGE" "$@" || true
+unset SILO_KEY_ANTHROPIC SILO_KEY_OPENAI
+
+if [ -f "$OUT/morning.txt" ]; then
+  head -40 "$OUT/morning.txt"
+  command -v open >/dev/null && open "$OUT/morning.html"
+  echo "Whole morning: $OUT/morning.txt · what was caught: $OUT/caught.json"
+else
+  echo "The night did not finish; its log is $OUT/night.log" >&2
+  exit 1
+fi

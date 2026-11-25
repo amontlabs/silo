@@ -1,0 +1,6 @@
+{
+  "_note": "Dollars per million tokens, list prices. Claude models as in the morning review's prices.json (read 24 November 2026). gpt-5.5 from OpenAI's model page (developers.openai.com/api/docs/models/gpt-5.5), read 25 November 2026: standard rate for prompts under 272K tokens; longer prompts cost 2x input and 1.5x output and are not counted here, so a long-context night is undercounted. OpenAI does not charge cache writes; they are counted at the input price. A model not listed is refused while the night has a budget.",
+  "claude-opus-5-5": {"in": 4.0, "out": 20.0, "cache_read": 0.2, "cache_write": 5.0},
+  "claude-haiku-5-5": {"in": 0.1, "out": 0.5, "cache_read": 0.01, "cache_write": 0.125},
+  "gpt-5.5": {"in": 5.0, "out": 30.0, "cache_read": 0.5, "cache_write": 5.0}
+}
