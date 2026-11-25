@@ -1,0 +1,9 @@
+#!/bin/sh
+# Stand-in for Claude Code in the Linux run of test 02: logged in when the credentials file exists.
+c="$HOME/.claude/.credentials.json"
+case "$1" in
+  --version) echo "2.1.999 (Claude Code, fake)" ;;
+  auth) if [ -f "$c" ]; then echo "Login method: Claude Max account"; else echo "Not logged in"; exit 1; fi ;;
+  -p) if [ -f "$c" ]; then echo "ok"; else echo "Invalid API key · Please run /login"; exit 1; fi ;;
+  *) exit 2 ;;
+esac

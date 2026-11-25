@@ -1,0 +1,208 @@
+#!/bin/bash
+# The Mac test kit's one entry command. ./kit help says what it does.
+set -u
+
+KIT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+export KIT_ROOT
+export KIT_WORK_ROOT="${SILO_KIT_HOME:-$HOME/SiloKit}"
+
+usage() {
+  cat <<EOF
+Silo's Mac test kit. Everything it writes is under $KIT_WORK_ROOT (set SILO_KIT_HOME to move it).
+
+  ./kit list                      the tests, their tier, time and what they need
+  ./kit build                     compile the VM helper and the C probes into $KIT_WORK_ROOT/bin
+  ./kit run [options] WHAT...     run tests; WHAT is test ids (03 06) or a tier:
+                                    quick   no VM, no sudo, no download: about 30 minutes
+                                    vm      needs the installed macOS computer of test 00
+                                    guided  needs you at the keyboard (logins, apps)
+                                    long    hours, or a night
+                                    all     every test, in id order
+  ./kit report [RESULTS_DIR]      write summary.md for a run (the last run by default)
+  ./kit doc                       rewrite RESULTS.md from the tests' outcome lines
+  ./kit pack [RESULTS_DIR]        one .tar.gz of a run's results, to hand back
+  ./kit clean [--all]             delete the work folder and the VMs; --all also deletes results
+  ./kit selftest                  the checks that run on Linux or a Mac without changing anything
+
+Options of run:
+  --yes          answer yes to "this takes N minutes / downloads N GB / starts a VM"
+  --allow-sudo   let a test run sudo on your Mac; each one says why first (only tests 03, 09 and 20
+                 ask; without it, they skip that part)
+  --keep-vms     keep the computers a test made, to look at them afterwards
+EOF
+}
+
+# Parse the "# key: value" header of a test file.
+header() { sed -n "s/^# $2: //p" "$1" | head -1; }
+
+test_files() {
+  local f
+  for f in "$KIT_ROOT"/tests/[0-9][0-9]-*.sh; do [ -f "$f" ] && echo "$f"; done
+}
+
+cmd_list() {
+  local f
+  printf '%-3s %-7s %-14s %s\n' id tier time title
+  for f in $(test_files); do
+    printf '%-3s %-7s %-14s %s\n' "$(header "$f" id)" "$(header "$f" tier)" "$(header "$f" time | cut -c1-14)" "$(header "$f" title)"
+    printf '            needs: %s\n' "$(header "$f" needs)"
+    [ -n "$(header "$f" blocks)" ] && printf '            BLOCKS: %s\n' "$(header "$f" blocks)"
+  done
+}
+
+select_tests() { # prints matching files, in id order, no duplicates
+  local w f id tier out=""
+  for w in "$@"; do
+    for f in $(test_files); do
+      id="$(header "$f" id)"; tier="$(header "$f" tier)"
+      case "$w" in
+        all) out="$out $f" ;;
+        "$id"|"$tier") out="$out $f" ;;
+      esac
+    done
+  done
+  for f in $out; do echo "$f"; done | sort -u
+}
+
+host_json() {
+  python3 - <<'EOF'
+import json, os, platform, subprocess, sys
+def run(*a):
+    try: return subprocess.run(a, capture_output=True, text=True, timeout=20).stdout.strip()
+    except Exception: return ""
+h = {"system": platform.system(), "machine": platform.machine(), "kernel": platform.release()}
+if h["system"] == "Darwin":
+    h["macos"] = run("sw_vers", "-productVersion")
+    h["build"] = run("sw_vers", "-buildVersion")
+    h["chip"] = run("sysctl", "-n", "machdep.cpu.brand_string")
+    h["memory_gb"] = round(int(run("sysctl", "-n", "hw.memsize") or 0) / 2**30)
+    h["model"] = run("sysctl", "-n", "hw.model")
+    h["filevault"] = run("fdesetup", "status")
+    h["power"] = run("pmset", "-g", "batt").splitlines()[0:1]
+df = run("df", "-k", os.environ.get("KIT_WORK_ROOT", os.path.expanduser("~")))
+h["work_volume_df_kb"] = df.splitlines()[-1] if df else ""
+print(json.dumps(h))
+EOF
+}
+
+cmd_run() {
+  export KIT_YES=0 KIT_SUDO=0 KIT_KEEP_VMS=0
+  local what=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --yes) KIT_YES=1 ;;
+      --allow-sudo) KIT_SUDO=1 ;;
+      --keep-vms) KIT_KEEP_VMS=1 ;;
+      -*) echo "unknown option $1" >&2; exit 2 ;;
+      *) what="$what $1" ;;
+    esac
+    shift
+  done
+  [ -n "$what" ] || { usage; exit 2; }
+  # shellcheck disable=SC2086
+  local files; files="$(select_tests $what)"
+  [ -n "$files" ] || { echo "no test matches:$what" >&2; exit 2; }
+
+  local stamp dir f id rc
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  dir="$KIT_WORK_ROOT/results/$stamp"
+  mkdir -p "$dir/logs" "$KIT_WORK_ROOT/work"
+  export KIT_OUT="$dir/results.jsonl"
+  : > "$KIT_OUT"
+  host_json > "$dir/host.json"
+  ln -sfn "$dir" "$KIT_WORK_ROOT/results/last"
+  echo "Results go to $dir" >&2
+
+  # Ctrl-C reaches the whole terminal's process group: the test, its tee and this loop. The test's
+  # EXIT trap must still stop its computers and put back what it changed, and it logs while doing
+  # so; tee must outlive it, or the trap dies of SIGPIPE half way. This loop stops after that test.
+  local stopped=0
+  trap 'stopped=1' INT
+  export KIT_STOP_FILE="$dir/stop-run"
+  rm -f "$KIT_STOP_FILE"
+  for f in $files; do
+    [ "$stopped" = 0 ] || { echo "stopped by Ctrl-C: the remaining tests did not run" >&2; break; }
+    if [ -f "$KIT_STOP_FILE" ]; then
+      echo "the remaining tests did not run: $(cat "$KIT_STOP_FILE")" >&2; break
+    fi
+    id="$(header "$f" id)"
+    export KIT_ID="$id"
+    export KIT_WORK="$KIT_WORK_ROOT/work/$id"
+    mkdir -p "$KIT_WORK"
+    echo "" >&2
+    echo "=== $id $(header "$f" title) ($(header "$f" time))" >&2
+    printf '{"test":"%s","kind":"begin","t":%s,"title":%s}\n' "$id" "$(date +%s)" \
+      "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$(header "$f" title)")" >> "$KIT_OUT"
+    # A test reads the terminal for confirmations, so stdin stays attached; its output is copied
+    # to the log.
+    bash "$f" 2>&1 | (trap '' INT; exec tee "$dir/logs/$id.log")
+    rc="${PIPESTATUS[0]}"
+    printf '{"test":"%s","kind":"end","t":%s,"exit":%s}\n' "$id" "$(date +%s)" "$rc" >> "$KIT_OUT"
+  done
+  trap - INT
+  cmd_report "$dir"
+}
+
+cmd_report() {
+  local dir="${1:-$KIT_WORK_ROOT/results/last}"
+  python3 "$KIT_ROOT/py/kitreport.py" report "$KIT_ROOT" "$dir"
+}
+
+cmd_doc() { python3 "$KIT_ROOT/py/kitreport.py" doc "$KIT_ROOT"; }
+
+cmd_pack() {
+  local dir="${1:-$KIT_WORK_ROOT/results/last}"
+  dir="$(cd "$dir" && pwd -P)"
+  local out
+  out="$KIT_WORK_ROOT/silo-kit-results-$(basename "$dir").tar.gz"
+  tar -czf "$out" -C "$(dirname "$dir")" "$(basename "$dir")"
+  echo "$out"
+}
+
+cmd_clean() {
+  local b p st
+  # What a test cut off (power, kill -9) may have left outside the work folder, put back before
+  # the work folder, which holds the copies and the state needed to put it back, is deleted.
+  st="$KIT_WORK_ROOT/work/08/ssh_config.state.json"
+  if [ -f "$st" ]; then
+    echo "test 08 left its Include line in ~/.ssh/config: taking it out" >&2
+    python3 -I "$KIT_ROOT/py/08-sshconfig.py" restore --state "$st" >&2 || {
+      echo "could not restore ~/.ssh/config; its copy is $KIT_WORK_ROOT/work/08/ssh_config.backup: nothing deleted" >&2
+      return 1
+    }
+  fi
+  if [ "$(uname -s)" = Darwin ]; then
+    launchctl bootout "gui/$(id -u)/com.silo.kit.test09.agent" 2>/dev/null
+    if launchctl print system/com.silo.kit.test09.daemon >/dev/null 2>&1; then
+      echo "test 09's job is still loaded in launchd's system domain; removing it needs sudo:" >&2
+      sudo /bin/sh -c 'launchctl bootout system/com.silo.kit.test09.daemon 2>/dev/null; rm -rf /private/tmp/silokit-09; true'
+    fi
+  fi
+  for b in "$KIT_WORK_ROOT"/work/*/*.silovm "$KIT_WORK_ROOT"/work/*/*/*.silovm; do
+    [ -f "$b/run.pid" ] && kill "$(cat "$b/run.pid")" 2>/dev/null
+  done
+  for p in "$KIT_WORK_ROOT"/work/*/*/gvproxy.run.pid; do
+    [ -f "$p" ] && kill "$(cat "$p")" 2>/dev/null
+  done
+  rm -rf "$KIT_WORK_ROOT/work"
+  if [ "${1:-}" = --all ]; then rm -rf "$KIT_WORK_ROOT"; fi
+  echo "deleted $KIT_WORK_ROOT/work${1:+ and everything else under $KIT_WORK_ROOT}" >&2
+}
+
+cmd_build() {
+  bash "$KIT_ROOT/lib/build.sh"
+}
+
+cmd_selftest() { bash "$KIT_ROOT/linux/selftest.sh"; }
+
+case "${1:-help}" in
+  list) cmd_list ;;
+  build) cmd_build ;;
+  run) shift; cmd_run "$@" ;;
+  report) shift; cmd_report "$@" ;;
+  doc) cmd_doc ;;
+  pack) shift; cmd_pack "$@" ;;
+  clean) shift; cmd_clean "$@" ;;
+  selftest) cmd_selftest ;;
+  *) usage ;;
+esac

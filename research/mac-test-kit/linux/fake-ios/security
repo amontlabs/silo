@@ -1,0 +1,8 @@
+#!/bin/sh
+# A fake of macOS's security for the Linux run of test 27: add-trusted-cert succeeds and records
+# the certificate in the fake computer's system store ($HOME/.fake-system-roots.pem), which the
+# fake simulators do not read.
+case "$1" in
+  add-trusted-cert) for last; do :; done; cat "$last" >> "$HOME/.fake-system-roots.pem" ;;
+  *) echo "fake security: $1 is not faked" >&2; exit 1 ;;
+esac
