@@ -20,7 +20,7 @@ line. Neither was measured. This page measures both, and finds a third fix that 
    time.** In all 20 runs and all four ways of counting hosts as seen. In alphabetical order it is
    9th to 35th.
 4. **A host that was sent more than it sent back stands apart.** Each of the 49 hosts measured
-   here (the setup downloads and a documentation walk) received at least two and a half times what
+   here (the setup downloads and a documentation walk) received more than three times what
    it was sent. The paste upload sent 1,750 times what it received.
 5. **A host counted as seen still carries data out.** After the first run, github.com,
    api.github.com, ghcr.io and storage.googleapis.com are seen, and anyone with an account can
