@@ -1,0 +1,12 @@
+{
+  "name": "Spend across a team",
+  "what": "A budget on all of a member's computers, set by the team's rules, and a daily summary of each member's spend written to a place the team owns.",
+  "needs": [
+    "team-budget",
+    "spend-the-team-sees"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Teams spend over a thousand dollars per developer a month on agents and say their caps are easy to get around; a budget held at the boundary covers every program and every key."
+  }
+}

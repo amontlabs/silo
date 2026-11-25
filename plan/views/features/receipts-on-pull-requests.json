@@ -1,0 +1,12 @@
+{
+  "name": "Receipts on pull requests",
+  "what": "The receipts of the runs behind a pull request, printed for its description at the level the member picks, and signed by the Silo that made them.",
+  "needs": [
+    "receipt-on-a-pull-request",
+    "shared-receipt-signed"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Reviewers of a pull request an agent opened cannot see how it was made, and auditors ask who authorised and what tested each change."
+  }
+}

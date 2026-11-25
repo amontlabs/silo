@@ -1,0 +1,7 @@
+{
+  "asks": "When several people reach one engine, which person does a control fact name?",
+  "answer": "Each person reaches the engine with a key of their own, and each control fact made by a person names that key's person. With one person, the field holds the same name each time. It is in the record from its first version, so that a host shared later needs no change to the record's format.",
+  "needs": [
+    "who-made-each-change"
+  ]
+}

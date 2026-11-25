@@ -1,0 +1,7 @@
+{
+  "asks": "What does a member see of what their company set up in Silo?",
+  "answer": "All of it. A rule set, an extension or a setting that the Mac's management put in place is marked as managed, with who manages it. An extension that sends any part of the record off the Mac shows where it sends and what. Nothing a company sets up is hidden from the person whose agents it watches.",
+  "needs": [
+    "yours-to-know"
+  ]
+}

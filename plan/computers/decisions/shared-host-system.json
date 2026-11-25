@@ -1,0 +1,7 @@
+{
+  "asks": "Where do the computers that several people of a team share run?",
+  "answer": "On a Linux server the team owns, not on a Mac. Apple's licence for macOS forbids using macOS in time-sharing or similar services, \"whether such services are being provided within your own organization or to third parties\", and lets one user use it at a time. A Mac that stays on runs the computers of one person, reached from that person's other devices. Whether Apple allows more under a written agreement is to find out.",
+  "needs": [
+    "main-on-several-devices"
+  ]
+}

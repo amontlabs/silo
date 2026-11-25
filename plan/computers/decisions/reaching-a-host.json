@@ -1,0 +1,7 @@
+{
+  "asks": "How is a host reached from another network?",
+  "answer": "Over a private network the user already runs, such as Tailscale or WireGuard. The engine accepts a person's key on that network, as SSH does. Silo runs no relay of its own, so nothing passes through Amont Labs.",
+  "needs": [
+    "main-on-several-devices"
+  ]
+}

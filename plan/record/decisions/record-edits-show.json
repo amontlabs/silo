@@ -1,0 +1,8 @@
+{
+  "asks": "Can someone tell, later, that a record was edited or cut?",
+  "answer": "Yes. Each line of the record carries the hash of the line before it, so an edit or a removal breaks the chain from that line on. The hash of the last line can be written out on a schedule, to a place the user chooses: a record checked against it later shows whether anything before it changed. This is decided before the record's files are first written, because adding it later changes their format.",
+  "needs": [
+    "record-file-format",
+    "changes-to-the-record"
+  ]
+}
