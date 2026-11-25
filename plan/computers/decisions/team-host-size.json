@@ -1,0 +1,8 @@
+{
+  "asks": "What host does a team of five need?",
+  "answer": "A Linux server with KVM, 128 GB of memory, 16 cores and 4 TB of NVMe disk, for five people each running main with a few agents and one or two computers beside it, with 30 days of daily checkpoints. What a host holds is measured with the benchmark of `memory-handling-measured`, as on a Mac.",
+  "needs": [
+    "members-on-a-host",
+    "sizing-target"
+  ]
+}

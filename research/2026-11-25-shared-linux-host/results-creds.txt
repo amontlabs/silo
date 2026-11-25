@@ -1,0 +1,12 @@
+== A's boundary process (dumpable)
+another process of A:  read sk-live-member-a-0001
+a process of B:        refused: Permission denied
+root:                  read sk-live-member-a-0001
+== A's boundary process (nodump)
+another process of A:  refused: Permission denied
+a process of B:        refused: Permission denied
+root:                  read sk-live-member-a-0001
+== A's SSH agent, its socket in a folder only A can open
+a process of A:        listed A's key
+a process of B:        refused (Error connecting to agent: Permission denied)
+root:                  listed A's key
