@@ -57,7 +57,7 @@ fi
 kit_fact gvproxy_sealed "$("$NET_GVPROXY_SEALED" -version 2>&1 | head -1), $NET_GVPROXY_TAG ($NET_GVPROXY_COMMIT) with net/gvproxy-sealed.patch $(net_sha256 "$KIT_ROOT/net/gvproxy-sealed.patch" | cut -c1-12)"
 
 D="$W/gs"; mkdir -p "$D"; chmod 700 "$W" "$D"
-B=""; STANDIN_PID=""; GVPID=""
+B=""; STANDIN_PID=""
 cleanup() {
   if [ "$LINUX" = 1 ]; then
     [ -f "$D/sshd.pid" ] && kill "$(cat "$D/sshd.pid")" 2>/dev/null
@@ -97,7 +97,7 @@ kit_note "stand-in engine: 127.0.0.1:$P_LO, 0.0.0.0:$P_ANY, $W/standin/engine.so
 # --- the computer on the sealed gvproxy ----------------------------------------------------------
 if [ "$LINUX" = 1 ]; then MAC_ADDR="5a:94:ef:4b:11:35"; else B="$(vm_fresh n35)" || exit 1; MAC_ADDR="$(net_bundle_mac "$B")"; fi
 net_gvproxy_config "$D" sealed "$MAC_ADDR"
-GVPID="$(net_gvproxy_start "$D" sealed)" || { kit_attach "$D/gvproxy.out"; kit_outcome inconclusive "the sealed gvproxy did not start: $(tail -3 "$D/gvproxy.out" | tr '\n' ' ')"; exit 0; }
+net_gvproxy_start "$D" sealed >/dev/null || { kit_attach "$D/gvproxy.out"; kit_outcome inconclusive "the sealed gvproxy did not start: $(tail -3 "$D/gvproxy.out" | tr '\n' ' ')"; exit 0; }
 if [ "$LINUX" = 1 ]; then
   rm -f "$D/guest-ready.json"
   unshare -n python3 -I "$KIT_ROOT/linux/fake-guest-net.py" --sock "$D/gv.sock" --mac "$MAC_ADDR" --ready "$D/guest-ready.json" > "$D/guest.log" 2>&1 &

@@ -197,6 +197,7 @@ decision mac-kept-awake
   option framework-holds: Apple's framework already holds the Mac awake while a computer runs; Silo adds no assertion, and says what battery and a closed lid do
   37 fact vm_holds_awake=yes: framework-holds
   37 fact vm_holds_awake=no: on-power-only on-battery-too
+  37 run-lost: on-battery-too
   16 fact vz_holds_assertion=yes: framework-holds
   16 fact vz_holds_assertion=no: on-power-only on-battery-too
 

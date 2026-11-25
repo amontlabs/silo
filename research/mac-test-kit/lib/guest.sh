@@ -1,5 +1,5 @@
 # shellcheck shell=bash disable=SC2034  # its variables are read by the tests that source it
-# Helpers for the tests that work inside a provisioned macOS computer (02 09 11 12 14 16 21 22).
+# Helpers for the tests that work inside a provisioned macOS computer (02 09 11 12 14 16 21 22 37).
 # Sourced after lib/common.sh and lib/vm.sh. Written for macOS /bin/bash 3.2.
 #
 # One computer at a time is "the current one": GB holds its bundle. guest_sh and guest_sudo run a
