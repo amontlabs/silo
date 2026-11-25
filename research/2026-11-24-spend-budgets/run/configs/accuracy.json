@@ -1,0 +1,8 @@
+{"policy": "finish", "prices": "/home/user/silo/research/2026-11-24-spend-budgets/prices.json",
+ "uncountable_hosts": ["api.mistral.ai", "api.deepseek.com"],
+ "computers": [
+  {"name": "main", "address": "127.0.0.2", "person": "polar", "credentials": [{"value": "sk-ant-api03-main-fake"}]},
+  {"name": "codex", "address": "127.0.0.3", "person": "polar", "credentials": [{"value": "sk-proj-codex-fake"}]},
+  {"name": "gemini", "address": "127.0.0.6", "person": "polar", "credentials": [{"value": "AIzaFakeGeminiKey000"}]},
+  {"name": "script", "address": "127.0.0.7", "credentials": [{"value": "sk-proj-script-fake"}, {"value": "sk-ant-api03-script-fake"}, {"value": "AIzaScriptFake000"}], "limits": {"total": 1000}}],
+ "people": [{"name": "polar"}]}

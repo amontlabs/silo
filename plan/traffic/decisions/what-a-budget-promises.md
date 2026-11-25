@@ -50,3 +50,109 @@ whoever builds it.
   budget, counted as it streams, and settled on the provider's final usage, so two calls at once
   cannot both spend the same remainder. A call that fails midway still counts what it cost.
   ([source](https://github.com/evmts/guillotine-mini/blob/edafd394bc0aa48a9691b037da36b6f36525121a/CLAUDE.md?plain=1#L669))
+
+## Measured with Claude Code under a budget (24 November 2026)
+
+An agent's part, 24 November 2026, from `research/2026-11-24-spend-budgets`. This refines the choice above with a working
+boundary and real agent programs, where #351 had a simulator.
+
+Main has a budget of $3 and Claude Code on Opus 5.5 starts 8 subagents at once. Each call reasons
+for 2,000 to 12,000 tokens before it writes anything, and the reasoning streams as nothing the
+boundary can read. Three runs per option, the same task each time:
+
+| How a call is admitted | Spent, worst of 3 | Over the budget |
+|---|---|---|
+| Running calls finish, counting what is visible (the answer above) | $4.61 | 54% |
+| The same, and a running call's output also counts by time at the model's speed | $4.05 | 35% |
+| The same, and the call's own input must fit in what is left | $4.05 | 35% |
+| Each running call holds its input and its model's typical output (90th percentile) | $2.80 | 7% to 9% under, every run |
+| Each running call holds `max_tokens` | $0.53 | stopped after 3 calls: Claude Code asks for 128,000 |
+
+Fable 5.2 under $6 gave 56%, 34%, 34%, 7% to 9% under, and 82% under.
+
+What the table says:
+
+- With visible output only, a third to a half of the overshoot came from calls that left after the
+  budget was already spent, because the reasoning of the calls under way was not counted yet.
+  Counting output by time while a call runs removes all of it. What is left is the calls under
+  way at the limit, which the answer above accepts.
+- That rest is large with subagents: a third of the budget here. A promise of "over by the calls
+  under way" should say so in the app, with the number of calls running.
+- The input check changed nothing on this night, since Claude Code's inputs are mostly cache
+  reads. It is for one large call: a 2.4 MB tool result sent with $0.34 left of $1 ended the budget
+  at $7.38 without it, and was refused with it.
+- Holding `max_tokens` is not usable with Claude Code.
+
+Recommended: keep "running calls finish", count a running call's output by time as well as by
+what is visible, and keep the input check. If "never over" matters more than the last 7% to 9% of
+the budget, hold the typical output instead: it was never over in six runs.
+
+## A budget reached in the middle of an answer (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-spend-budget-edges`. The same
+Claude Code run as above (Opus 5.5, 8 subagents, $3), with a fourth way built: cut each call
+under way once what is counted, reasoning included by time, reaches the budget. Three runs each:
+
+| How a call is admitted | Spent, each run | Over the budget, worst | Paid for answers that were cut |
+|---|---|---|---|
+| Running calls finish, output counted by time | $3.71, $4.05, $3.92 | 35% | none |
+| Each running call holds its typical output | $2.74, $2.78, $2.80 | 7% under | none |
+| Cut at the budget | $3.02, $3.03, $2.99 | 1% | $0.52 to $0.92 a run |
+| Hold the typical output, and cut at the budget | $2.75, $2.78, $2.80 | 7% under | none |
+
+When a call was cut, Claude Code retried it within 40 ms, got the 400 refusal, and printed Silo's
+sentence. A cut is paid for: here a sixth to a third of the budget went on answers nobody used.
+
+One case the typical hold does not cover: a single call that reasons far longer than the model's
+usual. With $0.68 left of $1, a call that reasoned 60,000 tokens was admitted under the typical
+hold and ended the budget at $1.52. With the cut as well, it was stopped at $1.00, and the
+program got an error event in the provider's own shape: "Silo: this computer's budget of $1.00
+was reached while this answer was being written ($1.00 spent), so it was stopped."
+
+So a fourth option for the choice above: hold the typical output, and cut only what passes the
+budget anyway. It stopped 7% under the budget like the typical hold in every Claude Code run, and
+held the one long call to the budget. It costs a cut answer in that rare case. Recommended, if
+"never over" is wanted. If the overshoot is accepted, the recommendation above stands.
+
+## The input check after a pause (25 November 2026)
+
+An agent's part, 25 November 2026. The input check prices a call's input before it leaves. Priced
+at the dearest rate, a conversation that reads 63,000 tokens from Anthropic's cache was held at
+$0.51 for an input billed $0.013. Priced as "likely", every earlier token at the cache-read rate,
+the estimate fell to $0.013, and after a pause longer than the cache's 5 minutes it stayed at
+$0.013 while the provider billed $0.316 to write the cache again: 24 times short, the one call the
+check is for. Built and measured: the boundary keeps when each conversation's cache was last
+used, how much of its input the cache held, and its lifetime (5 minutes, or 1 hour when the reply
+wrote a 1-hour cache), and prices that part as a write again once the lifetime has passed. Every
+call of the run was then priced at or above its bill, and no more than the dearest price.
+
+## A model with no price, a third option (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-model-prices`. The second case above
+asks what a budget does with a model Silo has no price for. Two options were given: deny its
+calls, or let them pass uncounted. The research measured a third.
+
+- Count it at a bound. The call leaves, and is counted at the dearest price any model of the same
+  provider and tier has in Silo's table, times a margin of 2. The app shows the call as counted at
+  a bound until the model's price arrives. It costs a budget that runs out early while that lasts.
+
+What was measured. Under a budget of $1, five calls to a model that was in no table were admitted
+at a bound of $16 and $80 per million input and output tokens (twice Fable 5.2's price). The
+stand-in billed them at $6 and $30. The budget stopped the agent after $0.46 had really been spent,
+when the bound had counted $1.22. Under "deny", the same agent stopped at its first call.
+
+How safe the bound is. Of 100 models Anthropic, OpenAI and Google released since January 2025, 7
+cost more than the dearest model their provider already sold. The largest gap was 1.6 times
+(OpenRouter's catalogue; models retired since are missing from it, so the gap can be larger). A
+margin of 2 covered all of them. Pricing a new model like the previous model of its family would
+have counted too little for 19 of 55, by up to 8 times.
+
+Why it matters now. Agent programs change their default model when they update, often on the day
+the model is released. With "deny", every budgeted computer stops on that day until Silo's table
+has the price. LiteLLM's table had a price for a new model of these providers on the day it was
+listed for half of them, and within 3 days for 9 in 10 (`where-prices-come-from` proposes a table
+of Silo's own).
+
+Recommended: count it at a bound. A budget still holds, since the bound is above what the provider
+charges, and a new model does not stop work. This would replace the sentence of the answer on a
+model Silo has no price for. The answer is left as it is for polarzero to choose.

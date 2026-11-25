@@ -1,0 +1,1 @@
+{"seed": 11, "main_steps": 40, "subagents": 8, "spawn_at": 2, "sub_steps": 14, "think": [2000, 12000], "tps": 500, "fallback_rate": 0.0}

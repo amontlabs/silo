@@ -1,0 +1,1 @@
+{"policy": "finish", "prices": "/home/user/silo/research/2026-11-24-spend-budgets/prices.json", "out_of_sight": "hold", "computers": [{"name": "script", "address": "127.0.0.7", "credentials": [{"value": "sk-proj-script-fake"}, {"value": "sk-ant-api03-script-fake"}, {"value": "AIzaScriptFake000"}], "limits": {"total": 1.5}}]}

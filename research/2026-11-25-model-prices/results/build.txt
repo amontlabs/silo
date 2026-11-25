@@ -1,0 +1,5 @@
+version 2026112501: 167 rows, 1 multipliers, 4 disputes
+  DISPUTE openai/gpt-5.4/batch [{'field': 'cache_read', 'page': 0.13, 'openrouter': 0.125}]
+  DISPUTE google/gemini-3.8-flash/standard [{'field': 'input', 'page': 0.75, 'openrouter': 0.825}, {'field': 'output', 'page': 3.75, 'openrouter': 4.125}, {'field': 'cache_read', 'page': 0.075, 'openrouter': 0.0825}]
+  DISPUTE google/gemini-3.1-pro-preview/batch [{'field': 'cache_read', 'page': 0.2, 'openrouter': 0}]
+  DISPUTE google/gemini-3-flash-preview/batch [{'field': 'cache_read', 'page': 0.05, 'openrouter': 0}]
