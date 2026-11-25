@@ -1,0 +1,6 @@
+$ RAILWAY_TOKEN=test-token-123 -- railway restart --service api --yes
+websocket upgrade failed
+
+Caused by:
+    unexpected status code: 200 OK
+--- exit=1 seconds=.281796265

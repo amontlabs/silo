@@ -1,0 +1,10 @@
+$ SUPABASE_ACCESS_TOKEN=<redacted> SUPABASE_YES=1 DO_NOT_TRACK=1 -- supabase projects api-keys --project-ref abcdefghijklmnopqrst
+Warning: --project-ref is deprecated and will be removed in v4. Use --remote=<ref> instead
+Target: project abcdefghijklmnopqrst
+
+  
+   NAME         | KEY VALUE                  
+  --------------|----------------------------
+   anon         | eyJhbGciOiJIUzI1NiJ9.e30.x 
+   service_role | eyJhbGciOiJIUzI1NiJ9.e30.y 
+--- exit=0 seconds=.518689158

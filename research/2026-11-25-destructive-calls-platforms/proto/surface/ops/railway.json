@@ -1,0 +1,3254 @@
+[
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "accessGroupCreate",
+"args": [
+"input"
+],
+"summary": "Create an access group in a workspace."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "accessGroupDelete",
+"args": [
+"id"
+],
+"summary": "Delete an access group."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "accessGroupMemberAdd",
+"args": [
+"input"
+],
+"summary": "Add a workspace member to an access group."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "accessGroupMemberRemove",
+"args": [
+"input"
+],
+"summary": "Remove a member from an access group."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "accessGroupProjectAttach",
+"args": [
+"input"
+],
+"summary": "Attach a project to an access group."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "accessGroupProjectDetach",
+"args": [
+"input"
+],
+"summary": "Detach a project from an access group."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "accessGroupUpdate",
+"args": [
+"id",
+"input"
+],
+"summary": "Update an access group's name or role."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "agentUsageLimitSet",
+"args": [
+"input"
+],
+"summary": "Set agent usage limit for a workspace"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "apiTokenCreate",
+"args": [
+"input"
+],
+"summary": "Creates a new API token."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "apiTokenDelete",
+"args": [
+"id"
+],
+"summary": "Deletes an API token."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "baseEnvironmentOverride",
+"args": [
+"id",
+"input"
+],
+"summary": "Sets the base environment override for a deployment trigger."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "botScopeBindingRemove",
+"args": [
+"id"
+],
+"summary": "Remove a Railway agent chat binding. Requires admin on the binding's workspace."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "bucketCreate",
+"args": [
+"input"
+],
+"summary": "Create a bucket in a project"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "bucketCredentialsReset",
+"args": [
+"bucketId",
+"environmentId",
+"projectId",
+"redeployDependents"
+],
+"summary": "Reset the credentials for a bucket in an environment"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "bucketUpdate",
+"args": [
+"id",
+"input"
+],
+"summary": "Updates a bucket."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "cancelPitrHaWorkflow",
+"args": [
+"environmentId",
+"rootServiceId"
+],
+"summary": "Cancels an in-progress PITR enable/disable rollout on an HA database cluster and resets its progress so the UI re-reads from the live cluster. No-ops when nothi"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "canvasViewMerge",
+"args": [
+"sourceEnvironmentId",
+"targetEnvironmentId"
+],
+"summary": "Merge a canvas layout from one environment into another. Re-computes the merge from current state and applies mutations."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "clearPitrHaWorkflowProgress",
+"args": [
+"environmentId",
+"rootServiceId"
+],
+"summary": "Clears the recorded progress of a finished PITR enable/disable rollout so the Backups page starts fresh. A rollout still in progress cannot be cleared."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "clearanceTokenCreate",
+"args": [
+"input"
+],
+"summary": "Creates a Railway Authentication token for a project's protected services and returns it once. Requires a workspace admin and the workspace's Railway Authentica"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "clearanceTokenRevoke",
+"args": [
+"id"
+],
+"summary": "Revokes a Railway Authentication token. Requires a workspace admin; works without the entitlement. Revoking a revoked token succeeds."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "cliAuthEventTrack",
+"args": [
+"input"
+],
+"summary": "Track CLI authentication-attempt outcomes (signup / sign-in funnel)"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "cliEventTrack",
+"args": [
+"input"
+],
+"summary": "Track events from the Railway CLI"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "cloudAgentArchive",
+"args": [
+"id"
+],
+"summary": "Archive a cloud agent, hiding it from lists of unarchived agents. Requires permission to manage the agent."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "cloudAgentCheckpointCreate",
+"args": [
+"id",
+"name"
+],
+"summary": "Checkpoint the agent's disk. Poll cloudAgentCheckpoint until SUCCEEDED."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "cloudAgentCheckpointDelete",
+"args": [
+"id"
+],
+"summary": "Delete a checkpoint."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "cloudAgentCreate",
+"args": [
+"input"
+],
+"summary": "Create a cloud agent."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "cloudAgentDelete",
+"args": [
+"id"
+],
+"summary": "Delete a cloud agent."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "cloudAgentDeploy",
+"args": [
+"id",
+"path",
+"regions",
+"serviceName"
+],
+"summary": "Build the agent's code inside its own VM and deploy it. Creates the named service (default: the agent's name) or reuses it. Needs an agent booted with the build"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "cloudAgentFeedbackCreate",
+"args": [
+"input"
+],
+"summary": "Send lightweight agent feedback to Railway. Returns the report ID after delivery."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "cloudAgentFork",
+"args": [
+"id",
+"name",
+"variables"
+],
+"summary": "Duplicate a running cloud agent."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "cloudAgentHarnessToken",
+"args": [
+"environmentId",
+"id"
+],
+"summary": "Mint a short-lived (5m) JWT for the agent's harness WebSocket (see agentWsUrl). The in-VM gate verifies signature/exp/aud and pins it to this agent. Mint one pe"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "cloudAgentMarkSeen",
+"args": [
+"cloudAgentId",
+"sessionId"
+],
+"summary": "Mark the agent's finished and failed sessions as seen, or only sessionId's. Requires permission to manage the agent."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "cloudAgentSessionRename",
+"args": [
+"cloudAgentId",
+"sessionId",
+"title"
+],
+"summary": "Set a session's title, shown over its generated one. An empty title clears it."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "cloudAgentSleep",
+"args": [
+"id"
+],
+"summary": "Sleep a running cloud agent, keeping its volume. Processes on the machine are terminated; waking re-runs its entrypoint."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "cloudAgentStateReport",
+"args": [
+"input"
+],
+"summary": "Report the current coding-agent session state."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "cloudAgentTaskCancel",
+"args": [
+"taskId"
+],
+"summary": "Stop a task. Before its prompt is sent it never starts; after, only its own run is aborted. The task ends CANCELLED, with \"The task was cancelled\" as its error."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "cloudAgentTaskDispatch",
+"args": [
+"input"
+],
+"summary": "Start a task and return its handle. Creates a fresh agent by default; replyToTaskId continues the original conversation."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "cloudAgentTaskRecover",
+"args": [
+"cloudAgentId",
+"sessionId"
+],
+"summary": "Recover the latest task response from the agent. May wake the VM."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "cloudAgentTaskRespond",
+"args": [
+"input"
+],
+"summary": "Answer a question the task is waiting on. Wakes a sleeping VM to deliver it (the question survives sleep); poll cloudAgentTask for the outcome."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "cloudAgentUnarchive",
+"args": [
+"id"
+],
+"summary": "Restore an archived cloud agent. Requires permission to manage the agent."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "cloudAgentWake",
+"args": [
+"id"
+],
+"summary": "Wake a sleeping cloud agent."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "customDomainCreate",
+"args": [
+"input"
+],
+"summary": "Creates a new custom domain."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "customDomainDelete",
+"args": [
+"id"
+],
+"summary": "Deletes a custom domain."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "customDomainIssueCertificate",
+"args": [
+"id"
+],
+"summary": "Issues a new certificate"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "customDomainUpdate",
+"args": [
+"environmentId",
+"id",
+"targetPort"
+],
+"summary": "Updates a custom domain."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "customerCreateFreePlanSubscription",
+"args": [
+"id"
+],
+"summary": "Create a free plan subscription for a customer"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "customerTogglePayoutsToCredits",
+"args": [
+"customerId",
+"input"
+],
+"summary": "Toggle whether a customer is automatically withdrawing to credits"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "databasePasswordReset",
+"args": [
+"input"
+],
+"summary": "Reset database credentials, coordinating all members for an HA cluster. On an HA cluster the rotation keeps running after this returns (`rotationInProgress`); f"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "deploymentApprove",
+"args": [
+"id"
+],
+"summary": "Approves a deployment."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "deploymentCancel",
+"args": [
+"id"
+],
+"summary": "Cancels a deployment."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "deploymentInstanceExecutionCreate",
+"args": [
+"input"
+],
+"summary": "Invoke a deployment instance execution."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "deploymentRedeploy",
+"args": [
+"id",
+"usePreviousImageTag"
+],
+"summary": "Redeploys a deployment."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "deploymentRemove",
+"args": [
+"id"
+],
+"summary": "Removes a deployment."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "deploymentRestart",
+"args": [
+"id"
+],
+"summary": "Restarts a deployment."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "deploymentRollback",
+"args": [
+"id"
+],
+"summary": "Rolls back to a deployment."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "deploymentStop",
+"args": [
+"id"
+],
+"summary": "Stops a deployment."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "deploymentTriggerCreate",
+"args": [
+"input"
+],
+"summary": "Creates a deployment trigger."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "deploymentTriggerDelete",
+"args": [
+"id"
+],
+"summary": "Deletes a deployment trigger."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "deploymentTriggerUpdate",
+"args": [
+"id",
+"input"
+],
+"summary": "Updates a deployment trigger."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "devNewLandingTargetClear",
+"args": [],
+"summary": "Forget the box `ssh dev.new` lands you in; the next connection creates a new one."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "devNewLandingTargetSet",
+"args": [
+"cloudAgentId"
+],
+"summary": "Make this cloud agent the box `ssh dev.new` lands you in. Replaces any previous choice."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "disablePitrForHaCluster",
+"args": [
+"input"
+],
+"summary": "Disables point-in-time recovery on an HA database cluster with the same rolling rollout as enable. The backup bucket is left intact, so existing backup history "
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "disableServiceCdn",
+"args": [
+"input"
+],
+"summary": "Disables CDN for a service, soft-deleting the edge config."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "dockerComposeImport",
+"args": [
+"environmentId",
+"projectId",
+"skipStagingPatch",
+"yaml"
+],
+"summary": "Create services and volumes from docker compose"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "egressGatewayAssociationCreate",
+"args": [
+"input"
+],
+"summary": "Create a new egress gateway association for a service instance"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "egressGatewayAssociationsClear",
+"args": [
+"input"
+],
+"summary": "Clear all egress gateway associations for a service instance"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "egressGatewayHAMigrationPreview",
+"args": [
+"input"
+],
+"summary": "Preview the HA static egress IPs that would be assigned, without applying them. Set allEnvironments to cover all of the service's environments."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "egressGatewayRollbackFromHA",
+"args": [
+"input"
+],
+"summary": "Switch a service from HA static egress IPs back to a standard static IP. Set allEnvironments to apply to all of the service's environments."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "egressGatewayUpgradeToHA",
+"args": [
+"input"
+],
+"summary": "Enable HA static egress IPs for a service. Set allEnvironments to apply to all of the service's environments."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "emailChangeConfirm",
+"args": [
+"nonce"
+],
+"summary": "Change the User's account email if there is a valid change email request."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "emailChangeInitiate",
+"args": [
+"newEmail"
+],
+"summary": "Initiate an email change request for a user"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "enablePitrForHaCluster",
+"args": [
+"input"
+],
+"summary": "Enables point-in-time recovery on an HA database cluster (Postgres HA, MySQL HA) with a rolling, near-zero-downtime rollout across its members. Safe to retry."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "enableServiceCdn",
+"args": [
+"input"
+],
+"summary": "Enables CDN for a service, creating an edge config and attaching all live domains."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "environmentApplyChangeSet",
+"args": [
+"baseConfigEtag",
+"commitMessage",
+"environmentId",
+"input",
+"waitForCompletion"
+],
+"summary": "Experimental: applies an intent-level RailwayChangeSet and returns operation results."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "environmentClearanceDefaultUpdate",
+"args": [
+"input"
+],
+"summary": "Sets whether Railway Authentication protects an environment's services that have no setting of their own, and pushes it to them. Requires a workspace admin; tur"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "environmentConfigPlanCommentUpsert",
+"args": [
+"input"
+],
+"summary": "Posts or updates a `railway config plan` comment on a GitHub pull request under the Railway app identity. The caller proves it runs in the target repo with a Gi"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "environmentCreate",
+"args": [
+"input"
+],
+"summary": "Creates a new environment."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "environmentDelete",
+"args": [
+"id"
+],
+"summary": "Deletes an environment."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "environmentIacPartialRelease",
+"args": [
+"baseConfigEtag",
+"environmentId",
+"partial",
+"resources"
+],
+"summary": "Release resources from a named IaC partial without deleting, redeploying, or changing them. Omit resources to release the entire partial. Whole-project manageme"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "environmentIacPartialTransfer",
+"args": [
+"baseConfigEtag",
+"environmentId",
+"fromPartial",
+"resources",
+"toPartial"
+],
+"summary": "Transfer resources between named IaC partials without deleting, redeploying, or changing them. Omit resources to transfer the entire source partial. The destina"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "environmentPatchCommit",
+"args": [
+"commitMessage",
+"environmentId",
+"patch",
+"skipDeploys"
+],
+"summary": "Commit the provided patch to the environment."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "environmentPatchCommitStaged",
+"args": [
+"commitMessage",
+"environmentId",
+"skipDeploys"
+],
+"summary": "Commits the staged changes for a single environment."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "environmentPatchDismissFailure",
+"args": [
+"patchId"
+],
+"summary": "Acknowledge a FAILED patch so it no longer shows as the environment's latest failure. The patch is left untouched."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "environmentPatchRestage",
+"args": [
+"patchId"
+],
+"summary": "Copy a FAILED patch's changes into the environment's staged patch (creating one if needed). The FAILED patch is left untouched."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "environmentPreviewChangeSet",
+"args": [
+"environmentId",
+"input"
+],
+"summary": "Experimental: previews an intent-level RailwayChangeSet without side effects."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "environmentRename",
+"args": [
+"id",
+"input"
+],
+"summary": "Renames an environment."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "environmentStageChanges",
+"args": [
+"environmentId",
+"input",
+"merge"
+],
+"summary": "Sets the staged patch for a single environment."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "environmentTriggersDeploy",
+"args": [
+"input"
+],
+"summary": "Deploys all connected triggers for an environment."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "environmentUnskipService",
+"args": [
+"environmentId",
+"serviceId"
+],
+"summary": "Deploy a service that was skipped when its environment was created, along with its skipped transitive dependencies."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "fairUseAgree",
+"args": [
+"agree"
+],
+"summary": "Agree to the fair use policy for the currently authenticated user"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "featureFlagAdd",
+"args": [
+"input"
+],
+"summary": "Add a feature flag for a user"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "featureFlagRemove",
+"args": [
+"input"
+],
+"summary": "Remove a feature flag for a user"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "generateShellToken",
+"args": [
+"input"
+],
+"summary": "Creates a short-lived (5-minute) token for opening a shell, file, or network session to a running deployment."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "githubRepoDeploy",
+"args": [
+"input"
+],
+"summary": "Deploys a GitHub repo"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "githubRepoUpdate",
+"args": [
+"input"
+],
+"summary": "Updates a GitHub repo through the linked template"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "inviteCodeUse",
+"args": [
+"code"
+],
+"summary": "Join a project using an invite code"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "jobApplicationCreate",
+"args": [
+"input",
+"resume"
+],
+"summary": "Creates a new job application."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "loginSessionAuth",
+"args": [
+"input"
+],
+"summary": "Auth a login session for a user"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "loginSessionCancel",
+"args": [
+"code"
+],
+"summary": "Cancel a login session"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "loginSessionConsume",
+"args": [
+"code"
+],
+"summary": "Get a token for a login session if it exists"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "loginSessionCreate",
+"args": [],
+"summary": "Start a CLI login session"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "loginSessionVerify",
+"args": [
+"code"
+],
+"summary": "Verify if a login session is valid"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "notificationDeliveriesMarkAsRead",
+"args": [
+"deliveryIds"
+],
+"summary": "Marks notification deliveries as read"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "notificationRuleCreate",
+"args": [
+"input"
+],
+"summary": "Create a new notification rule"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "notificationRuleDelete",
+"args": [
+"id"
+],
+"summary": "Delete a notification rule"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "notificationRuleUpdate",
+"args": [
+"id",
+"input"
+],
+"summary": "Update a notification rule"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "observabilityDashboardCreate",
+"args": [
+"input"
+],
+"summary": "Create an observability dashboard"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "observabilityDashboardReset",
+"args": [
+"id"
+],
+"summary": "Reset an observability dashboard to default dashboard items"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "observabilityDashboardUpdate",
+"args": [
+"id",
+"input"
+],
+"summary": "Update an observability dashboard"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "passkeyDelete",
+"args": [
+"id"
+],
+"summary": "Deletes a Passkey"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "preferencesUpdate",
+"args": [
+"input"
+],
+"summary": "Update the email preferences for a user"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "privateNetworkEndpointRename",
+"args": [
+"dnsName",
+"id",
+"privateNetworkId"
+],
+"summary": "Rename a private network endpoint."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectClaim",
+"args": [
+"id",
+"workspaceId"
+],
+"summary": "Claims a project."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectClearanceDefaultUpdate",
+"args": [
+"input"
+],
+"summary": "Sets whether environments created from now on start with Railway Authentication protecting services that have no setting of their own. Existing environments are"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectCreate",
+"args": [
+"input"
+],
+"summary": "Creates a new project."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectDelete",
+"args": [
+"id"
+],
+"summary": "Deletes a project."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectFavoriteSet",
+"args": [
+"favorite",
+"projectId"
+],
+"summary": "Star or unstar a project for the authenticated user. Returns the resulting state."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectFeatureFlagAdd",
+"args": [
+"input"
+],
+"summary": "Add a feature flag for a project"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectFeatureFlagRemove",
+"args": [
+"input"
+],
+"summary": "Remove a feature flag for a project"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectInvitationAccept",
+"args": [
+"code"
+],
+"summary": "Accept a project invitation using the invite code"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectInvitationCreate",
+"args": [
+"id",
+"input"
+],
+"summary": "Create an invitation for a project"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectInvitationDelete",
+"args": [
+"id"
+],
+"summary": "Delete an invitation for a project"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectInvitationResend",
+"args": [
+"id"
+],
+"summary": "Resend an invitation for a project"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectInviteCodeCreate",
+"args": [
+"projectId",
+"role"
+],
+"summary": "Create a 24-hour project invite link, reusing a link created within the last hour"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectLeave",
+"args": [
+"id"
+],
+"summary": "Leave project as currently authenticated user"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectMemberAdd",
+"args": [
+"input"
+],
+"summary": "Add a workspace member to a project with a specific role. The user must already be a member of the project's workspace."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectMemberRemove",
+"args": [
+"input"
+],
+"summary": "Remove user from a project"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectMemberUpdate",
+"args": [
+"input"
+],
+"summary": "Change the role for a user within a project"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectScheduleDelete",
+"args": [
+"id"
+],
+"summary": "Deletes a project with a 48 hour grace period."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectScheduleDeleteCancel",
+"args": [
+"id"
+],
+"summary": "Cancel scheduled deletion of a project"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectScheduleDeleteForce",
+"args": [
+"id"
+],
+"summary": "Force delete a scheduled deletion of a project (skips the grace period)"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectTokenCreate",
+"args": [
+"input"
+],
+"summary": "Create a token for a project that has access to a specific environment"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectTokenDelete",
+"args": [
+"id"
+],
+"summary": "Delete a project token"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectTransfer",
+"args": [
+"input",
+"projectId"
+],
+"summary": "Transfer a project to a workspace"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectTransferConfirm",
+"args": [
+"input"
+],
+"summary": "Confirm the transfer of project ownership"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectTransferInitiate",
+"args": [
+"input"
+],
+"summary": "Initiate the transfer of project ownership"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectTransferToTeam",
+"args": [
+"id",
+"input"
+],
+"summary": "Transfer a project to a team"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "projectUpdate",
+"args": [
+"id",
+"input"
+],
+"summary": "Updates a project."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "providerAuthRemove",
+"args": [
+"id"
+],
+"summary": "Deletes a ProviderAuth."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "purgeServiceCache",
+"args": [
+"input"
+],
+"summary": "Purges the CDN cache for a service. Bumps the edge config's purge epoch so every edge node treats prior cached entries as stale on next request. Idempotent; ret"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "railwayDomainDnsRecordCreate",
+"args": [
+"input"
+],
+"summary": "Create a DNS record for a Railway domain"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "railwayDomainDnsRecordDelete",
+"args": [
+"input"
+],
+"summary": "Delete a DNS record for a Railway domain"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "railwayDomainDnsRecordUpdate",
+"args": [
+"input"
+],
+"summary": "Update a DNS record for a Railway domain"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "railwayDomainEmailForwardingRemoveAll",
+"args": [
+"input"
+],
+"summary": "Stop forwarding every address on this domain, and remove the mail records that delivered them"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "railwayDomainEmailForwardingRuleCreate",
+"args": [
+"input"
+],
+"summary": "Forward an address on this domain to an external inbox"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "railwayDomainEmailForwardingRuleDelete",
+"args": [
+"input"
+],
+"summary": "Stop forwarding an address on this domain"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "railwayDomainEmailForwardingRuleSendTest",
+"args": [
+"input"
+],
+"summary": "Send a message to a forwarded address so the customer can confirm it delivers."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "railwayDomainEmailForwardingRuleUpdate",
+"args": [
+"input"
+],
+"summary": "Change where a forwarded address delivers"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "railwayDomainNameserversSet",
+"args": [
+"input"
+],
+"summary": "Delegate the domain's authoritative nameservers to an external DNS provider, or reset to Railway defaults by passing an empty list."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "railwayDomainUpdate",
+"args": [
+"input"
+],
+"summary": "Update a Railway domain's settings"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "recoveryCodeGenerate",
+"args": [],
+"summary": "Generates a new set of recovery codes for the authenticated user."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "recoveryCodeValidate",
+"args": [
+"input"
+],
+"summary": "Validates a recovery code."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "referralInfoUpdate",
+"args": [
+"input"
+],
+"summary": "Updates the ReferralInfo for the authenticated user."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "sandboxCheckpointCreate",
+"args": [
+"environmentId",
+"name",
+"sandboxId"
+],
+"summary": "Capture a running sandbox's current disk into a reusable, named checkpoint. Synchronous: the checkpoint is ready when this returns."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "sandboxCheckpointDelete",
+"args": [
+"environmentId",
+"id"
+],
+"summary": "Delete a sandbox checkpoint."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "sandboxCheckpointRename",
+"args": [
+"environmentId",
+"id",
+"name"
+],
+"summary": "Rename a sandbox checkpoint."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "sandboxCreate",
+"args": [
+"input"
+],
+"summary": "Create a sandbox in an environment."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "sandboxDestroy",
+"args": [
+"environmentId",
+"id"
+],
+"summary": "Destroy a sandbox."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "sandboxExec",
+"args": [
+"command",
+"environmentId",
+"id",
+"timeoutSec"
+],
+"summary": "Execute a command inside a running sandbox."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "sandboxHeartbeat",
+"args": [
+"environmentId",
+"id"
+],
+"summary": "Extend a sandbox's lifetime."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "sandboxTemplateBuild",
+"args": [
+"environmentId",
+"input"
+],
+"summary": "Build a sandbox template into a bootable checkpoint."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceConnect",
+"args": [
+"id",
+"input"
+],
+"summary": "Connect a service to a source"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceCreate",
+"args": [
+"input"
+],
+"summary": "Creates a new service."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceDelete",
+"args": [
+"environmentId",
+"id"
+],
+"summary": "Deletes a service."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceDisconnect",
+"args": [
+"id"
+],
+"summary": "Disconnect a service from a repo"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceDomainCreate",
+"args": [
+"input"
+],
+"summary": "Creates a new service domain."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceDomainDelete",
+"args": [
+"id"
+],
+"summary": "Deletes a service domain."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceDomainUpdate",
+"args": [
+"input"
+],
+"summary": "Updates a service domain."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceDuplicate",
+"args": [
+"environmentId",
+"serviceId"
+],
+"summary": "Duplicate a service, including its configuration, variables, and volumes."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceFeatureFlagAdd",
+"args": [
+"input"
+],
+"summary": "Add a feature flag for a service"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceFeatureFlagRemove",
+"args": [
+"input"
+],
+"summary": "Remove a feature flag for a service"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceInstanceAutoDeployUpdate",
+"args": [
+"input"
+],
+"summary": "Enables or disables auto-deploy for a service instance."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceInstanceAutoUpdateScheduleUpdate",
+"args": [
+"environmentId",
+"schedule",
+"serviceId"
+],
+"summary": "Update the auto-update maintenance window for a service instance, applied immediately (no config staging, no redeploy). Only the schedule changes \u2014 the update p"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceInstanceAutoUpdateSnooze",
+"args": [
+"environmentId",
+"serviceId",
+"snoozeDays"
+],
+"summary": "Skip the next scheduled auto-update for a service instance. Takes effect immediately, with no staged change and no redeploy. The maintenance window and update p"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceInstanceAutoUpdateSnoozeClear",
+"args": [
+"environmentId",
+"serviceId"
+],
+"summary": "Undo an active auto-update skip for a service instance, applied immediately (no config staging, no redeploy). The recurring maintenance window and update policy"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceInstanceClearanceUpdate",
+"args": [
+"input"
+],
+"summary": "Sets a service instance's own Railway Authentication setting: on, off, or none (follow the environment's default). Requires a workspace admin; ending up on also"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceInstanceDeploy",
+"args": [
+"commitSha",
+"environmentId",
+"latestCommit",
+"serviceId"
+],
+"summary": "Deploy a service instance"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceInstanceDeployV2",
+"args": [
+"commitSha",
+"environmentId",
+"serviceId"
+],
+"summary": "Deploy a service instance. Returns a deployment ID"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceInstanceLimitsUpdate",
+"args": [
+"input"
+],
+"summary": "Update the resource limits for a service instance"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceInstanceRedeploy",
+"args": [
+"environmentId",
+"serviceId"
+],
+"summary": "Redeploy a service instance"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceInstanceUpdate",
+"args": [
+"environmentId",
+"input",
+"serviceId"
+],
+"summary": "Update a service instance"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceInstanceVulnRemediationDismiss",
+"args": [
+"environmentId",
+"serviceId"
+],
+"summary": "Dismiss a pending database security update and cancel its scheduled redeploy."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceInstanceVulnRemediationPatchNow",
+"args": [
+"environmentId",
+"serviceId"
+],
+"summary": "Apply a pending database security update now (backup, then redeploy). Returns the new deployment id."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceRemoveUpstreamUrl",
+"args": [
+"id"
+],
+"summary": "Remove the upstream URL from all service instances for this service"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceTakedownAcknowledge",
+"args": [
+"input"
+],
+"summary": "Record that a workspace admin confirms subsequent deployments will exclude the content named in this notice, lifting its persistent takedown restriction. any ot"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "serviceUpdate",
+"args": [
+"id",
+"input"
+],
+"summary": "Updates a service."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "sessionDelete",
+"args": [
+"id"
+],
+"summary": "Deletes a session."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "setServiceUnderAttackMode",
+"args": [
+"input"
+],
+"summary": "Enables or disables Under Attack Mode for a service. While enabled, the edge serves a browser challenge to unverified visitors of the service's edge-routed doma"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "setupAgentEventTrack",
+"args": [
+"input"
+],
+"summary": "Track setup agent lifecycle events from the Railway CLI"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "sharedVariableConfigure",
+"args": [
+"input"
+],
+"summary": "Configure a shared variable."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "signalCreate",
+"args": [
+"input"
+],
+"summary": "Register a new signal for an owner scope."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "signalDefaultSet",
+"args": [
+"input"
+],
+"summary": "Change a signal's canonical default (production floor)."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "signalDelete",
+"args": [
+"input"
+],
+"summary": "Delete a signal and its audit log."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "signalReplace",
+"args": [
+"input"
+],
+"summary": "Replace a signal's type and default, clearing all rules. Destructive \u2014 intended for CLI --force re-type."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "signalRollback",
+"args": [
+"input"
+],
+"summary": "Restore a signal to the snapshot captured before a change (reads prevState from the target change row)."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "signalRuleSet",
+"args": [
+"input"
+],
+"summary": "Attach or replace a rule on a signal. Matching rules must agree at resolution time or the default is returned."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "signalRuleUnset",
+"args": [
+"input"
+],
+"summary": "Remove a rule from a signal."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "sshPublicKeyCreate",
+"args": [
+"input"
+],
+"summary": "Creates a new SSH public key. When workspaceId is provided (or omitted under a workspace-scoped API token, in which case it defaults to the token's workspace), "
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "sshPublicKeyDelete",
+"args": [
+"id"
+],
+"summary": "Deletes an SSH public key."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "sshSignupApprove",
+"args": [
+"code",
+"workspaceId"
+],
+"summary": "Approve an SSH signup: register the offered SSH key on the authenticated account so the agent is recognized. When the key owns an anonymous trial box, claims th"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "tcpProxyCreate",
+"args": [
+"input"
+],
+"summary": "Creates a new TCP proxy for a service instance."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "tcpProxyDelete",
+"args": [
+"id"
+],
+"summary": "Deletes a TCP proxy by id"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "templateClone",
+"args": [
+"input"
+],
+"summary": "Duplicates an existing template"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "templateDelete",
+"args": [
+"id",
+"input"
+],
+"summary": "Deletes a template."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "templateDeploy",
+"args": [
+"input"
+],
+"summary": "Deploys a template."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "templateDeployV2",
+"args": [
+"input"
+],
+"summary": "Deploys a template using the serialized template config"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "templateGenerate",
+"args": [
+"input"
+],
+"summary": "Generate a template for a project"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "templatePublish",
+"args": [
+"id",
+"input"
+],
+"summary": "Publishes a template."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "templateRevert",
+"args": [
+"input"
+],
+"summary": "Reverts an HA cluster to standalone mode using template metadata to derive variables to remove"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "templateServiceSourceEject",
+"args": [
+"input"
+],
+"summary": "Ejects a service from the template and creates a new repo in the provided org."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "templateUnpublish",
+"args": [
+"id"
+],
+"summary": "Unpublishes a template."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "templateVolumeUpdate",
+"args": [
+"serviceId",
+"sizeMB",
+"templateId",
+"volumeId"
+],
+"summary": "Sets the default size (in MB) for a volume mount in a template's config. New volumes created when the template is deployed are provisioned at this size, clamped"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "trustedDomainCreate",
+"args": [
+"input"
+],
+"summary": "Create a new trusted domain for this workspace"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "trustedDomainDelete",
+"args": [
+"id"
+],
+"summary": "Delete a trusted domain"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "trustedDomainRetriggerVerification",
+"args": [
+"id"
+],
+"summary": "Check the DNS record for a workspace email domain"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "trustedDomainUpdate",
+"args": [
+"input"
+],
+"summary": "Update the automatic joining policy for a workspace email domain"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "twoFactorInfoCreate",
+"args": [
+"input"
+],
+"summary": "Setup 2FA authorization for authenticated user."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "twoFactorInfoDelete",
+"args": [],
+"summary": "Deletes the TwoFactorInfo for the authenticated user."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "twoFactorInfoSecret",
+"args": [],
+"summary": "Generates the 2FA app secret for the authenticated user."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "twoFactorInfoValidate",
+"args": [
+"input"
+],
+"summary": "Validates the token for a 2FA action or for a login request."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "updateServiceEdgeConfig",
+"args": [
+"input"
+],
+"summary": "Updates the edge config (caching settings) for a service."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "updateServiceEdgeRules",
+"args": [
+"input"
+],
+"summary": "Replaces the service's edge rules (whole-section replace; null clears). Rules are boolean expressions over request attributes plus one action (block/allow/chall"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "upsertSlackChannel",
+"args": [
+"workspaceId"
+],
+"summary": "Generate a Slack channel for a workspace"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "usageLimitRemove",
+"args": [
+"input"
+],
+"summary": "Remove the usage limit for a customer"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "usageLimitSet",
+"args": [
+"input"
+],
+"summary": "Set the usage limit for a customer"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "userBetaLeave",
+"args": [],
+"summary": "Unsubscribe from the Beta program."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "userDelete",
+"args": [],
+"summary": "Delete the currently authenticated user"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "userDiscordDisconnect",
+"args": [],
+"summary": "Disconnect your Railway account from Discord."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "userFlagsRemove",
+"args": [
+"input"
+],
+"summary": "Remove a flag on the user."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "userFlagsSet",
+"args": [
+"input"
+],
+"summary": "Set flags on the authenticated user."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "userProfileUpdate",
+"args": [
+"input"
+],
+"summary": "Updates the profile for the authenticated user"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "userTermsUpdate",
+"args": [],
+"summary": "Update date of TermsAgreedOn"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "variableCollectionUpsert",
+"args": [
+"input"
+],
+"summary": "Upserts a collection of variables."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "variableDelete",
+"args": [
+"input"
+],
+"summary": "Deletes a variable."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "variableUpsert",
+"args": [
+"input"
+],
+"summary": "Upserts a variable."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "volumeCreate",
+"args": [
+"input"
+],
+"summary": "Create a persistent volume in a project"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "volumeDelete",
+"args": [
+"volumeId"
+],
+"summary": "Delete a persistent volume in a project"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "volumeInstanceBackupCreate",
+"args": [
+"name",
+"volumeInstanceId"
+],
+"summary": "Create backup of a volume instance"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "volumeInstanceBackupDelete",
+"args": [
+"volumeInstanceBackupId",
+"volumeInstanceId"
+],
+"summary": "Deletes volume instance backup"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "volumeInstanceBackupLock",
+"args": [
+"volumeInstanceBackupId",
+"volumeInstanceId"
+],
+"summary": "Removes backup expiration date"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "volumeInstanceBackupRestore",
+"args": [
+"replicaServiceIds",
+"volumeInstanceBackupId",
+"volumeInstanceId",
+"wipeServiceIds"
+],
+"summary": "Restore a volume instance from a backup"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "volumeInstanceBackupScheduleUpdate",
+"args": [
+"kinds",
+"volumeInstanceId"
+],
+"summary": "Manage schedule for backups of a volume instance"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "volumeInstancePITRRestore",
+"args": [
+"newServiceName",
+"sourceRepoPath",
+"targetTimestamp",
+"volumeInstanceId"
+],
+"summary": "Point-in-time restore. Creates a brand-new database service in the project, recovered to the target timestamp from the source service's backup history. The sour"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "volumeInstanceUpdate",
+"args": [
+"environmentId",
+"input",
+"volumeId"
+],
+"summary": "Update a volume instance. If no environmentId is provided, all volume instances for the volume will be updated."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "volumeUpdate",
+"args": [
+"input",
+"volumeId"
+],
+"summary": "Update a persistent volume in a project"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "webhookTest",
+"args": [
+"headers",
+"notificationRuleId",
+"payload",
+"url"
+],
+"summary": "Test a webhook URL by sending a sample payload. Returns the HTTP status code. Custom headers come from `headers`, plus the stored headers of `notificationRuleId"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "workspaceApiTokenDelete",
+"args": [
+"id",
+"workspaceId"
+],
+"summary": "Revokes an API token scoped to a workspace. Requires workspace admin access."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "workspaceDelete",
+"args": [
+"id"
+],
+"summary": "Delete a workspace and all data associated with it"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "workspaceInviteCodeCreate",
+"args": [
+"input",
+"workspaceId"
+],
+"summary": "Get an invite code for a workspace and role"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "workspaceInviteCodeUse",
+"args": [
+"code"
+],
+"summary": "Use an invite code to join a workspace"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "workspaceLeave",
+"args": [
+"id"
+],
+"summary": "Leave a workspace"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "workspacePermissionChange",
+"args": [
+"input"
+],
+"summary": "Changes a user workspace permissions."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "workspacePolicyDeploySourceAllowlistAdd",
+"args": [
+"sourceId",
+"sourceType",
+"workspaceId"
+],
+"summary": "Add a deploy source to a workspace policy allowlist."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "workspacePolicyDeploySourceAllowlistRemove",
+"args": [
+"id"
+],
+"summary": "Remove a deploy source from a workspace policy allowlist."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "workspacePolicyItemUpdate",
+"args": [
+"enabled",
+"input",
+"policy",
+"workspaceId"
+],
+"summary": "Enable or disable a workspace policy. Enterprise workspaces only."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "workspaceSetRestrictProjectVisibilityToGroups",
+"args": [
+"enabled",
+"workspaceId"
+],
+"summary": "Control whether non-admin project visibility is restricted to access groups and direct project permissions."
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "workspaceTwoFactorEnforcementUpdate",
+"args": [
+"enabled",
+"workspaceId"
+],
+"summary": "Enable or disable 2FA enforcement for a workspace"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "workspaceUpdate",
+"args": [
+"id",
+"input"
+],
+"summary": "Update a workspace by id"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "workspaceUpsertSlackChannel",
+"args": [
+"id"
+],
+"summary": "Generate a Slack channel for a workspace"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "workspaceUserInvite",
+"args": [
+"input",
+"workspaceId"
+],
+"summary": "Invite a user by email to a workspace"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "workspaceUserRemove",
+"args": [
+"input",
+"workspaceId"
+],
+"summary": "Remove a user from a workspace"
+},
+{
+"provider": "railway",
+"kind": "graphql",
+"host": "backboard.railway.com",
+"method": "POST",
+"path": "/graphql/v2",
+"name": "xAgentProjectClaim",
+"args": [
+"buildId",
+"workspaceId"
+],
+"summary": "Claim a build requested from @RailwayAgent on X into workspaceId. The caller's connected X account must be the one that requested it."
+}
+]

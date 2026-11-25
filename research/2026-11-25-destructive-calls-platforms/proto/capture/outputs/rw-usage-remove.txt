@@ -1,0 +1,9 @@
+$ RAILWAY_API_TOKEN=test-token-123 -- railway usage limit remove --yes
+Usage limit removed
+
+Workspace:         x
+Current usage:     $1.00
+Soft limit:        $1
+Hard limit:        $1
+Over limit:        no
+--- exit=0 seconds=.149747770

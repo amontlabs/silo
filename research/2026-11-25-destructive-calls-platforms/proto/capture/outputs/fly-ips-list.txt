@@ -1,0 +1,6 @@
+$ FLY_API_TOKEN=FlyV1 fm2_test-token-123 FLY_NO_UPDATE_CHECK=1 FLY_METRICS_TOKEN=- -- flyctl ips list -a my-app
+ VERSION │ IP          │ TYPE                              │ REGION │ NETWORK │ CREATED AT        
+ v4      │ 203.0.113.7 │ public ingress (dedicated, $2/mo) │ global │         │ Nov 24 2026 00:00 
+
+Learn more about Fly.io public, private, shared and dedicated IP addresses in our docs: https://docs.fly.io/networking/services
+--- exit=0 seconds=.106444506

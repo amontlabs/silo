@@ -1,0 +1,286 @@
+# Vercel REST (api.vercel.com), from https://openapi.vercel.sh/, labelled by hand on 2026-11-25.
+# Key: METHOD path. See ../label.md.
+PUT /ai-gateway/budgets either can raise a budget
+DELETE /ai-gateway/budgets hold:money removes a spending cap
+PUT /ai-gateway/budgets/defaults either
+DELETE /ai-gateway/budgets/defaults hold:money
+POST /ai-gateway/byok-credentials either
+PATCH /ai-gateway/byok-credentials/{credentialId} either
+DELETE /ai-gateway/byok-credentials/{credentialId} hold:outage
+POST /ai-gateway/rules allow
+PATCH /ai-gateway/rules either
+DELETE /ai-gateway/rules either
+POST /ai-gateway/virtual-model-configs allow
+PATCH /ai-gateway/virtual-model-configs either
+DELETE /ai-gateway/virtual-model-configs either
+PATCH /ai-gateway/virtual-model-configs/{vmcSlug} either
+DELETE /ai-gateway/virtual-model-configs/{vmcSlug} either
+PATCH /aliases/{id}/protection-bypass hold:exposed a link that skips deployment protection
+POST /api-keys hold:exposed mints a key
+PATCH /api-keys/{apiKeyID}/quota hold:money
+PUT /domains/{domain}/records hold:gone replaces the zone's records
+PUT /projects/transfer-request/{code} either accepts a project into this team
+POST /projects/{idOrName}/transfer-request hold:exposed the project leaves the team
+POST /speed-insights/toggle either
+POST /storage/stores/blob allow
+DELETE /storage/stores/blob/{id} hold:gone
+POST /v1/access-groups allow
+POST /v1/access-groups/{accessGroupIdOrName}/projects hold:exposed
+PATCH /v1/access-groups/{accessGroupIdOrName}/projects/{projectId} hold:exposed role
+DELETE /v1/access-groups/{accessGroupIdOrName}/projects/{projectId} either
+POST /v1/access-groups/{idOrName} hold:exposed members and roles
+DELETE /v1/access-groups/{idOrName} hold:outage
+POST /v1/billing/buy hold:money
+PUT /v1/bulk-redirects allow staged
+DELETE /v1/bulk-redirects either staged
+PATCH /v1/bulk-redirects allow staged
+POST /v1/bulk-redirects/restore allow staged
+POST /v1/bulk-redirects/versions deploy promotes to production
+POST /v1/connect/authorize/{connector} allow
+POST /v1/connect/connectors allow
+DELETE /v1/connect/connectors/{connector} hold:outage
+POST /v1/connect/connectors/{connector}/managed/eject either
+POST /v1/connect/connectors/{connector}/projects/{projectId} allow
+DELETE /v1/connect/connectors/{connector}/projects/{projectId} hold:outage
+DELETE /v1/connect/connectors/{connector}/projects/{projectId}/environments/{environment} hold:outage
+PATCH /v1/connect/connectors/{connector}/trigger-destinations either
+POST /v1/connect/networks either billed
+DELETE /v1/connect/networks/{networkId} hold:outage
+PATCH /v1/connect/networks/{networkId} either
+POST /v1/connect/token/{connector} either a token for the connector
+POST /v1/deployments/{deploymentId}/checks allow
+PATCH /v1/deployments/{deploymentId}/checks/{checkId} either a failed check can block a release
+POST /v1/deployments/{deploymentId}/checks/{checkId}/rerequest allow
+PATCH /v1/deployments/{deploymentId}/integrations/{integrationConfigurationId}/resources/{resourceId}/actions/{action} either
+PATCH /v1/domains/records/{recordId} hold:outage
+POST /v1/drains hold:exposed logs go to an outside URL
+POST /v1/drains/test allow
+DELETE /v1/drains/{id} either
+PATCH /v1/drains/{id} hold:exposed can change the destination
+DELETE /v1/drives/{nameOrId} hold:gone
+POST /v1/drives/{name} allow
+POST /v1/drives/{name}/fork allow
+POST /v1/edge-cache/dangerously-delete-by-src-images hold:outage cache misses until refilled
+POST /v1/edge-cache/dangerously-delete-by-tags hold:outage
+POST /v1/edge-cache/invalidate-by-src-images allow
+POST /v1/edge-cache/invalidate-by-tags allow
+POST /v1/env allow
+PATCH /v1/env either overwrites values
+DELETE /v1/env hold:gone
+PATCH /v1/env/{id}/unlink/{projectId} hold:outage
+POST /v1/global-config allow
+PUT /v1/global-config/{edgeConfigId} either
+DELETE /v1/global-config/{edgeConfigId} hold:gone
+POST /v1/global-config/{edgeConfigId}/backups/{edgeConfigBackupVersionId}/restore hold:gone replaces current items
+PATCH /v1/global-config/{edgeConfigId}/items cond delete operations
+POST /v1/global-config/{edgeConfigId}/schema either
+DELETE /v1/global-config/{edgeConfigId}/schema either
+POST /v1/global-config/{edgeConfigId}/token hold:exposed
+DELETE /v1/global-config/{edgeConfigId}/tokens hold:outage
+PATCH /v1/installations/{integrationConfigurationId} allow integration-side API
+POST /v1/installations/{integrationConfigurationId}/billing allow integration-side API
+POST /v1/installations/{integrationConfigurationId}/billing/balance allow integration-side API
+POST /v1/installations/{integrationConfigurationId}/billing/finalize allow integration-side API
+POST /v1/installations/{integrationConfigurationId}/billing/invoices allow integration-side API
+POST /v1/installations/{integrationConfigurationId}/billing/invoices/{invoiceId}/actions allow integration-side API
+POST /v1/installations/{integrationConfigurationId}/credentials/revoke hold:outage
+POST /v1/installations/{integrationConfigurationId}/credentials/rotate hold:outage
+POST /v1/installations/{integrationConfigurationId}/events allow
+PUT /v1/installations/{integrationConfigurationId}/products/{integrationProductIdOrSlug}/resources/{resourceId}/secrets either
+DELETE /v1/installations/{integrationConfigurationId}/resources/{resourceId} hold:gone
+PUT /v1/installations/{integrationConfigurationId}/resources/{resourceId} allow
+PATCH /v1/installations/{integrationConfigurationId}/resources/{resourceId} either
+PUT /v1/installations/{integrationConfigurationId}/resources/{resourceId}/experimentation/global-config either
+POST /v1/installations/{integrationConfigurationId}/resources/{resourceId}/experimentation/items allow
+PATCH /v1/installations/{integrationConfigurationId}/resources/{resourceId}/experimentation/items/{itemId} allow
+DELETE /v1/installations/{integrationConfigurationId}/resources/{resourceId}/experimentation/items/{itemId} either
+PUT /v1/installations/{integrationConfigurationId}/resources/{resourceId}/secrets either
+DELETE /v1/integrations/configuration/{id} hold:gone uninstalls the integration and its resources
+POST /v1/integrations/installations/{integrationConfigurationId}/resources/{resourceId}/connections allow
+DELETE /v1/integrations/log-drains/{id} either
+POST /v1/integrations/sso/token allow
+POST /v1/kms/issuers allow
+PATCH /v1/kms/issuers/{issuerId} either
+DELETE /v1/kms/issuers/{issuerId} hold:outage
+POST /v1/kms/issuers/{issuerId}/keys allow
+POST /v1/kms/issuers/{issuerId}/keys/{keyId}/activate either
+POST /v1/kms/issuers/{issuerId}/keys/{keyId}/revoke hold:outage
+POST /v1/kms/issuers/{issuerId}/policies either
+PATCH /v1/kms/issuers/{issuerId}/policies/{kind}/{policyKey} either
+DELETE /v1/kms/issuers/{issuerId}/policies/{kind}/{policyKey} either
+POST /v1/kms/issuers/{issuerId}/sign/message allow
+POST /v1/kms/issuers/{issuerId}/sign/token either signs a token others trust
+POST /v1/log-drains hold:exposed
+DELETE /v1/log-drains/{id} either
+POST /v1/microfrontends/group allow
+POST /v1/networking/privatelink/endpoints allow
+DELETE /v1/networking/privatelink/endpoints/{endpointId} hold:outage
+PATCH /v1/networking/privatelink/endpoints/{endpointId} either
+PUT /v1/observability/manage/configuration/projects/{projectIdOrName} allow
+POST /v1/organizations allow
+PATCH /v1/organizations/{organizationId} either
+PUT /v1/organizations/{organizationId}/dsync/groups/{groupId} hold:exposed roles from the directory
+DELETE /v1/organizations/{organizationId}/dsync/groups/{groupId} either
+POST /v1/organizations/{organizationId}/teams allow
+DELETE /v1/organizations/{organizationId}/teams/{targetTeamId} hold:gone
+PUT /v1/organizations/{organizationId}/teams/{targetTeamId}/dsync either
+POST /v1/projects/traces/session allow
+POST /v1/projects/{idOrName}/avatar allow
+DELETE /v1/projects/{idOrName}/avatar allow
+PUT /v1/projects/{idOrName}/daemons/{daemonName}/instances either can set 0
+POST /v1/projects/{idOrName}/daemons/{daemonName}/instances/{instanceId}/restart either
+POST /v1/projects/{idOrName}/domains/{domain}/move hold:outage the domain leaves this project
+DELETE /v1/projects/{idOrName}/env hold:gone
+POST /v1/projects/{idOrName}/members hold:exposed
+DELETE /v1/projects/{idOrName}/members/{uid} hold:outage
+PATCH /v1/projects/{idOrName}/protection-bypass hold:exposed
+POST /v1/projects/{idOrName}/rolling-release/approve-stage deploy
+POST /v1/projects/{idOrName}/rolling-release/complete deploy
+DELETE /v1/projects/{idOrName}/rolling-release/config either
+PATCH /v1/projects/{idOrName}/rolling-release/config either
+POST /v1/projects/{idOrName}/rolling-release/start deploy
+PATCH /v1/projects/{idOrName}/shared-connect-links either static IPs
+POST /v1/projects/{idOrName}/token either an OIDC token for the project
+PUT /v1/projects/{projectIdOrName}/feature-flags/connections allow
+DELETE /v1/projects/{projectIdOrName}/feature-flags/connections/{consumerProjectId} either
+PUT /v1/projects/{projectIdOrName}/feature-flags/flags allow
+PATCH /v1/projects/{projectIdOrName}/feature-flags/flags/{flagIdOrSlug} either flips production behaviour
+DELETE /v1/projects/{projectIdOrName}/feature-flags/flags/{flagIdOrSlug} either
+POST /v1/projects/{projectIdOrName}/feature-flags/labels/lookup allow a read sent as POST
+POST /v1/projects/{projectIdOrName}/feature-flags/overrides/sign allow
+PUT /v1/projects/{projectIdOrName}/feature-flags/sdk-keys hold:exposed
+DELETE /v1/projects/{projectIdOrName}/feature-flags/sdk-keys/{hashKey} hold:outage
+PUT /v1/projects/{projectIdOrName}/feature-flags/segments allow
+DELETE /v1/projects/{projectIdOrName}/feature-flags/segments/{segmentIdOrSlug} either
+PATCH /v1/projects/{projectIdOrName}/feature-flags/segments/{segmentIdOrSlug} either
+PATCH /v1/projects/{projectIdOrName}/feature-flags/settings either
+PATCH /v1/projects/{projectId}/microfrontends either
+POST /v1/projects/{projectId}/pause hold:outage
+POST /v1/projects/{projectId}/rollback/{deploymentId} deploy
+PATCH /v1/projects/{projectId}/rollback/{deploymentId}/update-description allow
+PUT /v1/projects/{projectId}/routes allow staged
+POST /v1/projects/{projectId}/routes allow staged
+DELETE /v1/projects/{projectId}/routes either staged
+POST /v1/projects/{projectId}/routes/generate allow
+POST /v1/projects/{projectId}/routes/versions deploy promotes to production
+PATCH /v1/projects/{projectId}/routes/{routeId} allow staged
+POST /v1/projects/{projectId}/unpause allow
+POST /v1/registrar/domains/availability allow a read sent as POST
+POST /v1/registrar/domains/buy hold:money
+POST /v1/registrar/domains/price allow a read sent as POST
+POST /v1/registrar/domains/search allow a read sent as POST
+PATCH /v1/registrar/domains/{domain}/auto-renew either switching it off loses the domain later
+PATCH /v1/registrar/domains/{domain}/nameservers hold:outage
+POST /v1/registrar/domains/{domain}/buy hold:money
+POST /v1/registrar/domains/{domain}/renew hold:money
+POST /v1/registrar/domains/{domain}/transfer hold:money
+POST /v1/security/attack-mode allow
+POST /v1/security/firewall/bypass hold:exposed
+DELETE /v1/security/firewall/bypass either
+POST /v1/security/firewall/bypass/rules hold:exposed
+PUT /v1/security/firewall/bypass/rules hold:exposed
+DELETE /v1/security/firewall/bypass/rules either
+PUT /v1/security/firewall/config hold:exposed replaces the whole firewall
+PATCH /v1/security/firewall/config either
+POST /v1/security/firewall/config/generate-rule allow
+DELETE /v1/security/firewall/config/{configVersion} either
+POST /v1/security/firewall/config/{configVersion}/activate either
+POST /v1/storage/stores/integration/direct either can be billed
+POST /v1/teams allow
+DELETE /v1/teams/{teamId} hold:gone
+POST /v1/teams/{teamId}/dsync-roles hold:exposed
+DELETE /v1/teams/{teamId}/invites/{inviteId} allow
+POST /v1/teams/{teamId}/members/teams/join allow
+PATCH /v1/teams/{teamId}/members/{uid} hold:exposed role
+DELETE /v1/teams/{teamId}/members/{uid} hold:outage
+PATCH /v1/teams/{teamId}/microfrontends/{groupId} either
+DELETE /v1/teams/{teamId}/microfrontends/{groupId} hold:outage
+POST /v1/teams/{teamId}/request allow
+DELETE /v1/user hold:gone
+POST /v1/vcr/repository allow
+DELETE /v1/vcr/repository/{idOrName} hold:gone
+DELETE /v1/vcr/repository/{idOrName}/images/{imageId} either
+POST /v1/vcr/repository/{idOrName}/permissions hold:exposed
+DELETE /v1/vcr/repository/{idOrName}/permissions either
+DELETE /v1/vcr/repository/{idOrName}/permissions/all hold:outage
+POST /v1/vercel-ci/invocations/{invocationId}/attempts/{attempt}/retry allow
+PATCH /v1/vercel-ci/repository-settings either
+POST /v1/vercel-ci/task-analyses allow
+POST /v1/vercel-ci/task-analyses/{analysisId}/pull-request allow
+POST /v1/webhooks hold:exposed events go to an outside URL
+DELETE /v1/webhooks/{id} either
+POST /v10/projects/{idOrName}/domains either
+POST /v10/projects/{idOrName}/env allow
+POST /v10/projects/{projectId}/promote/{deploymentId} deploy
+POST /v11/projects allow
+PATCH /v12/deployments/{id}/cancel deploy
+POST /v13/deployments deploy
+DELETE /v13/deployments/{id} hold:gone
+DELETE /v2/aliases/{aliasId} hold:outage
+PATCH /v2/connect/connectors/{connector} either
+POST /v2/deployments/{deploymentId}/check-runs allow
+PATCH /v2/deployments/{deploymentId}/check-runs/{checkRunId} either
+POST /v2/deployments/{id}/aliases deploy points a domain at a deployment
+POST /v2/domains/{domain}/records either
+DELETE /v2/domains/{domain}/records/{recordId} hold:outage
+POST /v2/files allow
+POST /v2/integrations/log-drains hold:exposed
+POST /v2/observability/query allow a read sent as POST
+POST /v2/projects/{projectIdOrName}/checks allow
+PATCH /v2/projects/{projectIdOrName}/checks/{checkId} either
+DELETE /v2/projects/{projectIdOrName}/checks/{checkId} either
+POST /v2/sandboxes allow
+DELETE /v2/sandboxes/drives/{nameOrId} hold:gone
+POST /v2/sandboxes/drives/{name} allow
+POST /v2/sandboxes/drives/{name}/fork allow
+POST /v2/sandboxes/sessions/{sessionId}/cmd allow
+POST /v2/sandboxes/sessions/{sessionId}/cmd/{cmdId}/kill allow
+POST /v2/sandboxes/sessions/{sessionId}/cmd/{cmdId}/stdin allow
+POST /v2/sandboxes/sessions/{sessionId}/extend-timeout allow
+POST /v2/sandboxes/sessions/{sessionId}/fs/mkdir allow
+POST /v2/sandboxes/sessions/{sessionId}/fs/read allow
+POST /v2/sandboxes/sessions/{sessionId}/fs/write allow
+POST /v2/sandboxes/sessions/{sessionId}/network-policy either
+POST /v2/sandboxes/sessions/{sessionId}/snapshot allow
+POST /v2/sandboxes/sessions/{sessionId}/stop allow
+DELETE /v2/sandboxes/snapshots/{snapshotId} either
+PATCH /v2/sandboxes/{name} allow
+DELETE /v2/sandboxes/{name} either sandboxes are short-lived by design
+POST /v2/sandboxes/{name}/fork allow
+PATCH /v2/teams/{teamId} either
+POST /v2/teams/{teamId}/members hold:exposed
+POST /v2/{teamSlug}/{projectSlug}/{repositoryName}/blobs/uploads/ allow registry push
+DELETE /v2/{teamSlug}/{projectSlug}/{repositoryName}/blobs/uploads/{uuid} allow
+PATCH /v2/{teamSlug}/{projectSlug}/{repositoryName}/blobs/uploads/{uuid} allow
+PUT /v2/{teamSlug}/{projectSlug}/{repositoryName}/blobs/uploads/{uuid} allow
+DELETE /v2/{teamSlug}/{projectSlug}/{repositoryName}/blobs/{digest} either
+PUT /v2/{teamSlug}/{projectSlug}/{repositoryName}/manifests/{reference} either can move a tag
+DELETE /v2/{teamSlug}/{projectSlug}/{repositoryName}/manifests/{reference} either
+PATCH /v3/domains/{domain} either update or move
+POST /v3/sandboxes allow
+POST /v3/sandboxes/sessions/{sessionId}/snapshot allow
+POST /v3/sandboxes/{name}/fork allow
+POST /v3/user/tokens hold:exposed
+DELETE /v3/user/tokens/{tokenId} hold:outage
+POST /v4/sandboxes allow
+DELETE /v6/domains/{domain} hold:outage
+POST /v7/domains allow
+POST /v8/artifacts allow a read sent as POST
+DELETE /v8/artifacts either a cache
+POST /v8/artifacts/events allow
+PUT /v8/artifacts/{hash} allow
+POST /v8/certs allow
+PUT /v8/certs either
+DELETE /v8/certs/{id} hold:outage
+POST /v9/domains/{domain}/claim either
+PATCH /v9/projects/{idOrName} cond
+DELETE /v9/projects/{idOrName} hold:gone
+POST /v9/projects/{idOrName}/custom-environments allow
+PATCH /v9/projects/{idOrName}/custom-environments/{environmentSlugOrId} either
+DELETE /v9/projects/{idOrName}/custom-environments/{environmentSlugOrId} hold:gone
+PATCH /v9/projects/{idOrName}/domains/{domain} either can redirect the domain
+DELETE /v9/projects/{idOrName}/domains/{domain} hold:outage
+POST /v9/projects/{idOrName}/domains/{domain}/verify allow
+DELETE /v9/projects/{idOrName}/env/{id} hold:gone
+PATCH /v9/projects/{idOrName}/env/{id} either overwrites one value
+POST /web/insights/toggle either

@@ -1,0 +1,3 @@
+$ SUPABASE_ACCESS_TOKEN=<redacted> SUPABASE_YES=1 DO_NOT_TRACK=1 -- supabase db query select count(*) from users --remote=abcdefghijklmnopqrst --read-only
+Target: project abcdefghijklmnopqrst
+--- exit=0 seconds=.560898547

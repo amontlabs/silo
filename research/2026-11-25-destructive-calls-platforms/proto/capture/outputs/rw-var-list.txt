@@ -1,0 +1,5 @@
+$ RAILWAY_TOKEN=test-token-123 -- railway variable list --service api
+╔═════════ Variables for api ════════╗
+║ DATABASE_URL │ postgres://u:p@db/x ║
+╚════════════════════════════════════╝
+--- exit=0 seconds=.203867453

@@ -1,0 +1,866 @@
+[
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PATCH",
+"path": "/v1/branches/{branch_id_or_ref}",
+"name": "v1-update-a-branch-config",
+"summary": "Update database branch config"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "DELETE",
+"path": "/v1/branches/{branch_id_or_ref}",
+"name": "v1-delete-a-branch",
+"summary": "Delete a database branch"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/branches/{branch_id_or_ref}/merge",
+"name": "v1-merge-a-branch",
+"summary": "Merges a database branch"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/branches/{branch_id_or_ref}/push",
+"name": "v1-push-a-branch",
+"summary": "Pushes a database branch"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/branches/{branch_id_or_ref}/reset",
+"name": "v1-reset-a-branch",
+"summary": "Resets a database branch"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/branches/{branch_id_or_ref}/restore",
+"name": "v1-restore-a-branch",
+"summary": "Restore a scheduled branch deletion"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/oauth/revoke",
+"name": "v1-revoke-token",
+"summary": "Revoke oauth app authorization and it's corresponding tokens"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/oauth/token",
+"name": "v1-exchange-oauth-token",
+"summary": "Exchange auth code for user's access and refresh token"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/organizations",
+"name": "v1-create-an-organization",
+"summary": "Create an organization"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/organizations/{slug}/project-claim/{token}",
+"name": "v1-claim-project-for-organization",
+"summary": "Claims project for the specified organization"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects",
+"name": "v1-create-a-project",
+"summary": "Create a project"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "DELETE",
+"path": "/v1/projects/{ref}",
+"name": "v1-delete-a-project",
+"summary": "Deletes the given project"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PATCH",
+"path": "/v1/projects/{ref}",
+"name": "v1-update-a-project",
+"summary": "Updates the given project"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PATCH",
+"path": "/v1/projects/{ref}/actions/{run_id}/status",
+"name": "v1-update-action-run-status",
+"summary": "Update the status of an action run"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/analytics/endpoints/logs",
+"name": "v1-post-project-logs",
+"summary": "Gets all project's logs in a single log stream"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/api-keys",
+"name": "v1-create-project-api-key",
+"summary": "Creates a new API key for the project"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PUT",
+"path": "/v1/projects/{ref}/api-keys/legacy",
+"name": "v1-update-project-legacy-api-keys",
+"summary": "Disable or re-enable JWT based legacy (anon, service_role) API keys. This API endpoint will be removed in the future, check for HTTP 404 Not Found."
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PATCH",
+"path": "/v1/projects/{ref}/api-keys/{id}",
+"name": "v1-update-project-api-key",
+"summary": "Updates an API key for the project"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "DELETE",
+"path": "/v1/projects/{ref}/api-keys/{id}",
+"name": "v1-delete-project-api-key",
+"summary": "Deletes an API key for the project"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PATCH",
+"path": "/v1/projects/{ref}/billing/addons",
+"name": "v1-apply-project-addon",
+"summary": "Apply or update billing addons, including compute instance size"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "DELETE",
+"path": "/v1/projects/{ref}/billing/addons/{addon_variant}",
+"name": "v1-remove-project-addon",
+"summary": "Remove billing addons or revert compute instance sizing"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/branches",
+"name": "v1-create-a-branch",
+"summary": "Create a database branch"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "DELETE",
+"path": "/v1/projects/{ref}/branches",
+"name": "v1-disable-preview-branching",
+"summary": "Disables preview branching"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/claim-token",
+"name": "v1-create-project-claim-token",
+"summary": "Creates project claim token"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "DELETE",
+"path": "/v1/projects/{ref}/claim-token",
+"name": "v1-delete-project-claim-token",
+"summary": "Revokes project claim token"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/cli/login-role",
+"name": "v1-create-login-role",
+"summary": "Create a login role for CLI with temporary password"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "DELETE",
+"path": "/v1/projects/{ref}/cli/login-role",
+"name": "v1-delete-login-roles",
+"summary": "Delete existing login roles used by CLI"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PATCH",
+"path": "/v1/projects/{ref}/config/auth",
+"name": "v1-update-auth-service-config",
+"summary": "Updates a project's auth config"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/config/auth/signing-keys",
+"name": "v1-create-project-signing-key",
+"summary": "Create a new signing key for the project in standby status"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/config/auth/signing-keys/legacy",
+"name": "v1-create-legacy-signing-key",
+"summary": "Set up the project's existing JWT secret as an in_use JWT signing key. This endpoint will be removed in the future always check for HTTP 404 Not Found."
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "DELETE",
+"path": "/v1/projects/{ref}/config/auth/signing-keys/{id}",
+"name": "v1-remove-project-signing-key",
+"summary": "Remove a signing key from a project. Only possible if the key has been in revoked status for a while."
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PATCH",
+"path": "/v1/projects/{ref}/config/auth/signing-keys/{id}",
+"name": "v1-update-project-signing-key",
+"summary": "Update a signing key, mainly its status"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/config/auth/sso/providers",
+"name": "v1-create-a-sso-provider",
+"summary": "Creates a new SSO provider"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PUT",
+"path": "/v1/projects/{ref}/config/auth/sso/providers/{provider_id}",
+"name": "v1-update-a-sso-provider",
+"summary": "Updates a SSO provider by its UUID"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "DELETE",
+"path": "/v1/projects/{ref}/config/auth/sso/providers/{provider_id}",
+"name": "v1-delete-a-sso-provider",
+"summary": "Removes a SSO provider by its UUID"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/config/auth/third-party-auth",
+"name": "v1-create-project-tpa-integration",
+"summary": "Creates a new third-party auth integration"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "DELETE",
+"path": "/v1/projects/{ref}/config/auth/third-party-auth/{tpa_id}",
+"name": "v1-delete-project-tpa-integration",
+"summary": "Removes a third-party auth integration"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PATCH",
+"path": "/v1/projects/{ref}/config/database/pooler",
+"name": "v1-update-pooler-config",
+"summary": "Updates project's supavisor config"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PUT",
+"path": "/v1/projects/{ref}/config/database/postgres",
+"name": "v1-update-postgres-config",
+"summary": "Updates project's Postgres config"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PATCH",
+"path": "/v1/projects/{ref}/config/database/postgres",
+"name": "v1-patch-postgres-config",
+"summary": "Partially updates project's Postgres config"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/config/disk",
+"name": "v1-modify-database-disk",
+"summary": "Modify database disk"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PATCH",
+"path": "/v1/projects/{ref}/config/realtime",
+"name": "v1-update-realtime-config",
+"summary": "Updates realtime configuration"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/config/realtime/shutdown",
+"name": "v1-shutdown-realtime",
+"summary": "Shutdowns realtime connections for a project"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PATCH",
+"path": "/v1/projects/{ref}/config/storage",
+"name": "v1-update-storage-config",
+"summary": "Updates project's storage config"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "DELETE",
+"path": "/v1/projects/{ref}/custom-hostname",
+"name": "v1-Delete hostname config",
+"summary": "Deletes a project's custom hostname configuration"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/custom-hostname/activate",
+"name": "v1-activate-custom-hostname",
+"summary": "Activates a custom hostname for a project."
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/custom-hostname/initialize",
+"name": "v1-update-hostname-config",
+"summary": "Updates project's custom hostname configuration"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/custom-hostname/reverify",
+"name": "v1-verify-dns-config",
+"summary": "Attempts to verify the DNS configuration for project's custom hostname configuration"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/database/backups/restore",
+"name": "v1-restore-physical-backup",
+"summary": "Restores a physical backup for a database"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/database/backups/restore-pitr",
+"name": "v1-restore-pitr-backup",
+"summary": "Restores a PITR backup for a database"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/database/backups/restore-point",
+"name": "v1-create-restore-point",
+"summary": "Initiates a creation of a restore point for a database"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PATCH",
+"path": "/v1/projects/{ref}/database/backups/schedule",
+"name": "v1-update-backup-schedule",
+"summary": "Updates the backup schedule time for a project"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/database/backups/undo",
+"name": "v1-undo",
+"summary": "Initiates an undo to a given restore point"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/database/jit",
+"name": "v1-authorize-jit-access",
+"summary": "Authorize user-id to role mappings for JIT access"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PUT",
+"path": "/v1/projects/{ref}/database/jit",
+"name": "v1-update-jit-access",
+"summary": "Updates a user mapping for JIT access"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/database/jit/invite",
+"name": "v1-invite-external-jit-access",
+"summary": "Invites an external user to a database for JIT access"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/database/jit/invite/accept",
+"name": "v1-accept-invite-external-jit-access",
+"summary": "Accepts invitation for JIT database access"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "DELETE",
+"path": "/v1/projects/{ref}/database/jit/invite/{invite_id}",
+"name": "v1-delete-invite-external-jit-access",
+"summary": "Deletes the invite for an external user to a database for JIT access"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "DELETE",
+"path": "/v1/projects/{ref}/database/jit/{user_id}",
+"name": "v1-delete-jit-access",
+"summary": "Delete JIT access by user-id"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/database/migrations",
+"name": "v1-apply-a-migration",
+"summary": "Apply a database migration"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PUT",
+"path": "/v1/projects/{ref}/database/migrations",
+"name": "v1-upsert-a-migration",
+"summary": "Upsert a database migration without applying"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "DELETE",
+"path": "/v1/projects/{ref}/database/migrations",
+"name": "v1-rollback-migrations",
+"summary": "Rollback database migrations and remove them from history table"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PATCH",
+"path": "/v1/projects/{ref}/database/migrations/{version}",
+"name": "v1-patch-a-migration",
+"summary": "Patch an existing entry in migration history"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PATCH",
+"path": "/v1/projects/{ref}/database/password",
+"name": "v1-update-database-password",
+"summary": "Updates the database password"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/database/query",
+"name": "v1-run-a-query",
+"summary": "Run sql query"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/database/query/read-only",
+"name": "v1-read-only-query",
+"summary": "Run a sql query as supabase_read_only_user"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/database/webhooks/enable",
+"name": "v1-enable-database-webhook",
+"summary": "Enables Database Webhooks on the project"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/functions",
+"name": "v1-create-a-function",
+"summary": "Create a function"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PUT",
+"path": "/v1/projects/{ref}/functions",
+"name": "v1-bulk-update-functions",
+"summary": "Bulk update functions"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "DELETE",
+"path": "/v1/projects/{ref}/functions",
+"name": "v1-delete-all-functions",
+"summary": "Deletes all Edge Functions from a project"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/functions/deploy",
+"name": "v1-deploy-a-function",
+"summary": "Deploy a function"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PATCH",
+"path": "/v1/projects/{ref}/functions/{function_slug}",
+"name": "v1-update-a-function",
+"summary": "Update a function"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "DELETE",
+"path": "/v1/projects/{ref}/functions/{function_slug}",
+"name": "v1-delete-a-function",
+"summary": "Delete a function"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PUT",
+"path": "/v1/projects/{ref}/jit-access",
+"name": "v1-update-jit-access-config",
+"summary": "Update project's temporary access configuration."
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "DELETE",
+"path": "/v1/projects/{ref}/network-bans",
+"name": "v1-delete-network-bans",
+"summary": "Remove network bans."
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/network-bans/retrieve",
+"name": "v1-list-all-network-bans",
+"summary": "Gets project's network bans"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/network-bans/retrieve/enriched",
+"name": "v1-list-all-network-bans-enriched",
+"summary": "Gets project's network bans with additional information about which databases they affect"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PATCH",
+"path": "/v1/projects/{ref}/network-restrictions",
+"name": "v1-patch-network-restrictions",
+"summary": "Updates project's network restrictions by adding or removing CIDRs"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/network-restrictions/apply",
+"name": "v1-update-network-restrictions",
+"summary": "Updates project's network restrictions"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/network-restrictions/review",
+"name": "v1-review-network-restrictions",
+"summary": "Applies or rejects the change in review in a project's network restrictions"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/pause",
+"name": "v1-pause-a-project",
+"summary": "Pauses the given project"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PUT",
+"path": "/v1/projects/{ref}/pgsodium",
+"name": "v1-update-pgsodium-config",
+"summary": "Updates project's pgsodium config. Updating the root_key can cause all data encrypted with the older key to become inaccessible."
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PATCH",
+"path": "/v1/projects/{ref}/postgrest",
+"name": "v1-update-postgrest-service-config",
+"summary": "Updates project's postgrest config"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/read-replicas/remove",
+"name": "v1-remove-a-read-replica",
+"summary": "Remove a read replica"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/read-replicas/setup",
+"name": "v1-setup-a-read-replica",
+"summary": "Set up a read replica"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/readonly/temporary-disable",
+"name": "v1-disable-readonly-mode-temporarily",
+"summary": "Disables project's readonly mode for the next 15 minutes"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/restart",
+"name": "v1-restart-a-project",
+"summary": "Restarts the given project"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/restore",
+"name": "v1-restore-a-project",
+"summary": "Restores the given project"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/restore/cancel",
+"name": "v1-cancel-a-project-restoration",
+"summary": "Cancels the given project restoration"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/secrets",
+"name": "v1-bulk-create-secrets",
+"summary": "Bulk create secrets"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "DELETE",
+"path": "/v1/projects/{ref}/secrets",
+"name": "v1-bulk-delete-secrets",
+"summary": "Bulk delete secrets"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "PUT",
+"path": "/v1/projects/{ref}/ssl-enforcement",
+"name": "v1-update-ssl-enforcement-config",
+"summary": "Update project's SSL enforcement configuration."
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/upgrade",
+"name": "v1-upgrade-postgres-version",
+"summary": "Upgrades the project's Postgres version"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "DELETE",
+"path": "/v1/projects/{ref}/vanity-subdomain",
+"name": "v1-deactivate-vanity-subdomain-config",
+"summary": "Deletes a project's vanity subdomain configuration"
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/vanity-subdomain/activate",
+"name": "v1-activate-vanity-subdomain-config",
+"summary": "Activates a vanity subdomain for a project."
+},
+{
+"provider": "supabase",
+"kind": "rest",
+"host": "api.supabase.com",
+"method": "POST",
+"path": "/v1/projects/{ref}/vanity-subdomain/check-availability",
+"name": "v1-check-vanity-subdomain-availability",
+"summary": "Checks vanity subdomain availability"
+}
+]

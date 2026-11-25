@@ -1,0 +1,11 @@
+$ FLY_API_TOKEN=FlyV1 fm2_test-token-123 FLY_NO_UPDATE_CHECK=1 FLY_METRICS_TOKEN=- -- flyctl certs add example.com -a my-app
+✓ Certificate created for example.com
+
+! Your app has no public IP addresses.
+Run fly ips allocate to allocate IPs.
+
+Tip: Run fly certs add www.example.com to cover the www subdomain.
+
+Run fly certs check example.com to check validation progress.
+Run fly certs setup example.com for alternative DNS setups.
+--- exit=0 seconds=.055009012

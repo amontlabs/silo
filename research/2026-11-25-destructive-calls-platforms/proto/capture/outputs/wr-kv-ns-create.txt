@@ -1,0 +1,17 @@
+$ CLOUDFLARE_API_TOKEN=test-token-123 CLOUDFLARE_ACCOUNT_ID=acc123 WRANGLER_SEND_METRICS=false -- wrangler kv namespace create CACHE
+
+ ⛅️ wrangler 4.168.0
+────────────────────
+Resource location: remote 
+
+🌀 Creating namespace with title "CACHE"
+✨ Success!
+To access your new KV Namespace in your Worker, add the following snippet to your configuration file:
+{
+  "kv_namespaces": [
+    {
+      "binding": "CACHE"
+    }
+  ]
+}
+--- exit=0 seconds=.767326460

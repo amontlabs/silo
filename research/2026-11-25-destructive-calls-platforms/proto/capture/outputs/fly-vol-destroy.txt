@@ -1,0 +1,3 @@
+$ FLY_API_TOKEN=FlyV1 fm2_test-token-123 FLY_NO_UPDATE_CHECK=1 FLY_METRICS_TOKEN=- -- flyctl volumes destroy vol_123 -a my-app --yes
+Destroyed volume ID: vol_123 name: 
+--- exit=0 seconds=.104367774

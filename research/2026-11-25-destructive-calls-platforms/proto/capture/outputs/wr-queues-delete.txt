@@ -1,0 +1,7 @@
+$ CLOUDFLARE_API_TOKEN=test-token-123 CLOUDFLARE_ACCOUNT_ID=acc123 WRANGLER_SEND_METRICS=false -- wrangler queues delete jobs
+
+ ⛅️ wrangler 4.168.0
+────────────────────
+Deleting queue jobs.
+Deleted queue jobs.
+--- exit=0 seconds=.821383483

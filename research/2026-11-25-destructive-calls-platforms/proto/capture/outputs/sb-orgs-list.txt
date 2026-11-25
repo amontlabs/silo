@@ -1,0 +1,7 @@
+$ SUPABASE_ACCESS_TOKEN=<redacted> SUPABASE_YES=1 DO_NOT_TRACK=1 -- supabase orgs list
+
+  
+   ID   | NAME 
+  ------|------
+   org1 | Acme 
+--- exit=0 seconds=.493603638

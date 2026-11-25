@@ -1,0 +1,9 @@
+$ SUPABASE_ACCESS_TOKEN=<redacted> SUPABASE_YES=1 DO_NOT_TRACK=1 -- supabase functions list --project-ref abcdefghijklmnopqrst
+Warning: --project-ref is deprecated and will be removed in v4. Use --remote=<ref> instead
+Target: project abcdefghijklmnopqrst
+
+  
+   ID | NAME  | SLUG  | STATUS | VERSION | UPDATED_AT (UTC)    
+  ----|-------|-------|--------|---------|---------------------
+   f1 | hello | hello | ACTIVE | 1       | 2023-11-14 22:13:20 
+--- exit=0 seconds=.495832072

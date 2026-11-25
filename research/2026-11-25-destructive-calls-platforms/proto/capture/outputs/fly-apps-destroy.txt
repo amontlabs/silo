@@ -1,0 +1,3 @@
+$ FLY_API_TOKEN=FlyV1 fm2_test-token-123 FLY_NO_UPDATE_CHECK=1 FLY_METRICS_TOKEN=- -- flyctl apps destroy my-app --yes
+Destroyed app my-app
+--- exit=0 seconds=.141172029

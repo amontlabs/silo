@@ -1,0 +1,9 @@
+$ FLY_API_TOKEN=FlyV1 fm2_test-token-123 FLY_NO_UPDATE_CHECK=1 FLY_METRICS_TOKEN=- -- flyctl apps move my-app --org other --yes
+Error: can't establish agent agent: failed to start
+The agent failed to start with the following error log:
+
+2026/11/25 10:42:43.045708 srv no access token available. Please login with 'flyctl auth login'
+
+
+A copy of this log has been saved at /opt/clis/home-fly/.fly/agent-logs/2027371658.log
+--- exit=126 seconds=5.144578416

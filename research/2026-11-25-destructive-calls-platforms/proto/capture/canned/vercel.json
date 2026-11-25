@@ -1,0 +1,347 @@
+[
+{
+"method": "GET",
+"path": "aliases/my-app.example.com",
+"body": {
+"uid": "alias_1",
+"alias": "my-app.example.com",
+"deploymentId": "dpl_2",
+"projectId": "prj_1",
+"createdAt": 1700000000000
+}
+},
+{
+"method": "GET",
+"path": "^/v\\d+/certs/cert_1",
+"body": {
+"uid": "cert_1",
+"id": "cert_1",
+"cns": [
+"example.com"
+],
+"created": 1700000000000,
+"createdAt": 1700000000000,
+"expiration": 1800000000000,
+"autoRenew": true
+}
+},
+{
+"method": "GET",
+"path": "^/teams/(acme|team_1)",
+"body": {
+"id": "team_1",
+"slug": "acme",
+"name": "Acme",
+"membership": {
+"role": "OWNER",
+"confirmed": true
+}
+}
+},
+{
+"method": "GET",
+"path": "^/v\\d+/teams(\\?|$)",
+"body": {
+"teams": [
+{
+"id": "team_1",
+"slug": "acme",
+"name": "Acme",
+"membership": {
+"role": "OWNER",
+"confirmed": true
+}
+}
+],
+"pagination": {
+"count": 1,
+"next": null,
+"prev": null
+}
+}
+},
+{
+"method": "GET",
+"path": "project-domains",
+"body": {
+"projectDomains": [],
+"pagination": {
+"count": 0,
+"next": null,
+"prev": null
+}
+}
+},
+{
+"method": "GET",
+"path": "^/v\\d+/domains/records/rec_1",
+"body": {
+"id": "rec_1",
+"name": "www",
+"type": "CNAME",
+"value": "cname.vercel-dns.com",
+"domain": "example.com",
+"createdAt": 1700000000000
+}
+},
+{
+"method": "GET",
+"path": "^/v\\d+/domains/example.com/records",
+"body": {
+"records": [
+{
+"id": "rec_1",
+"name": "www",
+"type": "CNAME",
+"value": "cname.vercel-dns.com"
+}
+],
+"pagination": {
+"count": 1,
+"next": null,
+"prev": null
+}
+}
+},
+{
+"method": "GET",
+"path": "^/v\\d+/domains/example.com",
+"body": {
+"domain": {
+"id": "dom_1",
+"name": "example.com",
+"serviceType": "external",
+"verified": true,
+"createdAt": 1700000000000,
+"aliases": [],
+"certs": []
+}
+}
+},
+{
+"method": "GET",
+"path": "^/v\\d+/domains(\\?|$)",
+"body": {
+"domains": [
+{
+"id": "dom_1",
+"name": "example.com",
+"serviceType": "external",
+"verified": true,
+"createdAt": 1700000000000
+}
+],
+"pagination": {
+"count": 1,
+"next": null,
+"prev": null
+}
+}
+},
+{
+"method": "GET",
+"path": "^/v\\d+/deployments/dpl_",
+"body": {
+"id": "dpl_2",
+"uid": "dpl_2",
+"url": "my-app-abc.vercel.app",
+"name": "my-app",
+"projectId": "prj_1",
+"target": "production",
+"readyState": "READY",
+"state": "READY",
+"createdAt": 1700000000000,
+"created": 1700000000000,
+"creator": {
+"uid": "u1",
+"username": "alice"
+},
+"ownerId": "u1"
+}
+},
+{
+"method": "GET",
+"path": "^/v\\d+/deployments\\?",
+"body": {
+"deployments": [
+{
+"id": "dpl_2",
+"uid": "dpl_2",
+"url": "my-app-abc.vercel.app",
+"name": "my-app",
+"projectId": "prj_1",
+"target": "production",
+"readyState": "READY",
+"state": "READY",
+"createdAt": 1700000000000,
+"created": 1700000000000,
+"creator": {
+"uid": "u1",
+"username": "alice"
+},
+"ownerId": "u1"
+}
+],
+"pagination": {
+"count": 1,
+"next": null,
+"prev": null
+}
+}
+},
+{
+"method": "POST",
+"path": "^/v1/webhooks",
+"body": {
+"id": "hook_1",
+"url": "https://hooks.example.net/x",
+"events": [
+"deployment.created"
+],
+"createdAt": 1700000000000,
+"secret": "x"
+}
+},
+{
+"method": "GET",
+"path": "^/v\\d+/teams/(acme|team_1)",
+"body": {
+"id": "team_1",
+"slug": "acme",
+"name": "Acme"
+}
+},
+{
+"method": "GET",
+"path": "custom-environments",
+"body": {
+"environments": []
+}
+},
+{
+"method": "GET",
+"path": "^/v2/user",
+"body": {
+"user": {
+"id": "u1",
+"uid": "u1",
+"username": "alice",
+"email": "alice@example.com",
+"name": "Alice",
+"defaultTeamId": null,
+"version": "northstar",
+"softBlock": null
+}
+}
+},
+{
+"method": "GET",
+"path": "^/v2/teams",
+"body": {
+"teams": [],
+"pagination": {
+"count": 0,
+"next": null,
+"prev": null
+}
+}
+},
+{
+"method": "GET",
+"path": "^/v\\d+/projects/prj_1(\\?|$)",
+"body": {
+"id": "prj_1",
+"name": "my-app",
+"accountId": "u1",
+"createdAt": 1700000000000,
+"updatedAt": 1700000000000,
+"env": [
+{
+"id": "env_1",
+"key": "DATABASE_URL",
+"type": "encrypted",
+"target": [
+"production"
+],
+"createdAt": 1700000000000
+}
+]
+}
+},
+{
+"method": "GET",
+"path": "^/v\\d+/projects/my-app",
+"body": {
+"id": "prj_1",
+"name": "my-app",
+"accountId": "u1",
+"createdAt": 1700000000000,
+"updatedAt": 1700000000000,
+"env": [
+{
+"id": "env_1",
+"key": "DATABASE_URL",
+"type": "encrypted",
+"target": [
+"production"
+],
+"createdAt": 1700000000000
+}
+]
+}
+},
+{
+"method": "GET",
+"path": "^/v\\d+/projects/[^/]+/env",
+"body": {
+"envs": [
+{
+"id": "env_1",
+"key": "DATABASE_URL",
+"type": "encrypted",
+"target": [
+"production"
+],
+"createdAt": 1700000000000,
+"updatedAt": 1700000000000
+}
+]
+}
+},
+{
+"method": "GET",
+"path": "^/v\\d+/(now/)?deployments",
+"body": {
+"deployments": [
+{
+"uid": "dpl_1",
+"url": "my-app-abc.vercel.app",
+"name": "my-app",
+"state": "READY",
+"created": 1700000000000,
+"target": "production",
+"ownerId": "u1"
+}
+],
+"pagination": {
+"count": 1,
+"next": null
+}
+}
+},
+{
+"method": "GET",
+"path": "^/v\\d+/aliases",
+"body": {
+"aliases": [],
+"pagination": {
+"count": 0,
+"next": null
+}
+}
+},
+{
+"method": "DELETE",
+"body": {}
+}
+]

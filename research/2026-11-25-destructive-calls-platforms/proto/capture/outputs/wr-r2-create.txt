@@ -1,0 +1,16 @@
+$ CLOUDFLARE_API_TOKEN=test-token-123 CLOUDFLARE_ACCOUNT_ID=acc123 WRANGLER_SEND_METRICS=false -- wrangler r2 bucket create newbucket
+
+ ⛅️ wrangler 4.168.0
+────────────────────
+Creating bucket 'newbucket'...
+✅ Created bucket 'newbucket' with default storage class of Standard.
+To access your new R2 Bucket in your Worker, add the following snippet to your configuration file:
+{
+  "r2_buckets": [
+    {
+      "bucket_name": "newbucket",
+      "binding": "newbucket"
+    }
+  ]
+}
+--- exit=0 seconds=.807478607

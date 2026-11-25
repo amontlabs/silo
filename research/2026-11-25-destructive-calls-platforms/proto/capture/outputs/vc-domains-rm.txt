@@ -1,0 +1,6 @@
+$ VERCEL_TOKEN=testtoken123 VERCEL_TELEMETRY_DISABLED=1 -- vercel domains rm example.com --yes
+Vercel CLI 66.6.0
+Fetching domain example.com under alice
+! --yes is deprecated for this command. Use --confirm-name example.com.
+> Success! Domain example.com removed [1ms]
+--- exit=0 seconds=.439524726

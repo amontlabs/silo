@@ -1,0 +1,4 @@
+$ SUPABASE_ACCESS_TOKEN=<redacted> SUPABASE_YES=1 DO_NOT_TRACK=1 -- supabase projects delete abcdefghijklmnopqrst --yes
+Confirmed by --yes: Delete project abcdefghijklmnopqrst
+Deleted project: prod
+--- exit=0 seconds=.583820344

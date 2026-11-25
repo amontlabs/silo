@@ -1,0 +1,8 @@
+$ SUPABASE_ACCESS_TOKEN=<redacted> SUPABASE_YES=1 DO_NOT_TRACK=1 -- supabase network-restrictions update --db-allow-cidr 0.0.0.0/0 --project-ref abcdefghijklmnopqrst --experimental --yes
+Warning: --project-ref is deprecated and will be removed in v4. Use --remote=<ref> instead
+Target: project abcdefghijklmnopqrst
+Confirmed by --yes: Replace the network restrictions on project abcdefghijklmnopqrst
+DB Allowed IPv4 CIDRs: &[0.0.0.0/0]
+DB Allowed IPv6 CIDRs: <nil>
+Restrictions applied successfully: true
+--- exit=0 seconds=.500950788

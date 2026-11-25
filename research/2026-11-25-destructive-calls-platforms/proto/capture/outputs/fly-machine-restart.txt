@@ -1,0 +1,5 @@
+$ FLY_API_TOKEN=FlyV1 fm2_test-token-123 FLY_NO_UPDATE_CHECK=1 FLY_METRICS_TOKEN=- -- flyctl machine restart 3d8d1 -a my-app
+Restarting machine 3d8d1
+No health checks found
+Machine 3d8d1 restarted successfully!
+--- exit=0 seconds=.095731239

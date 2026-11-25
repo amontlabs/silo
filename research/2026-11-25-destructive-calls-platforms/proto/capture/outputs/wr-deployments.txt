@@ -1,0 +1,15 @@
+$ CLOUDFLARE_API_TOKEN=test-token-123 CLOUDFLARE_ACCOUNT_ID=acc123 WRANGLER_SEND_METRICS=false -- wrangler deployments list --name my-worker
+
+ ⛅️ wrangler 4.168.0
+────────────────────
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mThe expression evaluated to a falsy value:[0m
+
+  
+    (version)
+  
+
+
+[32mIf you think this is a bug then please create an issue at https://github.com/cloudflare/workers-sdk/issues/new/choose[0m
+🪵  Logs were written to "/opt/clis/home-wrangler/.config/.wrangler/logs/wrangler-2026-11-25_10-45-36_464.log"
+--- exit=1 seconds=.884424554

@@ -1,0 +1,7 @@
+$ FLY_API_TOKEN=FlyV1 fm2_test-token-123 FLY_NO_UPDATE_CHECK=1 FLY_METRICS_TOKEN=- -- flyctl mpg destroy pg123 --yes
+Error: MPG commands require updated tokens but found older-style tokens.
+
+Please upgrade your authentication by running:
+  flyctl auth logout
+  flyctl auth login
+--- exit=1 seconds=.042209923

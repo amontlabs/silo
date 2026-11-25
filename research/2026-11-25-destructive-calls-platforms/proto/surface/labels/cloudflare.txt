@@ -1,0 +1,303 @@
+# Cloudflare API v4 (api.cloudflare.com/client/v4), from github.com/cloudflare/api-schemas openapi.json,
+# the products listed in ../extract.py CF_SCOPE, labelled by hand on 2026-11-25. Key: METHOD path. See ../label.md.
+DELETE /client/v4/accounts/{account_id} hold:gone
+PUT /client/v4/accounts/{account_id} either
+POST /client/v4/accounts/{account_id}/cfd_tunnel allow
+DELETE /client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id} hold:outage
+PATCH /client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id} either
+DELETE /client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id}/configurations hold:outage
+PUT /client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id}/configurations hold:exposed decides what the tunnel publishes
+DELETE /client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id}/connections either
+POST /client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id}/management either
+POST /client/v4/accounts/{account_id}/containers/applications allow
+DELETE /client/v4/accounts/{account_id}/containers/applications/{application_id} hold:gone
+PATCH /client/v4/accounts/{account_id}/containers/applications/{application_id} either
+POST /client/v4/accounts/{account_id}/containers/applications/{application_id}/rollouts deploy
+POST /client/v4/accounts/{account_id}/containers/image-preparations allow
+POST /client/v4/accounts/{account_id}/containers/registries allow
+DELETE /client/v4/accounts/{account_id}/containers/registries/{domain} either
+POST /client/v4/accounts/{account_id}/containers/registries/{domain}/credentials either
+POST /client/v4/accounts/{account_id}/d1/database allow
+DELETE /client/v4/accounts/{account_id}/d1/database/{database_id} hold:gone
+PATCH /client/v4/accounts/{account_id}/d1/database/{database_id} either
+PUT /client/v4/accounts/{account_id}/d1/database/{database_id} either
+POST /client/v4/accounts/{account_id}/d1/database/{database_id}/export allow
+POST /client/v4/accounts/{account_id}/d1/database/{database_id}/import cond SQL decides
+POST /client/v4/accounts/{account_id}/d1/database/{database_id}/query cond SQL decides
+POST /client/v4/accounts/{account_id}/d1/database/{database_id}/raw cond SQL decides
+POST /client/v4/accounts/{account_id}/d1/database/{database_id}/time_travel/restore hold:gone everything after the bookmark
+POST /client/v4/accounts/{account_id}/d1/database/{database_id}/undelete allow
+PUT /client/v4/accounts/{account_id}/d1/insights/settings allow
+POST /client/v4/accounts/{account_id}/hyperdrive/configs allow
+DELETE /client/v4/accounts/{account_id}/hyperdrive/configs/{hyperdrive_id} hold:outage
+PATCH /client/v4/accounts/{account_id}/hyperdrive/configs/{hyperdrive_id} either
+PUT /client/v4/accounts/{account_id}/hyperdrive/configs/{hyperdrive_id} either
+POST /client/v4/accounts/{account_id}/hyperdrive/configs/{hyperdrive_id}/restart either
+POST /client/v4/accounts/{account_id}/hyperdrive/integrationsOperations/planetScale/createDatabaseSignature allow
+POST /client/v4/accounts/{account_id}/members hold:exposed
+DELETE /client/v4/accounts/{account_id}/members/{member_id} hold:outage
+PUT /client/v4/accounts/{account_id}/members/{member_id} hold:exposed role
+POST /client/v4/accounts/{account_id}/pages/projects allow
+DELETE /client/v4/accounts/{account_id}/pages/projects/{project_name} hold:gone
+PATCH /client/v4/accounts/{account_id}/pages/projects/{project_name} either
+POST /client/v4/accounts/{account_id}/pages/projects/{project_name}/deployments deploy
+DELETE /client/v4/accounts/{account_id}/pages/projects/{project_name}/deployments/{deployment_id} either an old deployment
+POST /client/v4/accounts/{account_id}/pages/projects/{project_name}/deployments/{deployment_id}/retry deploy
+POST /client/v4/accounts/{account_id}/pages/projects/{project_name}/deployments/{deployment_id}/rollback deploy
+POST /client/v4/accounts/{account_id}/pages/projects/{project_name}/deployments/{deployment_id}/tails allow
+DELETE /client/v4/accounts/{account_id}/pages/projects/{project_name}/deployments/{deployment_id}/tails/{tail_id} allow
+POST /client/v4/accounts/{account_id}/pages/projects/{project_name}/domains either
+DELETE /client/v4/accounts/{account_id}/pages/projects/{project_name}/domains/{domain_name} hold:outage
+PATCH /client/v4/accounts/{account_id}/pages/projects/{project_name}/domains/{domain_name} allow retry validation
+POST /client/v4/accounts/{account_id}/pages/projects/{project_name}/purge_build_cache allow
+DELETE /client/v4/accounts/{account_id}/pages/projects/{project_name}/source either
+POST /client/v4/accounts/{account_id}/pages/projects/{project_name}/source deploy
+POST /client/v4/accounts/{account_id}/queues allow
+DELETE /client/v4/accounts/{account_id}/queues/{queue_id} hold:gone with its messages
+PATCH /client/v4/accounts/{account_id}/queues/{queue_id} either
+PUT /client/v4/accounts/{account_id}/queues/{queue_id} either
+POST /client/v4/accounts/{account_id}/queues/{queue_id}/consumers allow
+DELETE /client/v4/accounts/{account_id}/queues/{queue_id}/consumers/{consumer_id} hold:outage
+PUT /client/v4/accounts/{account_id}/queues/{queue_id}/consumers/{consumer_id} either
+POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages allow
+POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/ack either
+POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/batch allow
+POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/extend allow
+POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/peek allow a read sent as POST
+POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/preview allow a read sent as POST
+POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/preview/ack hold:gone deletes the previewed messages
+POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/pull allow
+POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/purge hold:gone
+POST /client/v4/accounts/{account_id}/queues/{queue_id}/purge hold:gone every message
+POST /client/v4/accounts/{account_id}/r2/buckets allow
+DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name} hold:gone
+PATCH /client/v4/accounts/{account_id}/r2/buckets/{bucket_name} either
+PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name} allow
+DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/cors either
+PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/cors either
+POST /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/custom_domains hold:exposed serves the bucket on a public domain
+DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/custom_domains/{domain} hold:outage
+POST /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/domains/custom hold:exposed
+DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/domains/custom/{domain} hold:outage
+PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/domains/custom/{domain} either
+PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/domains/managed cond enabling r2.dev makes the bucket public
+POST /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/jobs either
+PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/lifecycle hold:gone expiry rules delete objects later, out of sight
+PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/local-uploads allow
+DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/lock hold:gone lets locked objects be deleted
+PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/lock either
+DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/objects hold:gone
+DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/objects/{object_key} hold:gone
+PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/objects/{object_key} either overwrites an object of that name
+DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/sippy either
+PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/sippy either
+POST /client/v4/accounts/{account_id}/r2/temp-access-credentials hold:exposed mints credentials
+POST /client/v4/accounts/{account_id}/secrets_store/stores allow
+DELETE /client/v4/accounts/{account_id}/secrets_store/stores/{store_id} hold:gone
+DELETE /client/v4/accounts/{account_id}/secrets_store/stores/{store_id}/secrets hold:gone
+POST /client/v4/accounts/{account_id}/secrets_store/stores/{store_id}/secrets allow
+DELETE /client/v4/accounts/{account_id}/secrets_store/stores/{store_id}/secrets/{secret_id} hold:gone
+PATCH /client/v4/accounts/{account_id}/secrets_store/stores/{store_id}/secrets/{secret_id} either overwrites a value
+POST /client/v4/accounts/{account_id}/secrets_store/stores/{store_id}/secrets/{secret_id}/duplicate allow
+POST /client/v4/accounts/{account_id}/storage/kv/namespaces allow
+DELETE /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id} hold:gone
+PUT /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id} allow rename
+DELETE /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/bulk hold:gone
+PUT /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/bulk either overwrites
+POST /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/bulk/delete hold:gone
+POST /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/bulk/get allow a read sent as POST
+DELETE /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/values/{key_name} hold:gone
+PUT /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/values/{key_name} either overwrites
+POST /client/v4/accounts/{account_id}/tokens hold:exposed mints a credential
+DELETE /client/v4/accounts/{account_id}/tokens/{token_id} hold:outage
+PUT /client/v4/accounts/{account_id}/tokens/{token_id} hold:exposed can widen its rights
+PUT /client/v4/accounts/{account_id}/tokens/{token_id}/value hold:outage rolls the value; users of the old one stop
+POST /client/v4/accounts/{account_id}/vectorize/indexes allow
+DELETE /client/v4/accounts/{account_id}/vectorize/indexes/{index_name} hold:gone
+PUT /client/v4/accounts/{account_id}/vectorize/indexes/{index_name} either
+POST /client/v4/accounts/{account_id}/vectorize/indexes/{index_name}/delete-by-ids hold:gone
+POST /client/v4/accounts/{account_id}/vectorize/indexes/{index_name}/get-by-ids allow a read sent as POST
+POST /client/v4/accounts/{account_id}/vectorize/indexes/{index_name}/insert allow
+POST /client/v4/accounts/{account_id}/vectorize/indexes/{index_name}/query allow a read sent as POST
+POST /client/v4/accounts/{account_id}/vectorize/indexes/{index_name}/upsert either overwrites
+POST /client/v4/accounts/{account_id}/vectorize/v2/indexes allow
+DELETE /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name} hold:gone
+POST /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}/delete_by_ids hold:gone
+POST /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}/get_by_ids allow a read sent as POST
+POST /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}/insert allow
+POST /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}/metadata_index/create allow
+POST /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}/metadata_index/delete either
+POST /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}/query allow a read sent as POST
+POST /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}/upsert either overwrites
+PUT /client/v4/accounts/{account_id}/workers/account-settings either
+POST /client/v4/accounts/{account_id}/workers/assets/upload deploy
+POST /client/v4/accounts/{account_id}/workers/dispatch/namespaces allow
+DELETE /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace} hold:gone every script in it
+PATCH /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace} either
+PUT /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace} either
+DELETE /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts hold:gone
+DELETE /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name} hold:gone
+PUT /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name} deploy
+POST /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/assets-upload-session deploy
+PUT /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/content deploy
+PUT /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/secrets either overwrites
+PATCH /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/secrets-bulk either
+DELETE /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/secrets/{secret_name} hold:gone
+PATCH /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/settings either
+PUT /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/tags allow
+DELETE /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/tags/{tag} allow
+PATCH /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/tags/{tag} allow
+PUT /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/tags/{tag} allow
+PUT /client/v4/accounts/{account_id}/workers/domains either
+DELETE /client/v4/accounts/{account_id}/workers/domains/{domain_id} hold:outage
+POST /client/v4/accounts/{account_id}/workers/durable_objects/namespaces/{id}/query/v2 either runs a query on a Durable Object's storage
+POST /client/v4/accounts/{account_id}/workers/observability/destinations hold:exposed telemetry to an outside endpoint
+DELETE /client/v4/accounts/{account_id}/workers/observability/destinations/{slug} either
+PATCH /client/v4/accounts/{account_id}/workers/observability/destinations/{slug} hold:exposed
+POST /client/v4/accounts/{account_id}/workers/observability/issues/automations allow
+DELETE /client/v4/accounts/{account_id}/workers/observability/issues/automations/{automationId} allow
+PUT /client/v4/accounts/{account_id}/workers/observability/issues/automations/{automationId} allow
+POST /client/v4/accounts/{account_id}/workers/observability/issues/groups allow
+DELETE /client/v4/accounts/{account_id}/workers/observability/issues/groups/{groupId} allow
+POST /client/v4/accounts/{account_id}/workers/observability/issues/groups/{groupId}/members allow
+DELETE /client/v4/accounts/{account_id}/workers/observability/issues/groups/{groupId}/members/{issueId} allow
+PATCH /client/v4/accounts/{account_id}/workers/observability/issues/{issueId} allow
+POST /client/v4/accounts/{account_id}/workers/observability/issues/{issueId}/notification-runs allow
+POST /client/v4/accounts/{account_id}/workers/observability/metricsexport either
+POST /client/v4/accounts/{account_id}/workers/observability/queries allow
+DELETE /client/v4/accounts/{account_id}/workers/observability/queries/{queryId} allow
+PATCH /client/v4/accounts/{account_id}/workers/observability/queries/{queryId} allow
+POST /client/v4/accounts/{account_id}/workers/observability/shared/query either a shareable link to logs
+POST /client/v4/accounts/{account_id}/workers/observability/telemetry/keys allow a read sent as POST
+POST /client/v4/accounts/{account_id}/workers/observability/telemetry/live-tail allow
+POST /client/v4/accounts/{account_id}/workers/observability/telemetry/live-tail/heartbeat allow
+POST /client/v4/accounts/{account_id}/workers/observability/telemetry/query allow a read sent as POST
+POST /client/v4/accounts/{account_id}/workers/observability/telemetry/values allow a read sent as POST
+DELETE /client/v4/accounts/{account_id}/workers/scripts/{script_name} hold:gone
+PUT /client/v4/accounts/{account_id}/workers/scripts/{script_name} deploy
+POST /client/v4/accounts/{account_id}/workers/scripts/{script_name}/assets-upload-session deploy
+PUT /client/v4/accounts/{account_id}/workers/scripts/{script_name}/content deploy
+POST /client/v4/accounts/{account_id}/workers/scripts/{script_name}/deployments deploy
+DELETE /client/v4/accounts/{account_id}/workers/scripts/{script_name}/deployments/{deployment_id} either
+PUT /client/v4/accounts/{account_id}/workers/scripts/{script_name}/schedules either replaces the cron triggers
+PATCH /client/v4/accounts/{account_id}/workers/scripts/{script_name}/script-settings either
+PUT /client/v4/accounts/{account_id}/workers/scripts/{script_name}/secrets either overwrites
+PATCH /client/v4/accounts/{account_id}/workers/scripts/{script_name}/secrets-bulk either
+DELETE /client/v4/accounts/{account_id}/workers/scripts/{script_name}/secrets/{secret_name} hold:gone
+PATCH /client/v4/accounts/{account_id}/workers/scripts/{script_name}/settings either bindings can be dropped
+DELETE /client/v4/accounts/{account_id}/workers/scripts/{script_name}/subdomain hold:outage
+POST /client/v4/accounts/{account_id}/workers/scripts/{script_name}/subdomain either
+POST /client/v4/accounts/{account_id}/workers/scripts/{script_name}/tails allow
+DELETE /client/v4/accounts/{account_id}/workers/scripts/{script_name}/tails/{id} allow
+PUT /client/v4/accounts/{account_id}/workers/scripts/{script_name}/usage-model either
+POST /client/v4/accounts/{account_id}/workers/scripts/{script_name}/versions deploy
+PUT /client/v4/accounts/{account_id}/workers/services/{service_name}/environments/{environment_name}/content deploy
+PATCH /client/v4/accounts/{account_id}/workers/services/{service_name}/environments/{environment_name}/settings either
+DELETE /client/v4/accounts/{account_id}/workers/subdomain hold:outage every workers.dev URL of the account
+PUT /client/v4/accounts/{account_id}/workers/subdomain either
+POST /client/v4/accounts/{account_id}/workers/workers allow
+DELETE /client/v4/accounts/{account_id}/workers/workers/{worker_id} hold:gone
+PATCH /client/v4/accounts/{account_id}/workers/workers/{worker_id} either
+PUT /client/v4/accounts/{account_id}/workers/workers/{worker_id} either
+POST /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews allow
+DELETE /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews/{preview_id} either
+PATCH /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews/{preview_id} allow
+PUT /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews/{preview_id} allow
+POST /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews/{preview_id}/deployments allow
+PATCH /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews/{preview_id}/deployments/latest allow
+DELETE /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews/{preview_id}/deployments/{deployment_id} either
+POST /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews/{preview_id}/deployments/{deployment_id}/profile allow
+POST /client/v4/accounts/{account_id}/workers/workers/{worker_id}/versions deploy
+PATCH /client/v4/accounts/{account_id}/workers/workers/{worker_id}/versions/latest deploy
+DELETE /client/v4/accounts/{account_id}/workers/workers/{worker_id}/versions/{version_id} either
+POST /client/v4/accounts/{account_id}/workers/workers/{worker_id}/versions/{version_id}/profile allow
+POST /client/v4/accounts/{account_id}/workflows/concurrency allow
+DELETE /client/v4/accounts/{account_id}/workflows/concurrency/{key_id} either
+PATCH /client/v4/accounts/{account_id}/workflows/concurrency/{key_id} either
+PATCH /client/v4/accounts/{account_id}/workflows/settings either
+DELETE /client/v4/accounts/{account_id}/workflows/{workflow_name} hold:gone with its instances
+PUT /client/v4/accounts/{account_id}/workflows/{workflow_name} deploy
+POST /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances allow
+POST /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances/batch allow
+POST /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances/batch/delete hold:gone
+POST /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances/batch/terminate hold:outage
+DELETE /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances/{instance_id} hold:gone
+POST /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances/{instance_id}/events/{event_type} allow
+PATCH /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances/{instance_id}/status cond terminate or pause
+POST /client/v4/user/tokens hold:exposed mints a credential
+DELETE /client/v4/user/tokens/{token_id} hold:outage
+PUT /client/v4/user/tokens/{token_id} hold:exposed
+PUT /client/v4/user/tokens/{token_id}/value hold:outage
+POST /client/v4/zones allow
+DELETE /client/v4/zones/{zone_id} hold:gone the zone and every record
+PATCH /client/v4/zones/{zone_id} cond paused or plan
+POST /client/v4/zones/{zone_id}/custom_hostnames allow
+DELETE /client/v4/zones/{zone_id}/custom_hostnames/fallback_origin hold:outage
+PUT /client/v4/zones/{zone_id}/custom_hostnames/fallback_origin hold:outage
+DELETE /client/v4/zones/{zone_id}/custom_hostnames/{custom_hostname_id} hold:outage
+PATCH /client/v4/zones/{zone_id}/custom_hostnames/{custom_hostname_id} either
+DELETE /client/v4/zones/{zone_id}/custom_hostnames/{custom_hostname_id}/certificate_pack/{certificate_pack_id}/certificates/{certificate_id} hold:outage
+PUT /client/v4/zones/{zone_id}/custom_hostnames/{custom_hostname_id}/certificate_pack/{certificate_pack_id}/certificates/{certificate_id} either
+POST /client/v4/zones/{zone_id}/dns_records either
+POST /client/v4/zones/{zone_id}/dns_records/batch cond deletes in the batch
+POST /client/v4/zones/{zone_id}/dns_records/import either
+POST /client/v4/zones/{zone_id}/dns_records/scan allow
+POST /client/v4/zones/{zone_id}/dns_records/scan/review either
+POST /client/v4/zones/{zone_id}/dns_records/scan/trigger allow
+DELETE /client/v4/zones/{zone_id}/dns_records/{dns_record_id} hold:outage
+PATCH /client/v4/zones/{zone_id}/dns_records/{dns_record_id} hold:outage
+PUT /client/v4/zones/{zone_id}/dns_records/{dns_record_id} hold:outage
+PATCH /client/v4/zones/{zone_id}/email/routing either
+PUT /client/v4/zones/{zone_id}/email/routing either
+POST /client/v4/zones/{zone_id}/email/routing/disable hold:outage
+DELETE /client/v4/zones/{zone_id}/email/routing/dns hold:outage
+PATCH /client/v4/zones/{zone_id}/email/routing/dns either
+POST /client/v4/zones/{zone_id}/email/routing/dns allow
+POST /client/v4/zones/{zone_id}/email/routing/enable allow
+POST /client/v4/zones/{zone_id}/email/routing/rules either mail to an outside inbox
+PUT /client/v4/zones/{zone_id}/email/routing/rules/catch_all hold:exposed every unmatched address
+DELETE /client/v4/zones/{zone_id}/email/routing/rules/{rule_identifier} either
+PUT /client/v4/zones/{zone_id}/email/routing/rules/{rule_identifier} hold:exposed redirects mail
+POST /client/v4/zones/{zone_id}/email/routing/unlock either
+POST /client/v4/zones/{zone_id}/purge_cache either
+POST /client/v4/zones/{zone_id}/rulesets either
+PUT /client/v4/zones/{zone_id}/rulesets/phases/{ruleset_phase}/entrypoint hold:exposed replaces every rule of the phase, WAF included
+DELETE /client/v4/zones/{zone_id}/rulesets/{ruleset_id} hold:exposed
+PUT /client/v4/zones/{zone_id}/rulesets/{ruleset_id} hold:exposed
+POST /client/v4/zones/{zone_id}/rulesets/{ruleset_id}/rules either
+DELETE /client/v4/zones/{zone_id}/rulesets/{ruleset_id}/rules/{rule_id} hold:exposed
+PATCH /client/v4/zones/{zone_id}/rulesets/{ruleset_id}/rules/{rule_id} either
+DELETE /client/v4/zones/{zone_id}/rulesets/{ruleset_id}/versions/{ruleset_version} allow an old version
+PATCH /client/v4/zones/{zone_id}/settings cond the setting and value decide
+DELETE /client/v4/zones/{zone_id}/settings/aegis either
+PATCH /client/v4/zones/{zone_id}/settings/aegis either
+PATCH /client/v4/zones/{zone_id}/settings/auto_origin_tls_kex allow
+PATCH /client/v4/zones/{zone_id}/settings/automatic_platform_optimization allow
+PATCH /client/v4/zones/{zone_id}/settings/binary_ast allow
+PATCH /client/v4/zones/{zone_id}/settings/csam_scanner_third_party either
+PATCH /client/v4/zones/{zone_id}/settings/fonts allow
+PUT /client/v4/zones/{zone_id}/settings/google-tag-gateway/config allow
+PATCH /client/v4/zones/{zone_id}/settings/h2_prioritization allow
+PATCH /client/v4/zones/{zone_id}/settings/image_resizing allow
+PATCH /client/v4/zones/{zone_id}/settings/nel allow
+DELETE /client/v4/zones/{zone_id}/settings/ohttp-gateway either
+PUT /client/v4/zones/{zone_id}/settings/ohttp-gateway allow
+PATCH /client/v4/zones/{zone_id}/settings/origin_h2_max_streams allow
+PATCH /client/v4/zones/{zone_id}/settings/origin_max_http_version allow
+DELETE /client/v4/zones/{zone_id}/settings/origin_tls_compliance_modes either
+PATCH /client/v4/zones/{zone_id}/settings/origin_tls_compliance_modes either
+PUT /client/v4/zones/{zone_id}/settings/origin_tls_compliance_modes either
+PATCH /client/v4/zones/{zone_id}/settings/rum allow
+PATCH /client/v4/zones/{zone_id}/settings/speed_brain allow
+PATCH /client/v4/zones/{zone_id}/settings/ssl_automatic_mode either
+PATCH /client/v4/zones/{zone_id}/settings/transformations_allowed_origins allow
+PATCH /client/v4/zones/{zone_id}/settings/transformations_c2pa allow
+PATCH /client/v4/zones/{zone_id}/settings/transformations_config allow
+PUT /client/v4/zones/{zone_id}/settings/zaraz/config either
+PUT /client/v4/zones/{zone_id}/settings/zaraz/history either
+POST /client/v4/zones/{zone_id}/settings/zaraz/publish deploy
+PUT /client/v4/zones/{zone_id}/settings/zaraz/workflow either
+PATCH /client/v4/zones/{zone_id}/settings/{setting_id} cond the setting and value decide
+POST /client/v4/zones/{zone_id}/workers/routes either takes traffic of the pattern
+DELETE /client/v4/zones/{zone_id}/workers/routes/{route_id} hold:outage
+PUT /client/v4/zones/{zone_id}/workers/routes/{route_id} hold:outage

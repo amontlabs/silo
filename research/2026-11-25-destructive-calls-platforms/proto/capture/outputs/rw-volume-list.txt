@@ -1,0 +1,10 @@
+$ RAILWAY_TOKEN=test-token-123 -- railway volume list
+Project: prod-app
+Environment: production
+
+Volume: pg-data
+Attached to: api
+Mount path: x
+Storage used: 1MB/1MB
+Status: Deleted
+--- exit=0 seconds=.191102467

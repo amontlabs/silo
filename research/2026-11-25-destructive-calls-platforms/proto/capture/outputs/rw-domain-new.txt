@@ -1,0 +1,6 @@
+$ RAILWAY_TOKEN=test-token-123 -- railway domain --service api
+Domains already exist on the service:
+Domain                    Type      ID                Port   Sync
+api-prod.up.railway.app   service   servicedomain-1   1      ACTIVE
+api.example.com           custom    customdomain-1    1      ACTIVE
+--- exit=0 seconds=.201603760
