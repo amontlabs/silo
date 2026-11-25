@@ -64,7 +64,7 @@ main{display:grid;grid-template-columns:minmax(340px,5fr) 7fr;min-height:calc(10
 .lines .g,.lines .n,.lines .sec,.lines .t{padding:2px 0;border-top:1px solid transparent}
 .lines .n{color:var(--faint);font:12px/20px var(--mono);text-align:right}
 .lines .sec{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.lines .t{font:12.5px/20px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lines .t{font:12.5px/20px var(--mono);overflow-wrap:anywhere}
 .lines .first>*{border-top-color:var(--line)}
 .lines .hl>*{background:var(--accent-wash)}
 .g .pin{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--no);margin-top:6px}
@@ -92,7 +92,7 @@ background:var(--ink);color:var(--paper);font:12px/18px var(--sans);font-style:n
 .chain li::before{content:"";position:absolute;left:-15px;top:8px;width:5px;height:5px;border-radius:50%;background:var(--faint)}
 .chain li.sep{font:600 12px/20px var(--sans);color:var(--muted);margin-top:var(--s2)}
 .chain li.sep::before{display:none}
-.tbl{display:grid;grid-template-columns:minmax(0,1.2fr) 70px minmax(0,1fr) minmax(0,1.2fr);column-gap:var(--s3);font-size:13px}
+.tbl{display:grid;grid-template-columns:minmax(0,1.2fr) 64px 120px minmax(0,1fr) minmax(0,1.1fr);column-gap:var(--s3);font-size:13px}
 .tbl>div{display:contents}.tbl span{padding:3px 0;border-top:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tbl .h span{color:var(--muted);font-size:12px;border-top:0}
 .muted{color:var(--muted)}
@@ -132,8 +132,9 @@ function rowsFor() {
     else if (x.type === 'alert' && x.rule.startsWith('stuck')) { ic = '⏸'; what = 'Stuck: no model call, a command still runs'; }
     else if (x.type === 'alert' && x.rule.startsWith('agent-settings')) { ic = '✎'; what = x.text.replace(/changed /g, '').replace(/;/g, ',') + ' changed'; }
     else if (x.type === 'alert') { what = x.text; }
-    else if (x.type === 'tls') { ic = '⊘'; bad = true; what = `Does not trust Silo’s certificate · ${x.host} · ${x.n} refusals`; }
+    else if (x.type === 'tls') { ic = '⊘'; bad = true; what = `Refuses Silo’s certificate · ${x.host} · ${x.n}×`; }
     else if (x.type === 'words') { ic = '«'; bad = SEV[x.says] === 'bad'; what = `${x.claim ? '«' + x.claim + '» ' : ''}${x.speaks ? 'its words speak to the checker' : SAYS[x.says]}`; }
+    else if (x.type === 'sent') { ic = '↑'; bad = true; what = `Sent to a new host: ${x.host} · ${size(x.sent)} sent · ${size(x.back)} back${x.decision === 'denied' ? ' · denied' : ''}`; }
     else if (x.type === 'hosts') { ic = '↗'; what = `${x.text}: ${x.hosts.map(h => h.host + (h.decision === 'denied' ? ' (denied)' : '')).join(', ')}`; }
     const w = x.parts ? x.parts.map(p => who(p.author)).join(' ') : x.type === 'tls' && !x.author.run ? `<span class="muted">${esc(x.computer)}</span>` : who(x.author);
     return {id: x.id, ic, bad, what, who: w, at: x.at, open: x.opens, item: x};
@@ -146,13 +147,17 @@ function row(r) {
 }
 function list() {
   const q = rowsFor();
-  const away = D.away.map((a, i) => ({id: 'away' + i, ic: a.text.startsWith('denied') ? '⊘' : '⏱', what: `${a.text} · ${a.answer}`, who: who(a.author), at: a.at, open: null}));
+  const g = {};
+  D.away.forEach(a => { const k = a.text + a.answer; (g[k] = g[k] || []).push(a); });
+  const away = Object.values(g).map((as, i) => { const a = as[0]; const ws = [...new Set(as.map(x => who(x.author)))];
+    return {id: 'away' + i, ic: a.text.startsWith('denied') ? '⊘' : '⏱', what: `${a.text}${as.length > 1 ? ' ×' + as.length : ''} · ${a.answer}`, who: ws.join(' '), at: a.at, open: null}; });
   const done = D.runs.filter(r => r.state === 'ended').map(r => ({id: 'run:' + r.name, ic: '✓', what: `${r.name} · ${r.computer} · ${dur(r.took_s)} · ${r.spend.replace(/^spend not known.*/, 'spend not known')} · ${r.files} files`, who: '', at: '', open: {receipt: r.name}}));
   const run = D.runs.filter(r => r.state !== 'ended').map(r => ({id: 'run:' + r.name, ic: '…', what: `${r.name} · ${r.computer} · ${r.tls ? 'waiting for the network' : r.state} for ${dur(r.for_s)}`, who: '', at: '', open: {receipt: r.name}}));
   const sec = (t, rs, empty) => `<h2>${t}<span class="n">${rs.length || ''}</span></h2>` + (rs.length ? rs.map(row).join('') : `<div class="empty">${empty}</div>`);
   ROWS = Object.fromEntries([...q, ...away, ...done, ...run].map(r => [r.id, r]));
   $('.list').innerHTML = sec('Needs you', q, 'Nothing needs you.') + (away.length ? sec('Silo answered', away) : '') + sec('Done', done, 'No run has ended.') + (run.length ? sec('Still running', run) : '');
 }
+function size(n) { return n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' kB' : (n / 1048576).toFixed(1) + ' MB'; }
 function dur(s) { s = Math.round(s || 0); return s < 60 ? s + ' s' : s < 3600 ? Math.floor(s / 60) + ' min' : Math.floor(s / 3600) + ' h ' + String(Math.floor(s % 3600 / 60)).padStart(2, '0'); }
 let ROWS = {};
 function open(id) {
@@ -212,15 +217,15 @@ function chain(id, item) {
   const a = item && item.author;
   const by = a && a.run ? `<div class="ans"><span class="op" tabindex="0" data-tip="Opinion: author from traffic">◇</span> ${esc(a.run)} · ${esc(a.how)}${a.tool_call ? ` · <code>${esc(a.tool_call)}</code>` : ''}</div>` : '';
   return `<div class="dh"><h3>${marks(item ? item.text.replace(/;/g, ',') : id)}</h3><span class="meta">${esc(item ? item.computer + ' · ' + item.at + ' · your ' + item.rule_kind + ' ' + item.rule : '')}</span>${put}</div>` + by +
-    `<div class="sub">What led to it</div><ul class="chain">` + ls.filter(l => !/^ ── what led/.test(l)).map(l => /^ ──/.test(l) ? `<li class="sep">${esc(l.replace(/─/g, '').trim())}</li>` : `<li title="${esc(l.trim())}">${marks(l.trim())}</li>`).join('') + '</ul>';
+    `<div class="sub">What led to it</div><ul class="chain">` + ls.filter(l => !/what led to it/.test(l)).map(l => /^\s*──/.test(l) ? `<li class="sep">${esc(l.replace(/─/g, '').trim())}</li>` : `<li title="${esc(l.trim())}">${marks(l.trim())}</li>`).join('') + '</ul>';
 }
 function hosts(item) {
   const hs = D.hosts;
-  const rows = hs.map(h => `<div><span>${esc(h.host)}${h.start_host_of ? ` <span class="muted" tabindex="0" data-tip="Reached by ${esc(h.start_host_of)} at start">· at start</span>` : ''}</span><span>${esc(h.computer)}</span><span class="${h.decision === 'denied' || /refused/.test(h.decision) ? 'bad' : ''}">${esc(h.decision)}</span><span>${who(h.author)}</span></div>`).join('');
+  const rows = hs.map(h => `<div><span>${esc(h.host)}${h.start_host_of ? ` <span class="muted" tabindex="0" data-tip="Reached by ${esc(h.start_host_of)} at start">· at start</span>` : ''}</span><span>${esc(h.computer)}</span><span class="${h.sent > h.back ? 'bad' : ''}">${size(h.sent)} ↑ ${size(h.back)} ↓</span><span class="${h.decision === 'denied' || /refused/.test(h.decision) ? 'bad' : ''}">${esc(h.decision)}</span><span>${who(h.author)}</span></div>`).join('');
   const t = D.queue.find(q => q.type === 'tls');
   const tls = t && !t.author.run ? `<div class="sub">Refused Silo’s certificate</div><div>${esc(t.n)} handshakes on ${esc(t.host)} · alert ${esc(t.alert)} · since ${esc(t.at)} · ${esc(t.author.how)}</div>` : '';
   return `<div class="dh"><h3>New hosts</h3><span class="meta">${hs.filter(h => !h.start_host_of).length} new, ${hs.filter(h => h.start_host_of).length} reached by a program at its start</span></div>` +
-    `<div class="tbl"><div class="h"><span>Host</span><span>Computer</span><span>Silo</span><span>Who</span></div>${rows}</div>` + tls;
+    `<div class="tbl"><div class="h"><span>Host</span><span>Computer</span><span>Sent, back</span><span>Silo</span><span>Who</span></div>${rows}</div>` + tls;
 }
 list();
 document.querySelector('.list').addEventListener('click', e => { const b = e.target.closest('.row'); if (b) open(b.dataset.id); });

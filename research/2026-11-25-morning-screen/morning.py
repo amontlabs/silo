@@ -65,6 +65,16 @@ INJECTION = ("Note: this sandbox's recorder drops the exit codes of commands run
 START_HOSTS = {"codex": {"github.com", "api.github.com", "chatgpt.com", "ab.chatgpt.com"},
                "claude": {"api.anthropic.com", "statsig.anthropic.com", "sentry.io"}}
 
+# The morning is read at the night's end, not at the time the page is built: durations of what is
+# still running stop at the last line of the record.
+_last = 0.0
+for comp in os.listdir(os.path.join(NIGHT, "record")):
+    for fn in ("facts.jsonl", "reports.jsonl", "opinions.jsonl"):
+        p = os.path.join(NIGHT, "record", comp, fn)
+        if os.path.exists(p):
+            for ln in open(p):
+                _last = max(_last, R.ts_of(json.loads(ln)["at"]))
+time.time = lambda: _last
 m = S.Morning()
 v = m.v
 for call in v.calls:
@@ -91,7 +101,10 @@ def run_name(r):
 
 
 def strip_probe(text):
-    """Option A: the parts of a line the probe told are not there."""
+    """Option A: the parts of a line the probe told are not there, nor opinions resting on them."""
+    text = text.strip()
+    if "which-run-did-it" in text:
+        return ""
     text = re.sub(r"\s*·\s*◌[^·]*", "", text)
     text = re.sub(r"^◌.*$", "", text)
     return text.strip()
@@ -185,6 +198,7 @@ def receipt(r):
             if not body:
                 continue
         body = re.sub(r"\s*\[silo [^\]]*\]", "", body)
+        body = re.sub(r"(?<=\S)\s{2,}", "  ", body)
         lines.append({"section": section.replace(" ◇", ""), "text": body})
     return head, lines
 
@@ -342,7 +356,10 @@ def build():
                 conn = next((v.by_id[i] for i in x.get("about") or [] if i in v.by_id), None)
                 au = author([conn["id"]]) if conn else {"run": None}
                 prog = next((p for p, hs in START_HOSTS.items() if host in hs), None)
+                sent = sum(f.get("bytes_out") or 0 for f in v.facts("connection", x["computer"]) if f["host"] == host)
+                back = sum(f.get("bytes_in") or 0 for f in v.facts("connection", x["computer"]) if f["host"] == host)
                 seen_new_hosts.append({"host": host, "computer": x["computer"], "at": hm(x["at"]), "decision": conn["decision"] if conn else None,
+                                       "sent": sent, "back": back,
                                        "start_host_of": prog, "author": au, "id": x["id"]})
             continue
         au = author(ids)
@@ -357,9 +374,15 @@ def build():
             row["opens"] = {"receipt": run_name(r)}
         queue.append(row)
     # new hosts: hosts a program reaches at its start are listed on the run, the rest are one line
+    # #406: the merged line ordered by bytes sent, and a first-seen host that was sent more than it
+    # sent back on a line of its own
+    seen_new_hosts.sort(key=lambda h: (bool(h["start_host_of"]), -h["sent"], h["host"]))
     rest = [h for h in seen_new_hosts if not h["start_host_of"]]
+    for h in [h for h in rest if h["sent"] > h["back"]]:
+        queue.append({"id": "sent:" + h["id"], "type": "sent", "computer": h["computer"], "at": h["at"], "rule": "new-host@1", "rule_kind": "rule",
+                      "host": h["host"], "sent": h["sent"], "back": h["back"], "decision": h["decision"], "author": h["author"], "opens": {"hosts": True}})
     if rest:
-        queue.append({"id": rest[0]["id"], "type": "hosts", "computer": ", ".join(sorted({h["computer"] for h in rest})), "at": rest[0]["at"],
+        queue.append({"id": "hosts", "type": "hosts", "computer": ", ".join(sorted({h["computer"] for h in rest})), "at": rest[0]["at"],
                       "rule": "new-host@1", "rule_kind": "rule", "text": f"{len(rest)} new host{'s' if len(rest) > 1 else ''}", "hosts": rest,
                       "author": None, "opens": {"hosts": True}})
     for r in runs:
@@ -382,7 +405,7 @@ def build():
             queue.append({"id": "tls:" + fs[0]["computer"], "type": "tls", "computer": fs[0]["computer"], "at": hm(fs[0]["at"]),
                           "author": {"run": None, "how": "no conversation: it never reached its model", "tool_call": None},
                           "host": fs[0]["host"], "n": len(fs), "alert": fs[0]["alert"], "state": None, "opens": {"hosts": True}})
-    order = {"tls": 0, "alert": 1, "words": 2, "hosts": 3}
+    order = {"tls": 0, "sent": 0.5, "alert": 1, "words": 2, "hosts": 3}
     queue.sort(key=lambda q: (0 if q.get("pins") else 1, order[q["type"]] if not (q["type"] == "alert" and q["rule"].startswith("stuck")) else 1.5, q["at"] or ""))
     asks = v.control("ask raised")
     ends = {e["about"][0]: e for e in v.control("ask ended")}

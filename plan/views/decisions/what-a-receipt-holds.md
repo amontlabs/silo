@@ -69,3 +69,9 @@ said `bun test --watch` was running, and `codex exec` killed it when it ended. E
 from tool results equalled the probe's every time both existed (16 of 16), but in Codex's code
 mode they are only there when the model's script prints them (13 of 18 commands had one). The
 item "files that changed" can name the conversation as an opinion: `author-from-traffic`.
+
+An agent's part, 25 November 2026, from `research/2026-11-25-morning-screen`. A receipt with
+numbered lines (`r1`, `r2`…) lets an opinion cite the lines it rests on, and Silo checks that a
+cited line exists (#400). The page also adds two lines #371's receipt lacked: the handshakes a
+program refused (TLS), and, without the probe, "may still run" from an open or backgrounded tool
+call (#399).

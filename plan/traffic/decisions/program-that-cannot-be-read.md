@@ -145,3 +145,12 @@ count while a budget covers the computer, inside a host Silo reads. The options 
 
 Not checked: which programs leave `include_usage` unset. Aider, Cline and OpenCode, which #369
 found can be switched to any OpenAI-compatible host, should be captured before this is ruled.
+
+An agent's part, 25 November 2026, from `research/2026-11-25-morning-screen`. Recorded and shown
+on #371's night with a fifth run: the real Codex 0.172.0, the proxy set, Silo's authority not
+given. The boundary ended TLS for api.openai.com and wrote a fact per refused handshake (host,
+the client's alert). Codex sent `unknown_ca` 42 times in four minutes and printed "waiting for
+network"; #371's receipt for it read "idle, 0 turns, 42 connections allowed". On the morning screen
+the facts are one line under What needs you, "Refuses Silo's certificate · api.openai.com · 42×",
+above everything else, and a line of the run's receipt. Without the probe (option A) the line
+names the computer, not the run: a program that never reaches its model has no conversation.

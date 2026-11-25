@@ -22,3 +22,11 @@ Recommended: grouped, and yours to switch. You still hear about every new host, 
 alerts that would teach you to ignore them.
 
 The audit's finding is in the notes of `first-seen-host`, which this decision replaces.
+
+An agent's part, 25 November 2026, from `research/2026-11-25-morning-screen`. On #371's night with
+a fifth run, 11 first-seen hosts over two computers: 8 are hosts an agent program reaches at its
+start (Codex: github.com, api.github.com, chatgpt.com, ab.chatgpt.com), listed on the hosts view
+and not in the queue; the other 3 are one line, ordered by bytes sent as #406 recommends. A host
+counted as seen still needs a run beside it: api.github.com was both Codex's start host and the
+host Claude Code's `curl` tried to open a pull request on, and traffic alone cannot tell the two
+apart.
