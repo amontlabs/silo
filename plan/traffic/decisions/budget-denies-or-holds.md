@@ -33,3 +33,39 @@ request to its model. How Claude Code 2.1.331 and Codex 0.172.0 take each status
 
 So the error is 402 for Claude Code and 400 with plain text for Codex. Each retry the program
 makes anyway must get the same error at once.
+
+## Whether the agent program shows the refusal (24 November 2026)
+
+An agent's part, 24 November 2026. Measured on eight agent programs; the table is in the notes of
+`how-a-hold-ends`. With a 403 that says the budget is reached, Cline, Goose, Gemini CLI, Codex and
+Aider showed Silo's sentence. Claude Code, Qwen Code and OpenCode retried for the whole minute and
+showed nothing. So the error the program gets is not enough to tell you: the alert in the app is
+what says the budget is reached, and the record holds each retry as a refused request.
+
+## A refusal that every program shows (24 November 2026)
+
+An agent's part, 24 November 2026, from the research in `research/2026-11-24-agent-programs-follow-ups`. This refines the section above.
+
+A stand-in refused every model request, and only those, with one status in the provider's own error
+shape and the sentence "Silo: this computer's budget is reached. Raise it in the Silo app." Calls
+that are not model requests failed as they would without Silo. Eight programs, 45 seconds each, on
+Linux.
+
+- **400 was the only status every program stopped on and showed.** With
+  `invalid_request_error` (Anthropic, OpenAI) or `{"error": {"code": 400}}` (Google), Claude Code,
+  Codex, Gemini CLI, OpenCode, Cline, Aider, Goose and Copilot CLI with its own key all stopped
+  within 9 seconds and printed the sentence. Goose sent the request 8 times first, the others once
+  or twice.
+- **With 403**, seven of eight showed it, but Aider retried for the whole run and Copilot printed
+  its own message instead.
+- **Some statuses make the program say something else.** On 402, Goose tells you to add credits
+  with your provider. On 404, Claude Code says the model may not exist. On 401, Claude Code retries
+  and shows nothing.
+- Here Claude Code stopped on a 403 and showed the sentence. The section above saw it retry, with a
+  stand-in that refused every request to the host, its sign-in and settings calls included. The
+  likely cause of the difference is that, not the status.
+
+So a refused metered request could answer 400 with Silo's sentence in the provider's error shape,
+and the user would read it in the program, as well as in the app. A 400 says "your request is
+wrong", which is not true of a budget, and a program may one day react to it by changing the
+request. That is the cost. The alert in the app stays what tells you for sure.

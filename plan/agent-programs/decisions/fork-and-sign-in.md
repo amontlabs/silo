@@ -108,3 +108,19 @@ through at a time, and gives a renewal that comes just after another the same re
 computers connected through three rounds, and the server saw one renewal. So the answer should
 say: a sign-in held outside renews once for every computer that uses it. The scripts are in the
 project files, `research/2026-11-24-mcp-oauth` (`fork.sh`, `race_slow.sh`, `race2_slow.sh`).
+
+## Two more sign-ins on disk (24 November 2026)
+
+An agent's part, 24 November 2026, from the research in `research/2026-11-24-agent-programs-follow-ups`.
+
+- **Ollama** makes a key at its first start, `~/.ollama/id_ed25519`, and signs every request to
+  `ollama.com` with it: `Authorization: <public key>:<signature>`, over the method, the path and
+  a time. After `ollama signin`, that key is the account's sign-in for cloud models. A fork copies
+  it. A placeholder cannot stand in for it, since each request is signed afresh: kept out of the
+  computer, it would have to be held by Silo, which signs each request, as the research on AWS
+  signatures did.
+- **Kiro CLI** keeps the sign-in of `kiro-cli login` in `~/.local/share/kiro-cli/data.sqlite3`,
+  and its sessions in `~/.kiro/`. `KIRO_API_KEY` is the other way in.
+- **LM Studio** keeps its hub sign-in under `~/.lmstudio/credentials`.
+
+Each is a field for the program's data file (`agent-program-data-file`).

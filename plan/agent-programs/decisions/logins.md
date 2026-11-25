@@ -125,3 +125,23 @@ intermediates the login. For an API key, and for a provider whose terms allow it
 applies. A partial guard fits the recommended option: the boundary sees the login's value in the
 requests it reads, so it can refuse a request to any other host it reads that carries that value.
 It cannot see the value leave through a host it does not read.
+
+## Where other agent programs keep a login (24 November 2026)
+
+An agent's part, 24 November 2026, from the research in `research/2026-11-24-every-agent-program`.
+Seen on disk after a run, or read in the vendor's documentation where marked.
+
+- Cline 3.0.75 writes an API key given on its command line (`-k`) to
+  `~/.cline/data/settings/providers.json`, in plain text (seen). A fork of the computer copies it
+  unless `fork-and-sign-in` keeps it out.
+- Cursor CLI keeps its settings in `~/.cursor/`, or reads `CURSOR_API_KEY` (seen).
+- Amp keeps its state in `~/.local/share/amp/`, or reads `AMP_API_KEY` (seen).
+- OpenCode keeps sign-ins in `~/.local/share/opencode/auth.json`, Gemini CLI a Google sign-in in
+  `~/.gemini/oauth_creds.json`, Qwen Code a Qwen sign-in in `~/.qwen/oauth_creds.json`
+  (documentation).
+- Copilot CLI uses the system's keychain, else `~/.copilot/`, or a token in
+  `COPILOT_GITHUB_TOKEN`, `GH_TOKEN` or `GITHUB_TOKEN`; Goose uses the system's keyring, else
+  `~/.config/goose/secrets.yaml` (documentation).
+
+A Linux computer has no keyring service unless one is installed. By their documentation, Copilot
+CLI and Goose then fall back to the files, which a fork copies. That fallback was not tried.

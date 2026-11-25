@@ -295,3 +295,33 @@ stand-in for Bedrock. What the boundary reads differs from Anthropic's API in fo
   models before the conversation begins. `x-claude-code-session-id` is sent here too.
 
 The scripts are in the project files, `research/2026-11-24-bedrock`.
+
+## Every other agent program, on Linux (24 November 2026)
+
+An agent's part, 24 November 2026. The research in `research/2026-11-24-every-agent-program` ran
+nine more programs against a stand-in for their providers, with fake keys, and five of them
+through the spike of the boundary. Linux only, no real sign-in.
+
+**Trust.** With Silo's test authority in the system's store and no setting in the program:
+
+- Works: Claude Code, Codex, Cline, OpenCode, Goose, GitHub Copilot CLI, Amp, Cursor CLI. Cline
+  builds a bundle of its own from the system's store at start.
+- Refuses: Gemini CLI 0.71.1 and Qwen Code 0.28.4, which run on plain Node.js, and Aider 0.86.2,
+  which is Python with the `certifi` list. Gemini CLI works with `NODE_USE_SYSTEM_CA=1`, Qwen Code
+  with `NODE_EXTRA_CA_CERTS`, Aider with `SSL_CERT_FILE` naming the system's bundle. These are the
+  settings their recipes would write.
+- With the authority nowhere, all of them refused. None skips the check.
+
+**Transports.** Every program fell back to HTTP/1.1 when the boundary offered nothing else,
+including Goose, which offers HTTP/2 first. Cursor's agent prefers HTTP/2 in both directions; its
+code holds a setting `network.useHttp1ForAgent`.
+
+**Formats.** One host serves several formats: `api.openai.com` gets Chat Completions from Aider
+and Responses from Codex, Cline, OpenCode and Goose. So the reader is chosen by the request's path.
+The spike was taught Chat Completions and Google's `generateContent`, and read whole conversations
+of Gemini CLI, Qwen Code, Cline, OpenCode and Goose. Cursor, Amp and Copilot send the conversation
+to their vendor's own server: `vendor-runs-the-model-calls`.
+
+So for these programs the four things this entry checks split this way: the certificate is
+accepted by all, three of them through a setting; every transport seen can be read over HTTP/1.1;
+signing in and byte for byte were not tried.

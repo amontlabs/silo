@@ -85,3 +85,41 @@ the body until you answer. Tried with a 20 MB PUT and a hold of 150 s:
 
 So boto3 joins pip as a tool that gives up first: holding a body costs nothing by itself, and the
 limit is each tool's own wait. The script is in the project files, `research/2026-11-24-holds/uploads`.
+
+Nothing has been measured yet.
+
+## How long each agent program waits on a model reply (24 November 2026)
+
+An agent's part, 24 November 2026. A stand-in for each program's model host never answered a model
+request, not even with a first byte, for 12 minutes. Linux, fake keys. The research is in
+`research/2026-11-24-every-agent-program`.
+
+| Program | Gave up after | Then |
+|---|---|---|
+| Codex 0.172.0 | 15 s | sent the request again, five times, then fell back from its WebSocket to plain requests |
+| Gemini CLI 0.71.1 | 60 s | sent it again, five times, then stopped with an error at 327 s |
+| Qwen Code 0.28.4 | 120 s | sent it again, six times in 12 minutes |
+| Goose 1.60.2 | 600 s | sent it again |
+| Aider 0.86.2 | 600 s | sent it again |
+| OpenCode 1.19.6 | never closed it | new requests on other connections at 303 s and 608 s |
+| Claude Code 2.1.331 | never closed it | one more model request on another connection at 183 s |
+
+This measures the wait for a model's reply, not for a command, which the 90 seconds were set
+against. A hold on a model's reply, such as a tool call held while a precaution or you answer
+(`classifier-wait-limit`), is cut by Codex at 15 seconds and by Gemini CLI at 60, each of which
+then sends the whole request again. When the reply had already started before the hold, whether
+the program counts its wait from the last byte was not tried.
+
+## How long a held reply can last (24 November 2026)
+
+An agent's part, 24 November 2026, from the research in `research/2026-11-24-agent-programs-follow-ups`.
+
+The limits in the section above count from the request to the first byte. Once the status and
+headers are sent, they no longer apply. After them, without anything more, Claude Code gave up at
+180 s and Codex and OpenCode at 300 s, and each sent the whole request again. With a keep-alive byte
+every 5 seconds (`ping` on Anthropic's format, a comment on Gemini's, an event on Codex's), every
+program tried waited 300 s, and Codex 420 s, then took the reply.
+
+So the 90 seconds are not bounded by the programs' waits on a model reply, as long as the boundary
+sends the headers and a keep-alive while it holds. They are bounded by what the person waits for,
+and by the command timeouts named above.

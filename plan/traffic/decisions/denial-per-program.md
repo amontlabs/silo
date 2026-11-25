@@ -94,3 +94,27 @@ Two findings bear on how the check is written:
 Not tested: a Mac, Claude Code's subagents, MCP tools, a shell left running in the background,
 Codex signed in with ChatGPT (its model traffic then goes over a WebSocket), and how a real model
 answers such an error.
+
+## Five more programs (24 November 2026)
+
+An agent's part, 24 November 2026. The same check, through the spike of the boundary rather than a
+fake provider that arms the probe itself. The fake model asked for a shell call to deny, a harmless
+shell call, a file write to deny and a harmless write. Linux, fake keys. The research is in
+`research/2026-11-24-every-agent-program`.
+
+| Program | Denied shell call, as the model got it | Denied write | Went on |
+|---|---|---|---|
+| Gemini CLI 0.71.1 | `spawn EPERM` | `EPERM … open '…/DENIED.txt.<uuid>.tmp'` | yes |
+| Qwen Code 0.28.4 | `spawn EPERM` | `EPERM … open '…/DENIED.txt.<hex>.tmp'` | yes |
+| Cline 3.0.75 | `Command failed: EPERM … posix_spawn '/bin/bash'` | `Editor operation failed: EPERM` | yes |
+| Goose 1.60.2 | `Failed to spawn shell command: Operation not permitted` | `Failed to write …: Operation not permitted` | yes |
+| OpenCode 1.19.6 | `EPERM … posix_spawn '/usr/bin/bash'` | | no: its own `git` failed and it stopped (`own-processes-in-a-denial`) |
+
+- Nothing of a denied call ran, and each program sent the error once, with no retry. The allowed
+  calls after it ran.
+- Only Claude Code and OpenCode mark the result as an error (`is_error`). Cline sends
+  `"success": false` inside the text, Goose only the text. A precaution that reads results cannot
+  rely on the flag.
+- Aider uses no tool calls: it asks the model for edits as text and applies them itself. There is
+  no call for the boundary to deny, so for Aider a denial of a tool call does not apply.
+- The resume of the conversation was not tried for these programs.

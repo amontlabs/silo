@@ -1,0 +1,8 @@
+{
+  "asks": "What does Silo read of an agent program whose vendor's server calls the model?",
+  "answer": "Silo reads a vendor's server as it reads a provider, but only where the vendor speaks a format Silo already has, chosen by the request's path: GitHub Copilot's server answers in the providers' formats, so it can be read once a live check shows it. Silo writes no reader for a vendor's own protocol that the vendor does not document, such as Cursor's, Windsurf's or Amp's. Such a program's model traffic is treated as `program-that-cannot-be-read` says: allowed or denied by the rules, never read, and left out of spend, budgets and denied tool calls, which the app says for that program. Under a budget, its traffic is denied like any model traffic Silo does not read.",
+  "needs": [
+    "program-that-cannot-be-read",
+    "adapters-follow-providers"
+  ]
+}

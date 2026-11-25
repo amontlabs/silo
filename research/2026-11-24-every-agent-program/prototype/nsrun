@@ -1,0 +1,4 @@
+#!/bin/bash
+# Runs a command in its own mount namespace, where /etc/hosts sends the providers' names to 127.0.0.1.
+# Nothing outside the command sees the change.
+exec unshare -m --propagation private bash -c 'mount --bind "$0" /etc/hosts && exec "$@"' $SILO_EXP/w/hosts.test "$@"
