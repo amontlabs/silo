@@ -61,6 +61,8 @@ An agent's part, 25 November 2026, written while merging every draft into one br
 - #377 concluded that the receipt's own warnings matter more than the claim checker. #387, on 75 new claims, found the warnings fire on 5 of the 57 false claims and on 5 of the 16 true ones, so they do not tell a false summary from a true one. Both are right about different things: the warnings are facts to show, and a model reading the words is what catches a false summary. Recommended: #387's option, with the receipt's lines always shown, as this entry's choice says.
 - #382's gap 8 (`npm test -- test/auth` read as the whole suite, so a false «All tests pass.» came out matched) is fixed by #387. On this branch, #382's repro `checks/claims_npm_narrowed.py` exits 0. On #377's tree it still prints WRONG for both claims.
 
+## The reader under injected lines (25 November 2026)
+
 An agent's part, 25 November 2026, from `research/2026-11-25-summary-injection`. The answer now
 reads the summary twice, because a line in the summary can talk the classifier round. With a
 small model reading the summary beside the receipt, a false end of the summary followed by a
