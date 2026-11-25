@@ -374,6 +374,7 @@
         "anthropic-reads-intermediate",
         "provider-sees-silos-connection",
         "reading-each-agent-program",
+        "code-mode-calls-reported",
         "subscription-and-key-alike",
         "google-sign-in-unread",
         "silos-own-model-calls",

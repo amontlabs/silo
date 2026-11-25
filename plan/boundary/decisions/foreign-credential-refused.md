@@ -30,3 +30,12 @@ covers github.com when no secret is given is the next thing to settle, with this
 A credential is recognised by where it sits (`Authorization`, `Cookie`, a token in the query), not
 by its format. #358's proposal, a hash of the subscription login kept so that the login leaving to
 any other host is a fact, belongs with `logins`.
+
+## A ChatGPT sign-in renews its token (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-codex-read-in-full/`. The answer lets
+the agent program's own sign-in pass. #385's prototype of a related check (a request on a model
+host whose credential this computer was not given is refused) compared the token's value, and a
+ChatGPT access token changes each time Codex renews it. Once it had, every request of Codex was
+refused and it could not start. A sign-in is known by its account, not by one value of its token:
+the account id in the token stayed the same and passed, and another account's token was refused.

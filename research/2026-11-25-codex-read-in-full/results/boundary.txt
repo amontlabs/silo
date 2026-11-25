@@ -1,0 +1,20 @@
+before gpt           exit=0  files: a.txt b.old c.txt  {'ws-request': 3, 'refused:sni ab.chatgpt.com': 1}
+                     {"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":0,"cache_write_input_tokens":0,"out
+before gpt-http      exit=1  files: a.txt b.old c.txt  {'call': 1, 'reached': 1, 'refused:total': 1}
+                     {"type":"turn.failed","error":{"message":"{\"error\":{\"message\":\"Silo: this computer's budget of $0.00 is r
+before key           exit=0  files: a.txt b.old c.txt  {'ws-request': 3, 'refused:sni ab.chatgpt.com': 1}
+                     {"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":0,"cache_write_input_tokens":0,"out
+before gpt-nobudget  exit=0  files: a.txt b.old c.txt  {'ws-request': 3, 'refused:sni ab.chatgpt.com': 1}
+                     {"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":0,"cache_write_input_tokens":0,"out
+before gpt-rotated   exit=1  files: (none)             {'refused:unknown-credential': 30}
+                     {"type":"turn.failed","error":{"message":"workspace routing discovery failed"}}
+after  gpt           exit=1  files: (none)             {'ws-request': 2, 'call': 1, 'reached': 1, 'refused:total': 1, 'ws-refused': 1}
+                     {"type":"turn.failed","error":{"message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_req
+after  gpt-http      exit=1  files: a.txt b.old c.txt  {'call': 1, 'reached': 1, 'refused:total': 1}
+                     {"type":"turn.failed","error":{"message":"{\"error\":{\"message\":\"Silo: this computer's budget of $0.00 is r
+after  key           exit=1  files: (none)             {'ws-request': 2, 'call': 1, 'reached': 1, 'refused:total': 1, 'ws-refused': 1}
+                     {"type":"turn.failed","error":{"message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_req
+after  gpt-nobudget  exit=0  files: a.txt b.old c.txt  {'ws-request': 3, 'call': 3, 'refused:sni ab.chatgpt.com': 1}
+                     {"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":0,"cache_write_input_tokens":0,"out
+after  gpt-rotated   exit=0  files: a.txt b.old c.txt  {'ws-request': 3, 'call': 3, 'refused:sni ab.chatgpt.com': 1}
+                     {"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":0,"cache_write_input_tokens":0,"out
