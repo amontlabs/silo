@@ -34,3 +34,23 @@ holds what crosses Silo's boundary.
 
 The word `budget` today means a limit on "a computer, a conversation or a run". A budget on all of a
 member's computers adds a scope, and taking this decision would change that word.
+
+## A pooled budget, built and measured (25 November 2026, by an agent)
+
+The pooled option above says each Mac must reach a shared count "before every model call", and
+that when it cannot, "either the budget is no longer exact or every agent stops". A simulation of
+a team of five on its own Macs, with #374's counting on each, found a cheaper way
+(`research/2026-11-25-team-ledger/`, and `pooled-budget-ledger`):
+
+- A ledger can hand each Mac a slice of the budget, about a dozen calls' worth, and each Mac
+  admits on its own until it needs more. A Mac then reaches the ledger every dozen calls, not on
+  every call.
+- While the ledger is down, each Mac goes on with its slice. With each call's typical output held,
+  the team ended between 2.2% under and 0.4% over $15, outage or not.
+- What a pooled budget costs is a ledger somewhere: the team's Linux host, a Mac that stays on, or
+  a branch of the team's repository, where a refused push keeps two Macs from taking the same
+  dollars.
+
+The recommended answer, a budget on all of a member's computers, meets the same question as soon
+as one member's computers run on two Macs (`main-on-several-devices`): two boundaries count
+against one limit. `pooled-budget-ledger` answers both cases the same way.

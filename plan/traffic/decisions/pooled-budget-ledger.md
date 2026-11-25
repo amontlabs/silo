@@ -1,0 +1,61 @@
+# One budget across several Macs
+
+## The choice
+
+An agent's part, 25 November 2026. A team of five has $15 a day for agents at API prices. Two
+members run Claude Code with 8 subagents, one runs 2, one runs a single conversation, one runs
+nothing today. Each member's computers run on their own Mac, behind that Mac's boundary. The
+same question comes up with one person: a member with a laptop and a Mac mini
+(`main-on-several-devices`) under a budget "on all of a member's computers" (`team-budget`) has
+two boundaries counting against one limit.
+
+Each way below was built and run in a simulation of that team, with #374's counting on each Mac,
+20 runs each; the ledger was built as a server and tested under crashes
+(`research/2026-11-25-team-ledger/`). With the typical output of each call held (#374's
+`reserve_typical`), every way that shares one count ended the team between 2.2% under and 0.4%
+over the budget. With output counted by time, at most 15% over, against 35% for one computer
+under $3 in #374. So the choice is about what each way needs and what breaks it, not about
+precision.
+
+The options:
+
+- Leases from one ledger (recommended). The ledger gives each Mac a slice, $2 here, about a dozen
+  calls. The Mac admits on its own against its slice and asks for more when less than $1 is left.
+  When the ledger runs short, it takes back unused room from the other Macs. A Mac talks to the
+  ledger once every dozen calls while plenty is free. While the ledger cannot be reached, each
+  Mac goes on with its slice: in a 1-minute outage, 0.5 calls per run waited more than 10 s,
+  against 2.7 with a ledger asked on every call. It costs a ledger somewhere, and a recall:
+  without one, slices stayed on Macs whose agents had stopped, and a team of 12 ended 35% under
+  its budget.
+- A ledger asked before every model call. The simplest to get right: one count, as exact as one
+  boundary. It costs a round trip per call (30 ms to 150 ms, nothing against calls that last
+  minutes), and while the ledger is down every new call waits for it. Refusing calls instead
+  stopped the agents: the team spent half its budget.
+- Gossip between Macs, no ledger. Each Mac tells every other what it has counted every few
+  seconds. It costs every Mac reaching every other, 240 to 840 messages per model call, which
+  laptops asleep or behind NAT cannot do. When the team was cut in two for 10 minutes, each half
+  spent what it thought was left: 33% to 45% over. A Mac that limits itself to its share when it
+  cannot hear a peer brought that to 2.5%, which is leases with no ledger to rebalance them.
+- Fixed shares, no talk. Each Mac holds a fifth. It costs the budget the quiet members do not use:
+  the team ended 5% to 26% under while its heavy members were refused.
+
+Where the ledger runs, for leases:
+
+- On the team's shared Linux host (`shared-host-system`), beside the computers that run there,
+  which count exactly behind its boundary with no message at all.
+- On a member's Mac that stays on. A laptop that sleeps cannot serve.
+- On a branch of the team's repository. A push that is not a fast-forward is refused, so a push is
+  a compare-and-swap: 12 Macs took $30 in 32 grants and never more. No server runs. An ask took
+  0.7 s to 2.6 s against a local repository; a hosted one was not measured.
+- A service Silo runs for the team. It is the one place a member's spend would leave the Mac for
+  someone other than the team, so it would be the team's choice to turn on, beside
+  `what-silo-sends-home`.
+
+Recommended: leases from one ledger, with a recall, run where the team has a place for it. They
+keep the budget as exact as one boundary, need the ledger only every dozen calls, and ride out a
+ledger that is down for a minute or two. A longer outage outlasts a slice, and calls then wait
+for the ledger like any held model request (#364).
+
+Not built yet: a lease that expires, so a slice held by a Mac that went to sleep comes back; and
+admitting each call at the ledger once less than a slice per Mac is free, which would remove the
+recalls at the end of a budget (they made calls wait up to 48 s through a Git repository).

@@ -50,3 +50,14 @@ whoever builds it.
   budget, counted as it streams, and settled on the provider's final usage, so two calls at once
   cannot both spend the same remainder. A call that fails midway still counts what it cost.
   ([source](https://github.com/evmts/guillotine-mini/blob/edafd394bc0aa48a9691b037da36b6f36525121a/CLAUDE.md?plain=1#L669))
+
+## The same rule over several Macs (25 November 2026, by an agent)
+
+`research/2026-11-25-team-ledger/` ran this decision's rule on each Mac of a simulated team, with
+the budget shared through a ledger, leases or gossip. The simulator gives #374's numbers on one
+Mac ($3, 8 subagents: 50% over counting visible output, 35% counting output by time). Over a team
+of five under $15, the calls under way at the limit are a smaller share of the budget: at most 27%
+over counting visible output, 15% counting output by time, and from 0.4% over to 2.2% under
+holding each call's typical output, through a ledger or leases. Twelve members under $36: at most 13% over counting output by time.
+Where the count is kept (one boundary, a ledger 150 ms away, leases) moved these by a point or
+two at most.

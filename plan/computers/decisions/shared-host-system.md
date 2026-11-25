@@ -29,3 +29,12 @@ The options:
 Recommended: a Linux server for what several people share. Whether Apple grants more under a
 written agreement is to find out. The licence text says so is possible; an Apple engineer asked on
 Apple's forum in 2026 could not say how to ask for one.
+
+## The host as the team's ledger (25 November 2026, by an agent)
+
+A team that shares one budget needs one place that counts it (`pooled-budget-ledger`). The
+shared Linux host is that place when the team has one: the computers that run on it are behind
+its boundary and count with no message, and members' own Macs reach it over the LAN or a VPN for a
+slice of the budget every dozen calls. In a simulation of a team of five, with two members'
+computers on the host and three Macs 30 ms away, the team ended exactly as with one boundary for
+everyone (`research/2026-11-25-team-ledger/`).
