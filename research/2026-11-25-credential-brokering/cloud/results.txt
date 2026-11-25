@@ -1,0 +1,51 @@
+real-tokens          works  metadata_ssrf_guards               outside=[] 
+real-tokens          works  google_metadata_storage            outside=['storage.googleapis.com'] 
+real-tokens          works  google_id_token_cloud_run          outside=['hello-abc.a.run.app'] 
+real-tokens          works  google_id_token_decode             outside=['hello-abc.a.run.app'] 
+real-tokens          works  gcloud storage ls                  outside=[] 
+real-tokens          works  gcloud auth print-access-token     outside=['storage.googleapis.com'] 
+real-tokens          works  google_authorized_user_exchange    outside=['storage.googleapis.com', False] 
+real-tokens          works  azure_managed_identity             outside=['management.azure.com'] 
+real-tokens          works  azure_default_credential           outside=['management.azure.com'] 
+real-tokens          works  az login --identity                outside=[] 
+real-tokens          works  az group list                      outside=[] 
+real-tokens          works  az account get-access-token        outside=['management.azure.com'] 
+real-tokens          works  azure_client_secret_exchange       outside=['management.azure.com'] 
+real-tokens          works  azure_refresh_rotation             outside=['management.azure.com', 'management.azure.com', 'management.azure.com', False, False, False] 
+real-tokens          works  exfiltrate                         outside=[] 
+real-tokens          the Mac's first Azure refresh token after the computer refreshed: HTTP 400
+real-tokens          leaks: {"bytes sent into the computer": {"google_access": 3, "google_id": 3, "azure_access": 7, "azure_refresh": 3}, "files in the computer's home": {"google_access": 1, "google_id": 1, "azure_refresh": 1}, "what the outsider collected": {"google_access": 2, "google_id": 1, "azure_access": 4, "azure_refresh": 1}}
+placeholders         works  metadata_ssrf_guards               outside=[] 
+placeholders         works  google_metadata_storage            outside=[False] 
+placeholders         works  google_id_token_cloud_run          outside=[False] 
+placeholders         works  google_id_token_decode             outside=[False] 
+placeholders         works  gcloud storage ls                  outside=[] 
+placeholders         works  gcloud auth print-access-token     outside=[False] 
+placeholders         works  google_authorized_user_exchange    outside=[False, False] 
+placeholders         works  azure_managed_identity             outside=[False] 
+placeholders         works  azure_default_credential           outside=[False] 
+placeholders         works  az login --identity                outside=[] 
+placeholders         works  az group list                      outside=[] 
+placeholders         works  az account get-access-token        outside=[False] 
+placeholders         works  azure_client_secret_exchange       outside=[False] 
+placeholders         works  azure_refresh_rotation             outside=[False, False, False, False, False, False] 
+placeholders         works  exfiltrate                         outside=[] 
+placeholders         the Mac's first Azure refresh token after the computer refreshed: HTTP 400
+placeholders         leaks: {"bytes sent into the computer": {}, "files in the computer's home": {}, "what the outsider collected": {}}
+opaque-placeholders  works  metadata_ssrf_guards               outside=[] 
+opaque-placeholders  works  google_metadata_storage            outside=[False] 
+opaque-placeholders  FAILS  google_id_token_cloud_run          outside=[] MalformedError: Wrong number of segments in token: b'eyJsiloPH_3UZ4_MCUBoQDSJ1LY-8bvVDYdG_6WACuhi5XC7xuqypYynmXDcJus4EPxOKHE4h-nrenv_K5Jjqr0cjcxzNMYK2I9TRKBsjc3
+opaque-placeholders  FAILS  google_id_token_decode             outside=[] MalformedError: Wrong number of segments in token: b'eyJsiloPH_3UZ4_MCUBoQDSJ1LY-8bvVDYdG_6WACuhi5XC7xuqypYynmXDcJus4EPxOKHE4h-nrenv_K5Jjqr0cjcxzNMYK2I9TRKBsjc3
+opaque-placeholders  works  gcloud storage ls                  outside=[] 
+opaque-placeholders  works  gcloud auth print-access-token     outside=[False] 
+opaque-placeholders  works  google_authorized_user_exchange    outside=[False, False] 
+opaque-placeholders  works  azure_managed_identity             outside=[False] 
+opaque-placeholders  works  azure_default_credential           outside=[False] 
+opaque-placeholders  FAILS  az login --identity                outside=[] ERROR: The command failed with an unexpected error. Here is the traceback: | ERROR: Not enough segments | ValueError: not enough values to unpack (expected 2, g
+opaque-placeholders  FAILS  az group list                      outside=[] ERROR: Please run 'az login' to setup account.
+opaque-placeholders  FAILS  az account get-access-token        outside=[] ERROR: Please run 'az login' to setup account.
+opaque-placeholders  works  azure_client_secret_exchange       outside=[False] 
+opaque-placeholders  works  azure_refresh_rotation             outside=[False, False, False, False, False, False] 
+opaque-placeholders  works  exfiltrate                         outside=[] 
+opaque-placeholders  the Mac's first Azure refresh token after the computer refreshed: HTTP 400
+opaque-placeholders  leaks: {"bytes sent into the computer": {}, "files in the computer's home": {}, "what the outsider collected": {}}
