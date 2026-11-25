@@ -21,3 +21,13 @@ happens as exactly as what it costs.
 
 polarzero put budgets on rates on the roadmap on 21 November 2026: spend per hour, new conversations
 per minute. The feature is `budgets-on-rates`. polarzero did not answer this question.
+
+## Windows on a clock that does not jump
+
+Agent, 25 November 2026, from `research/2026-11-25-techniques-from-two-tools/`. An open-source
+gateway with a spend window over the last 24 hours found that a wall clock moved forward makes all
+spend look old, so the window admits everything, and that pruning old entries by the same clock
+deletes them for good. It now measures windows on a monotonic clock. On a Mac that sleeps, the
+window is measured on `mach_continuous_time`, which counts sleep, and the record is never pruned
+by a wall-clock cutoff. The same gateway refuses a call when its ledger cannot be read at all: for
+a budget, "I don't know" means no.

@@ -17,3 +17,14 @@ The options:
 
 Recommended: what Silo sees, and no more. A few providers carry nearly all model traffic, so reading
 a new provider covers every program that uses it, where a reader of files covers one program.
+
+## A count of calls as the backstop
+
+Agent, 25 November 2026, from `research/2026-11-25-techniques-from-two-tools/`. An open-source
+gateway's last bound counts an event it causes itself, not dollars a reply reports, so no gap in
+reading usage can undercount it. For Silo, a limit on the number of model calls a computer makes
+holds where money cannot be counted: plan traffic, Chat Completions streams without
+`include_usage`, a host Silo cannot read. The same gateway refuses batch routes
+(`/v1/messages/batches`) rather than count them. #374 did not build batches or `background: true`
+responses; until they are counted, refusing them in the provider's shape while a budget is set is
+the simplest answer.

@@ -50,3 +50,12 @@ whoever builds it.
   budget, counted as it streams, and settled on the provider's final usage, so two calls at once
   cannot both spend the same remainder. A call that fails midway still counts what it cost.
   ([source](https://github.com/evmts/guillotine-mini/blob/edafd394bc0aa48a9691b037da36b6f36525121a/CLAUDE.md?plain=1#L669))
+
+## One call at a time near the limit
+
+Agent, 25 November 2026, from `research/2026-11-25-techniques-from-two-tools/`. An open-source
+gateway lets one call per task be in flight by default, so it overshoots by one call at most. #374
+found "calls under way finish" goes 35% to 56% over with 8 subagents, because 8 calls are under way
+at the limit. A middle way: admit calls in parallel while what is left exceeds what the calls under
+way could spend at their typical output, and one at a time after that. Not measured; #374's
+`run/overshoot.sh` can measure it as a fifth policy.

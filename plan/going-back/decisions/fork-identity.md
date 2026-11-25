@@ -28,3 +28,11 @@ on", since "never acts as its parent" cannot be kept for a service Silo does not
 Git versions files; Silo versions something alive. A file does nothing when copied. A computer
 has an identity, scheduled jobs, open sessions and logins. That is why a fork must not act as its
 parent.
+
+## The account password
+
+Agent, 25 November 2026, from `research/2026-11-25-techniques-from-two-tools/`. A macOS guest that
+logs in by itself keeps its account password in `/etc/kcpassword`, lightly obscured and readable
+by root. Every computer made from one macOS install has the same password, so root in one computer
+learns the password of the others. A fork shares its parent's by nature. A fresh computer made from
+the same install image should get a password of its own at its first start.

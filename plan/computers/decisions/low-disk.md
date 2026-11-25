@@ -28,3 +28,13 @@ polarzero's other first thoughts, rough: for disk, what many apps already do; ho
 setting with a few presets.
 
 To settle with the product and its design.
+
+## What removing a checkpoint frees
+
+Agent, 25 November 2026, from `research/2026-11-25-techniques-from-two-tools/`. On a Mac with a
+local Time Machine snapshot, deleted data stays on the disk for up to a day, or until macOS needs
+the space. Removing a checkpoint may then free nothing at once, and the private size APFS reports
+for a clone reads 0. An open-source tool that keeps APFS clones counts what they hold by clone ids
+and blocks instead. So the second level must not count on space freed by removing checkpoints in
+the same minute, and Disk should say when a local snapshot holds freed space
+(`tmutil listlocalsnapshots /`).
