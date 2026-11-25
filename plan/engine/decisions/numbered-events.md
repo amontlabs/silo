@@ -29,3 +29,12 @@ whoever builds it.
   events after N, when the first one after N has already left the ring, is told to resync, never
   handed later events silently.
   ([source](https://github.com/evmts/guillotine-mini/blob/edafd394bc0aa48a9691b037da36b6f36525121a/BUG_HUNT_REPORT.md?plain=1#L411))
+
+## The first build's spec
+
+Agent, 24 November 2026, from [the build specs of the first
+build](../../../research/2026-11-24-first-build-specs/README.md). The specs put a history id beside
+the number, as #352 (file 04) proposes: in the engine's saves, in `welcome`, and in each `follow`.
+The engine's history is also its count in the record, so a line's source says which history and
+which event it came from. Without the history id, the field goes and a client that missed a rebuild
+can show a state the engine no longer has.

@@ -27,3 +27,12 @@ restarts is still to find out by a trial.
 - If the engine stops, in the record's table of processes: "Changes wait. A hold still ends at its
   limit, which the helper keeps." A hold's limit is `hold-limit`, in the part `boundary`.
 - Whether a restarted engine can take its helpers back is `engine-takes-back-helpers`.
+
+## The first build's spec
+
+Agent, 24 November 2026, from [the build specs of the first
+build](../../../research/2026-11-24-first-build-specs/README.md). The specs build this answer for
+the first build's night: main, its power assertion and its lines to the recorder stay with the
+helper, `ssh main` goes through the helper and still works, and every request to change something
+fails with exit code 3 and a sentence saying so until launchd has started the engine again, about 10
+seconds later.

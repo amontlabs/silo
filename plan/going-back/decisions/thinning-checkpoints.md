@@ -47,3 +47,13 @@ a computer that rewrites 2 GiB an hour, so "one per day for the last 30 days" pr
 default limit takes away within a week or two. A proposal: the limit as a share of the free space,
 the Timeline showing how far back the kept checkpoints reach, and an alert when the limit removes
 a checkpoint younger than 30 days.
+
+## The first build's spec
+
+Agent, 24 November 2026, from [the build specs of the first
+build](../../../research/2026-11-24-first-build-specs/README.md). The spec of step 4 keeps every
+automatic checkpoint for 24 hours, then one per hour for 2 days and one per day for 7 days, and
+never removes a checkpoint you took, the save before a restore or a put-back, a checkpoint not yet
+compared, or the newest. It combines #351, #352 and #354 as #364 proposes. The three lengths are
+settings, and their values are polarzero's: #365 measured that 30 days of dailies hold 247 to 413 GB
+beyond the live disk under its model of agents rewriting 2 GB an hour, and 7 days 72 to 105 GB.

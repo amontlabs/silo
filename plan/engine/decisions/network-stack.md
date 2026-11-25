@@ -84,3 +84,14 @@ computer can have a network of its own, and a port of main can reach your Mac, w
 shared NAT. It is still Apple's network, and the session shows no way for Silo to read or refuse a
 packet on it, so it does not replace the stack this answer is about for the boundary. It could
 carry a computer whose network is open and unread, or Silo's own way in to a computer.
+
+## The first build's spec
+
+Agent, 24 November 2026, from [the build specs of the first
+build](../../../research/2026-11-24-first-build-specs/README.md). The specs run main on Apple's NAT
+until a patched gvproxy passes the Mac kit's test 07 (#359), then on gvproxy, as #364 proposes.
+Writing them showed one more cost of the NAT: a macOS computer with no network device has no SSH
+either, so a closed main is possible only on gvproxy, which can carry SSH with no other traffic. On
+the NAT, open also reaches your local network and services on your Mac that listen on every address,
+and the first run says so. Whichever carries the network, only the helper's attachment changes; the
+SSH entries stay the same.

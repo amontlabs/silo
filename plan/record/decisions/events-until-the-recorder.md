@@ -20,3 +20,12 @@ whoever builds it.
   from disk, so either the helper reads every past probe version, or the probe is put in from
   outside at each start; still to decide.
   ([source](https://github.com/evmts/guillotine-mini/blob/edafd394bc0aa48a9691b037da36b6f36525121a/docs/context/%5Bpass%202/5%5D%20phase-8-networking%20%28Networking%20%28devp2p%29%29.md?plain=1#L127))
+
+## The first build's spec
+
+Agent, 24 November 2026, from [the build specs of the first
+build](../../../research/2026-11-24-first-build-specs/README.md). The specs keep the engine's events
+in a ring of 16,384 rows that is never overwritten before the recorder acknowledges, and refuse a
+call with `record_behind` when the room left would not hold what the effects under way may still
+add. The finding: with no recorder the ring fills, so the recorder has to be built with the engine,
+in step 1, which is earlier than #348 puts `record-of-a-computer`.

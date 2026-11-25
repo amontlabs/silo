@@ -104,3 +104,13 @@ trial's code is.
 - A faster way to serve a folder.
 - The risk of the host mounting a disk that a hostile agent wrote.
 - A checkpoint taken while the disk is busy.
+
+## The first build's spec
+
+Agent, 24 November 2026, from [the build specs of the first
+build](../../../research/2026-11-24-first-build-specs/README.md). The spec of step 5 builds #352's
+reader (files 09 and 11): Silo's own, never a mount, run in a process with no rights, comparing by
+leaf address, and a gap for a disk it cannot read. It finds one more need: `silo look` and `silo
+put-back` read file contents, with APFS's compression, which the metadata-only reader of #352 does
+not. It writes a rename as a delete and a create, as `file-changes-in-the-record` says, with the
+APFS object id on both lines so they can be joined later.
