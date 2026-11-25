@@ -1,0 +1,8 @@
+{
+  "asks": "What keeps a full disk from leaving you unable to restore?",
+  "answer": "The engine keeps a reserve file on the volume that holds the computers, and only the engine may delete it. Automatic checkpoints stop, with an alert, before the volume's free space falls under a level. When the volume is full anyway, the engine deletes the reserve, so that it can still write, remove a checkpoint you choose and restore.",
+  "needs": [
+    "checkpoint-storage",
+    "engine-saved-state"
+  ]
+}

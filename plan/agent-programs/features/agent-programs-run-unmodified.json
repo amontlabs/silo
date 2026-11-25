@@ -5,9 +5,8 @@
     "unmodified-agent-programs",
     "documented-surfaces",
     "disguising",
-    "agent-program-data-file",
-    "offered-programs-list",
-    "computers-main-on-a-mac"
+    "computers-main-on-a-mac",
+    "main-set-up-for-agents"
   ],
   "suggest": {
     "verdict": "take",

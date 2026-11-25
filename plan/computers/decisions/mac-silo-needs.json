@@ -1,0 +1,8 @@
+{
+  "asks": "Which Mac does Silo need?",
+  "answer": "A Mac with Apple silicon that runs macOS 27 or later. On an older Mac, the first run says which version it needs and starts nothing. A new macOS computer then gets its user and SSH from Apple's guest provisioning on its first start, with nobody clicking and nothing written to its disk from outside.",
+  "needs": [
+    "main-on-macos-first",
+    "computer-image"
+  ]
+}
