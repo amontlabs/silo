@@ -30,3 +30,10 @@ Whatever carries the network in the first build, gvproxy as the first driver of 
 Apple's NAT, has to keep the computer from your Mac. gvproxy maps an address in the computer to
 your Mac's 127.0.0.1 by default, and its API answers from inside the computer without a token
 (drafts #352, file 04, and #358). Both are turned off before main runs on it.
+
+## Where the drafts of 25 November disagree (integration)
+
+An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
+
+- "Closed: not possible" in #370's table no longer holds. #378's card that leads nowhere, with its proxy refusing every host, is a closed main, and SSH comes in over vsock.
+- "Never your Mac, your local network or cloud metadata" holds on #380's patched gvproxy and on #378's card. It does not hold on stock gvproxy or #363's `-sealed`, which both forward ping, nor on Apple's NAT.

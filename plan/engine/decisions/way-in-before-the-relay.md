@@ -30,3 +30,9 @@ the only option that needs nothing new.
 
 What is not known: whether Apple's provisioning can start a program given in its options, which
 would let the relay start with no SSH at all. Neither #352 file 10 nor #378 found such an option.
+
+## Where the drafts of 25 November disagree (integration)
+
+An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
+
+#380 measured the second option of the choice above on Linux: gvproxy with its `-closed` flag reached nothing from inside the computer, and SSH still got in. That makes the option that keeps `network-stack`'s "never Apple's NAT" measured, though not on a Mac. Recommended: keep Apple's NAT for the first start, as above, until test 07 has run on a Mac. If test 07 passes with #380's patch, take the gvproxy option, so no packet of main ever goes through Apple's NAT.

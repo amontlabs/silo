@@ -191,3 +191,11 @@ What I would choose, with #378's card that leads nowhere as one of the paths:
 
 The answer above stays as it is: every packet still passes Silo, and nothing goes around it when
 Silo's part stops.
+
+## Where the drafts of 25 November disagree (integration)
+
+An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
+
+- #370's step 2 says a closed main is not possible on Apple's NAT, because a macOS computer with no network device has no SSH, so closed waits for a patched gvproxy. #378 makes closed possible with no stack: a network card that leads nowhere, a proxy over vsock, and SSH carried by a relay over vsock. #380 agrees and keeps gvproxy for an open main with rules later. Recommended: #378's card for the first build, closed or limited to a list, and #370's step 2 table changed to say so. Test 07 then stops blocking option A, as #378 says.
+- #363's `-sealed` patch was said to close the Mac's loopback, its addresses and the local network. #380 found that gvproxy 0.9.0 forwards ping, which `-sealed` does not filter, so a sealed computer still pings the Mac and the local network. Recommended: where gvproxy is used, #380's patch with `-outbound-deny` replaces #363's, and test 07 of the Mac kit adds a ping to the Mac's address and to a machine on the local network.
+- #382 puts main on Apple's NAT for its first start, for about two minutes, because the relay that carries SSH over vsock has to be installed over SSH. That goes against this answer's "never Apple's NAT". It is its own open entry, `way-in-before-the-relay`, and its notes say what each way costs.

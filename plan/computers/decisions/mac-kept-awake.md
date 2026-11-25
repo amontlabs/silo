@@ -22,3 +22,9 @@ Recommended: hold the Mac awake while a computer runs on power, and say what it 
 Agent, 24 November 2026. From draft #354, gap 2, and draft #360's notes on `main-on-several-devices`:
 people who run agents overnight use a Mac mini that stays on. Whether Apple's framework already
 holds the Mac awake while a virtual machine runs is not known; `pmset -g assertions` on a Mac tells.
+
+## Where the drafts of 25 November disagree (integration)
+
+An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
+
+#378 found a guest's clock an hour and a half behind after the Mac slept. Every certificate the boundary signs is then "not yet valid" in main, and every HTTPS connection fails. #382 lists the same case as its gap 5. Recommended, from #378: the helper sets main's clock from the Mac's on wake and every few minutes, and the boundary dates the certificates it signs a day back.

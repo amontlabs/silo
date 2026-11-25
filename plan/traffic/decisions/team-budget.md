@@ -54,3 +54,9 @@ a team of five on its own Macs, with #374's counting on each, found a cheaper wa
 The recommended answer, a budget on all of a member's computers, meets the same question as soon
 as one member's computers run on two Macs (`main-on-several-devices`): two boundaries count
 against one limit. `pooled-budget-ledger` answers both cases the same way.
+
+## Where the drafts of 25 November disagree (integration)
+
+An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
+
+#362's pooled option says each Mac must reach a shared count before every model call, and that when it cannot, the budget is no longer exact or every agent stops. #388 measured leases instead: a Mac reaches the ledger about every dozen calls and goes on with its slice while the ledger is down, and the budget held within 0.4% with the typical output held. Recommended: the pooled option's cost is a ledger somewhere, not a round trip per call, as `pooled-budget-ledger` says.

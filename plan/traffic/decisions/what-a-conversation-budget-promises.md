@@ -50,3 +50,9 @@ The options:
 
 Recommended: start at what the parent's had spent. The computer's budget is the limit that no
 fork gets around in any of the three: main's ledger held every turn of both computers.
+
+## Where the drafts of 25 November disagree (integration)
+
+An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
+
+#385 ran a $0.50 conversation budget across main and a fork. With this answer and `recognising-a-conversation`'s "the same conversation continued in a fork is a new conversation of the fork", that one conversation spent $1.10. When the fork's copy started at what the parent had spent, it was held to $0.83, and main's copy went on. Recommended: a fork's copy of a conversation starts at the parent's spend at the moment of the fork. `recognising-a-conversation` then needs its last sentence changed to say so.

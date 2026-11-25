@@ -30,3 +30,9 @@ forbidding it, the way is a decision that replaces `fork-from-the-moment` with b
 
 A path is read from the checkpoint by the same reader that compares checkpoints
 (`file-changes-from-outside`), never by mounting the disk on the Mac.
+
+## Where the drafts of 25 November disagree (integration)
+
+An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
+
+#378, section 3: #370's put-back writes with `sudo tar -x` and `mv` through paths in a folder an agent may control. An agent that swaps a folder for a link to `/etc/sudoers.d` between the listing and the copy makes root write there. Recommended: a small program in main does the put-back through open folders (`openat` with no-follow), unlocks files the agent locked, and moves a FIFO or socket aside without opening it.

@@ -25,3 +25,7 @@ The options:
 
 Recommended: a hash chain. This is ground work: the record's files carry it from their first
 version, or a later change has to rewrite them.
+
+## A head kept next to the record (25 November 2026)
+
+An agent's part, from `research/2026-11-25-record-format/`, added on merge because #386 wrote it before #362 had landed. A head kept next to the record shows accidents, not someone with your user's rights: another program running as you on the Mac can rewrite the record and the head together. Only a copy of the head kept elsewhere shows a rewrite. Agents inside a computer cannot reach the record, which is on the Mac.

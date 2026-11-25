@@ -26,3 +26,9 @@ In its place: "Silo stores each retained message once by hash. A request names t
 extends and lists the messages it added; when the program changed an earlier message, it lists all
 of them." Claude Code changes earlier messages it resends (#371, finding 1), so some requests carry
 the full list; the model assumed 5% of them. How often it happens on a real night is to measure.
+
+## Where the drafts of 25 November disagree (integration)
+
+An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
+
+#376 and #386 each challenge this answer, for different reasons: #376 for a keyed hash, #386 for the size of the list. One replacement that holds both is proposed in the notes of `message-identity-keyed`.

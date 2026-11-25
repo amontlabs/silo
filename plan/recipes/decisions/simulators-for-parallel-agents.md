@@ -45,3 +45,7 @@ Code's documentation says that when a prompt names no simulator Claude uses one 
 even one another session opened; and a reported issue has the simulator tool ignoring the requested
 device when two sessions run on one Mac. It is to check on a Mac whether `xcrun simctl` events are
 enough for the record to name the process.
+
+## Held per use, kept warm (25 November 2026)
+
+An agent's part, from `research/2026-11-25-checkpoint-retention/`, added on merge because #389 wrote it before #361 had landed. In a simulation of a night of 16 agents, a simulator held for the whole session leaves 10 of 16 agents with none when 6 may be booted. Held per use and kept booted until another agent needs the place, 6 booted keep 95 waits in 100 under 30 s. "For as long as it uses them" could read "while it runs the app; its simulator stays booted until another agent needs the place".

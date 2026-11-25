@@ -53,3 +53,10 @@ model from 13 + 30 to 10 + 34.
 The ask held as a contract («don't change the tests», «run the whole suite», «code freeze»)
 caught nothing in either corpus: public issues rarely quote an ask with a rule in it. A night
 records the ask word for word, so this is left for a real night to measure.
+
+## Where the drafts of 25 November disagree (integration)
+
+An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
+
+- #377 concluded that the receipt's own warnings matter more than the claim checker. #387, on 75 new claims, found the warnings fire on 5 of the 57 false claims and on 5 of the 16 true ones, so they do not tell a false summary from a true one. Both are right about different things: the warnings are facts to show, and a model reading the words is what catches a false summary. Recommended: #387's option, with the receipt's lines always shown, as this entry's choice says.
+- #382's gap 8 (`npm test -- test/auth` read as the whole suite, so a false «All tests pass.» came out matched) is fixed by #387. On this branch, #382's repro `checks/claims_npm_narrowed.py` exits 0. On #377's tree it still prints WRONG for both claims.

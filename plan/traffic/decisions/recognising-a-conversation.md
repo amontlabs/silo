@@ -148,3 +148,9 @@ only, and joining on the program's session (`metadata.user_id` for Claude Code,
 `prompt_cache_key` for Codex) when the tools are the same, kept each of the four conversations
 whole. It supports the recommended option, and adds that the prefix test has to leave out what
 the program rewrites.
+
+## Where the drafts of 25 November disagree (integration)
+
+An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
+
+#376 edited this answer to end with "the same conversation continued in a fork is a new conversation of the fork". #385 measured that this lets a fork spend a conversation's budget again ($1.10 against $0.50), and recommends that the fork's copy start at the parent's spend. The notes of `what-a-conversation-budget-promises` hold the case. Recommended: keep "a new conversation of the fork", and add that its spend starts at the parent's.

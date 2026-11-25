@@ -43,3 +43,9 @@ no bound: under a budget it is refused.
 Not verified: Gemini's storage price per million tokens per hour (the run used $4.50 as a
 stand-in), whether OpenAI bills a cancelled background response for what it generated, and
 Gemini's batch result format, which was not built.
+
+## Where the drafts of 25 November disagree (integration)
+
+An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
+
+#378 proposes refusing batch routes under a budget, "until they are counted", as the gateway tool it studied does. #385 counted them: a batch, a background response or a cache leaves when its whole bound fits, and the count matched the bill to the cent. The condition of #378's proposal is met, so its refusal is the fallback only for work Silo still cannot count, such as code execution billed by container time.

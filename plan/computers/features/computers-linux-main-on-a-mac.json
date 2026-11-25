@@ -24,7 +24,9 @@
     "storage-between-computers",
     "network-stack",
     "engine-program-and-clients",
-    "engine-matches-wanted"
+    "engine-matches-wanted",
+    "mac-silo-needs",
+    "network-before-rules"
   ],
   "keeps": [
     "nothing-shared-from-your-device"

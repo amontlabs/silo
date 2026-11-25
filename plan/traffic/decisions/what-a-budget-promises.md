@@ -145,3 +145,17 @@ over counting visible output, 15% counting output by time, and from 0.4% over to
 holding each call's typical output, through a ledger or leases. Twelve members under $36: at most 13% over counting output by time.
 Where the count is kept (one boundary, a ledger 150 ms away, leases) moved these by a point or
 two at most.
+
+## Where the drafts of 25 November disagree (integration)
+
+An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
+
+Three drafts recommend different policies for calls under way when the budget is reached.
+
+- #374: running calls finish. Measured 35% to 56% over with Claude Code and 8 subagents.
+- #378: one call at a time near the limit, from an open-source gateway. Not measured.
+- #385: hold each call's typical output, and cut a call only when it passes the budget anyway. Measured 7% under in every Claude Code run, and it stopped the one call that reasoned 60,000 tokens at the budget.
+
+#388 shows the same policies over a team of five Macs: the typical hold stays between 0.4% over and 2.2% under.
+
+Recommended: #385's fourth option. It is the only measured policy that is never over, and the cut it costs happens only for a call far longer than the model's usual. The overshoot of "running calls finish" (35% at $3) is larger than anything the cut wastes.
