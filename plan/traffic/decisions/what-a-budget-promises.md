@@ -160,6 +160,10 @@ Three drafts recommend different policies for calls under way when the budget is
 
 Recommended: #385's fourth option. It is the only measured policy that is never over, and the cut it costs happens only for a call far longer than the model's usual. The overshoot of "running calls finish" (35% at $3) is larger than anything the cut wastes.
 
+## A cut at the budget over a team (25 November 2026)
+
+An agent's part, from `research/2026-11-25-team-ledger/`.
+
 With #385's cut, every way that shares one count stopped a team of five within 0.6% over $15,
 and paid $1.40 to $1.90 a run for cut answers. Under leases, where each Mac cuts on its own slice,
 `typical-cut` cut $0.09 a run against $1.85 for plain `cut`.

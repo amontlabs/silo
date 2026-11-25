@@ -542,6 +542,8 @@ kind, and the boundary signs each request again with the real key. A prototype d
 for App Store Connect, the key every Mac and iOS developer's release tools use. Codex's network
 proxy ships the same thing for AWS request signatures. Details: `research/2026-11-24-mac-and-ios-developers/README.md`.
 
+## The boundary end to end (25 November 2026)
+
 An agent's part, 25 November 2026 (`research/2026-11-25-boundary-end-to-end`). One boundary swapped
 placeholders for two computers, one reaching it by a proxy inside (#378's `CONNECT`) and one by
 gvproxy's hand-off (#380). The swap worked the same on both, and Claude Code ran a task on each

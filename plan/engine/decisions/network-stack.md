@@ -202,6 +202,8 @@ An agent's part, 25 November 2026, written while merging every draft into one br
 - #363's `-sealed` patch was said to close the Mac's loopback, its addresses and the local network. #380 found that gvproxy 0.9.0 forwards ping, which `-sealed` does not filter, so a sealed computer still pings the Mac and the local network. Recommended: where gvproxy is used, #380's patch with `-outbound-deny` replaces #363's, and test 07 of the Mac kit adds a ping to the Mac's address and to a machine on the local network.
 - #382 puts main on Apple's NAT for its first start, for about two minutes, because the relay that carries SSH over vsock has to be installed over SSH. That goes against this answer's "never Apple's NAT". It is its own open entry, `way-in-before-the-relay`, and its notes say what each way costs.
 
+## The boundary end to end (25 November 2026)
+
 An agent's part, 25 November 2026 (`research/2026-11-25-boundary-end-to-end`). One Zig boundary
 took both ways in on Linux: #378's `CONNECT` and #380's hand-off. A request on a kept-alive
 connection took 0.22 ms with no boundary, 0.53 ms by `CONNECT` and 0.71 ms by the hand-off. Three
