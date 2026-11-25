@@ -1,0 +1,43 @@
+day         label       models  age d      x  what
+2023-11-22  correction       3     63   10.0  Claude 2 and Instant prices written in another unit at first
+2024-02-05  correction       1     74    4.0  fine-tuned gpt-3.5-turbo
+2024-06-17  correction       5    163    0.0  Gemini rows priced at $0 until then
+2024-07-06  correction       2     19   10.0  gemini-1.5-pro 10x low
+2024-09-09  provider         2     84    4.7  Gemini 1.5 Flash price cut of 12 August 2024, written 28 days late
+2024-09-14  correction       1     15    0.0  experimental model priced as paid
+2024-11-12  provider         1    183    2.0  the gpt-4o alias moved to gpt-4o-2024-08-06 on 2 October 2024, written 41 days late
+2025-01-31  provider         1    141    2.7  o1-mini cut with o3-mini's launch, 31 January 2025
+2025-02-06  correction       1      0  1500.0  gemini-2.0-flash added 1,500x high
+2025-02-27  provider         1    114    8.0  Claude 3.5 Haiku's price cut at its launch, written 114 days late, with its cache read 10x high
+2025-04-08  correction       1     40   10.0  Claude 3.5 Haiku cache read 10x high for 40 days
+2025-04-12  correction       1      7   10.0  gemini-2.5-pro-preview output 10x low
+2025-04-14  correction       2      0    2.0  gpt-4.1 cache read 2x high, same day
+2025-06-10  provider         2     55    5.0  o3 cut by 80% on 10 June 2025, written the same day
+2025-06-19  provider         1     30    4.2  gemini-2.5-flash priced again at its general release (preview to stable)
+2025-08-08  correction       1      1   10.0  gpt-5-chat 4x high the day after launch
+2025-09-06  correction       1     11   12.0  gemini-2.5-flash-image output 12x low
+2025-09-25  correction       1    736    3.0  gpt-3.5-turbo 3x high for two years
+2025-11-07  correction       1    142    2.5  gemini-2.5-flash cache read 2.5x high
+2025-11-19  correction       1      1    1.6  gemini-3-pro-preview cache read, next day
+2026-01-14  correction       5    284    2.5  gemini-2.5-pro cache read 2.5x high for 7 months
+2026-01-21  correction       2    182    2.5  gemini-2.5-flash-lite cache read 2.5x high
+2026-03-06  correction       2      0    1.5  gpt-5.4-pro, same day
+2026-04-28  correction       2      4    2.0  gpt-5.5-pro 2x high for 4 days
+2026-07-03  provider         1      3    1.5  Claude Sonnet 5's introductory price; the increase it announced for 1 September 2026 was later withdrawn
+2026-07-30  provider         2     21    5.0  gpt-5.6-terra and -luna repriced by OpenAI on 30 July 2026?
+2026-08-18  provider         1     28    2.0  Gemini 3.6 Flash introductory price, written 28 days after launch
+2026-08-22  provider         3     44    1.5  GPT-5.6 Sol promotion (ends 30 November 2026)
+2026-08-27  correction      11    464    2.5  Gemini cache reads and audio rows wrong for 6 to 15 months
+2026-09-16  provider         1     43    2.0  gemini-robotics-er-2-preview repriced?
+2026-09-16  provider         6    355    6.3  the gemini-*-latest aliases moved to newer models; the table kept the old models' prices for 7 to 12 months
+2026-09-22  provider         1     42    2.0  gemini-robotics-er-2-streaming-preview repriced?
+2026-10-07  correction       1      9    2.0  Claude Sonnet 5.5 cache read 2x high for 9 days
+2026-11-18  provider         1     19    1.5  GPT-6 Rosalind promotional price (at least through 31 December 2026)
+2026-11-20  correction       1     21    1.5  GPT-6 Rosalind cache write
+
+2023: 0 provider changes, 1 corrections
+2024: 2 provider changes, 4 corrections
+2025: 4 provider changes, 9 corrections
+2026: 8 provider changes, 7 corrections
+corrections: 21; age of the wrong value, median 19 days, 75th percentile 142, max 736; size of the error, median 2.5x, max 1500x
+LiteLLM at 2c4d234466, 2026-11-25

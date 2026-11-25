@@ -168,7 +168,7 @@ fn loadState(path: []const u8) !*State {
     const bytes = try std.fs.cwd().readFileAlloc(gpa, path, 1 << 20);
     const parsed = try std.json.parseFromSlice(spend.Config, gpa, bytes, .{ .ignore_unknown_fields = true, .allocate = .alloc_always });
     const st = try gpa.create(State);
-    st.* = .{ .cfg = parsed.value, .book = .{ .gpa = gpa }, .table = .{ .gpa = gpa, .path = parsed.value.prices } };
+    st.* = .{ .cfg = parsed.value, .book = .{ .gpa = gpa }, .table = .{ .gpa = gpa, .path = parsed.value.prices, .keys = parsed.value.price_keys, .local_path = parsed.value.local_prices, .on_event = priceEvent } };
     st.book.policy = std.meta.stringToEnum(budget.Policy, parsed.value.policy) orelse return error.UnknownPolicy;
     const n = st.cfg.computers.len;
     st.covers = try gpa.alloc([]usize, n);
@@ -208,6 +208,11 @@ fn loadState(path: []const u8) !*State {
     st.table.refresh();
     if (st.table.parsed == null) return error.NoPriceTable;
     return st;
+}
+
+/// The record's line for each reading of the price files that changed or refused something.
+fn priceEvent(e: prices.Event, version: u64, why: []const u8) void {
+    record("\"kind\":\"prices\",\"event\":\"{s}\",\"version\":{d},\"why\":{f}", .{ @tagName(e), version, j(why) });
 }
 
 fn hasLimits(l: budget.Limits) bool {
@@ -348,7 +353,13 @@ fn beginCall(st: *State, comp: usize, conn: u32, format: usage.Format, path: []c
     var day_buf: [10]u8 = undefined;
     const day = prices.today(&day_buf);
     const provider = spend.providerKey(format);
-    const row = st.table.find(provider, req.model, req.tier, day);
+    var row = st.table.findFor(provider, req.model, req.tier, req.asked, day);
+    if (row == null and st.budgeted[comp] and std.mem.eql(u8, st.cfg.unknown_model, "bound")) {
+        // No price yet: held and counted at a bound, the dearest the provider charges for any
+        // model at this tier, times a margin. Settled at the same bound, marked as such.
+        row = st.table.bound(provider, req.tier, day, st.cfg.unknown_margin);
+        if (row) |r| record("\"conn\":{d},\"kind\":\"priced-as-bound\",\"model\":{f},\"tier\":{f},\"input\":{d:.4},\"output\":{d:.4}", .{ conn, j(req.model), j(req.tier), r.input, r.output });
+    }
     if (row == null and st.budgeted[comp]) {
         record("\"conn\":{d},\"kind\":\"refused\",\"why\":\"no-price\",\"model\":{f},\"tier\":{f}", .{ conn, j(req.model), j(req.tier) });
         const m = std.fmt.bufPrint(msg_buf, "Silo: there is no price for {s} ({s}) yet, and a budget covers this computer, so its calls cannot be counted.", .{ req.model, req.tier }) catch "Silo: no price for this model.";
@@ -487,7 +498,7 @@ fn ledgerWho(name: []const u8) []const u8 {
 fn costOfMeter(st: *State, call: *Call) struct { cost: f64, priced: bool } {
     var day_buf: [10]u8 = undefined;
     const day = prices.today(&day_buf);
-    if (spend.costOf(&st.table, spend.providerKey(call.format), &call.meter, day)) |v| return .{ .cost = v, .priced = true };
+    if (spend.costOf(&st.table, spend.providerKey(call.format), &call.meter, call.req.asked, day)) |v| return .{ .cost = v, .priced = true };
     if (call.row) |r| return .{ .cost = prices.cost(r, call.meter.billed()), .priced = false };
     return .{ .cost = 0, .priced = false };
 }

@@ -1,0 +1,19 @@
+== new text models per month (OpenRouter's listing day)
+  2025-12: anthropic 0, openai 4, google 1  (all 5)
+  2026-01: anthropic 0, openai 3, google 0  (all 3)
+  2026-02: anthropic 2, openai 1, google 3  (all 6)
+  2026-03: anthropic 0, openai 4, google 1  (all 5)
+  2026-04: anthropic 1, openai 3, google 2  (all 6)
+  2026-05: anthropic 1, openai 1, google 2  (all 4)
+  2026-06: anthropic 2, openai 0, google 3  (all 5)
+  2026-07: anthropic 1, openai 6, google 2  (all 9)
+  2026-08: anthropic 0, openai 0, google 1  (all 1)
+  2026-09: anthropic 3, openai 8, google 1  (all 12)
+  2026-10: anthropic 1, openai 2, google 2  (all 5)
+  2026-11: anthropic 1, openai 4, google 5  (all 10)
+  last six months: 43 models, 1.7 a week
+== days from OpenRouter's listing to a price in LiteLLM's table (since June 2025)
+  68 models: median 0.0 days, 90th percentile 3, max 149; never priced: 26 (google/gemini-2.5-pro-preview, openai/gpt-oss-20b, openai/gpt-oss-120b, google/gemini-2.5-flash-image, openai/gpt-5-image, openai/gpt-5-image-mini...)
+== a new model's price against what was known before it (since January 2025)
+  priced as its family's previous model: under-counted 19 of 55 successors; by up to 8.0x: [('gpt-oss-120b', 1.92), ('gpt-5-mini', 1.25), ('gpt-5', 1.25), ('gpt-5.2', 1.4), ('gpt-5.2-pro', 1.4), ('gpt-5.2-codex', 1.4), ('gemini-3.1-pro-preview', 1.6), ('gpt-5.4', 1.43), ('gpt-5.4-pro', 1.43), ('gpt-5.4-mini', 3.0), ('gpt-5.4-nano', 4.0), ('gemma-4-31b-it', 8.0), ('gpt-5.4-image-2', 1.5), ('gpt-5.5', 2.0), ('gemini-3.1-flash-lite', 3.75), ('gemini-3.5-flash', 5.0), ('gemini-3.1-flash-image', 1.67), ('gemini-3.5-flash-lite', 1.67), ('gemini-3.8-flash', 1.1)]
+  priced at the dearest model its provider sold: under-counted 7 of 100; [('2025-06-05', 'gemini-2.5-pro-preview', 15.38), ('2025-06-10', 'o3-pro', 1.33), ('2025-10-06', 'gpt-5-pro', 1.5), ('2025-11-20', 'gemini-3-pro-image-preview', 1.6), ('2025-12-10', 'gpt-5.2-pro', 1.4), ('2026-03-05', 'gpt-5.4-pro', 1.07), ('2026-11-18', 'gemini-4-neon', 1.5)]

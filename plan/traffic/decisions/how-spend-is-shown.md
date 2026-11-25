@@ -61,3 +61,17 @@ gateway once summed a cost found in a task's log, where the agent's own output w
 forged line claiming $999,999 refused every task until it aged out. A cost an agent prints is the
 agent's claim: Silo shows it with the agent as its author, if at all, and never adds it to what
 Silo counted.
+
+## Prices that depend on where and how the call runs (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-model-prices`.
+
+- Anthropic charges 1.1 times every token price for US-only inference (`inference_geo: "us"`) on
+  Claude 4.6 and later. Claude on Bedrock and on Google Cloud costs 1.1 times as much on a regional
+  endpoint as on the global one; AWS's own price list confirms it on every Claude model. OpenAI
+  charges 10% more on regional endpoints for models released on or after 5 March 2026. Spend "at
+  the provider's API prices" has to include these, and the research's boundary counts the first.
+- Anthropic, OpenAI and Google sell volume discounts by contract. The research's table takes a
+  discount you write in your own prices file. Whether the app shows that discounted figure, or the
+  list price as this entry proposes, is still open. Showing the list price keeps conversations
+  comparable between people. Showing the discounted one keeps a budget in the dollars you pay.

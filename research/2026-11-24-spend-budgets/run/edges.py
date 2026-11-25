@@ -244,7 +244,49 @@ def fork():
         if turn(MAIN, "main", k) != 200: break
 
 
-CASES = {"prev_id": prev_id, "background": background, "websearch": websearch, "chat": chat, "cache_expiry": cache_expiry,
+# ---- the price table itself (research/2026-11-25-model-prices) ----
+
+def anth(model, extra=None, text_bytes=4000, think=300):
+    body = {"model": model, "max_tokens": 4000, "messages": [{"role": "user", "content": text(text_bytes) + f" THINK={think}"}]}
+    body.update(extra or {})
+    return call("api.anthropic.com", "POST", "/v1/messages", body, H_AN)
+
+
+def prices_release():
+    """Silo's table is replaced while calls go on: by hand, by a signed release, by an older one."""
+    d = os.environ["PRICES_DIR"]; table = f"{d}/prices.json"
+    sign = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../2026-11-25-model-prices/update/sign.py")
+
+    def publish(name, signed=True):
+        import shutil, subprocess
+        shutil.copy(f"{d}/{name}", table)
+        if signed:
+            subprocess.run([sys.executable, sign, "sign", d, "test-2026", table], check=True, capture_output=True)
+        time.sleep(1.1)  # a new modification time for the boundary to see
+
+    s, b = anth("claude-opus-5-5"); say(step="v1 opus", status=s)
+    s, b = anth("claude-opus-6-0"); say(step="v1 new model", status=s, said=silo_said(b))
+    # Someone lowers Opus's price in the file by hand; the signature no longer matches.
+    publish("tampered.json", signed=False)
+    s, b = anth("claude-opus-5-5"); say(step="tampered opus", status=s)
+    # The next release adds the new model.
+    publish("v2.json")
+    s, b = anth("claude-opus-6-0"); say(step="v2 new model", status=s, said=silo_said(b))
+    # An older release, validly signed, is put back.
+    publish("v1.json")
+    s, b = anth("claude-opus-6-0"); say(step="v1 replayed, new model", status=s, said=silo_said(b))
+    # US-only inference costs 1.1x on Claude 4.6 and later.
+    s, b = anth("claude-opus-5-5", {"inference_geo": "us"}); say(step="opus us-only", status=s)
+
+
+def unknown_bound():
+    """A model released after Silo's table, under a budget, priced at a bound until its row comes."""
+    for k in range(6):
+        s, b = anth("claude-opus-6-0", text_bytes=20000, think=2000); say(step=f"new model {k}", status=s, said=silo_said(b))
+        if s != 200: break
+
+
+CASES = {"prev_id": prev_id, "prices_release": prices_release, "unknown_bound": unknown_bound, "background": background, "websearch": websearch, "chat": chat, "cache_expiry": cache_expiry,
          "gcache": gcache, "batch": batch, "midstream": midstream, "fork": fork}
 
 if __name__ == "__main__":

@@ -1,0 +1,1 @@
+13 rows on both sides, 0 differ; 1 only in table, 12 only in page
