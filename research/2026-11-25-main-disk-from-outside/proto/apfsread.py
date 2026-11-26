@@ -1,7 +1,8 @@
 """A small APFS reader for the kit: metadata only, read only, no decryption.
 
-(Copied from #390, mac-test-kit/py/apfs/apfsread.py at 15820da, with one change: child() refuses
-an index value shorter than 8 bytes, which fuzz_reader.py found crashing the probe.)
+(Copied from #390, mac-test-kit/py/apfs/apfsread.py at 15820da, with two changes: child() refuses
+an index value shorter than 8 bytes, and the object map an entry not of 16 and 16 bytes; fuzz_reader.py
+found both crashing the probe.)
 
 Written from the Apple File System Reference (2020-06-22), after the 250-line prototype of
 research 11 (`apfs/scripts/apfsdiff.py` of the research scripts folder). Pure Python 3.9, no
@@ -346,6 +347,8 @@ class OMap:
         self.entries = {}
         for leaf, _, _ in self.tree.leaves():
             for k, v in self.tree.records(leaf):
+                if len(k) != 16 or len(v) != 16:  # rule R1, found by fuzz_reader.py
+                    raise Bad("object map entry of %d and %d bytes" % (len(k), len(v)))
                 oid, xid = struct.unpack("<QQ", k)
                 fl, size, paddr = struct.unpack("<IIQ", v)
                 if max_xid is not None and xid > max_xid:

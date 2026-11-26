@@ -48,19 +48,21 @@ have crafted, with Silo's rights on the Mac.
    commit is from 2017; no report of this was found. Reporting it upstream is public, so it is
    polarzero's call.
 
-4. **#390's probe crashes or exhausts memory on crafted disks, 8 faults at 6 places.** A fuzzer of the whole
+4. **#390's probe crashes or exhausts memory on crafted disks: 10 faults at 8 places.** A fuzzer of the whole
    reader ([`proto/fuzz_reader.py`](proto/fuzz_reader.py), atheris) patches the blocks the probe
    reads and recomputes their checksums, as root can, then lists and reads every file as `look`
-   would. In 69,696 inputs it found (a `MemoryError` and an `OverflowError` at the same line count as two):
+   would. In 87,847 inputs over 15 minutes it found (a `MemoryError` and an `OverflowError` at the same
+   line count as two):
 
    | Fault | Where | What an agent gets |
    |---|---|---|
    | An extent whose logical offset is huge: the probe fills the hole with zeroes | apfscontent.py:246 | Gigabytes allocated, or an `OverflowError` |
-   | A stream whose size is huge | apfscontent.py:262 | The same |
+   | A stream whose size is huge | apfscontent.py:262 and 263 | The same |
    | An extent whose length is huge | apfscontent.py:249 | The same |
    | A key shorter than 8 bytes | apfscontent.py:144 | The whole listing stops |
    | A directory entry's value shorter than 18 bytes | apfscontent.py:206 | The whole listing stops |
    | An index value of a tree node shorter than 8 bytes | apfsread.py:291 | The whole listing stops |
+   | An object map entry whose value is not 16 bytes | apfsread.py:345 | The whole listing stops |
 
    One file an agent crafts makes `look` fail for every file, or uses the Mac's memory up. It is the
    rule `parsers-fuzzed-and-compared` names (#376): a crash is found by fuzzing, and here fuzzing
@@ -69,8 +71,10 @@ have crafted, with Silo's rights on the Mac.
 5. **Six rules make the same fuzzing find nothing.**
    [`proto/content_reader.py`](proto/content_reader.py) is the probe rewritten with them. It reads
    the same 1,067 files of dissect.apfs's three test disks to the same SHA-256 as the probe, every
-   compressed method included. Under the same fuzzer and seed for the same time, it showed no fault
-   (`results.txt` has the run counts).
+   compressed method included. Under the same fuzzer and seed for the same 15 minutes it ran
+   62,406 inputs with no fault, and each of the probe's fault inputs
+   ([`proto/reader-faults/`](proto/reader-faults/)) gives a gap. Two of the rules also needed
+   lines in `apfsread.py`, the probe's metadata reader, copied here with those two lines added.
 
    - **R1** Every length read from the disk is checked before anything is unpacked from it.
    - **R2** No size from the disk decides an allocation: a file, a stream or a hole is bounded by
@@ -151,7 +155,7 @@ have crafted, with Silo's rights on the Mac.
 Main's disk from outside: a size check misses 64% of corrupted LZFSE and 69% of LZVN blocks, and
 no file hash exists to check against, so the reader's bar is what macOS reads; Apple's lzfse reads
 up to 7 bytes past a crafted block (fixed by padding); #390's probe crashes or exhausts memory on
-crafted disks (8 faults) and six rules fix all of them under the same fuzzing; on ext4, verifying the
+crafted disks (10 faults) and six rules fix all of them under the same fuzzing; on ext4, verifying the
 journal's checksums makes #381's reader refuse exactly the 4 disks the kernel refuses.
 
 ## For you to rule

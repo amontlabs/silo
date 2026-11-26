@@ -1,0 +1,59 @@
+Results of 25 and 26 November 2026, on Linux (Intel Xeon 2.1 GHz, SHA extensions), gcc 13, Python 3.13,
+atheris 3.1.0, lzfse at e634ca5 (2017-05-22). run.sh produces this file again.
+
+== 1. One flipped bit in a decmpfs block (corrupt.c, corrupt_zlib.py)
+lzfse: 181 blocks, 11760985 bytes encoded to 4532384 (38.5%), 200 flips each
+  naive  refused  27.0%  same   0.1%  wrong without an error  72.9%
+  probe  refused  35.7%  same   0.1%  wrong without an error  64.1%
+  strict refused  35.7%  same   0.1%  wrong without an error  64.1%
+lzvn: 180 blocks, 11695449 bytes encoded to 4993048 (42.7%), 200 flips each
+  naive  refused  21.0%  same   0.6%  wrong without an error  78.5%
+  probe  refused  30.7%  same   0.3%  wrong without an error  69.0%
+  strict refused  30.7%  same   0.3%  wrong without an error  69.0%
+lzvn: 35.2% of encoded bytes are literals, copied to the output as they are
+zlib: 184 blocks, 200 flips each
+  strict refused  99.9%  same   0.1%  wrong without an error   0.0%
+
+== 2. Apple's lzfse decoder fuzzed with crafted blocks (fuzz_lzfse.c)
+PAD=0: AddressSanitizer, a read of 8 bytes, 1 byte past a 1,800-byte input, in fse_in_checked_flush64
+       (lzfse_fse.h:372) from lzfse_decode_lmd (lzfse_decode_base.c:193), within the first seconds.
+       Input: lzfse-overread.input
+PAD=8: 36373000 inputs run, 71 seeds, corpus 87, 295 decoder blocks reached, no fault (900 s)
+
+== 3. The APFS content reader fuzzed with a crafted disk (fuzz_reader.py, dissect.apfs case_sensitive.bin, -seed=1, 900 s each)
+#390's probe at 15820da: 87,847 inputs, 10 faults at 8 places:
+  error at apfscontent.py:144	return struct.unpack_from("<Q", k)[0] & OID_MASK	unpack_from requires a buffer of at least 8 bytes for unpacking 8 bytes at offset 0 (actual buffer size is 0)
+  error at apfscontent.py:206	child, _added, flags = struct.unpack_from("<QQH", v, 0)	unpack_from requires a buffer of at least 18 bytes for unpacking 18 bytes at offset 0 (actual buffer size is 2)
+  OverflowError at apfscontent.py:246	parts.append(b"\0" * (logical - at))	cannot fit 'int' into an index-sized integer
+  MemoryError at apfscontent.py:246	parts.append(b"\0" * (logical - at))	
+  error at apfsread.py:345	fl, size, paddr = struct.unpack("<IIQ", v)	unpack requires a buffer of 16 bytes
+  MemoryError at apfscontent.py:263	return b"".join(parts)[:size]	
+  MemoryError at apfscontent.py:262	parts.append(b"\0" * (size - at))	
+  error at apfsread.py:291	c = struct.unpack_from("<Q", v, 0)[0]	unpack_from requires a buffer of at least 8 bytes for unpacking 8 bytes at offset 0 (actual buffer size is 0)
+  OverflowError at apfscontent.py:262	parts.append(b"\0" * (size - at))	cannot fit 'int' into an index-sized integer
+  MemoryError at apfscontent.py:249	parts.append(b"\0" * length)	
+content_reader.py: 62,406 inputs, no fault.
+Every fault input of the probe (reader-faults/, and 8 from an earlier run) replayed on content_reader.py: a gap each, no fault.
+
+Both readers on dissect.apfs's case_sensitive, case_insensitive and snapshot disks: the same 1,067 files to the same SHA-256.
+
+== 4. ext4: journal faults, the kernel against the reader (journal-faults.sh)
+-- this folder's ext4read.py (checksums verified)
+fault       | kernel                       | e2fsck                                                         | reader
+none        | mounts, 302 paths            | exit 1:                                                        | same 302 paths as the kernel
+data        | refuses to mount             | exit 1: JBD2: Invalid checksum recovering data block 69 in log | gap journal-data-checksum
+descriptor  | refuses to mount             | exit 1: Journal checksum error found in e.img                  | gap journal-checksum
+commit      | refuses to mount             | exit 1: Journal transaction 2 was corrupt, replay was aborted. | gap journal-commit-checksum
+superblock  | refuses to mount             | exit 1: Journal superblock is corrupt.                         | gap journal-superblock-checksum
+sequence    | mounts, 401 paths            | exit 1:                                                        | same 401 paths as the kernel
+-- #381's trial as it is
+fault       | kernel                       | e2fsck                                                         | reader
+none        | mounts, 302 paths            | exit 1:                                                        | same 302 paths as the kernel
+data        | refuses to mount             | exit 1: JBD2: Invalid checksum recovering data block 69 in log | DIFFERS from the kernel: 303 lines
+descriptor  | refuses to mount             | exit 1: Journal checksum error found in e.img                  | DIFFERS from the kernel: 303 lines
+commit      | refuses to mount             | exit 1: Journal transaction 2 was corrupt, replay was aborted. | DIFFERS from the kernel: 303 lines
+superblock  | refuses to mount             | exit 1: Journal superblock is corrupt.                         | DIFFERS from the kernel: 303 lines
+sequence    | mounts, 401 paths            | exit 1:                                                        | same 401 paths as the kernel
+
+== 5. Hashing a checkpoint's blocks
+SHA-256 of 4 KiB blocks, Python hashlib: 1,124 MB/s on one core. BLAKE2b: 601 MB/s.

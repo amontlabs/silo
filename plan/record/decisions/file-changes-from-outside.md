@@ -111,7 +111,7 @@ An agent's part, 25 November 2026, from `research/2026-11-25-main-disk-from-outs
 main can write any byte of main's disk, with valid APFS checksums. Measured on Linux with
 dissect.apfs's test disks and Apple's open-source lzfse:
 
-- #390's content reader crashed, or allocated without bound, at 8 faults on crafted disks: a huge
+- #390's content reader crashed, or allocated without bound, at 10 faults on crafted disks: a huge
   extent offset, length or stream size, and keys or values too short for what is read from them.
   One crafted file stops the listing of every file. Six rules (lengths checked before use, no size
   from the disk decides an allocation, extents in order, the block table checked whole, decoder
