@@ -69,6 +69,22 @@ def pct(x):
     return f"{x:+.1f}%"
 
 
+def early_cuts(rs):
+    """Under leases: cuts a Mac made because no answer came in time, not because the ledger said
+    nothing was left. Per run."""
+    n = 0
+    for r in rs:
+        d = r["dir"]
+        if not os.path.isdir(d):
+            return None
+        for f in os.listdir(d):
+            if f.startswith("mac") and f.endswith(".jsonl"):
+                for line in open(os.path.join(d, f)):
+                    o = json.loads(line)
+                    n += o.get("cut") == "no answer"
+    return n / len(rs)
+
+
 def row_live(rs):
     sb = [r["billed"] / r["budget"] for r in rs]
     over = [r["over_pct"] for r in rs]
@@ -76,7 +92,7 @@ def row_live(rs):
             "cut": statistics.mean(r["cut_paid"] for r in rs), "calls": statistics.mean(r["calls_done"] for r in rs),
             "w10": statistics.mean(r["waited_10s"] for r in rs), "wmax": max(r["wait_max_s"] for r in rs),
             "msgs": statistics.mean(r["messages_per_call"] for r in rs),
-            "cerr": max(abs(r["count_err_pct"] or 0) for r in rs),
+            "cerr": max(abs(r["count_err_pct"] or 0) for r in rs), "early": early_cuts(rs) if rs[0]["way"] == "lease" else None,
             "batch": (sum(1 for r in rs if r.get("batch_admitted")), len(rs)) if any(r.get("batch_admitted") is not None for r in rs) else None}
 
 
@@ -107,18 +123,19 @@ def main():
         if not names:
             continue
         lines.append(f"### {title}\n")
-        lines.append("| Setting | Runs | Spent / budget | Over, worst | Under, worst | Paid for cut answers | Calls done | Calls that waited over 10 s | Longest wait, s | Messages per call | Sim: spent / budget | Sim: over, worst | Sim: under, worst | Sim: paid for cut answers | Sim: calls done | Sim: waited over 10 s | Sim: messages per call |")
-        lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+        lines.append("| Setting | Runs | Spent / budget | Over, worst | Under, worst | Paid for cut answers | Calls done | Calls that waited over 10 s | Longest wait, s | Messages per call | Cuts with no answer, per run | Sim: spent / budget | Sim: over, worst | Sim: under, worst | Sim: paid for cut answers | Sim: calls done | Sim: waited over 10 s | Sim: messages per call |")
+        lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
         for n in names:
             rs = by[n]
             L = row_live(rs)
             S = sim_of(cfgs[n][1], rs)
             S = row_sim(S) if S else None
             b = f" (batch admitted {L['batch'][0]} of {L['batch'][1]}; sim {S['batch'][0]} of {S['batch'][1]})" if L["batch"] and S and S["batch"] else ""
+            early = "" if L["early"] is None else f"{L['early']:.1f}"
             sim_cells = (f"{S['spent']:.3f} | {pct(S['worst'])} | {pct(S['under'])} | ${S['cut']:.2f} | {S['calls']:.0f} | {S['w10']:.1f} | {S['msgs']:.2f}"
                          if S else "n/a | | | | | |")
             lines.append(f"| {n}{b} | {L['n']} | {L['spent']:.3f} | {pct(L['worst'])} | {pct(L['under'])} | ${L['cut']:.2f} | {L['calls']:.0f} | "
-                         f"{L['w10']:.1f} | {L['wmax']:.1f} | {L['msgs']:.2f} | {sim_cells} |")
+                         f"{L['w10']:.1f} | {L['wmax']:.1f} | {L['msgs']:.2f} | {early} | {sim_cells} |")
         lines.append("")
     cerr = max((abs(r["count_err_pct"] or 0) for r in live), default=0)
     lines.append(f"Largest gap between what the boundaries counted and what the provider billed, in any run: {cerr:.2f}%.\n")
