@@ -1,0 +1,47 @@
+{
+ "program": "gemini-cli",
+ "version": "0.71.1",
+ "scenario": "refuse",
+ "trust": "env",
+ "exit": 1,
+ "secs": 4.7,
+ "passed": true,
+ "checks": [
+  {
+   "id": "model-hosts-read",
+   "entry": "program-that-cannot-be-read",
+   "result": "n/a",
+   "detail": "model calls went to no host"
+  },
+  {
+   "id": "transports",
+   "entry": "reading-each-agent-program",
+   "result": "n/a",
+   "detail": "none"
+  },
+  {
+   "id": "other-hosts",
+   "entry": "reading-each-agent-program",
+   "result": "n/a",
+   "detail": "looked up generativelanguage.googleapis.com, play.googleapis.com; the boundary refused none; 1 handshakes refused Silo's certificate"
+  },
+  {
+   "id": "conversation-named",
+   "entry": "recognising-a-conversation",
+   "result": "n/a",
+   "detail": "0 requests of the task's conversation; key in nothing; 0 distinct"
+  },
+  {
+   "id": "credential-kind",
+   "entry": "claude-key-or-plan",
+   "result": "n/a",
+   "detail": "model requests carry nothing; expected x-goog-api-key:AIza"
+  },
+  {
+   "id": "stops-on-refusal",
+   "entry": "budget-denies-or-holds",
+   "result": "pass",
+   "detail": "2 refused (no-price); exit 1 after 4.7 s; Silo's sentence shown"
+  }
+ ]
+}

@@ -1,0 +1,8 @@
+{
+ "item_types": {
+  "gone": [],
+  "new": [
+   "item:custom_tool_call_output"
+  ]
+ }
+}

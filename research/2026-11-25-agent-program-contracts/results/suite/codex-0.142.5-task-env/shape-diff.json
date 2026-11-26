@@ -1,0 +1,16 @@
+{
+ "body": {
+  "gone": [],
+  "new": [
+   "client_metadata.session_id:str",
+   "client_metadata.thread_id:str",
+   "client_metadata.turn_id:str"
+  ]
+ },
+ "item_types": {
+  "gone": [],
+  "new": [
+   "item:function_call"
+  ]
+ }
+}

@@ -1,0 +1,6 @@
+    3.08 play.googleapis.com A
+    3.08 play.googleapis.com AAAA
+    3.12 generativelanguage.googleapis.com A
+    3.12 generativelanguage.googleapis.com AAAA
+    3.20 generativelanguage.googleapis.com A
+    3.20 generativelanguage.googleapis.com AAAA

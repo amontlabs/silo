@@ -1,0 +1,76 @@
+{
+ "betas": [],
+ "body": [
+  "client_metadata.session_id:str",
+  "client_metadata.thread_id:str",
+  "client_metadata.turn_id:str",
+  "client_metadata.x-codex-installation-id:str",
+  "client_metadata.x-codex-turn-metadata:str",
+  "client_metadata.x-codex-window-id:str",
+  "client_metadata.x-codex-ws-stream-request-start-ms:str",
+  "generate:bool",
+  "include[]:str",
+  "input",
+  "instructions",
+  "model:str",
+  "parallel_tool_calls:bool",
+  "previous_response_id:str",
+  "prompt_cache_key:str",
+  "reasoning.effort:str",
+  "store:bool",
+  "stream:bool",
+  "text.verbosity:str",
+  "tool_choice:str",
+  "tools",
+  "type:str"
+ ],
+ "headers": [
+  "authorization",
+  "connection",
+  "host",
+  "openai-beta",
+  "originator",
+  "session-id",
+  "thread-id",
+  "upgrade",
+  "user-agent",
+  "version",
+  "x-client-request-id",
+  "x-codex-beta-features",
+  "x-codex-turn-metadata",
+  "x-codex-window-id"
+ ],
+ "hosts": [
+  "api.openai.com"
+ ],
+ "item_types": [
+  "item:function_call",
+  "item:function_call_output",
+  "item:message"
+ ],
+ "paths": [
+  "/v1/responses"
+ ],
+ "tool_kinds": [
+  "custom",
+  "function",
+  "tool_search",
+  "web_search"
+ ],
+ "tools": [
+  "custom:apply_patch",
+  "function:create_goal",
+  "function:exec_command",
+  "function:get_goal",
+  "function:request_user_input",
+  "function:update_goal",
+  "function:update_plan",
+  "function:view_image",
+  "function:write_stdin",
+  "tool_search:None",
+  "web_search:None"
+ ],
+ "transports": [
+  "websocket"
+ ]
+}

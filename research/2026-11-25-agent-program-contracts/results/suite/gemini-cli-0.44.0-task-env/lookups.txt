@@ -1,0 +1,6 @@
+    2.41 play.googleapis.com A
+    2.41 play.googleapis.com AAAA
+    2.45 generativelanguage.googleapis.com A
+    2.45 generativelanguage.googleapis.com AAAA
+    2.54 generativelanguage.googleapis.com A
+    2.54 generativelanguage.googleapis.com AAAA

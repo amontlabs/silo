@@ -1,0 +1,95 @@
+{
+ "program": "claude-code",
+ "version": "2.1.198",
+ "scenario": "task",
+ "trust": "env",
+ "exit": 0,
+ "secs": 0.9,
+ "passed": true,
+ "checks": [
+  {
+   "id": "reaches-the-model",
+   "entry": "reading-each-agent-program",
+   "result": "pass",
+   "detail": "exit 0 in 0.9 s, 3 model calls answered"
+  },
+  {
+   "id": "runs-the-tool-call",
+   "entry": "reading-each-agent-program",
+   "result": "pass",
+   "detail": "the shell tool call the stand-in sent ran"
+  },
+  {
+   "id": "model-hosts-read",
+   "entry": "program-that-cannot-be-read",
+   "result": "pass",
+   "detail": "model calls went to api.anthropic.com"
+  },
+  {
+   "id": "transports",
+   "entry": "reading-each-agent-program",
+   "result": "n/a",
+   "detail": "sse"
+  },
+  {
+   "id": "other-hosts",
+   "entry": "reading-each-agent-program",
+   "result": "n/a",
+   "detail": "looked up api.anthropic.com; the boundary refused none; 0 handshakes refused Silo's certificate"
+  },
+  {
+   "id": "usage-counted",
+   "entry": "what-a-budget-promises",
+   "result": "pass",
+   "detail": "3 HTTP calls billed 26410 in / 114 out; the boundary counted 3 calls, 26410 in / 114 out"
+  },
+  {
+   "id": "model-named",
+   "entry": "what-traffic-gives",
+   "result": "pass",
+   "detail": "sent ['claude-haiku-4-5-20251001', 'claude-opus-4-8'], recorded ['claude-haiku-4-5-20251001', 'claude-opus-4-8']"
+  },
+  {
+   "id": "format-known",
+   "entry": "adapters-follow-providers",
+   "result": "pass",
+   "detail": "formats read: anthropic; 0 unreadable"
+  },
+  {
+   "id": "tool-calls-read",
+   "entry": "tool-calls-from-traffic",
+   "result": "pass",
+   "detail": "1 sent, 1 in the record"
+  },
+  {
+   "id": "tool-results-joined",
+   "entry": "author-from-traffic",
+   "result": "pass",
+   "detail": "1 of 1 results came back naming their call"
+  },
+  {
+   "id": "command-text-readable",
+   "entry": "rule-on-a-tool-calls-text",
+   "result": "pass",
+   "detail": "1 of 1 calls carry the command as text: Bash"
+  },
+  {
+   "id": "conversation-named",
+   "entry": "recognising-a-conversation",
+   "result": "pass",
+   "detail": "2 requests of the task's conversation; key in metadata.user_id.session_id; 1 distinct"
+  },
+  {
+   "id": "credential-kind",
+   "entry": "claude-key-or-plan",
+   "result": "pass",
+   "detail": "model requests carry x-api-key:sk-ant-api; expected x-api-key:sk-ant-api"
+  },
+  {
+   "id": "shape-unchanged",
+   "entry": "reading-each-agent-program",
+   "result": "pass",
+   "detail": "betas: +1 -0; tools: +1 -3"
+  }
+ ]
+}

@@ -1,0 +1,87 @@
+{
+ "betas": [
+  "advanced-tool-use-2025-11-20",
+  "claude-code-20250219",
+  "context-1m-2025-08-07",
+  "context-management-2025-06-27",
+  "effort-2025-11-24",
+  "fallback-credit-2026-06-01",
+  "interleaved-thinking-2025-05-14",
+  "mid-conversation-system-2026-04-07",
+  "prompt-caching-scope-2026-01-05",
+  "structured-outputs-2025-12-15",
+  "thinking-token-count-2026-05-13"
+ ],
+ "body": [
+  "context_management.edits[].keep:str",
+  "context_management.edits[].type:str",
+  "max_tokens:int",
+  "messages",
+  "metadata.user_id:str",
+  "model:str",
+  "output_config.effort:str",
+  "output_config.format.schema.additionalProperties:bool",
+  "output_config.format.schema.properties.title.type:str",
+  "output_config.format.schema.required[]:str",
+  "output_config.format.schema.type:str",
+  "output_config.format.type:str",
+  "stream:bool",
+  "system",
+  "temperature:int",
+  "thinking.type:str",
+  "tools"
+ ],
+ "headers": [
+  "accept",
+  "accept-encoding",
+  "anthropic-beta",
+  "anthropic-dangerous-direct-browser-access",
+  "anthropic-version",
+  "connection",
+  "content-length",
+  "content-type",
+  "host",
+  "user-agent",
+  "x-api-key",
+  "x-app",
+  "x-claude-code-session-id",
+  "x-client-request-id",
+  "x-stainless-arch",
+  "x-stainless-lang",
+  "x-stainless-os",
+  "x-stainless-package-version",
+  "x-stainless-retry-count",
+  "x-stainless-runtime",
+  "x-stainless-runtime-version",
+  "x-stainless-timeout"
+ ],
+ "hosts": [
+  "api.anthropic.com"
+ ],
+ "item_types": [
+  "block:text",
+  "block:tool_result",
+  "block:tool_use"
+ ],
+ "paths": [
+  "/v1/messages?beta=true"
+ ],
+ "tool_kinds": [
+  "custom"
+ ],
+ "tools": [
+  "tool:Agent",
+  "tool:Bash",
+  "tool:DeferredToolPlaceholder",
+  "tool:Edit",
+  "tool:Read",
+  "tool:ReportFindings",
+  "tool:Skill",
+  "tool:ToolSearch",
+  "tool:Workflow",
+  "tool:Write"
+ ],
+ "transports": [
+  "sse"
+ ]
+}
