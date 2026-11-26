@@ -204,6 +204,30 @@ Sorted by how many open entries rest on each, through `needs`. "both" means A an
 | `work-on-top-of-libkrun` | engine | 6 | B only | its own answer; no second opinion |  |  |
 | `x86-linux-computers` | computers | 6 | B only | its own answer; no second opinion |  |  |
 
+## Refreshed 26 November: drafts #413 to #433
+
+Read on 26 November at about 16:00 Paris. None of them changes the recommendation (A, in #381's
+order) or the counts above, since none adds a need to a first-build feature. What they change for
+the first build:
+
+| Draft | Found | For the first build |
+|---|---|---|
+| #415 | Mac kit tests 40 to 49 for what the drafts of 25 November left to a Mac | Step 2 gains 40 to 43 and 47 (#378's relays over vsock, #380's gvproxy, `127.0.0.1` through gvproxy, libkrun); step 4 gains 46 and 48; step 5 gains 45. Run `blocking`, then `step2`, as before |
+| #417 | #395's seven boundary conflicts settled, each shown failing first | `secret-placeholder` gets new sentences (with #378's proxy a program that ignores it reaches nothing); `enforcing-and-recording` unchanged: a limit, then refuse |
+| #418 | Codex read in full: its `exec` scripts report what they ran if a setting is on | New `code-mode-calls-reported`: main's set-up turns Codex's report on; A needs it for #399's attribution of Codex's changes |
+| #421 | The morning screen assembled on #371's night, with a real TLS refusal | Edits `main-set-up-for-agents` and `runs-outlive-the-terminal`, both in A |
+| #425 | TLS refusals recorded per program at #395's boundary, one alert and one morning line | Notes on `ending-the-encrypted-connection`, `program-that-cannot-be-read`, `alert-only-on-a-change` |
+| #427 | Claude Code's own report checked against the connections Silo sees | `program-reports-its-own-spend` now "checked against what the boundary sees" |
+| #414 | Every prototype that keeps state audited for Mac durability | `what-a-budget-promises`: a call cut off by a restart counts at its reserve |
+| #429 | A size check misses 64% of corrupted LZFSE blocks and 69% of LZVN | Challenges #390 and #370: decode with Apple's `libcompression` on the Mac and judge the reader against what macOS reads; a hash per checkpoint block as a new choice in `going-back` |
+| #431 | One disk budget for checkpoints, the record, recordings and the bin | Notes on `low-disk`, `thinning-checkpoints`, `record-size-limit`: half of what is free, keeping 50 GiB |
+| #433 | Persistence an agent leaves, found by the record and undone by put-back | New `putting-back-a-new-path` and `restart-after-a-put-back`, for when `put-back` is in A (#382) |
+
+Later builds only: #413 (`summary-reader-model`), #419 (a team budget in a Git branch), #420 (the
+ask on a phone), #422 (`secret-shaped-values`), #423 (exposed, rescored), #424
+(`uploads-to-your-places`), #426 (forked conversations), #428 (`google-plan-counted-unread`), #430
+(gvproxy's upstream series), #432 (the shared host's leaks).
+
 ## What was not checked
 
 - The counts follow `needs` only. An entry a draft says the first build needs but that no feature
