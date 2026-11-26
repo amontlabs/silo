@@ -36,3 +36,25 @@ A path is read from the checkpoint by the same reader that compares checkpoints
 An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
 
 #378, section 3: #370's put-back writes with `sudo tar -x` and `mv` through paths in a folder an agent may control. An agent that swaps a folder for a link to `/etc/sudoers.d` between the listing and the copy makes root write there. Recommended: a small program in main does the put-back through open folders (`openat` with no-follow), unlocks files the agent locked, and moves a FIFO or socket aside without opening it.
+
+## Put back with a preview, prototyped
+
+An agent's part, 25 November 2026, from [put back with a preview](../../../research/2026-11-25-put-back-and-chain/README.md). #370 step 5 was built for any change, not only
+deletions, on #399's night, and tested.
+
+- #370 says a write made between the preview and the swap is lost from main but kept in the
+  checkpoint saved before the put-back. It is not kept. The write comes after that save, so no
+  checkpoint holds it. A test shows it.
+- Two changes close the gap. The confirm is bound to what the preview showed: if a shown path
+  changes before the swap, Silo stops, keeps its save, and shows you again. A checkpoint taken
+  just after the swap, while the staging folder still holds what was replaced, covers the last
+  instant between that check and the swap.
+- The swap should be one exchange of names (`RENAME_SWAP` on macOS, as #370's restore already
+  does). Two renames left the path missing for a program reading it, in 612 to 1,460 reads per
+  run. The exchange never did.
+- The preview lists what a put-back undoes, grouped by who made it, by `author-from-traffic`'s
+  rules, or "not known; while … ran". For a folder two agents worked in, this is where you see you
+  would undo the other agent's work. It is the same list `putting-back-a-runs-paths` shows.
+
+Proposed for the answer, after "so nothing is lost": "If a path changes after you saw what it
+replaces, Silo stops and shows you again." Without the check, "nothing is lost" is not true.

@@ -65,3 +65,14 @@ the tool call's input (it sent the content, names the path or a folder above it,
 known to write it), is an opinion of the same kind as the row "tool call → the processes it
 started". On six nights of #371's prototype it never named a wrong conversation where the probe
 named one. The rule is open in `author-from-traffic`. This adds a row; it changes none.
+
+## The chain under option A, drawn
+
+An agent's part, 25 November 2026, from [put back with a preview](../../../research/2026-11-25-put-back-and-chain/README.md). `chain.py` draws the chain from a file change
+straight to a tool call, then the turn, what you asked and who else uses the path. For the 400
+deleted fixtures it reaches `rm -rf ~/work/shared-fixtures` and "Don't touch anything outside the
+repo". It draws a link only on the rules of `author-from-traffic`'s answer. On a weaker rule it
+stops at the file and lists the tool calls open between the two checkpoints, which for `~/.bashrc`
+shows codex's `curl … | bash`. On the night, 489 links were drawn and none disagreed with the
+probe. "Who else uses it" should resolve the paths a file names: #371 matched the folder's name,
+and found client-b's `'../shared-fixtures'` as a user of `~/work/app/test/fixtures`.

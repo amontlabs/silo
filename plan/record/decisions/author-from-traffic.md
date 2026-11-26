@@ -51,3 +51,11 @@ Weaker signs were measured and left out of the answer. The tool result names the
 installer prints "bun was installed to ~/.bun/bin/bun"): right once, but whatever runs in the
 computer writes that text. One conversation had a tool call open: right on a fork, where only one
 agent runs, and the same as "while it ran" in main.
+
+## A second run of the same night
+
+An agent's part, 25 November 2026, from [put back with a preview](../../../research/2026-11-25-put-back-and-chain/README.md). On a second run of #399's `one-main` night, the
+rules in the answer again named no wrong conversation. The two the answer leaves out did: one
+Claude Code conversation running ("own files") took two files of another that had not yet made
+its first model call, and "only one tool call open" took one connection. #399's own run had none
+wrong. Leaving them out is right, because they depend on timing.

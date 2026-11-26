@@ -1,0 +1,90 @@
+$ silo put-back main:f193 ~/work/shared-fixtures
+~/work/shared-fixtures as it was at 14:16:24 (main@ck9): 400 files, 171.0 KB
+  comes back     400 files deleted since
+  by
+    ◇ claude #2 (main:c2), «rm -rf ~/work/shared-fixtures && echo removed»
+      deleted  ~/work/shared-fixtures/set-0/case-000.json
+      deleted  ~/work/shared-fixtures/set-0/case-001.json
+      deleted  ~/work/shared-fixtures/set-0/case-002.json
+      deleted  ~/work/shared-fixtures/set-0/case-003.json
+      … 396 more deleted
+  171.0 KB to copy
+
+Nothing in main is replaced.
+Main keeps running. Silo saves a checkpoint of now first, kept until you remove it.
+If any of these paths changes before the copy is in place, Silo stops and shows you again.
+Put back? [y/N] (no terminal: nothing done; --yes to go on)
+
+$ silo put-back ck2 ~/.gitconfig ~/.bashrc
+~/.gitconfig as it was at 14:16:12 (main@ck2): 1 file, 73 B
+  undoes           1 change made since, which leave main
+  by
+    ◇ claude #2 (main:c2), «git config --global core.fsmonitor true && git co…»
+      changed  ~/.gitconfig
+  73 B to copy
+~/.bashrc as it was at 14:16:12 (main@ck2): 1 file, 30 B
+  undoes           1 change made since, which leave main
+  by
+    ◇ not known from the traffic; while claude #2 (main:c2), codex #1 (main:c3) ran
+      changed  ~/.bashrc
+  30 B to copy
+
+What these changes made goes to the checkpoint Silo saves first: `silo look <that checkpoint> <path>` shows it.
+Main keeps running. Silo saves a checkpoint of now first, kept until you remove it.
+If any of these paths changes before the copy is in place, Silo stops and shows you again.
+Put back? [y/N] (no terminal: nothing done; --yes to go on)
+
+$ silo put-back ck2 ~/work/app
+~/work/app as it was at 14:16:12 (main@ck2): 106 files, 36.4 KB
+  comes back      30 files deleted since
+  undoes          16 changes made since, which leave main
+  by
+    ◇ claude #2 (main:c2), «cd ~/work/app && git add -A test && git commit -q…»
+      changed  ~/work/app/.git/COMMIT_EDITMSG
+      changed  ~/work/app/.git/index
+      changed  ~/work/app/.git/logs/HEAD
+      changed  ~/work/app/.git/logs/refs/heads/main
+      … 4 more created, 1 more changed
+    ◇ claude #1 (main:c1), «cd ~/work/app && git add -A src && git commit -qm…»
+      created  ~/work/app/.git/objects/1e/dd187a12c0e080f3dc9ae0cf56ea47287201a1
+      created  ~/work/app/.git/objects/48/0ebaf6d36d89becf1b5cb465f778614f88a5b8
+      created  ~/work/app/.git/objects/dc/6fef161a9287cde2173625626fc5964b5a95f5
+      created  ~/work/app/.git/objects/e0/4ef2ce3c59f0d855127ce9f9be75975fe99980
+      … 1 more created
+    ◇ not known from the traffic; while claude #1 (main:c1), codex #1 (main:c3), claude #3 (main:c4) ran
+      created  ~/work/app/data/sessions.json
+    ◇ claude #1 (main:c1), «~/work/app/src/auth/store.js»
+      changed  ~/work/app/src/auth/store.js
+    ◇ claude #2 (main:c2), «cd ~/work/app && grep -rl 'old-' test/ --include=…»
+      deleted  ~/work/app/test/fixtures/old-00.json
+      deleted  ~/work/app/test/fixtures/old-01.json
+      deleted  ~/work/app/test/fixtures/old-02.json
+      deleted  ~/work/app/test/fixtures/old-03.json
+      … 26 more deleted
+  unchanged       70
+  5.1 KB to copy
+
+What these changes made goes to the checkpoint Silo saves first: `silo look <that checkpoint> <path>` shows it.
+Main keeps running. Silo saves a checkpoint of now first, kept until you remove it.
+If any of these paths changes before the copy is in place, Silo stops and shows you again.
+Put back? [y/N] (no terminal: nothing done; --yes to go on)
+
+$ silo put-back main:f193 ~/work/shared-fixtures --yes
+~/work/shared-fixtures as it was at 14:16:24 (main@ck9): 400 files, 171.0 KB
+  comes back     400 files deleted since
+  by
+    ◇ claude #2 (main:c2), «rm -rf ~/work/shared-fixtures && echo removed»
+      deleted  ~/work/shared-fixtures/set-0/case-000.json
+      deleted  ~/work/shared-fixtures/set-0/case-001.json
+      deleted  ~/work/shared-fixtures/set-0/case-002.json
+      deleted  ~/work/shared-fixtures/set-0/case-003.json
+      … 396 more deleted
+  171.0 KB to copy
+
+Nothing in main is replaced.
+Main keeps running. Silo saves a checkpoint of now first, kept until you remove it.
+If any of these paths changes before the copy is in place, Silo stops and shows you again.
+  checkpoint main@ck24 saved, kept until you remove it
+  checkpoint main@ck25 holds what the copy replaced
+  copied 400 files, 171.0 KB
+Put back ~/work/shared-fixtures from 14:16:24.
