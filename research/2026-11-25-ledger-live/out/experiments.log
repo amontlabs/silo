@@ -1,1 +1,7 @@
 6 runs
+one boundary, typical-cut, a batch seed 2: billed $12.3536 (-17.64%), cut $0.0, waits>10s 0
+one boundary, typical-cut, a batch seed 1: billed $12.4883 (-16.74%), cut $0.0, waits>10s 0
+central 30 ms, typical-cut, a batch seed 1: billed $12.4803 (-16.8%), cut $0.0, waits>10s 0
+leases 30 ms, typical-cut, a batch seed 1: billed $12.4037 (-17.31%), cut $0.0, waits>10s 0
+central 30 ms, typical-cut, a batch seed 2: billed $12.4996 (-16.67%), cut $0.0, waits>10s 0
+leases 30 ms, typical-cut, a batch seed 2: billed $12.331 (-17.79%), cut $0.0, waits>10s 0

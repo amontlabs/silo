@@ -137,8 +137,9 @@ def main():
             lines.append(f"| {n}{b} | {L['n']} | {L['spent']:.3f} | {pct(L['worst'])} | {pct(L['under'])} | ${L['cut']:.2f} | {L['calls']:.0f} | "
                          f"{L['w10']:.1f} | {L['wmax']:.1f} | {L['msgs']:.2f} | {early} | {sim_cells} |")
         lines.append("")
-    cerr = max((abs(r["count_err_pct"] or 0) for r in live), default=0)
-    lines.append(f"Largest gap between what the boundaries counted and what the provider billed, in any run: {cerr:.2f}%.\n")
+    cerr = max((abs(r["count_err_pct"] or 0) for r in live if "batch" not in r["name"]), default=0)
+    lines.append(f"Largest gap between what the boundaries counted and what the provider billed, in any run without a batch: {cerr:.2f}%. "
+                 "In the batch runs the Macs' call totals leave the batch out; each batch was settled at what the provider billed for it, to the cent.\n")
     git = load(os.path.join(OUT, "git.jsonl"))
     if git:
         lines.append("### Leases through a Git branch\n")
