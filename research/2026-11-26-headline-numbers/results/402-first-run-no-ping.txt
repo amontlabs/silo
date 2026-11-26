@@ -1,0 +1,65 @@
+# way: nat
+way-in yes
+way-in-wait-s 1.0
+copy-2MB intact 0.26s
+host-loopback-tcp blocked
+host-own-address-tcp reached
+lan-neighbour-tcp reached
+lan-neighbour-udp reached
+ports-on 192.168.64.1 2024,7778
+dns-exfil-seen-by nobody
+
+# way: gvproxy-closed
+way-in yes
+way-in-wait-s 1.7
+copy-2MB intact 0.24s
+host-loopback-tcp blocked
+host-own-address-tcp blocked
+lan-neighbour-tcp blocked
+lan-neighbour-udp blocked
+ports-on 192.168.127.1 53
+ports-on 192.168.127.254 none
+dns-exfil-seen-by nobody
+
+# way: one-connection
+Cannot find device "tap0"
+Cannot find device "tap0"
+arping: libnet_init(LIBNET_LINK, tap0): libnet_check_iface() ioctl: No such device
+way-in no
+way-in-wait-s 17.1
+copy-2MB broken 0.01s
+
+host-loopback-tcp blocked
+host-own-address-tcp blocked
+lan-neighbour-tcp blocked
+lan-neighbour-udp blocked
+ports-on 169.254.81.16 none
+ports-on 10.254.0.1 none
+dns-exfil-seen-by nobody
+frames-dropped 
+
+# way: relay
+way-in yes
+way-in-wait-s 1.2
+copy-2MB intact 0.15s
+
+host-loopback-tcp blocked
+host-own-address-tcp blocked
+lan-neighbour-tcp blocked
+lan-neighbour-udp blocked
+ports-on 10.254.0.1 none
+dns-exfil-seen-by nobody
+frames-dropped arp who-has router, answered x2; tcp connect 10.254.0.1 ports 1,2,3,4,5,... x65535; tcp connect 10.77.0.2 ports 7778,... x3; tcp connect 192.0.2.2 ports 7778,... x3; tcp connect 192.168.127.254 ports 7777,... x3; udp 10.77.0.2 ports 7781 x1
+
+# way: serial
+way-in yes
+way-in-wait-s 0.1
+copy-2MB intact 38.01s
+
+host-loopback-tcp blocked
+host-own-address-tcp blocked
+lan-neighbour-tcp blocked
+lan-neighbour-udp blocked
+ports-on none no router
+dns-exfil-seen-by nobody
+

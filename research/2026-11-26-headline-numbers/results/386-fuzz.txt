@@ -1,0 +1,31 @@
+{"runs":300000,"seed":44,"unchanged":876,"found":299124,"missed":0,"seconds":229.5}
+    54880  segments are missing or out of order
+   114813  a line does not match its CRC
+    13023  the segment does not start with SILOREC
+    29224  a frame runs past the end of the segment
+    25139  a frame says it is longer than any line may be
+    10126  the line is not one JSON object
+    20707  the line before it was changed, removed or moved
+     7271  the segment's header does not match its checksum
+      179  the line has no kind
+      583  the segment does not follow the last line of the segment before
+    10261  the line is not the next line of the chain
+     3562  the line is not UTF-8
+     1734  the last line is unfinished: the recorder stopped while writing it, or it was changed
+     3532  the segment is shorter than its header
+      321  the line's kind is not one of the nine
+      884  the line's time is not UTC in nanoseconds
+      926  the record ends before the head's line: lines were removed at the end
+      413  the line names no computer
+      435  a frame header is cut short
+      103  the line does not say what it is
+      242  a line of the record is a fact or a report
+      123  the line names another computer
+       12  a control fact's author is not one Silo knows
+      279  the line has no source
+      106  the segment is of a format version this verify does not read
+       97  the line's source has no id
+       40  the head's line was changed
+       52  the segment does not start at the line after the last one
+       30  a control fact has no author
+       27  a control fact made by you names no person

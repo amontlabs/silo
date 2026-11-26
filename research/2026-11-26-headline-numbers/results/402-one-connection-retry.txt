@@ -1,0 +1,14 @@
+# way: one-connection
+way-in yes
+way-in-wait-s 3.1
+copy-2MB intact 12.06s
+
+host-loopback-tcp blocked
+host-own-address-tcp blocked
+lan-neighbour-tcp blocked
+lan-neighbour-udp blocked
+ports-on 169.254.81.16 none
+ports-on 10.254.0.1 none
+dns-exfil-seen-by nobody
+frames-dropped arp who-has 169.254.77.7 x2; for the way in x465; tcp connect 169.254.81.16 ports 1,2,3,4,5,... x65535
+
