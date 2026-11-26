@@ -26,3 +26,14 @@ The options:
 
 Recommended: a link per computer. It is what a network stack per computer (gvproxy, or Silo's own)
 gives already, so it costs nothing on a Mac and keeps the host from needing a bridge.
+
+## A link's name reused, measured
+
+An agent's part, 26 November 2026 ([the research](../../../research/2026-11-25-shared-host-leaks/README.md)). Ana's computer stopped and
+its link went; Ben's new computer got a link of the same name. Listeners bound to links, opened
+with each link, did not answer it: the kernel binds a listener to a link's index, not its name. A
+server restarted that looked each connection's link up by name, in a table not yet rewritten,
+gave Ben Ana's token. Rewriting the table with the link closed it. So the answer now says the
+owner is written with the link and removed with it. A network stack per computer gives this
+already: its process lives and dies with its computer. Cost at 200 computers: 22 ms and 226 KiB of
+kernel memory per link, 15.7 MiB for a server with 200 listeners, a token in 63 µs at the median.

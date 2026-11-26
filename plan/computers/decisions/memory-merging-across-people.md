@@ -23,8 +23,22 @@ The options:
   here.
 - On for the whole host. It costs what the case above shows: one person can test what another's
   computer holds in memory.
-- On only between one person's own computers. KSM has no setting for that that we found: it merges
-  any mergeable pages of any process.
+- Shared only between one person's own computers. KSM cannot do it: it merges any mergeable
+  page of any process, and Linux 6.18 has no setting to hold it to a group. It can be had by
+  construction instead, once memory snapshots exist (`forks-of-running-linux`): a person's forks
+  map that person's snapshot copy-on-write and share every page they have not written, with
+  nobody else's. See the measurement below.
 
 Recommended: off. `idle-computer-gives-memory-back` already returns free memory to the host;
 what KSM adds beyond it is shared content, which is the part that leaks.
+
+## Shared per person, measured
+
+An agent's part, 26 November 2026 ([the research](../../../research/2026-11-25-shared-host-leaks/README.md)). With KSM off, Ana's forks
+mapped her snapshot copy-on-write and counted its pages once; Ben, probing with a snapshot of his
+own, found nothing: every write cost the same, whichever page Ana held. A Debian 12 guest kept
+263 MiB of non-zero memory equal to its snapshot after 10 idle minutes, and 117 MiB while busy.
+That is about what KSM freed per idle computer (200 MiB), without the leak. It needs memory
+snapshots, which a Linux fork does not have yet; until then, off costs that memory. Forks of one
+snapshot also share its random state and must reseed when they learn they are copies (Linux's VM
+generation ID), within one person.

@@ -1,0 +1,17 @@
+== 1. host-out-of-reach: a link per computer, no host firewall
+Ana asks the metadata server:            token-of-Ana
+Ben asks the metadata server:            token-of-Ben
+Ben reaches the dev server, at his link: reached
+Ben reaches it at the host's own address: reached
+Ben reaches Ana's computer, host forwarding on (as Docker sets it): reached
+-- one nft table: from a link in group 7, only the boundary's ports at 169.254.169.254
+Ana asks the metadata server:            token-of-Ana
+Ben asks the metadata server:            token-of-Ben
+Ben reaches the dev server, at his link: not reached (3 tries)
+Ben reaches it at the host's own address: not reached (3 tries)
+Ben reaches Ana's computer, host forwarding on (as Docker sets it): not reached (3 tries)
+== 2. A stopped computer's link name given to a new computer of Ben's
+Ana's computer stopped; link h1 gone:    gone
+Ben's new computer on a new h1 asks, the server's listeners held by link index: no answer
+the same, a server restarted that keys its table by link name, the table not yet rewritten: token-of-Ana
+the engine rewrites the table with the link, then the listener opens: token-of-Ben
