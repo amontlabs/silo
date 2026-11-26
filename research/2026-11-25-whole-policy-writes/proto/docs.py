@@ -22,7 +22,7 @@ def hget(headers, name):
 
 def split(req):
     u = urlsplit(req["target"])
-    return u.path, parse_qs(u.query)
+    return u.path, parse_qs(u.query, keep_blank_values=True)
 
 
 def body_json(req):

@@ -1,0 +1,3323 @@
+[
+ {
+  "id": "g-file-owner",
+  "label": "hold:exposed",
+  "steps": [
+   {
+    "step": "gcloud projects get-iam-policy proj1 --format json > /opt/wpw/work/p.json",
+    "exit": 0,
+    "seconds": 1.15,
+    "out": ""
+   },
+   {
+    "step": "('edit', '/opt/wpw/work/p.json')",
+    "error": "JSONDecodeError('Expecting value: line 1 column 1 (char 0)')"
+   }
+  ],
+  "writes": [],
+  "log": [
+   {
+    "by": "computer",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:getIamPolicy?alt=json",
+    "status": 200
+   }
+  ],
+  "last": null,
+  "state_after": {}
+ },
+ {
+  "id": "g-file-viewer",
+  "label": "pass",
+  "steps": [
+   {
+    "step": "gcloud projects get-iam-policy proj1 --format json > /opt/wpw/work/p.json",
+    "exit": 0,
+    "seconds": 0.61,
+    "out": ""
+   },
+   {
+    "step": "('edit', '/opt/wpw/work/p.json')",
+    "error": "JSONDecodeError('Expecting value: line 1 column 1 (char 0)')"
+   }
+  ],
+  "writes": [],
+  "log": [
+   {
+    "by": "computer",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:getIamPolicy?alt=json",
+    "status": 200
+   }
+  ],
+  "last": null,
+  "state_after": {}
+ },
+ {
+  "id": "g-file-audit-off",
+  "label": "hold:hidden",
+  "steps": [
+   {
+    "step": "gcloud projects get-iam-policy proj1 --format json > /opt/wpw/work/p.json",
+    "exit": 0,
+    "seconds": 0.52,
+    "out": ""
+   },
+   {
+    "step": "('edit', '/opt/wpw/work/p.json')",
+    "error": "JSONDecodeError('Expecting value: line 1 column 1 (char 0)')"
+   }
+  ],
+  "writes": [],
+  "log": [
+   {
+    "by": "computer",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:getIamPolicy?alt=json",
+    "status": 200
+   }
+  ],
+  "last": null,
+  "state_after": {}
+ },
+ {
+  "id": "a-site-statement",
+  "label": "pass",
+  "steps": [
+   {
+    "step": "aws s3api get-bucket-policy --bucket site",
+    "exit": 0,
+    "seconds": 2.25,
+    "out": "{\n    \"Policy\": \"{\\\"Version\\\": \\\"2012-10-17\\\", \\\"Statement\\\": [{\\\"Effect\\\": \\\"Allow\\\", \\\"Action\\\": \\\"s3:GetObject\\\", \\\"Resource\\\": \\\"arn:aws:s3:::site/*\\\", \\\"Principal\\\": \\\"*\\\"}]}\"\n}\n"
+   },
+   {
+    "step": "aws s3api put-bucket-policy --bucket site --policy '{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::site/*\", \"Principal\": \"*\"}, {\"Effect\": \"Allow\", \"Action\": \"s3:PutObject\", \"Resource\": \"arn:aws:s3:::site/*\", \"Principal\": {\"AWS\": \"arn:a",
+    "exit": 0,
+    "seconds": 0.48,
+    "out": ""
+   }
+  ],
+  "writes": [
+   {
+    "request": {
+     "by": "computer",
+     "method": "PUT",
+     "host": "site.s3.amazonaws.com",
+     "target": "/?policy",
+     "status": 204
+    },
+    "body": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::site/*\", \"Principal\": \"*\"}, {\"Effect\": \"Allow\", \"Action\": \"s3:PutObject\", \"Resource\": \"arn:aws:s3:::site/*\", \"Principal\": {\"AWS\": \"arn:aws:iam::111122223333:role/app-role\"}}]}",
+    "decisions": {
+     "key": {
+      "kind": "aws-resource",
+      "key": [
+       "aws",
+       "s3",
+       "site"
+      ],
+      "A": {
+       "hold": true,
+       "why": [
+        "gives everyone access to the S3 bucket (not in the request) through its policy"
+       ],
+       "reads": 0
+      },
+      "B": {
+       "hold": true,
+       "why": [
+        "holds public grant AWS:* s3:getobject on arn:aws:s3:::site/*"
+       ],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": true,
+       "why": [
+        "adds powerful grant AWS:arn:aws:iam::111122223333:role/app-role s3:putobject on arn:aws:s3:::site/*"
+       ],
+       "reads": 0,
+       "before": "relayed"
+      },
+      "E": {
+       "hold": true,
+       "why": [
+        "adds powerful grant AWS:arn:aws:iam::111122223333:role/app-role s3:putobject on arn:aws:s3:::site/*"
+       ],
+       "reads": 1,
+       "before": "Silo's read"
+      },
+      "F": {
+       "hold": true,
+       "why": [
+        "adds powerful grant AWS:arn:aws:iam::111122223333:role/app-role s3:putobject on arn:aws:s3:::site/*"
+       ],
+       "reads": 1,
+       "before": "Silo's read"
+      }
+     },
+     "nokey": {
+      "kind": "aws-resource",
+      "key": [
+       "aws",
+       "s3",
+       "site"
+      ],
+      "A": {
+       "hold": true,
+       "why": [
+        "gives everyone access to the S3 bucket (not in the request) through its policy"
+       ],
+       "reads": 0
+      },
+      "B": {
+       "hold": true,
+       "why": [
+        "holds public grant AWS:* s3:getobject on arn:aws:s3:::site/*"
+       ],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": true,
+       "why": [
+        "adds powerful grant AWS:arn:aws:iam::111122223333:role/app-role s3:putobject on arn:aws:s3:::site/*"
+       ],
+       "reads": 0,
+       "before": "relayed"
+      },
+      "E": {
+       "hold": true,
+       "why": [
+        "unknown: Silo cannot sign a read without the key"
+       ],
+       "reads": 0
+      },
+      "F": {
+       "hold": true,
+       "why": [
+        "holds public grant AWS:* s3:getobject on arn:aws:s3:::site/*"
+       ],
+       "reads": 0,
+       "before": "none: as B (Silo cannot sign a read without the key)"
+      }
+     }
+    },
+    "held": false
+   }
+  ],
+  "log": [
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "site.s3.amazonaws.com",
+    "target": "/?policy",
+    "status": 200
+   },
+   {
+    "by": "silo",
+    "method": "GET",
+    "host": "site.s3.amazonaws.com",
+    "target": "/?policy",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "PUT",
+    "host": "site.s3.amazonaws.com",
+    "target": "/?policy",
+    "status": 204
+   }
+  ],
+  "last": {
+   "request": {
+    "by": "computer",
+    "method": "PUT",
+    "host": "site.s3.amazonaws.com",
+    "target": "/?policy",
+    "status": 204
+   },
+   "body": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::site/*\", \"Principal\": \"*\"}, {\"Effect\": \"Allow\", \"Action\": \"s3:PutObject\", \"Resource\": \"arn:aws:s3:::site/*\", \"Principal\": {\"AWS\": \"arn:aws:iam::111122223333:role/app-role\"}}]}",
+   "decisions": {
+    "key": {
+     "kind": "aws-resource",
+     "key": [
+      "aws",
+      "s3",
+      "site"
+     ],
+     "A": {
+      "hold": true,
+      "why": [
+       "gives everyone access to the S3 bucket (not in the request) through its policy"
+      ],
+      "reads": 0
+     },
+     "B": {
+      "hold": true,
+      "why": [
+       "holds public grant AWS:* s3:getobject on arn:aws:s3:::site/*"
+      ],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": true,
+      "why": [
+       "adds powerful grant AWS:arn:aws:iam::111122223333:role/app-role s3:putobject on arn:aws:s3:::site/*"
+      ],
+      "reads": 0,
+      "before": "relayed"
+     },
+     "E": {
+      "hold": true,
+      "why": [
+       "adds powerful grant AWS:arn:aws:iam::111122223333:role/app-role s3:putobject on arn:aws:s3:::site/*"
+      ],
+      "reads": 1,
+      "before": "Silo's read"
+     },
+     "F": {
+      "hold": true,
+      "why": [
+       "adds powerful grant AWS:arn:aws:iam::111122223333:role/app-role s3:putobject on arn:aws:s3:::site/*"
+      ],
+      "reads": 1,
+      "before": "Silo's read"
+     }
+    },
+    "nokey": {
+     "kind": "aws-resource",
+     "key": [
+      "aws",
+      "s3",
+      "site"
+     ],
+     "A": {
+      "hold": true,
+      "why": [
+       "gives everyone access to the S3 bucket (not in the request) through its policy"
+      ],
+      "reads": 0
+     },
+     "B": {
+      "hold": true,
+      "why": [
+       "holds public grant AWS:* s3:getobject on arn:aws:s3:::site/*"
+      ],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": true,
+      "why": [
+       "adds powerful grant AWS:arn:aws:iam::111122223333:role/app-role s3:putobject on arn:aws:s3:::site/*"
+      ],
+      "reads": 0,
+      "before": "relayed"
+     },
+     "E": {
+      "hold": true,
+      "why": [
+       "unknown: Silo cannot sign a read without the key"
+      ],
+      "reads": 0
+     },
+     "F": {
+      "hold": true,
+      "why": [
+       "holds public grant AWS:* s3:getobject on arn:aws:s3:::site/*"
+      ],
+      "reads": 0,
+      "before": "none: as B (Silo cannot sign a read without the key)"
+     }
+    }
+   },
+   "held": false
+  },
+  "state_after": {
+   "aws|trust|app-role": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Principal\": {\"Service\": \"lambda.amazonaws.com\"}, \"Action\": \"sts:AssumeRole\"}]}",
+   "aws|inline|role|app-role|app": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::b1/*\"}]}",
+   "aws|managed|arn:aws:iam::111122223333:policy/deploy": {
+    "default": "v1",
+    "versions": {
+     "v1": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:PutObject\", \"Resource\": \"arn:aws:s3:::b1/*\"}]}"
+    }
+   },
+   "aws|s3|b1": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::b1/*\", \"Principal\": {\"AWS\": \"arn:aws:iam::111122223333:role/app-role\"}}]}",
+   "aws|s3|site": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::site/*\", \"Principal\": \"*\"}, {\"Effect\": \"Allow\", \"Action\": \"s3:PutObject\", \"Resource\": \"arn:aws:s3:::site/*\", \"Principal\": {\"AWS\": \"arn:aws:iam::111122223333:role/app-role\"}}]}",
+   "aws|kms|k1": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"kms:*\", \"Resource\": \"*\", \"Principal\": {\"AWS\": \"arn:aws:iam::111122223333:root\"}}]}"
+  }
+ },
+ {
+  "id": "a-bucket-outside",
+  "label": "hold:exposed",
+  "steps": [
+   {
+    "step": "aws s3api put-bucket-policy --bucket b1 --policy '{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::b1/*\", \"Principal\": {\"AWS\": \"arn:aws:iam::111122223333:role/app-role\"}}, {\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aw",
+    "exit": 0,
+    "seconds": 0.36,
+    "out": ""
+   }
+  ],
+  "writes": [
+   {
+    "request": {
+     "by": "computer",
+     "method": "PUT",
+     "host": "s3.amazonaws.com",
+     "target": "/b1?policy",
+     "status": 200
+    },
+    "body": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::b1/*\", \"Principal\": {\"AWS\": \"arn:aws:iam::111122223333:role/app-role\"}}, {\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::b1/*\", \"Principal\": {\"AWS\": \"arn:aws:iam::444455556666:root\"}}]}",
+    "decisions": {
+     "key": {
+      "kind": "aws-resource",
+      "key": [
+       "aws",
+       "s3",
+       "b1"
+      ],
+      "A": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "B": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": false,
+       "why": [],
+       "reads": 0,
+       "before": "none: as B"
+      },
+      "E": {
+       "hold": true,
+       "why": [
+        "adds powerful grant AWS:arn:aws:iam::444455556666:root s3:getobject on arn:aws:s3:::b1/*"
+       ],
+       "reads": 1,
+       "before": "Silo's read"
+      },
+      "F": {
+       "hold": true,
+       "why": [
+        "adds powerful grant AWS:arn:aws:iam::444455556666:root s3:getobject on arn:aws:s3:::b1/*"
+       ],
+       "reads": 1,
+       "before": "Silo's read"
+      }
+     },
+     "nokey": {
+      "kind": "aws-resource",
+      "key": [
+       "aws",
+       "s3",
+       "b1"
+      ],
+      "A": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "B": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": false,
+       "why": [],
+       "reads": 0,
+       "before": "none: as B"
+      },
+      "E": {
+       "hold": true,
+       "why": [
+        "unknown: Silo cannot sign a read without the key"
+       ],
+       "reads": 0
+      },
+      "F": {
+       "hold": false,
+       "why": [],
+       "reads": 0,
+       "before": "none: as B (Silo cannot sign a read without the key)"
+      }
+     }
+    },
+    "held": false
+   }
+  ],
+  "log": [
+   {
+    "by": "silo",
+    "method": "GET",
+    "host": "b1.s3.amazonaws.com",
+    "target": "/?policy",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "PUT",
+    "host": "s3.amazonaws.com",
+    "target": "/b1?policy",
+    "status": 200
+   }
+  ],
+  "last": {
+   "request": {
+    "by": "computer",
+    "method": "PUT",
+    "host": "s3.amazonaws.com",
+    "target": "/b1?policy",
+    "status": 200
+   },
+   "body": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::b1/*\", \"Principal\": {\"AWS\": \"arn:aws:iam::111122223333:role/app-role\"}}, {\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::b1/*\", \"Principal\": {\"AWS\": \"arn:aws:iam::444455556666:root\"}}]}",
+   "decisions": {
+    "key": {
+     "kind": "aws-resource",
+     "key": [
+      "aws",
+      "s3",
+      "b1"
+     ],
+     "A": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "B": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": false,
+      "why": [],
+      "reads": 0,
+      "before": "none: as B"
+     },
+     "E": {
+      "hold": true,
+      "why": [
+       "adds powerful grant AWS:arn:aws:iam::444455556666:root s3:getobject on arn:aws:s3:::b1/*"
+      ],
+      "reads": 1,
+      "before": "Silo's read"
+     },
+     "F": {
+      "hold": true,
+      "why": [
+       "adds powerful grant AWS:arn:aws:iam::444455556666:root s3:getobject on arn:aws:s3:::b1/*"
+      ],
+      "reads": 1,
+      "before": "Silo's read"
+     }
+    },
+    "nokey": {
+     "kind": "aws-resource",
+     "key": [
+      "aws",
+      "s3",
+      "b1"
+     ],
+     "A": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "B": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": false,
+      "why": [],
+      "reads": 0,
+      "before": "none: as B"
+     },
+     "E": {
+      "hold": true,
+      "why": [
+       "unknown: Silo cannot sign a read without the key"
+      ],
+      "reads": 0
+     },
+     "F": {
+      "hold": false,
+      "why": [],
+      "reads": 0,
+      "before": "none: as B (Silo cannot sign a read without the key)"
+     }
+    }
+   },
+   "held": false
+  },
+  "state_after": {
+   "aws|trust|app-role": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Principal\": {\"Service\": \"lambda.amazonaws.com\"}, \"Action\": \"sts:AssumeRole\"}]}",
+   "aws|inline|role|app-role|app": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::b1/*\"}]}",
+   "aws|managed|arn:aws:iam::111122223333:policy/deploy": {
+    "default": "v1",
+    "versions": {
+     "v1": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:PutObject\", \"Resource\": \"arn:aws:s3:::b1/*\"}]}"
+    }
+   },
+   "aws|s3|b1": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::b1/*\", \"Principal\": {\"AWS\": \"arn:aws:iam::111122223333:role/app-role\"}}]}",
+   "aws|s3|site": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::site/*\", \"Principal\": \"*\"}]}",
+   "aws|kms|k1": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"kms:*\", \"Resource\": \"*\", \"Principal\": {\"AWS\": \"arn:aws:iam::111122223333:root\"}}]}"
+  }
+ },
+ {
+  "id": "a-bucket-public",
+  "label": "hold:exposed",
+  "steps": [
+   {
+    "step": "aws s3api put-bucket-policy --bucket b1 --policy '{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::b1/*\", \"Principal\": \"*\"}]}'",
+    "exit": 0,
+    "seconds": 0.42,
+    "out": ""
+   }
+  ],
+  "writes": [
+   {
+    "request": {
+     "by": "computer",
+     "method": "PUT",
+     "host": "s3.amazonaws.com",
+     "target": "/b1?policy",
+     "status": 200
+    },
+    "body": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::b1/*\", \"Principal\": \"*\"}]}",
+    "decisions": {
+     "key": {
+      "kind": "aws-resource",
+      "key": [
+       "aws",
+       "s3",
+       "b1"
+      ],
+      "A": {
+       "hold": true,
+       "why": [
+        "gives everyone access to the S3 bucket (not in the request) through its policy"
+       ],
+       "reads": 0
+      },
+      "B": {
+       "hold": true,
+       "why": [
+        "holds public grant AWS:* s3:getobject on arn:aws:s3:::b1/*"
+       ],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": true,
+       "why": [
+        "holds public grant AWS:* s3:getobject on arn:aws:s3:::b1/*"
+       ],
+       "reads": 0,
+       "before": "none: as B"
+      },
+      "E": {
+       "hold": true,
+       "why": [
+        "adds public grant AWS:* s3:getobject on arn:aws:s3:::b1/*"
+       ],
+       "reads": 1,
+       "before": "Silo's read"
+      },
+      "F": {
+       "hold": true,
+       "why": [
+        "adds public grant AWS:* s3:getobject on arn:aws:s3:::b1/*"
+       ],
+       "reads": 1,
+       "before": "Silo's read"
+      }
+     },
+     "nokey": {
+      "kind": "aws-resource",
+      "key": [
+       "aws",
+       "s3",
+       "b1"
+      ],
+      "A": {
+       "hold": true,
+       "why": [
+        "gives everyone access to the S3 bucket (not in the request) through its policy"
+       ],
+       "reads": 0
+      },
+      "B": {
+       "hold": true,
+       "why": [
+        "holds public grant AWS:* s3:getobject on arn:aws:s3:::b1/*"
+       ],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": true,
+       "why": [
+        "holds public grant AWS:* s3:getobject on arn:aws:s3:::b1/*"
+       ],
+       "reads": 0,
+       "before": "none: as B"
+      },
+      "E": {
+       "hold": true,
+       "why": [
+        "unknown: Silo cannot sign a read without the key"
+       ],
+       "reads": 0
+      },
+      "F": {
+       "hold": true,
+       "why": [
+        "holds public grant AWS:* s3:getobject on arn:aws:s3:::b1/*"
+       ],
+       "reads": 0,
+       "before": "none: as B (Silo cannot sign a read without the key)"
+      }
+     }
+    },
+    "held": false
+   }
+  ],
+  "log": [
+   {
+    "by": "silo",
+    "method": "GET",
+    "host": "b1.s3.amazonaws.com",
+    "target": "/?policy",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "PUT",
+    "host": "s3.amazonaws.com",
+    "target": "/b1?policy",
+    "status": 200
+   }
+  ],
+  "last": {
+   "request": {
+    "by": "computer",
+    "method": "PUT",
+    "host": "s3.amazonaws.com",
+    "target": "/b1?policy",
+    "status": 200
+   },
+   "body": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::b1/*\", \"Principal\": \"*\"}]}",
+   "decisions": {
+    "key": {
+     "kind": "aws-resource",
+     "key": [
+      "aws",
+      "s3",
+      "b1"
+     ],
+     "A": {
+      "hold": true,
+      "why": [
+       "gives everyone access to the S3 bucket (not in the request) through its policy"
+      ],
+      "reads": 0
+     },
+     "B": {
+      "hold": true,
+      "why": [
+       "holds public grant AWS:* s3:getobject on arn:aws:s3:::b1/*"
+      ],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": true,
+      "why": [
+       "holds public grant AWS:* s3:getobject on arn:aws:s3:::b1/*"
+      ],
+      "reads": 0,
+      "before": "none: as B"
+     },
+     "E": {
+      "hold": true,
+      "why": [
+       "adds public grant AWS:* s3:getobject on arn:aws:s3:::b1/*"
+      ],
+      "reads": 1,
+      "before": "Silo's read"
+     },
+     "F": {
+      "hold": true,
+      "why": [
+       "adds public grant AWS:* s3:getobject on arn:aws:s3:::b1/*"
+      ],
+      "reads": 1,
+      "before": "Silo's read"
+     }
+    },
+    "nokey": {
+     "kind": "aws-resource",
+     "key": [
+      "aws",
+      "s3",
+      "b1"
+     ],
+     "A": {
+      "hold": true,
+      "why": [
+       "gives everyone access to the S3 bucket (not in the request) through its policy"
+      ],
+      "reads": 0
+     },
+     "B": {
+      "hold": true,
+      "why": [
+       "holds public grant AWS:* s3:getobject on arn:aws:s3:::b1/*"
+      ],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": true,
+      "why": [
+       "holds public grant AWS:* s3:getobject on arn:aws:s3:::b1/*"
+      ],
+      "reads": 0,
+      "before": "none: as B"
+     },
+     "E": {
+      "hold": true,
+      "why": [
+       "unknown: Silo cannot sign a read without the key"
+      ],
+      "reads": 0
+     },
+     "F": {
+      "hold": true,
+      "why": [
+       "holds public grant AWS:* s3:getobject on arn:aws:s3:::b1/*"
+      ],
+      "reads": 0,
+      "before": "none: as B (Silo cannot sign a read without the key)"
+     }
+    }
+   },
+   "held": false
+  },
+  "state_after": {
+   "aws|trust|app-role": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Principal\": {\"Service\": \"lambda.amazonaws.com\"}, \"Action\": \"sts:AssumeRole\"}]}",
+   "aws|inline|role|app-role|app": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::b1/*\"}]}",
+   "aws|managed|arn:aws:iam::111122223333:policy/deploy": {
+    "default": "v1",
+    "versions": {
+     "v1": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:PutObject\", \"Resource\": \"arn:aws:s3:::b1/*\"}]}"
+    }
+   },
+   "aws|s3|b1": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::b1/*\", \"Principal\": {\"AWS\": \"arn:aws:iam::111122223333:role/app-role\"}}]}",
+   "aws|s3|site": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::site/*\", \"Principal\": \"*\"}]}",
+   "aws|kms|k1": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"kms:*\", \"Resource\": \"*\", \"Principal\": {\"AWS\": \"arn:aws:iam::111122223333:root\"}}]}"
+  }
+ },
+ {
+  "id": "a-bucket-own-role",
+  "label": "pass",
+  "steps": [
+   {
+    "step": "aws s3api put-bucket-policy --bucket b1 --policy '{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": [\"s3:GetObject\", \"s3:PutObject\"], \"Resource\": \"arn:aws:s3:::b1/*\", \"Principal\": {\"AWS\": \"arn:aws:iam::111122223333:role/app-role\"}}]}'",
+    "exit": 0,
+    "seconds": 0.4,
+    "out": ""
+   }
+  ],
+  "writes": [
+   {
+    "request": {
+     "by": "computer",
+     "method": "PUT",
+     "host": "s3.amazonaws.com",
+     "target": "/b1?policy",
+     "status": 200
+    },
+    "body": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": [\"s3:GetObject\", \"s3:PutObject\"], \"Resource\": \"arn:aws:s3:::b1/*\", \"Principal\": {\"AWS\": \"arn:aws:iam::111122223333:role/app-role\"}}]}",
+    "decisions": {
+     "key": {
+      "kind": "aws-resource",
+      "key": [
+       "aws",
+       "s3",
+       "b1"
+      ],
+      "A": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "B": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": false,
+       "why": [],
+       "reads": 0,
+       "before": "none: as B"
+      },
+      "E": {
+       "hold": false,
+       "why": [],
+       "reads": 1,
+       "before": "Silo's read"
+      },
+      "F": {
+       "hold": false,
+       "why": [],
+       "reads": 1,
+       "before": "Silo's read"
+      }
+     },
+     "nokey": {
+      "kind": "aws-resource",
+      "key": [
+       "aws",
+       "s3",
+       "b1"
+      ],
+      "A": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "B": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": false,
+       "why": [],
+       "reads": 0,
+       "before": "none: as B"
+      },
+      "E": {
+       "hold": true,
+       "why": [
+        "unknown: Silo cannot sign a read without the key"
+       ],
+       "reads": 0
+      },
+      "F": {
+       "hold": false,
+       "why": [],
+       "reads": 0,
+       "before": "none: as B (Silo cannot sign a read without the key)"
+      }
+     }
+    },
+    "held": false
+   }
+  ],
+  "log": [
+   {
+    "by": "silo",
+    "method": "GET",
+    "host": "b1.s3.amazonaws.com",
+    "target": "/?policy",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "PUT",
+    "host": "s3.amazonaws.com",
+    "target": "/b1?policy",
+    "status": 200
+   }
+  ],
+  "last": {
+   "request": {
+    "by": "computer",
+    "method": "PUT",
+    "host": "s3.amazonaws.com",
+    "target": "/b1?policy",
+    "status": 200
+   },
+   "body": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": [\"s3:GetObject\", \"s3:PutObject\"], \"Resource\": \"arn:aws:s3:::b1/*\", \"Principal\": {\"AWS\": \"arn:aws:iam::111122223333:role/app-role\"}}]}",
+   "decisions": {
+    "key": {
+     "kind": "aws-resource",
+     "key": [
+      "aws",
+      "s3",
+      "b1"
+     ],
+     "A": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "B": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": false,
+      "why": [],
+      "reads": 0,
+      "before": "none: as B"
+     },
+     "E": {
+      "hold": false,
+      "why": [],
+      "reads": 1,
+      "before": "Silo's read"
+     },
+     "F": {
+      "hold": false,
+      "why": [],
+      "reads": 1,
+      "before": "Silo's read"
+     }
+    },
+    "nokey": {
+     "kind": "aws-resource",
+     "key": [
+      "aws",
+      "s3",
+      "b1"
+     ],
+     "A": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "B": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": false,
+      "why": [],
+      "reads": 0,
+      "before": "none: as B"
+     },
+     "E": {
+      "hold": true,
+      "why": [
+       "unknown: Silo cannot sign a read without the key"
+      ],
+      "reads": 0
+     },
+     "F": {
+      "hold": false,
+      "why": [],
+      "reads": 0,
+      "before": "none: as B (Silo cannot sign a read without the key)"
+     }
+    }
+   },
+   "held": false
+  },
+  "state_after": {
+   "aws|trust|app-role": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Principal\": {\"Service\": \"lambda.amazonaws.com\"}, \"Action\": \"sts:AssumeRole\"}]}",
+   "aws|inline|role|app-role|app": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::b1/*\"}]}",
+   "aws|managed|arn:aws:iam::111122223333:policy/deploy": {
+    "default": "v1",
+    "versions": {
+     "v1": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:PutObject\", \"Resource\": \"arn:aws:s3:::b1/*\"}]}"
+    }
+   },
+   "aws|s3|b1": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::b1/*\", \"Principal\": {\"AWS\": \"arn:aws:iam::111122223333:role/app-role\"}}]}",
+   "aws|s3|site": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"arn:aws:s3:::site/*\", \"Principal\": \"*\"}]}",
+   "aws|kms|k1": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"kms:*\", \"Resource\": \"*\", \"Principal\": {\"AWS\": \"arn:aws:iam::111122223333:root\"}}]}"
+  }
+ },
+ {
+  "id": "z-vault-new-reader",
+  "label": "hold:exposed",
+  "steps": [
+   {
+    "step": "az keyvault set-policy -n kv1 -g rg1 --object-id 00000000-0000-0000-0000-000000000009 --secret-permissions get list",
+    "exit": 1,
+    "seconds": 2.75,
+    "out": "ERROR: Please run 'az login' to setup account.\n"
+   }
+  ],
+  "writes": [],
+  "log": [],
+  "last": null,
+  "state_after": {}
+ },
+ {
+  "id": "z-vault-existing-list",
+  "label": "pass",
+  "steps": [
+   {
+    "step": "az keyvault set-policy -n kv1 -g rg1 --object-id 00000000-0000-0000-0000-000000000005 --key-permissions get list",
+    "exit": 1,
+    "seconds": 0.4,
+    "out": "ERROR: Please run 'az login' to setup account.\n"
+   }
+  ],
+  "writes": [],
+  "log": [],
+  "last": null,
+  "state_after": {}
+ },
+ {
+  "id": "z-vault-remove",
+  "label": "pass",
+  "steps": [
+   {
+    "step": "az keyvault delete-policy -n kv1 -g rg1 --object-id 00000000-0000-0000-0000-000000000005",
+    "exit": 1,
+    "seconds": 0.35,
+    "out": "ERROR: Please run 'az login' to setup account.\n"
+   }
+  ],
+  "writes": [],
+  "log": [],
+  "last": null,
+  "state_after": {}
+ },
+ {
+  "id": "z-vault-open",
+  "label": "hold:exposed",
+  "steps": [
+   {
+    "step": "az keyvault update -n kv1 -g rg1 --default-action Allow",
+    "exit": 1,
+    "seconds": 0.39,
+    "out": "ERROR: Please run 'az login' to setup account.\n"
+   }
+  ],
+  "writes": [],
+  "log": [],
+  "last": null,
+  "state_after": {}
+ },
+ {
+  "id": "z-open-vault-existing-list",
+  "label": "pass",
+  "steps": [
+   {
+    "step": "az keyvault set-policy -n kv2 -g rg1 --object-id 00000000-0000-0000-0000-000000000005 --key-permissions get list",
+    "exit": 1,
+    "seconds": 0.42,
+    "out": "ERROR: Please run 'az login' to setup account.\n"
+   }
+  ],
+  "writes": [],
+  "log": [],
+  "last": null,
+  "state_after": {}
+ },
+ {
+  "id": "z-roledef-grant",
+  "label": "hold:exposed",
+  "steps": [
+   {
+    "step": "file /opt/wpw/work/rd.json"
+   },
+   {
+    "step": "az role definition update --role-definition /opt/wpw/work/rd.json",
+    "exit": 1,
+    "seconds": 0.55,
+    "out": "ERROR: Please run 'az login' to setup account.\n"
+   }
+  ],
+  "writes": [],
+  "log": [],
+  "last": null,
+  "state_after": {}
+ },
+ {
+  "id": "z-roledef-read",
+  "label": "pass",
+  "steps": [
+   {
+    "step": "file /opt/wpw/work/rd.json"
+   },
+   {
+    "step": "az role definition update --role-definition /opt/wpw/work/rd.json",
+    "exit": 1,
+    "seconds": 0.32,
+    "out": "ERROR: Please run 'az login' to setup account.\n"
+   }
+  ],
+  "writes": [],
+  "log": [],
+  "last": null,
+  "state_after": {}
+ },
+ {
+  "id": "z-roledef-unexcept",
+  "label": "hold:exposed",
+  "steps": [
+   {
+    "step": "file /opt/wpw/work/rd.json"
+   },
+   {
+    "step": "az role definition update --role-definition /opt/wpw/work/rd.json",
+    "exit": 1,
+    "seconds": 0.37,
+    "out": "ERROR: Please run 'az login' to setup account.\n"
+   }
+  ],
+  "writes": [],
+  "log": [],
+  "last": null,
+  "state_after": {}
+ },
+ {
+  "id": "z-assign-owner",
+  "label": "hold:exposed",
+  "steps": [
+   {
+    "step": "az role assignment create --assignee-object-id 00000000-0000-0000-0000-000000000009 --assignee-principal-type User --role Owner --scope /subscriptions/00000000-0000-0000-0000-00000000000a",
+    "exit": 1,
+    "seconds": 0.29,
+    "out": "ERROR: Please run 'az login' to setup account.\n"
+   }
+  ],
+  "writes": [],
+  "log": [],
+  "last": null,
+  "state_after": {}
+ },
+ {
+  "id": "z-assign-reader",
+  "label": "pass",
+  "steps": [
+   {
+    "step": "az role assignment create --assignee-object-id 00000000-0000-0000-0000-000000000009 --assignee-principal-type User --role Reader --scope /subscriptions/00000000-0000-0000-0000-00000000000a",
+    "exit": 1,
+    "seconds": 0.29,
+    "out": "ERROR: Please run 'az login' to setup account.\n"
+   }
+  ],
+  "writes": [],
+  "log": [],
+  "last": null,
+  "state_after": {}
+ },
+ {
+  "id": "k-apply-admin",
+  "label": "hold:exposed",
+  "steps": [
+   {
+    "step": "file /opt/wpw/work/crb.json"
+   },
+   {
+    "step": "kubectl apply --validate=false -f /opt/wpw/work/crb.json",
+    "exit": 0,
+    "seconds": 2.91,
+    "out": "clusterrolebinding.rbac.authorization.k8s.io/ops configured\nWarning: resource clusterrolebindings/ops is missing the kubectl.kubernetes.io/last-applied-configuration annotation which is required by kubectl apply. kubectl apply should only be used on resources created declaratively by either kubectl create --save-config or kubectl apply. The missing annotation will be patched automatically.\n"
+   }
+  ],
+  "writes": [
+   {
+    "request": {
+     "by": "computer",
+     "method": "PATCH",
+     "host": "kube.capture.test",
+     "target": "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops?fieldManager=kubectl-client-side-apply&fieldValidation=Ignore",
+     "status": 200
+    },
+    "body": "{\"metadata\":{\"annotations\":{\"kubectl.kubernetes.io/last-applied-configuration\":\"{\\\"apiVersion\\\":\\\"rbac.authorization.k8s.io/v1\\\",\\\"kind\\\":\\\"ClusterRoleBinding\\\",\\\"metadata\\\":{\\\"annotations\\\":{},\\\"name\\\":\\\"ops\\\"},\\\"roleRef\\\":{\\\"apiGroup\\\":\\\"rbac.authorization.k8s.io\\\",\\\"kind\\\":\\\"ClusterRole\\\",\\\"name\\\":\\\"cluster-admin\\\"},\\\"subjects\\\":[{\\\"apiGroup\\\":\\\"rbac.authorization.k8s.io\\\",\\\"kind\\\":\\\"User\\\",\\\"name\\\":\\\"alice\\\"},{\\\"apiGroup\\\":\\\"rbac.authorization.k8s.io\\\",\\\"kind\\\":\\\"User\\\",\\\"name\\\":\\\"mallory\\\"}]}\\n\"}},\"subjects\":[{\"apiGroup\":\"rbac.authorization.k8s.io\",\"kind\":\"User\",\"name\":\"alice\"},{\"apiGroup\":\"rbac.authorization.k8s.io\",\"kind\":\"User\",\"name\":\"mallory\"}]}",
+    "decisions": {
+     "key": {
+      "kind": "k8s-binding",
+      "key": [
+       "k8s",
+       "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops"
+      ],
+      "A": {
+       "hold": true,
+       "why": [
+        "calls Kubernetes patchRbacAuthorizationV1ClusterRoleBinding on /apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops (exposed)"
+       ],
+       "reads": 0
+      },
+      "B": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": true,
+       "why": [
+        "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+       ],
+       "reads": 0,
+       "before": "relayed"
+      },
+      "E": {
+       "hold": true,
+       "why": [
+        "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+       ],
+       "reads": 1,
+       "before": "Silo's read"
+      },
+      "F": {
+       "hold": true,
+       "why": [
+        "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+       ],
+       "reads": 1,
+       "before": "Silo's read"
+      }
+     },
+     "nokey": {
+      "kind": "k8s-binding",
+      "key": [
+       "k8s",
+       "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops"
+      ],
+      "A": {
+       "hold": true,
+       "why": [
+        "calls Kubernetes patchRbacAuthorizationV1ClusterRoleBinding on /apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops (exposed)"
+       ],
+       "reads": 0
+      },
+      "B": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": true,
+       "why": [
+        "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+       ],
+       "reads": 0,
+       "before": "relayed"
+      },
+      "E": {
+       "hold": true,
+       "why": [
+        "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+       ],
+       "reads": 1,
+       "before": "Silo's read"
+      },
+      "F": {
+       "hold": true,
+       "why": [
+        "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+       ],
+       "reads": 1,
+       "before": "Silo's read"
+      }
+     }
+    },
+    "held": false
+   }
+  ],
+  "log": [
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/api?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/apiregistration.k8s.io/v1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/resource.k8s.io/v1alpha3?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/internal.apiserver.k8s.io/v1alpha1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/storagemigration.k8s.io/v1beta1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/api/v1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/networking.k8s.io/v1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/node.k8s.io/v1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/resource.k8s.io/v1beta2?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/admissionregistration.k8s.io/v1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/admissionregistration.k8s.io/v1alpha1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/authorization.k8s.io/v1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/scheduling.k8s.io/v1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/scheduling.k8s.io/v1alpha3?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/rbac.authorization.k8s.io/v1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/admissionregistration.k8s.io/v1beta1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/apiextensions.k8s.io/v1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/resource.k8s.io/v1beta1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/autoscaling/v1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/autoscaling/v2?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/resource.k8s.io/v1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/apps/v1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/coordination.k8s.io/v1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/authentication.k8s.io/v1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/policy/v1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/scheduling.k8s.io/v1beta1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/batch/v1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/certificates.k8s.io/v1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/certificates.k8s.io/v1beta1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/lifecycle.k8s.io/v1alpha1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/coordination.k8s.io/v1beta1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/flowcontrol.apiserver.k8s.io/v1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/discovery.k8s.io/v1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/events.k8s.io/v1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/storagemigration.k8s.io/v1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/coordination.k8s.io/v1alpha2?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/storage.k8s.io/v1?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/openapi/v3?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/openapi/v3/apis/rbac.authorization.k8s.io/v1?hash=1&timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/openapi/v2?timeout=32s",
+    "status": 404
+   },
+   {
+    "by": "silo",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops",
+    "status": 200
+   },
+   {
+    "by": "silo",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "PATCH",
+    "host": "kube.capture.test",
+    "target": "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops?fieldManager=kubectl-client-side-apply&fieldValidation=Ignore",
+    "status": 200
+   }
+  ],
+  "last": {
+   "request": {
+    "by": "computer",
+    "method": "PATCH",
+    "host": "kube.capture.test",
+    "target": "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops?fieldManager=kubectl-client-side-apply&fieldValidation=Ignore",
+    "status": 200
+   },
+   "body": "{\"metadata\":{\"annotations\":{\"kubectl.kubernetes.io/last-applied-configuration\":\"{\\\"apiVersion\\\":\\\"rbac.authorization.k8s.io/v1\\\",\\\"kind\\\":\\\"ClusterRoleBinding\\\",\\\"metadata\\\":{\\\"annotations\\\":{},\\\"name\\\":\\\"ops\\\"},\\\"roleRef\\\":{\\\"apiGroup\\\":\\\"rbac.authorization.k8s.io\\\",\\\"kind\\\":\\\"ClusterRole\\\",\\\"name\\\":\\\"cluster-admin\\\"},\\\"subjects\\\":[{\\\"apiGroup\\\":\\\"rbac.authorization.k8s.io\\\",\\\"kind\\\":\\\"User\\\",\\\"name\\\":\\\"alice\\\"},{\\\"apiGroup\\\":\\\"rbac.authorization.k8s.io\\\",\\\"kind\\\":\\\"User\\\",\\\"name\\\":\\\"mallory\\\"}]}\\n\"}},\"subjects\":[{\"apiGroup\":\"rbac.authorization.k8s.io\",\"kind\":\"User\",\"name\":\"alice\"},{\"apiGroup\":\"rbac.authorization.k8s.io\",\"kind\":\"User\",\"name\":\"mallory\"}]}",
+   "decisions": {
+    "key": {
+     "kind": "k8s-binding",
+     "key": [
+      "k8s",
+      "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops"
+     ],
+     "A": {
+      "hold": true,
+      "why": [
+       "calls Kubernetes patchRbacAuthorizationV1ClusterRoleBinding on /apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops (exposed)"
+      ],
+      "reads": 0
+     },
+     "B": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": true,
+      "why": [
+       "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+      ],
+      "reads": 0,
+      "before": "relayed"
+     },
+     "E": {
+      "hold": true,
+      "why": [
+       "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+      ],
+      "reads": 1,
+      "before": "Silo's read"
+     },
+     "F": {
+      "hold": true,
+      "why": [
+       "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+      ],
+      "reads": 1,
+      "before": "Silo's read"
+     }
+    },
+    "nokey": {
+     "kind": "k8s-binding",
+     "key": [
+      "k8s",
+      "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops"
+     ],
+     "A": {
+      "hold": true,
+      "why": [
+       "calls Kubernetes patchRbacAuthorizationV1ClusterRoleBinding on /apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops (exposed)"
+      ],
+      "reads": 0
+     },
+     "B": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": true,
+      "why": [
+       "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+      ],
+      "reads": 0,
+      "before": "relayed"
+     },
+     "E": {
+      "hold": true,
+      "why": [
+       "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+      ],
+      "reads": 1,
+      "before": "Silo's read"
+     },
+     "F": {
+      "hold": true,
+      "why": [
+       "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+      ],
+      "reads": 1,
+      "before": "Silo's read"
+     }
+    }
+   },
+   "held": false
+  },
+  "state_after": {
+   "k8s|/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops": {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRoleBinding",
+    "metadata": {
+     "name": "ops",
+     "uid": "u-ops",
+     "resourceVersion": "2",
+     "creationTimestamp": "2026-11-24T00:00:00Z",
+     "annotations": {
+      "kubectl.kubernetes.io/last-applied-configuration": "{\"apiVersion\":\"rbac.authorization.k8s.io/v1\",\"kind\":\"ClusterRoleBinding\",\"metadata\":{\"annotations\":{},\"name\":\"ops\"},\"roleRef\":{\"apiGroup\":\"rbac.authorization.k8s.io\",\"kind\":\"ClusterRole\",\"name\":\"cluster-admin\"},\"subjects\":[{\"apiGroup\":\"rbac.authorization.k8s.io\",\"kind\":\"User\",\"name\":\"alice\"},{\"apiGroup\":\"rbac.authorization.k8s.io\",\"kind\":\"User\",\"name\":\"mallory\"}]}\n"
+     }
+    },
+    "roleRef": {
+     "apiGroup": "rbac.authorization.k8s.io",
+     "kind": "ClusterRole",
+     "name": "cluster-admin"
+    },
+    "subjects": [
+     {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "User",
+      "name": "alice"
+     },
+     {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "User",
+      "name": "mallory"
+     }
+    ]
+   },
+   "k8s|/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/readers": {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRoleBinding",
+    "metadata": {
+     "name": "readers",
+     "uid": "u-readers",
+     "resourceVersion": "1",
+     "creationTimestamp": "2026-11-24T00:00:00Z"
+    },
+    "roleRef": {
+     "apiGroup": "rbac.authorization.k8s.io",
+     "kind": "ClusterRole",
+     "name": "view"
+    },
+    "subjects": [
+     {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "Group",
+      "name": "team"
+     }
+    ]
+   },
+   "k8s|/api/v1/namespaces/kube-system/configmaps/aws-auth": {
+    "apiVersion": "v1",
+    "kind": "ConfigMap",
+    "metadata": {
+     "name": "aws-auth",
+     "namespace": "kube-system",
+     "uid": "u-aws-auth",
+     "resourceVersion": "1"
+    },
+    "data": {
+     "mapRoles": "- rolearn: arn:aws:iam::111122223333:role/node\n  username: system:node:{{EC2PrivateDNSName}}\n  groups:\n  - system:bootstrappers\n  - system:nodes\n- rolearn: arn:aws:iam::111122223333:role/admin\n  username: admin\n  groups:\n  - system:masters\n"
+    }
+   }
+  }
+ },
+ {
+  "id": "k-apply-view",
+  "label": "pass",
+  "steps": [
+   {
+    "step": "file /opt/wpw/work/crb.json"
+   },
+   {
+    "step": "kubectl apply --validate=false -f /opt/wpw/work/crb.json",
+    "exit": 0,
+    "seconds": 0.16,
+    "out": "clusterrolebinding.rbac.authorization.k8s.io/readers configured\nWarning: resource clusterrolebindings/readers is missing the kubectl.kubernetes.io/last-applied-configuration annotation which is required by kubectl apply. kubectl apply should only be used on resources created declaratively by either kubectl create --save-config or kubectl apply. The missing annotation will be patched automatically.\n"
+   }
+  ],
+  "writes": [
+   {
+    "request": {
+     "by": "computer",
+     "method": "PATCH",
+     "host": "kube.capture.test",
+     "target": "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/readers?fieldManager=kubectl-client-side-apply&fieldValidation=Ignore",
+     "status": 200
+    },
+    "body": "{\"metadata\":{\"annotations\":{\"kubectl.kubernetes.io/last-applied-configuration\":\"{\\\"apiVersion\\\":\\\"rbac.authorization.k8s.io/v1\\\",\\\"kind\\\":\\\"ClusterRoleBinding\\\",\\\"metadata\\\":{\\\"annotations\\\":{},\\\"name\\\":\\\"readers\\\"},\\\"roleRef\\\":{\\\"apiGroup\\\":\\\"rbac.authorization.k8s.io\\\",\\\"kind\\\":\\\"ClusterRole\\\",\\\"name\\\":\\\"view\\\"},\\\"subjects\\\":[{\\\"apiGroup\\\":\\\"rbac.authorization.k8s.io\\\",\\\"kind\\\":\\\"Group\\\",\\\"name\\\":\\\"team\\\"},{\\\"apiGroup\\\":\\\"rbac.authorization.k8s.io\\\",\\\"kind\\\":\\\"User\\\",\\\"name\\\":\\\"dana\\\"}]}\\n\"}},\"subjects\":[{\"apiGroup\":\"rbac.authorization.k8s.io\",\"kind\":\"Group\",\"name\":\"team\"},{\"apiGroup\":\"rbac.authorization.k8s.io\",\"kind\":\"User\",\"name\":\"dana\"}]}",
+    "decisions": {
+     "key": {
+      "kind": "k8s-binding",
+      "key": [
+       "k8s",
+       "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/readers"
+      ],
+      "A": {
+       "hold": true,
+       "why": [
+        "calls Kubernetes patchRbacAuthorizationV1ClusterRoleBinding on /apis/rbac.authorization.k8s.io/v1/clusterrolebindings/readers (exposed)"
+       ],
+       "reads": 0
+      },
+      "B": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": false,
+       "why": [],
+       "reads": 0,
+       "before": "relayed"
+      },
+      "E": {
+       "hold": false,
+       "why": [],
+       "reads": 1,
+       "before": "Silo's read"
+      },
+      "F": {
+       "hold": false,
+       "why": [],
+       "reads": 1,
+       "before": "Silo's read"
+      }
+     },
+     "nokey": {
+      "kind": "k8s-binding",
+      "key": [
+       "k8s",
+       "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/readers"
+      ],
+      "A": {
+       "hold": true,
+       "why": [
+        "calls Kubernetes patchRbacAuthorizationV1ClusterRoleBinding on /apis/rbac.authorization.k8s.io/v1/clusterrolebindings/readers (exposed)"
+       ],
+       "reads": 0
+      },
+      "B": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": false,
+       "why": [],
+       "reads": 0,
+       "before": "relayed"
+      },
+      "E": {
+       "hold": false,
+       "why": [],
+       "reads": 1,
+       "before": "Silo's read"
+      },
+      "F": {
+       "hold": false,
+       "why": [],
+       "reads": 1,
+       "before": "Silo's read"
+      }
+     }
+    },
+    "held": false
+   }
+  ],
+  "log": [
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/readers",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/openapi/v3?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/openapi/v3/apis/rbac.authorization.k8s.io/v1?hash=1&timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/openapi/v2?timeout=32s",
+    "status": 404
+   },
+   {
+    "by": "silo",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/readers",
+    "status": 200
+   },
+   {
+    "by": "silo",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/readers",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "PATCH",
+    "host": "kube.capture.test",
+    "target": "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/readers?fieldManager=kubectl-client-side-apply&fieldValidation=Ignore",
+    "status": 200
+   }
+  ],
+  "last": {
+   "request": {
+    "by": "computer",
+    "method": "PATCH",
+    "host": "kube.capture.test",
+    "target": "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/readers?fieldManager=kubectl-client-side-apply&fieldValidation=Ignore",
+    "status": 200
+   },
+   "body": "{\"metadata\":{\"annotations\":{\"kubectl.kubernetes.io/last-applied-configuration\":\"{\\\"apiVersion\\\":\\\"rbac.authorization.k8s.io/v1\\\",\\\"kind\\\":\\\"ClusterRoleBinding\\\",\\\"metadata\\\":{\\\"annotations\\\":{},\\\"name\\\":\\\"readers\\\"},\\\"roleRef\\\":{\\\"apiGroup\\\":\\\"rbac.authorization.k8s.io\\\",\\\"kind\\\":\\\"ClusterRole\\\",\\\"name\\\":\\\"view\\\"},\\\"subjects\\\":[{\\\"apiGroup\\\":\\\"rbac.authorization.k8s.io\\\",\\\"kind\\\":\\\"Group\\\",\\\"name\\\":\\\"team\\\"},{\\\"apiGroup\\\":\\\"rbac.authorization.k8s.io\\\",\\\"kind\\\":\\\"User\\\",\\\"name\\\":\\\"dana\\\"}]}\\n\"}},\"subjects\":[{\"apiGroup\":\"rbac.authorization.k8s.io\",\"kind\":\"Group\",\"name\":\"team\"},{\"apiGroup\":\"rbac.authorization.k8s.io\",\"kind\":\"User\",\"name\":\"dana\"}]}",
+   "decisions": {
+    "key": {
+     "kind": "k8s-binding",
+     "key": [
+      "k8s",
+      "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/readers"
+     ],
+     "A": {
+      "hold": true,
+      "why": [
+       "calls Kubernetes patchRbacAuthorizationV1ClusterRoleBinding on /apis/rbac.authorization.k8s.io/v1/clusterrolebindings/readers (exposed)"
+      ],
+      "reads": 0
+     },
+     "B": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": false,
+      "why": [],
+      "reads": 0,
+      "before": "relayed"
+     },
+     "E": {
+      "hold": false,
+      "why": [],
+      "reads": 1,
+      "before": "Silo's read"
+     },
+     "F": {
+      "hold": false,
+      "why": [],
+      "reads": 1,
+      "before": "Silo's read"
+     }
+    },
+    "nokey": {
+     "kind": "k8s-binding",
+     "key": [
+      "k8s",
+      "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/readers"
+     ],
+     "A": {
+      "hold": true,
+      "why": [
+       "calls Kubernetes patchRbacAuthorizationV1ClusterRoleBinding on /apis/rbac.authorization.k8s.io/v1/clusterrolebindings/readers (exposed)"
+      ],
+      "reads": 0
+     },
+     "B": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": false,
+      "why": [],
+      "reads": 0,
+      "before": "relayed"
+     },
+     "E": {
+      "hold": false,
+      "why": [],
+      "reads": 1,
+      "before": "Silo's read"
+     },
+     "F": {
+      "hold": false,
+      "why": [],
+      "reads": 1,
+      "before": "Silo's read"
+     }
+    }
+   },
+   "held": false
+  },
+  "state_after": {
+   "k8s|/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops": {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRoleBinding",
+    "metadata": {
+     "name": "ops",
+     "uid": "u-ops",
+     "resourceVersion": "1",
+     "creationTimestamp": "2026-11-24T00:00:00Z"
+    },
+    "roleRef": {
+     "apiGroup": "rbac.authorization.k8s.io",
+     "kind": "ClusterRole",
+     "name": "cluster-admin"
+    },
+    "subjects": [
+     {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "User",
+      "name": "alice"
+     }
+    ]
+   },
+   "k8s|/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/readers": {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRoleBinding",
+    "metadata": {
+     "name": "readers",
+     "uid": "u-readers",
+     "resourceVersion": "2",
+     "creationTimestamp": "2026-11-24T00:00:00Z",
+     "annotations": {
+      "kubectl.kubernetes.io/last-applied-configuration": "{\"apiVersion\":\"rbac.authorization.k8s.io/v1\",\"kind\":\"ClusterRoleBinding\",\"metadata\":{\"annotations\":{},\"name\":\"readers\"},\"roleRef\":{\"apiGroup\":\"rbac.authorization.k8s.io\",\"kind\":\"ClusterRole\",\"name\":\"view\"},\"subjects\":[{\"apiGroup\":\"rbac.authorization.k8s.io\",\"kind\":\"Group\",\"name\":\"team\"},{\"apiGroup\":\"rbac.authorization.k8s.io\",\"kind\":\"User\",\"name\":\"dana\"}]}\n"
+     }
+    },
+    "roleRef": {
+     "apiGroup": "rbac.authorization.k8s.io",
+     "kind": "ClusterRole",
+     "name": "view"
+    },
+    "subjects": [
+     {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "Group",
+      "name": "team"
+     },
+     {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "User",
+      "name": "dana"
+     }
+    ]
+   },
+   "k8s|/api/v1/namespaces/kube-system/configmaps/aws-auth": {
+    "apiVersion": "v1",
+    "kind": "ConfigMap",
+    "metadata": {
+     "name": "aws-auth",
+     "namespace": "kube-system",
+     "uid": "u-aws-auth",
+     "resourceVersion": "1"
+    },
+    "data": {
+     "mapRoles": "- rolearn: arn:aws:iam::111122223333:role/node\n  username: system:node:{{EC2PrivateDNSName}}\n  groups:\n  - system:bootstrappers\n  - system:nodes\n- rolearn: arn:aws:iam::111122223333:role/admin\n  username: admin\n  groups:\n  - system:masters\n"
+    }
+   }
+  }
+ },
+ {
+  "id": "k-replace-admin",
+  "label": "hold:exposed",
+  "steps": [
+   {
+    "step": "file /opt/wpw/work/crb.json"
+   },
+   {
+    "step": "kubectl replace --validate=false -f /opt/wpw/work/crb.json",
+    "exit": 0,
+    "seconds": 0.1,
+    "out": "clusterrolebinding.rbac.authorization.k8s.io/ops replaced\n"
+   }
+  ],
+  "writes": [
+   {
+    "request": {
+     "by": "computer",
+     "method": "PUT",
+     "host": "kube.capture.test",
+     "target": "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops?fieldManager=kubectl-replace&fieldValidation=Ignore",
+     "status": 200
+    },
+    "body": "{\"apiVersion\":\"rbac.authorization.k8s.io/v1\",\"kind\":\"ClusterRoleBinding\",\"metadata\":{\"name\":\"ops\",\"resourceVersion\":\"1\"},\"roleRef\":{\"apiGroup\":\"rbac.authorization.k8s.io\",\"kind\":\"ClusterRole\",\"name\":\"cluster-admin\"},\"subjects\":[{\"apiGroup\":\"rbac.authorization.k8s.io\",\"kind\":\"User\",\"name\":\"alice\"},{\"apiGroup\":\"rbac.authorization.k8s.io\",\"kind\":\"User\",\"name\":\"mallory\"}]}\n",
+    "decisions": {
+     "key": {
+      "kind": "k8s-binding",
+      "key": [
+       "k8s",
+       "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops"
+      ],
+      "A": {
+       "hold": true,
+       "why": [
+        "calls Kubernetes replaceRbacAuthorizationV1ClusterRoleBinding on /apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops (exposed)"
+       ],
+       "reads": 0
+      },
+      "B": {
+       "hold": true,
+       "why": [
+        "holds powerful grant User:/alice ClusterRole:cluster-admin",
+        "holds powerful grant User:/mallory ClusterRole:cluster-admin"
+       ],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": true,
+       "why": [
+        "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+       ],
+       "reads": 0,
+       "before": "relayed"
+      },
+      "E": {
+       "hold": true,
+       "why": [
+        "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+       ],
+       "reads": 1,
+       "before": "Silo's read"
+      },
+      "F": {
+       "hold": true,
+       "why": [
+        "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+       ],
+       "reads": 1,
+       "before": "Silo's read"
+      }
+     },
+     "nokey": {
+      "kind": "k8s-binding",
+      "key": [
+       "k8s",
+       "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops"
+      ],
+      "A": {
+       "hold": true,
+       "why": [
+        "calls Kubernetes replaceRbacAuthorizationV1ClusterRoleBinding on /apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops (exposed)"
+       ],
+       "reads": 0
+      },
+      "B": {
+       "hold": true,
+       "why": [
+        "holds powerful grant User:/alice ClusterRole:cluster-admin",
+        "holds powerful grant User:/mallory ClusterRole:cluster-admin"
+       ],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": true,
+       "why": [
+        "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+       ],
+       "reads": 0,
+       "before": "relayed"
+      },
+      "E": {
+       "hold": true,
+       "why": [
+        "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+       ],
+       "reads": 1,
+       "before": "Silo's read"
+      },
+      "F": {
+       "hold": true,
+       "why": [
+        "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+       ],
+       "reads": 1,
+       "before": "Silo's read"
+      }
+     }
+    },
+    "held": false
+   }
+  ],
+  "log": [
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops",
+    "status": 200
+   },
+   {
+    "by": "silo",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops",
+    "status": 200
+   },
+   {
+    "by": "silo",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "PUT",
+    "host": "kube.capture.test",
+    "target": "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops?fieldManager=kubectl-replace&fieldValidation=Ignore",
+    "status": 200
+   }
+  ],
+  "last": {
+   "request": {
+    "by": "computer",
+    "method": "PUT",
+    "host": "kube.capture.test",
+    "target": "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops?fieldManager=kubectl-replace&fieldValidation=Ignore",
+    "status": 200
+   },
+   "body": "{\"apiVersion\":\"rbac.authorization.k8s.io/v1\",\"kind\":\"ClusterRoleBinding\",\"metadata\":{\"name\":\"ops\",\"resourceVersion\":\"1\"},\"roleRef\":{\"apiGroup\":\"rbac.authorization.k8s.io\",\"kind\":\"ClusterRole\",\"name\":\"cluster-admin\"},\"subjects\":[{\"apiGroup\":\"rbac.authorization.k8s.io\",\"kind\":\"User\",\"name\":\"alice\"},{\"apiGroup\":\"rbac.authorization.k8s.io\",\"kind\":\"User\",\"name\":\"mallory\"}]}\n",
+   "decisions": {
+    "key": {
+     "kind": "k8s-binding",
+     "key": [
+      "k8s",
+      "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops"
+     ],
+     "A": {
+      "hold": true,
+      "why": [
+       "calls Kubernetes replaceRbacAuthorizationV1ClusterRoleBinding on /apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops (exposed)"
+      ],
+      "reads": 0
+     },
+     "B": {
+      "hold": true,
+      "why": [
+       "holds powerful grant User:/alice ClusterRole:cluster-admin",
+       "holds powerful grant User:/mallory ClusterRole:cluster-admin"
+      ],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": true,
+      "why": [
+       "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+      ],
+      "reads": 0,
+      "before": "relayed"
+     },
+     "E": {
+      "hold": true,
+      "why": [
+       "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+      ],
+      "reads": 1,
+      "before": "Silo's read"
+     },
+     "F": {
+      "hold": true,
+      "why": [
+       "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+      ],
+      "reads": 1,
+      "before": "Silo's read"
+     }
+    },
+    "nokey": {
+     "kind": "k8s-binding",
+     "key": [
+      "k8s",
+      "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops"
+     ],
+     "A": {
+      "hold": true,
+      "why": [
+       "calls Kubernetes replaceRbacAuthorizationV1ClusterRoleBinding on /apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops (exposed)"
+      ],
+      "reads": 0
+     },
+     "B": {
+      "hold": true,
+      "why": [
+       "holds powerful grant User:/alice ClusterRole:cluster-admin",
+       "holds powerful grant User:/mallory ClusterRole:cluster-admin"
+      ],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": true,
+      "why": [
+       "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+      ],
+      "reads": 0,
+      "before": "relayed"
+     },
+     "E": {
+      "hold": true,
+      "why": [
+       "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+      ],
+      "reads": 1,
+      "before": "Silo's read"
+     },
+     "F": {
+      "hold": true,
+      "why": [
+       "adds powerful grant User:/mallory ClusterRole:cluster-admin"
+      ],
+      "reads": 1,
+      "before": "Silo's read"
+     }
+    }
+   },
+   "held": false
+  },
+  "state_after": {
+   "k8s|/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops": {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRoleBinding",
+    "metadata": {
+     "name": "ops",
+     "resourceVersion": "2"
+    },
+    "roleRef": {
+     "apiGroup": "rbac.authorization.k8s.io",
+     "kind": "ClusterRole",
+     "name": "cluster-admin"
+    },
+    "subjects": [
+     {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "User",
+      "name": "alice"
+     },
+     {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "User",
+      "name": "mallory"
+     }
+    ]
+   },
+   "k8s|/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/readers": {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRoleBinding",
+    "metadata": {
+     "name": "readers",
+     "uid": "u-readers",
+     "resourceVersion": "1",
+     "creationTimestamp": "2026-11-24T00:00:00Z"
+    },
+    "roleRef": {
+     "apiGroup": "rbac.authorization.k8s.io",
+     "kind": "ClusterRole",
+     "name": "view"
+    },
+    "subjects": [
+     {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "Group",
+      "name": "team"
+     }
+    ]
+   },
+   "k8s|/api/v1/namespaces/kube-system/configmaps/aws-auth": {
+    "apiVersion": "v1",
+    "kind": "ConfigMap",
+    "metadata": {
+     "name": "aws-auth",
+     "namespace": "kube-system",
+     "uid": "u-aws-auth",
+     "resourceVersion": "1"
+    },
+    "data": {
+     "mapRoles": "- rolearn: arn:aws:iam::111122223333:role/node\n  username: system:node:{{EC2PrivateDNSName}}\n  groups:\n  - system:bootstrappers\n  - system:nodes\n- rolearn: arn:aws:iam::111122223333:role/admin\n  username: admin\n  groups:\n  - system:masters\n"
+    }
+   }
+  }
+ },
+ {
+  "id": "k-awsauth-masters",
+  "label": "hold:exposed",
+  "steps": [
+   {
+    "step": "file /opt/wpw/work/cm.json"
+   },
+   {
+    "step": "kubectl apply --validate=false -f /opt/wpw/work/cm.json",
+    "exit": 0,
+    "seconds": 0.15,
+    "out": "configmap/aws-auth configured\nWarning: resource configmaps/aws-auth is missing the kubectl.kubernetes.io/last-applied-configuration annotation which is required by kubectl apply. kubectl apply should only be used on resources created declaratively by either kubectl create --save-config or kubectl apply. The missing annotation will be patched automatically.\n"
+   }
+  ],
+  "writes": [
+   {
+    "request": {
+     "by": "computer",
+     "method": "PATCH",
+     "host": "kube.capture.test",
+     "target": "/api/v1/namespaces/kube-system/configmaps/aws-auth?fieldManager=kubectl-client-side-apply&fieldValidation=Ignore",
+     "status": 200
+    },
+    "body": "{\"data\":{\"mapRoles\":\"- rolearn: arn:aws:iam::111122223333:role/node\\n  username: system:node:{{EC2PrivateDNSName}}\\n  groups:\\n  - system:bootstrappers\\n  - system:nodes\\n- rolearn: arn:aws:iam::111122223333:role/admin\\n  username: admin\\n  groups:\\n  - system:masters\\n- rolearn: arn:aws:iam::111122223333:role/ci\\n  username: ci\\n  groups:\\n  - system:masters\\n\"},\"metadata\":{\"annotations\":{\"kubectl.kubernetes.io/last-applied-configuration\":\"{\\\"apiVersion\\\":\\\"v1\\\",\\\"data\\\":{\\\"mapRoles\\\":\\\"- rolearn: arn:aws:iam::111122223333:role/node\\\\n  username: system:node:{{EC2PrivateDNSName}}\\\\n  groups:\\\\n  - system:bootstrappers\\\\n  - system:nodes\\\\n- rolearn: arn:aws:iam::111122223333:role/admin\\\\n  username: admin\\\\n  groups:\\\\n  - system:masters\\\\n- rolearn: arn:aws:iam::111122223333:role/ci\\\\n  username: ci\\\\n  groups:\\\\n  - system:masters\\\\n\\\"},\\\"kind\\\":\\\"ConfigMap\\\",\\\"metadata\\\":{\\\"annotations\\\":{},\\\"name\\\":\\\"aws-auth\\\",\\\"namespace\\\":\\\"kube-system\\\"}}\\n\"}}}",
+    "decisions": {
+     "key": {
+      "kind": "k8s-aws-auth",
+      "key": [
+       "k8s",
+       "/api/v1/namespaces/kube-system/configmaps/aws-auth"
+      ],
+      "A": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "B": {
+       "hold": true,
+       "why": [
+        "holds powerful grant arn:aws:iam::111122223333:role/admin system:masters",
+        "holds powerful grant arn:aws:iam::111122223333:role/ci system:masters"
+       ],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": true,
+       "why": [
+        "adds powerful grant arn:aws:iam::111122223333:role/ci system:masters"
+       ],
+       "reads": 0,
+       "before": "relayed"
+      },
+      "E": {
+       "hold": true,
+       "why": [
+        "adds powerful grant arn:aws:iam::111122223333:role/ci system:masters"
+       ],
+       "reads": 1,
+       "before": "Silo's read"
+      },
+      "F": {
+       "hold": true,
+       "why": [
+        "adds powerful grant arn:aws:iam::111122223333:role/ci system:masters"
+       ],
+       "reads": 1,
+       "before": "Silo's read"
+      }
+     },
+     "nokey": {
+      "kind": "k8s-aws-auth",
+      "key": [
+       "k8s",
+       "/api/v1/namespaces/kube-system/configmaps/aws-auth"
+      ],
+      "A": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "B": {
+       "hold": true,
+       "why": [
+        "holds powerful grant arn:aws:iam::111122223333:role/admin system:masters",
+        "holds powerful grant arn:aws:iam::111122223333:role/ci system:masters"
+       ],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": true,
+       "why": [
+        "adds powerful grant arn:aws:iam::111122223333:role/ci system:masters"
+       ],
+       "reads": 0,
+       "before": "relayed"
+      },
+      "E": {
+       "hold": true,
+       "why": [
+        "adds powerful grant arn:aws:iam::111122223333:role/ci system:masters"
+       ],
+       "reads": 1,
+       "before": "Silo's read"
+      },
+      "F": {
+       "hold": true,
+       "why": [
+        "adds powerful grant arn:aws:iam::111122223333:role/ci system:masters"
+       ],
+       "reads": 1,
+       "before": "Silo's read"
+      }
+     }
+    },
+    "held": false
+   }
+  ],
+  "log": [
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/api/v1/namespaces/kube-system/configmaps/aws-auth",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/openapi/v3?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/openapi/v3/api/v1?hash=1&timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/openapi/v2?timeout=32s",
+    "status": 404
+   },
+   {
+    "by": "silo",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/api/v1/namespaces/kube-system/configmaps/aws-auth",
+    "status": 200
+   },
+   {
+    "by": "silo",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/api/v1/namespaces/kube-system/configmaps/aws-auth",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "PATCH",
+    "host": "kube.capture.test",
+    "target": "/api/v1/namespaces/kube-system/configmaps/aws-auth?fieldManager=kubectl-client-side-apply&fieldValidation=Ignore",
+    "status": 200
+   }
+  ],
+  "last": {
+   "request": {
+    "by": "computer",
+    "method": "PATCH",
+    "host": "kube.capture.test",
+    "target": "/api/v1/namespaces/kube-system/configmaps/aws-auth?fieldManager=kubectl-client-side-apply&fieldValidation=Ignore",
+    "status": 200
+   },
+   "body": "{\"data\":{\"mapRoles\":\"- rolearn: arn:aws:iam::111122223333:role/node\\n  username: system:node:{{EC2PrivateDNSName}}\\n  groups:\\n  - system:bootstrappers\\n  - system:nodes\\n- rolearn: arn:aws:iam::111122223333:role/admin\\n  username: admin\\n  groups:\\n  - system:masters\\n- rolearn: arn:aws:iam::111122223333:role/ci\\n  username: ci\\n  groups:\\n  - system:masters\\n\"},\"metadata\":{\"annotations\":{\"kubectl.kubernetes.io/last-applied-configuration\":\"{\\\"apiVersion\\\":\\\"v1\\\",\\\"data\\\":{\\\"mapRoles\\\":\\\"- rolearn: arn:aws:iam::111122223333:role/node\\\\n  username: system:node:{{EC2PrivateDNSName}}\\\\n  groups:\\\\n  - system:bootstrappers\\\\n  - system:nodes\\\\n- rolearn: arn:aws:iam::111122223333:role/admin\\\\n  username: admin\\\\n  groups:\\\\n  - system:masters\\\\n- rolearn: arn:aws:iam::111122223333:role/ci\\\\n  username: ci\\\\n  groups:\\\\n  - system:masters\\\\n\\\"},\\\"kind\\\":\\\"ConfigMap\\\",\\\"metadata\\\":{\\\"annotations\\\":{},\\\"name\\\":\\\"aws-auth\\\",\\\"namespace\\\":\\\"kube-system\\\"}}\\n\"}}}",
+   "decisions": {
+    "key": {
+     "kind": "k8s-aws-auth",
+     "key": [
+      "k8s",
+      "/api/v1/namespaces/kube-system/configmaps/aws-auth"
+     ],
+     "A": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "B": {
+      "hold": true,
+      "why": [
+       "holds powerful grant arn:aws:iam::111122223333:role/admin system:masters",
+       "holds powerful grant arn:aws:iam::111122223333:role/ci system:masters"
+      ],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": true,
+      "why": [
+       "adds powerful grant arn:aws:iam::111122223333:role/ci system:masters"
+      ],
+      "reads": 0,
+      "before": "relayed"
+     },
+     "E": {
+      "hold": true,
+      "why": [
+       "adds powerful grant arn:aws:iam::111122223333:role/ci system:masters"
+      ],
+      "reads": 1,
+      "before": "Silo's read"
+     },
+     "F": {
+      "hold": true,
+      "why": [
+       "adds powerful grant arn:aws:iam::111122223333:role/ci system:masters"
+      ],
+      "reads": 1,
+      "before": "Silo's read"
+     }
+    },
+    "nokey": {
+     "kind": "k8s-aws-auth",
+     "key": [
+      "k8s",
+      "/api/v1/namespaces/kube-system/configmaps/aws-auth"
+     ],
+     "A": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "B": {
+      "hold": true,
+      "why": [
+       "holds powerful grant arn:aws:iam::111122223333:role/admin system:masters",
+       "holds powerful grant arn:aws:iam::111122223333:role/ci system:masters"
+      ],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": true,
+      "why": [
+       "adds powerful grant arn:aws:iam::111122223333:role/ci system:masters"
+      ],
+      "reads": 0,
+      "before": "relayed"
+     },
+     "E": {
+      "hold": true,
+      "why": [
+       "adds powerful grant arn:aws:iam::111122223333:role/ci system:masters"
+      ],
+      "reads": 1,
+      "before": "Silo's read"
+     },
+     "F": {
+      "hold": true,
+      "why": [
+       "adds powerful grant arn:aws:iam::111122223333:role/ci system:masters"
+      ],
+      "reads": 1,
+      "before": "Silo's read"
+     }
+    }
+   },
+   "held": false
+  },
+  "state_after": {
+   "k8s|/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops": {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRoleBinding",
+    "metadata": {
+     "name": "ops",
+     "uid": "u-ops",
+     "resourceVersion": "1",
+     "creationTimestamp": "2026-11-24T00:00:00Z"
+    },
+    "roleRef": {
+     "apiGroup": "rbac.authorization.k8s.io",
+     "kind": "ClusterRole",
+     "name": "cluster-admin"
+    },
+    "subjects": [
+     {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "User",
+      "name": "alice"
+     }
+    ]
+   },
+   "k8s|/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/readers": {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRoleBinding",
+    "metadata": {
+     "name": "readers",
+     "uid": "u-readers",
+     "resourceVersion": "1",
+     "creationTimestamp": "2026-11-24T00:00:00Z"
+    },
+    "roleRef": {
+     "apiGroup": "rbac.authorization.k8s.io",
+     "kind": "ClusterRole",
+     "name": "view"
+    },
+    "subjects": [
+     {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "Group",
+      "name": "team"
+     }
+    ]
+   },
+   "k8s|/api/v1/namespaces/kube-system/configmaps/aws-auth": {
+    "apiVersion": "v1",
+    "kind": "ConfigMap",
+    "metadata": {
+     "name": "aws-auth",
+     "namespace": "kube-system",
+     "uid": "u-aws-auth",
+     "resourceVersion": "2",
+     "annotations": {
+      "kubectl.kubernetes.io/last-applied-configuration": "{\"apiVersion\":\"v1\",\"data\":{\"mapRoles\":\"- rolearn: arn:aws:iam::111122223333:role/node\\n  username: system:node:{{EC2PrivateDNSName}}\\n  groups:\\n  - system:bootstrappers\\n  - system:nodes\\n- rolearn: arn:aws:iam::111122223333:role/admin\\n  username: admin\\n  groups:\\n  - system:masters\\n- rolearn: arn:aws:iam::111122223333:role/ci\\n  username: ci\\n  groups:\\n  - system:masters\\n\"},\"kind\":\"ConfigMap\",\"metadata\":{\"annotations\":{},\"name\":\"aws-auth\",\"namespace\":\"kube-system\"}}\n"
+     }
+    },
+    "data": {
+     "mapRoles": "- rolearn: arn:aws:iam::111122223333:role/node\n  username: system:node:{{EC2PrivateDNSName}}\n  groups:\n  - system:bootstrappers\n  - system:nodes\n- rolearn: arn:aws:iam::111122223333:role/admin\n  username: admin\n  groups:\n  - system:masters\n- rolearn: arn:aws:iam::111122223333:role/ci\n  username: ci\n  groups:\n  - system:masters\n"
+    }
+   }
+  }
+ },
+ {
+  "id": "k-awsauth-node",
+  "label": "pass",
+  "steps": [
+   {
+    "step": "file /opt/wpw/work/cm.json"
+   },
+   {
+    "step": "kubectl apply --validate=false -f /opt/wpw/work/cm.json",
+    "exit": 0,
+    "seconds": 0.17,
+    "out": "configmap/aws-auth configured\nWarning: resource configmaps/aws-auth is missing the kubectl.kubernetes.io/last-applied-configuration annotation which is required by kubectl apply. kubectl apply should only be used on resources created declaratively by either kubectl create --save-config or kubectl apply. The missing annotation will be patched automatically.\n"
+   }
+  ],
+  "writes": [
+   {
+    "request": {
+     "by": "computer",
+     "method": "PATCH",
+     "host": "kube.capture.test",
+     "target": "/api/v1/namespaces/kube-system/configmaps/aws-auth?fieldManager=kubectl-client-side-apply&fieldValidation=Ignore",
+     "status": 200
+    },
+    "body": "{\"data\":{\"mapRoles\":\"- rolearn: arn:aws:iam::111122223333:role/node\\n  username: system:node:{{EC2PrivateDNSName}}\\n  groups:\\n  - system:bootstrappers\\n  - system:nodes\\n- rolearn: arn:aws:iam::111122223333:role/admin\\n  username: admin\\n  groups:\\n  - system:masters\\n- rolearn: arn:aws:iam::111122223333:role/node2\\n  username: system:node:{{EC2PrivateDNSName}}\\n  groups:\\n  - system:bootstrappers\\n  - system:nodes\\n\"},\"metadata\":{\"annotations\":{\"kubectl.kubernetes.io/last-applied-configuration\":\"{\\\"apiVersion\\\":\\\"v1\\\",\\\"data\\\":{\\\"mapRoles\\\":\\\"- rolearn: arn:aws:iam::111122223333:role/node\\\\n  username: system:node:{{EC2PrivateDNSName}}\\\\n  groups:\\\\n  - system:bootstrappers\\\\n  - system:nodes\\\\n- rolearn: arn:aws:iam::111122223333:role/admin\\\\n  username: admin\\\\n  groups:\\\\n  - system:masters\\\\n- rolearn: arn:aws:iam::111122223333:role/node2\\\\n  username: system:node:{{EC2PrivateDNSName}}\\\\n  groups:\\\\n  - system:bootstrappers\\\\n  - system:nodes\\\\n\\\"},\\\"kind\\\":\\\"ConfigMap\\\",\\\"metadata\\\":{\\\"annotations\\\":{},\\\"name\\\":\\\"aws-auth\\\",\\\"namespace\\\":\\\"kube-system\\\"}}\\n\"}}}",
+    "decisions": {
+     "key": {
+      "kind": "k8s-aws-auth",
+      "key": [
+       "k8s",
+       "/api/v1/namespaces/kube-system/configmaps/aws-auth"
+      ],
+      "A": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "B": {
+       "hold": true,
+       "why": [
+        "holds powerful grant arn:aws:iam::111122223333:role/admin system:masters"
+       ],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": false,
+       "why": [],
+       "reads": 0,
+       "before": "relayed"
+      },
+      "E": {
+       "hold": false,
+       "why": [],
+       "reads": 1,
+       "before": "Silo's read"
+      },
+      "F": {
+       "hold": false,
+       "why": [],
+       "reads": 1,
+       "before": "Silo's read"
+      }
+     },
+     "nokey": {
+      "kind": "k8s-aws-auth",
+      "key": [
+       "k8s",
+       "/api/v1/namespaces/kube-system/configmaps/aws-auth"
+      ],
+      "A": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "B": {
+       "hold": true,
+       "why": [
+        "holds powerful grant arn:aws:iam::111122223333:role/admin system:masters"
+       ],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": false,
+       "why": [],
+       "reads": 0,
+       "before": "relayed"
+      },
+      "E": {
+       "hold": false,
+       "why": [],
+       "reads": 1,
+       "before": "Silo's read"
+      },
+      "F": {
+       "hold": false,
+       "why": [],
+       "reads": 1,
+       "before": "Silo's read"
+      }
+     }
+    },
+    "held": false
+   }
+  ],
+  "log": [
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/api/v1/namespaces/kube-system/configmaps/aws-auth",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/openapi/v3?timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/openapi/v3/api/v1?hash=1&timeout=32s",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/openapi/v2?timeout=32s",
+    "status": 404
+   },
+   {
+    "by": "silo",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/api/v1/namespaces/kube-system/configmaps/aws-auth",
+    "status": 200
+   },
+   {
+    "by": "silo",
+    "method": "GET",
+    "host": "kube.capture.test",
+    "target": "/api/v1/namespaces/kube-system/configmaps/aws-auth",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "PATCH",
+    "host": "kube.capture.test",
+    "target": "/api/v1/namespaces/kube-system/configmaps/aws-auth?fieldManager=kubectl-client-side-apply&fieldValidation=Ignore",
+    "status": 200
+   }
+  ],
+  "last": {
+   "request": {
+    "by": "computer",
+    "method": "PATCH",
+    "host": "kube.capture.test",
+    "target": "/api/v1/namespaces/kube-system/configmaps/aws-auth?fieldManager=kubectl-client-side-apply&fieldValidation=Ignore",
+    "status": 200
+   },
+   "body": "{\"data\":{\"mapRoles\":\"- rolearn: arn:aws:iam::111122223333:role/node\\n  username: system:node:{{EC2PrivateDNSName}}\\n  groups:\\n  - system:bootstrappers\\n  - system:nodes\\n- rolearn: arn:aws:iam::111122223333:role/admin\\n  username: admin\\n  groups:\\n  - system:masters\\n- rolearn: arn:aws:iam::111122223333:role/node2\\n  username: system:node:{{EC2PrivateDNSName}}\\n  groups:\\n  - system:bootstrappers\\n  - system:nodes\\n\"},\"metadata\":{\"annotations\":{\"kubectl.kubernetes.io/last-applied-configuration\":\"{\\\"apiVersion\\\":\\\"v1\\\",\\\"data\\\":{\\\"mapRoles\\\":\\\"- rolearn: arn:aws:iam::111122223333:role/node\\\\n  username: system:node:{{EC2PrivateDNSName}}\\\\n  groups:\\\\n  - system:bootstrappers\\\\n  - system:nodes\\\\n- rolearn: arn:aws:iam::111122223333:role/admin\\\\n  username: admin\\\\n  groups:\\\\n  - system:masters\\\\n- rolearn: arn:aws:iam::111122223333:role/node2\\\\n  username: system:node:{{EC2PrivateDNSName}}\\\\n  groups:\\\\n  - system:bootstrappers\\\\n  - system:nodes\\\\n\\\"},\\\"kind\\\":\\\"ConfigMap\\\",\\\"metadata\\\":{\\\"annotations\\\":{},\\\"name\\\":\\\"aws-auth\\\",\\\"namespace\\\":\\\"kube-system\\\"}}\\n\"}}}",
+   "decisions": {
+    "key": {
+     "kind": "k8s-aws-auth",
+     "key": [
+      "k8s",
+      "/api/v1/namespaces/kube-system/configmaps/aws-auth"
+     ],
+     "A": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "B": {
+      "hold": true,
+      "why": [
+       "holds powerful grant arn:aws:iam::111122223333:role/admin system:masters"
+      ],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": false,
+      "why": [],
+      "reads": 0,
+      "before": "relayed"
+     },
+     "E": {
+      "hold": false,
+      "why": [],
+      "reads": 1,
+      "before": "Silo's read"
+     },
+     "F": {
+      "hold": false,
+      "why": [],
+      "reads": 1,
+      "before": "Silo's read"
+     }
+    },
+    "nokey": {
+     "kind": "k8s-aws-auth",
+     "key": [
+      "k8s",
+      "/api/v1/namespaces/kube-system/configmaps/aws-auth"
+     ],
+     "A": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "B": {
+      "hold": true,
+      "why": [
+       "holds powerful grant arn:aws:iam::111122223333:role/admin system:masters"
+      ],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": false,
+      "why": [],
+      "reads": 0,
+      "before": "relayed"
+     },
+     "E": {
+      "hold": false,
+      "why": [],
+      "reads": 1,
+      "before": "Silo's read"
+     },
+     "F": {
+      "hold": false,
+      "why": [],
+      "reads": 1,
+      "before": "Silo's read"
+     }
+    }
+   },
+   "held": false
+  },
+  "state_after": {
+   "k8s|/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/ops": {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRoleBinding",
+    "metadata": {
+     "name": "ops",
+     "uid": "u-ops",
+     "resourceVersion": "1",
+     "creationTimestamp": "2026-11-24T00:00:00Z"
+    },
+    "roleRef": {
+     "apiGroup": "rbac.authorization.k8s.io",
+     "kind": "ClusterRole",
+     "name": "cluster-admin"
+    },
+    "subjects": [
+     {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "User",
+      "name": "alice"
+     }
+    ]
+   },
+   "k8s|/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/readers": {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRoleBinding",
+    "metadata": {
+     "name": "readers",
+     "uid": "u-readers",
+     "resourceVersion": "1",
+     "creationTimestamp": "2026-11-24T00:00:00Z"
+    },
+    "roleRef": {
+     "apiGroup": "rbac.authorization.k8s.io",
+     "kind": "ClusterRole",
+     "name": "view"
+    },
+    "subjects": [
+     {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "Group",
+      "name": "team"
+     }
+    ]
+   },
+   "k8s|/api/v1/namespaces/kube-system/configmaps/aws-auth": {
+    "apiVersion": "v1",
+    "kind": "ConfigMap",
+    "metadata": {
+     "name": "aws-auth",
+     "namespace": "kube-system",
+     "uid": "u-aws-auth",
+     "resourceVersion": "2",
+     "annotations": {
+      "kubectl.kubernetes.io/last-applied-configuration": "{\"apiVersion\":\"v1\",\"data\":{\"mapRoles\":\"- rolearn: arn:aws:iam::111122223333:role/node\\n  username: system:node:{{EC2PrivateDNSName}}\\n  groups:\\n  - system:bootstrappers\\n  - system:nodes\\n- rolearn: arn:aws:iam::111122223333:role/admin\\n  username: admin\\n  groups:\\n  - system:masters\\n- rolearn: arn:aws:iam::111122223333:role/node2\\n  username: system:node:{{EC2PrivateDNSName}}\\n  groups:\\n  - system:bootstrappers\\n  - system:nodes\\n\"},\"kind\":\"ConfigMap\",\"metadata\":{\"annotations\":{},\"name\":\"aws-auth\",\"namespace\":\"kube-system\"}}\n"
+     }
+    },
+    "data": {
+     "mapRoles": "- rolearn: arn:aws:iam::111122223333:role/node\n  username: system:node:{{EC2PrivateDNSName}}\n  groups:\n  - system:bootstrappers\n  - system:nodes\n- rolearn: arn:aws:iam::111122223333:role/admin\n  username: admin\n  groups:\n  - system:masters\n- rolearn: arn:aws:iam::111122223333:role/node2\n  username: system:node:{{EC2PrivateDNSName}}\n  groups:\n  - system:bootstrappers\n  - system:nodes\n"
+    }
+   }
+  }
+ }
+]

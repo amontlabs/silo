@@ -181,7 +181,7 @@ S = [
     ("g-remove-viewer", "pass", [("cli", "gcloud projects remove-iam-policy-binding proj1 --member group:team@example.com --role roles/viewer")]),
     ("g-remove-owner", "hold:outage", [("cli", "gcloud projects remove-iam-policy-binding proj1 --member user:alice@example.com --role roles/owner")]),
     ("g-cond-viewer", "pass", [("cli", "gcloud projects add-iam-policy-binding proj1 --member user:dana@example.com --role roles/logging.viewer --condition=%s" % q(COND))]),
-    ("g-cond-owner", "hold:exposed", [("cli", "gcloud projects add-iam-policy-binding proj1 --member user:mallory@example.net --role roles/owner --condition=%s" % q(COND))]),
+    ("g-cond-iam-admin", "hold:exposed", [("cli", "gcloud projects add-iam-policy-binding proj1 --member user:mallory@example.net --role roles/resourcemanager.projectIamAdmin --condition=%s" % q(COND))]),
     ("g-file-owner", "hold:exposed", [("cli", "gcloud projects get-iam-policy proj1 --format json > /opt/wpw/work/p.json"),
                                       ("edit", "/opt/wpw/work/p.json", add_binding_file("roles/owner", "user:mallory@example.net")),
                                       ("cli", "gcloud projects set-iam-policy proj1 /opt/wpw/work/p.json --quiet")]),
@@ -255,17 +255,17 @@ S = [
     ("z-assign-reader", "pass", [("cli", "az role assignment create --assignee-object-id 00000000-0000-0000-0000-000000000009 --assignee-principal-type User --role Reader --scope /subscriptions/%s" % SUB)]),
     # ------------------------------------------------------------ Kubernetes
     ("k-apply-admin", "hold:exposed", [("file", "/opt/wpw/work/crb.json", crb_yaml("ops", "cluster-admin", [("User", "alice"), ("User", "mallory")])),
-                                       ("cli", "kubectl apply -f /opt/wpw/work/crb.json")]),
+                                       ("cli", "kubectl apply --validate=false -f /opt/wpw/work/crb.json")]),
     ("k-apply-view", "pass", [("file", "/opt/wpw/work/crb.json", crb_yaml("readers", "view", [("Group", "team"), ("User", "dana")])),
-                              ("cli", "kubectl apply -f /opt/wpw/work/crb.json")]),
+                              ("cli", "kubectl apply --validate=false -f /opt/wpw/work/crb.json")]),
     ("k-replace-admin", "hold:exposed", [("file", "/opt/wpw/work/crb.json", crb_yaml("ops", "cluster-admin", [("User", "alice"), ("User", "mallory")])),
-                                         ("cli", "kubectl replace -f /opt/wpw/work/crb.json")]),
+                                         ("cli", "kubectl replace --validate=false -f /opt/wpw/work/crb.json")]),
     ("k-jsonpatch-admin", "hold:exposed", [("cli", "kubectl patch clusterrolebinding ops --type=json -p %s"
                                             % q(json.dumps([{"op": "add", "path": "/subjects/-", "value": {"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": "mallory"}}])))]),
     ("k-jsonpatch-view", "pass", [("cli", "kubectl patch clusterrolebinding readers --type=json -p %s"
                                    % q(json.dumps([{"op": "add", "path": "/subjects/-", "value": {"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": "dana"}}])))]),
     ("k-awsauth-masters", "hold:exposed", [("file", "/opt/wpw/work/cm.json", awsauth_yaml("- rolearn: arn:aws:iam::111122223333:role/ci\n  username: ci\n  groups:\n  - system:masters\n")),
-                                           ("cli", "kubectl apply -f /opt/wpw/work/cm.json")]),
+                                           ("cli", "kubectl apply --validate=false -f /opt/wpw/work/cm.json")]),
     ("k-awsauth-node", "pass", [("file", "/opt/wpw/work/cm.json", awsauth_yaml("- rolearn: arn:aws:iam::111122223333:role/node2\n  username: system:node:{{EC2PrivateDNSName}}\n  groups:\n  - system:bootstrappers\n  - system:nodes\n")),
-                                ("cli", "kubectl apply -f /opt/wpw/work/cm.json")]),
+                                ("cli", "kubectl apply --validate=false -f /opt/wpw/work/cm.json")]),
 ]

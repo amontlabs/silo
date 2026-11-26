@@ -1,0 +1,7 @@
+{
+  "asks": "How does a rule see a grant sent inside a whole access policy?",
+  "answer": "By comparing it with the policy it replaces. For a write that sends a whole access document (Google's setIamPolicy, AWS's role, bucket, key and trust policies, Azure Key Vault access policies and custom role definitions, Kubernetes bindings and the aws-auth ConfigMap), the boundary takes the document before from the last copy it relayed to the computer when the write carries that copy's etag, and otherwise reads it itself with the request's own credential just before the write goes out. A rule then reads what the write adds and removes. A Google write with no etag gets the etag of Silo's read, so the provider refuses it if the policy changed in between. When Silo cannot read the document, the write is held when the document holds any public or powerful grant.",
+  "needs": [
+    "operation-of-a-request"
+  ]
+}

@@ -407,6 +407,7 @@
         "word-grant",
         "rule-sets",
         "operation-of-a-request",
+        "grant-in-a-whole-policy",
         "outcome-of-a-call",
         "made-undoable",
         "rule-set-shows-grants",

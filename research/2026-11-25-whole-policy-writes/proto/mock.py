@@ -45,8 +45,9 @@ def xml(action, inner, status=200):
 
 
 def next_etag(old):
-    n = int.from_bytes(base64.b64decode(old or "BwYAAAA="), "big") + 1 if old else 1
-    return base64.b64encode(n.to_bytes(5, "big")).decode()
+    raw = base64.b64decode(old + "=" * (-len(old) % 4)) if old else b"\0" * 6
+    n = int.from_bytes(raw, "big") + 1
+    return base64.b64encode(n.to_bytes(max(len(raw), 6), "big")).decode()
 
 
 # ---------------------------------------------------------------- Google
@@ -326,7 +327,7 @@ def k8s(m, host, path, q, body, headers):
 # ---------------------------------------------------------------- dispatch
 def handle(req):
     u = urlsplit(req["target"])
-    path, q = u.path, parse_qs(u.query)
+    path, q = u.path, parse_qs(u.query, keep_blank_values=True)
     host, m, body = req["host"], req["method"], req["body"]
     with LOCK:
         try:
