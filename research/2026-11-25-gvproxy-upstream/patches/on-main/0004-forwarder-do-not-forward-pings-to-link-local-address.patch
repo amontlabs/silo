@@ -1,0 +1,131 @@
+From 4a1c3e27b616ff065b1ebf561b441526a3f97ceb Mon Sep 17 00:00:00 2001
+From: silo-research <noreply@anthropic.com>
+Date: Wed, 25 Nov 2026 14:01:04 +0000
+Subject: [PATCH 4/5] forwarder: do not forward pings to link-local addresses
+
+The TCP and UDP forwarders refuse destinations in 169.254.0.0/16 unless
+ec2MetadataAccess is set, so that a guest cannot reach a cloud metadata
+service or another link-local service of the host's network. The ICMP
+forwarder added in #597 forwards echo requests to any address, so a
+guest can still ping 169.254.169.254 and the link-local neighbours of
+the host.
+
+Give ICMP the same check as TCP, on the address the guest pinged,
+before NAT translation, and release the request's packet when it is
+dropped.
+---
+ pkg/services/forwarder/icmp.go      |  9 +++++++-
+ pkg/services/forwarder/icmp_test.go | 34 +++++++++++++++++++++++++----
+ pkg/virtualnetwork/services.go      |  2 +-
+ 3 files changed, 39 insertions(+), 6 deletions(-)
+
+diff --git a/pkg/services/forwarder/icmp.go b/pkg/services/forwarder/icmp.go
+index cd09cd8e..205044b3 100644
+--- a/pkg/services/forwarder/icmp.go
++++ b/pkg/services/forwarder/icmp.go
+@@ -14,10 +14,17 @@ type Forwarder struct {
+ 	stack   *stack.Stack
+ }
+ 
+-func ICMP(s *stack.Stack, nat map[tcpip.Address]tcpip.Address, natLock *sync.Mutex) *Forwarder {
++func ICMP(s *stack.Stack, nat map[tcpip.Address]tcpip.Address, natLock *sync.Mutex, ec2MetadataAccess bool) *Forwarder {
+ 	return NewForwarder(s, func(r *ICMPForwarderRequest) {
+ 		localAddress := r.ID().LocalAddress
+ 
++		if !ec2MetadataAccess && linkLocal().Contains(localAddress) {
++			if pkt := r.Packet(); pkt != nil {
++				pkt.DecRef()
++			}
++			return
++		}
++
+ 		// Apply NAT translation if needed
+ 		natLock.Lock()
+ 		if replaced, ok := nat[localAddress]; ok {
+diff --git a/pkg/services/forwarder/icmp_test.go b/pkg/services/forwarder/icmp_test.go
+index aac3683a..6d1c0cd9 100644
+--- a/pkg/services/forwarder/icmp_test.go
++++ b/pkg/services/forwarder/icmp_test.go
+@@ -96,7 +96,7 @@ var _ = ginkgo.Describe("ICMP forwarding", func() {
+ 
+ 	// newForwardingStack returns the capture endpoint of a stack set up like the
+ 	// virtual network's, with the ICMP forwarder applying nat.
+-	newForwardingStack := func(nat map[tcpip.Address]tcpip.Address) *captureEndpoint {
++	newForwardingStack := func(nat map[tcpip.Address]tcpip.Address, ec2MetadataAccess bool) *captureEndpoint {
+ 		s := stack.New(stack.Options{
+ 			NetworkProtocols:   []stack.NetworkProtocolFactory{ipv4.NewProtocol},
+ 			TransportProtocols: []stack.TransportProtocolFactory{icmp.NewProtocol4},
+@@ -111,7 +111,7 @@ var _ = ginkgo.Describe("ICMP forwarding", func() {
+ 		s.SetSpoofing(1, true)
+ 		s.SetPromiscuousMode(1, true)
+ 		s.SetRouteTable([]tcpip.Route{{Destination: header.IPv4EmptySubnet, NIC: 1}})
+-		s.SetTransportProtocolHandler(icmp.ProtocolNumber4, ICMP(s, nat, &sync.Mutex{}).HandlePacket)
++		s.SetTransportProtocolHandler(icmp.ProtocolNumber4, ICMP(s, nat, &sync.Mutex{}, ec2MetadataAccess).HandlePacket)
+ 		return ep
+ 	}
+ 
+@@ -120,7 +120,7 @@ var _ = ginkgo.Describe("ICMP forwarding", func() {
+ 	// the address that it pinged, because Linux drops a packet arriving on eth0
+ 	// with a loopback source.
+ 	ginkgo.It("should reply from the address the VM pinged, not the NAT target", func() {
+-		ep := newForwardingStack(map[tcpip.Address]tcpip.Address{hostIP: header.IPv4Loopback})
++		ep := newForwardingStack(map[tcpip.Address]tcpip.Address{hostIP: header.IPv4Loopback}, false)
+ 
+ 		ep.DeliverNetworkPacket(ipv4.ProtocolNumber, echoRequest(vmIP, hostIP, 25943, 1))
+ 
+@@ -141,7 +141,7 @@ var _ = ginkgo.Describe("ICMP forwarding", func() {
+ 	// answers pings to its own addresses, so the forwarder must leave them
+ 	// alone, or the VM gets a second reply to every ping.
+ 	ginkgo.It("should leave pings to the gateway's own address to the stack", func() {
+-		ep := newForwardingStack(map[tcpip.Address]tcpip.Address{gatewayIP: header.IPv4Loopback})
++		ep := newForwardingStack(map[tcpip.Address]tcpip.Address{gatewayIP: header.IPv4Loopback}, false)
+ 
+ 		ep.DeliverNetworkPacket(ipv4.ProtocolNumber, echoRequest(vmIP, gatewayIP, 25943, 1))
+ 
+@@ -152,4 +152,30 @@ var _ = ginkgo.Describe("ICMP forwarding", func() {
+ 
+ 		gomega.Consistently(ep.written, time.Second).ShouldNot(gomega.Receive(), "second echo reply written to the VM")
+ 	})
++
++	// TCP and UDP refuse link-local destinations unless -ec2-metadata-access is
++	// set, so that a guest cannot reach the cloud's metadata service or another
++	// link-local service of the host's network. Pings must follow the same rule.
++	// The test maps a link-local address to the host's loopback, so that an
++	// answer comes back whenever the forwarder sends the ping.
++	linkLocalIP := tcpip.AddrFrom4([4]byte{169, 254, 169, 254})
++
++	ginkgo.It("should not forward pings to link-local addresses", func() {
++		ep := newForwardingStack(map[tcpip.Address]tcpip.Address{linkLocalIP: header.IPv4Loopback}, false)
++
++		ep.DeliverNetworkPacket(ipv4.ProtocolNumber, echoRequest(vmIP, linkLocalIP, 25943, 1))
++
++		gomega.Consistently(ep.written, 2*time.Second).ShouldNot(gomega.Receive(), "ping to a link-local address forwarded")
++	})
++
++	ginkgo.It("should forward pings to link-local addresses with ec2MetadataAccess", func() {
++		ep := newForwardingStack(map[tcpip.Address]tcpip.Address{linkLocalIP: header.IPv4Loopback}, true)
++
++		ep.DeliverNetworkPacket(ipv4.ProtocolNumber, echoRequest(vmIP, linkLocalIP, 25943, 1))
++
++		var reply *stack.PacketBuffer
++		gomega.Eventually(ep.written, 5*time.Second).Should(gomega.Receive(&reply), "no echo reply written to the VM")
++		defer reply.DecRef()
++		gomega.Expect(header.IPv4(reply.ToView().AsSlice()).SourceAddress()).To(gomega.Equal(linkLocalIP))
++	})
+ })
+diff --git a/pkg/virtualnetwork/services.go b/pkg/virtualnetwork/services.go
+index 3ed9a996..7601c5d8 100644
+--- a/pkg/virtualnetwork/services.go
++++ b/pkg/virtualnetwork/services.go
+@@ -30,7 +30,7 @@ func addServices(configuration *types.Configuration, s *stack.Stack, ipPool *tap
+ 	s.SetTransportProtocolHandler(tcp.ProtocolNumber, tcpForwarder.HandlePacket)
+ 	udpForwarder := forwarder.UDP(s, translation, &natLock, configuration.Ec2MetadataAccess)
+ 	s.SetTransportProtocolHandler(udp.ProtocolNumber, udpForwarder.HandlePacket)
+-	icmpForwarder := forwarder.ICMP(s, translation, &natLock)
++	icmpForwarder := forwarder.ICMP(s, translation, &natLock, configuration.Ec2MetadataAccess)
+ 	s.SetTransportProtocolHandler(icmp.ProtocolNumber4, icmpForwarder.HandlePacket)
+ 
+ 	dnsMux, err := dnsServer(configuration, s)
+-- 
+2.43.0
+

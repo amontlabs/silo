@@ -1,0 +1,25 @@
+------------------------------
+• [FAILED] [0.011 seconds]
+ICMP forwarding [It] should not forward pings to link-local addresses
+pkg/services/forwarder/icmp_test.go:163
+
+  [FAILED] Failed after 0.010s.
+  ping to a link-local address forwarded
+  Expected
+      <chan *stack.PacketBuffer | len:0, cap:10>: 0x2a715de10e00
+  not to receive anything.
+  In [It] at: pkg/services/forwarder/icmp_test.go:168 @ 11/25/26 14:00:42.719
+------------------------------
+time="2026-11-25T14:00:42Z" level=debug msg="Successfully forwarded ICMP echo reply to 192.168.127.2"
+•
+
+Summarizing 1 Failure:
+  [FAIL] ICMP forwarding [It] should not forward pings to link-local addresses
+  pkg/services/forwarder/icmp_test.go:168
+
+Ran 12 of 12 Specs in 2.050 seconds
+FAIL! -- 11 Passed | 1 Failed | 0 Pending | 0 Skipped
+--- FAIL: TestSuite (2.05s)
+FAIL
+FAIL	github.com/containers/gvisor-tap-vsock/pkg/services/forwarder	2.057s
+FAIL

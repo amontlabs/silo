@@ -1,0 +1,349 @@
+From 20775d8af221fad2ebc896147996da4bfaf3ccbb Mon Sep 17 00:00:00 2001
+From: silo-research <noreply@anthropic.com>
+Date: Wed, 25 Nov 2026 14:06:30 +0000
+Subject: [PATCH 09/10] gvproxy: add -outbound-handoff
+
+Some users want every connection of the guest decided, logged or
+rewritten by a program of theirs before it reaches the network: an
+egress proxy with an allow list by name, a recorder, a program that
+injects credentials the guest must not hold. Today they have to run
+that program as a transparent proxy behind gvproxy on the host, which
+needs root, or set proxy variables in the guest, which programs are free
+to ignore.
+
+-outbound-handoff <path>, or `stack.outboundHandoff`, hands every TCP
+connection of the guest to the unix socket at path, after a PROXY
+protocol v2 header with the guest's address and port and the
+destination after NAT translation, and gvproxy dials nothing itself.
+PROXY v2 is read by HAProxy, Envoy, nginx and common libraries, so the
+program needs no format of gvproxy's. Outbound UDP and ICMP are dropped,
+since only a stream can be handed over and nothing else may leave. If
+nothing listens on the socket, the guest's connection is reset.
+
+The dial filter, the deny list and the link-local rule still apply
+before the hand-off. It uses Configuration.DialTCP, and cannot be set
+together with it.
+---
+ README.md                      |  10 ++++
+ cmd/gvproxy/config.go          |   5 ++
+ cmd/gvproxy/config_test.go     |  22 +++++++
+ pkg/outbound/handoff.go        |  74 ++++++++++++++++++++++++
+ pkg/outbound/handoff_test.go   | 102 +++++++++++++++++++++++++++++++++
+ pkg/types/configuration.go     |   6 ++
+ pkg/virtualnetwork/services.go |  10 +++-
+ 7 files changed, 228 insertions(+), 1 deletion(-)
+ create mode 100644 pkg/outbound/handoff.go
+ create mode 100644 pkg/outbound/handoff_test.go
+
+diff --git a/README.md b/README.md
+index 82bf35b9..bf545631 100644
+--- a/README.md
++++ b/README.md
+@@ -220,6 +220,16 @@ For example, `--outbound-deny private,host,host-networks` lets the VM reach the
+ the host nor its local network. It is checked on the address gvproxy dials, after NAT, so
+ 192.168.127.254 is refused through its loopback target. Forwards into the VM are not affected.
+ 
++### Handing connections to a proxy
++
++`--outbound-handoff /path/to/socket` makes gvproxy open no outbound connection itself. Each TCP
++connection of the VM is handed to that unix socket, preceded by a
++[PROXY protocol v2](https://www.haproxy.org/download/3.0/doc/proxy-protocol.txt) header that
++carries the VM's address and the destination it asked for (after NAT). The program listening
++there, a proxy that HAProxy, Envoy, nginx or Go's `go-proxyproto` can be, decides and opens the
++connection. Outbound UDP and pings are dropped. If nothing listens, the VM's connections are reset.
++Combine it with `--dns-upstream` to have the same program answer the VM's lookups.
++
+ ### DNS
+ 
+ The gateway also runs a DNS server. It can be configured to serve static zones.
+diff --git a/cmd/gvproxy/config.go b/cmd/gvproxy/config.go
+index b481e63d..8b8fe317 100644
+--- a/cmd/gvproxy/config.go
++++ b/cmd/gvproxy/config.go
+@@ -54,6 +54,7 @@ type GvproxyArgs struct {
+ 	noHostLoopback     bool
+ 	dnsUpstream        arrayFlags
+ 	outboundDeny       arrayFlags
++	outboundHandoff    string
+ }
+ 
+ type GvproxyConfig struct {
+@@ -154,6 +155,7 @@ func GvproxyArgParse(flagSet *flag.FlagSet, args *GvproxyArgs, argv []string) (*
+ 	flagSet.BoolVar(&args.noHostLoopback, "no-host-loopback", false, "Map no address of the virtual network to the host's loopback: no default NAT entry from the host address to 127.0.0.1")
+ 	flagSet.Var(&args.dnsUpstream, "dns-upstream", "DNS server (ip:port) asked for names outside gvproxy's own zones, instead of the host's resolver; repeatable. \"none\" refuses those names")
+ 	flagSet.Var(&args.outboundDeny, "outbound-deny", "Destinations no outbound TCP, UDP or ICMP of the guest may reach: an address, a CIDR, private, host, host-networks or all; repeatable or separated by commas")
++	flagSet.StringVar(&args.outboundHandoff, "outbound-handoff", "", "Unix socket path: hand every outbound TCP connection of the guest to it after a PROXY protocol v2 header, dial nothing, drop outbound UDP and ICMP")
+ 	if err := flagSet.Parse(argv); err != nil {
+ 		return nil, err
+ 	}
+@@ -267,6 +269,9 @@ func GvproxyConfigure(config *GvproxyConfig, args *GvproxyArgs, version string)
+ 		config.NoHostLoopback = true
+ 	}
+ 	config.Stack.OutboundDeny = append(config.Stack.OutboundDeny, args.outboundDeny...)
++	if args.outboundHandoff != "" {
++		config.Stack.OutboundHandoff = args.outboundHandoff
++	}
+ 	if len(args.dnsUpstream) > 0 {
+ 		config.Stack.DNSUpstream = args.dnsUpstream
+ 	}
+diff --git a/cmd/gvproxy/config_test.go b/cmd/gvproxy/config_test.go
+index 2a9426a7..a662ddcb 100644
+--- a/cmd/gvproxy/config_test.go
++++ b/cmd/gvproxy/config_test.go
+@@ -877,3 +877,25 @@ func TestOutboundDeny(t *testing.T) {
+ 	require.NoError(t, err)
+ 	assert.Equal(t, []string{"host-networks", "private,host", "198.51.100.0/24"}, cnf.Stack.OutboundDeny)
+ }
++
++func TestOutboundHandoff(t *testing.T) {
++	t.Parallel()
++	for _, v := range []struct {
++		name, config string
++		argv         []string
++		want         string
++	}{
++		{"default", "", nil, ""},
++		{"flag", "", []string{"-outbound-handoff", "/run/boundary.sock"}, "/run/boundary.sock"},
++		{"config file", "stack:\n  outboundHandoff: /run/b.sock\n", nil, "/run/b.sock"},
++	} {
++		var cnf GvproxyConfig
++		var args GvproxyArgs
++		_, err := GvproxyArgParse(flag.NewFlagSet(os.Args[0], flag.ContinueOnError), &args, v.argv)
++		require.NoError(t, err, v.name)
++		require.NoError(t, yaml.Unmarshal([]byte(v.config), &cnf), v.name)
++		_, err = GvproxyConfigure(&cnf, &args, "testing")
++		require.NoError(t, err, v.name)
++		assert.Equal(t, v.want, cnf.Stack.OutboundHandoff, v.name)
++	}
++}
+diff --git a/pkg/outbound/handoff.go b/pkg/outbound/handoff.go
+new file mode 100644
+index 00000000..c12d54d3
+--- /dev/null
++++ b/pkg/outbound/handoff.go
+@@ -0,0 +1,74 @@
++package outbound
++
++import (
++	"context"
++	"encoding/binary"
++	"errors"
++	"fmt"
++	"net"
++	"net/netip"
++	"time"
++
++	"github.com/containers/gvisor-tap-vsock/pkg/types"
++)
++
++// proxyV2Signature opens every PROXY protocol version 2 header.
++var proxyV2Signature = []byte("\r\n\r\n\x00\r\nQUIT\n")
++
++// ProxyHeaderV2 is the PROXY protocol version 2 header of a TCP connection
++// from src to dst, as HAProxy specifies it
++// (https://www.haproxy.org/download/3.0/doc/proxy-protocol.txt).
++func ProxyHeaderV2(src, dst netip.AddrPort) []byte {
++	h := append([]byte{}, proxyV2Signature...)
++	s, d := src.Addr().Unmap(), dst.Addr().Unmap()
++	var addrs []byte
++	if s.Is4() && d.Is4() {
++		h = append(h, 0x21, 0x11, 0x00, 12) // version 2, PROXY; TCP over IPv4; 12 bytes follow
++		a, b := s.As4(), d.As4()
++		addrs = append(append(addrs, a[:]...), b[:]...)
++	} else {
++		h = append(h, 0x21, 0x21, 0x00, 36) // version 2, PROXY; TCP over IPv6; 36 bytes follow
++		a, b := src.Addr().As16(), dst.Addr().As16()
++		addrs = append(append(addrs, a[:]...), b[:]...)
++	}
++	addrs = binary.BigEndian.AppendUint16(addrs, src.Port())
++	addrs = binary.BigEndian.AppendUint16(addrs, dst.Port())
++	return append(h, addrs...)
++}
++
++// Handoff returns a dialer, for types.Configuration.DialTCP, that opens no
++// connection to the destination. It connects to the unix socket at path and
++// writes a PROXY protocol v2 header with the guest's address and the
++// destination dialled after NAT translation. Whatever listens on the socket
++// (a proxy, a firewall, a recorder) then decides and opens the connection.
++func Handoff(path string) func(context.Context, netip.AddrPort, types.DialRequest) (net.Conn, error) {
++	return func(ctx context.Context, source netip.AddrPort, req types.DialRequest) (net.Conn, error) {
++		var d net.Dialer
++		conn, err := d.DialContext(ctx, "unix", path)
++		if err != nil {
++			return nil, err
++		}
++		if deadline, ok := ctx.Deadline(); ok {
++			_ = conn.SetWriteDeadline(deadline)
++		}
++		if _, err := conn.Write(ProxyHeaderV2(source, req.DialAddress)); err != nil {
++			conn.Close()
++			return nil, fmt.Errorf("handoff to %s: %w", path, err)
++		}
++		_ = conn.SetWriteDeadline(time.Time{})
++		return conn, nil
++	}
++}
++
++// ErrHandoffTCPOnly refuses UDP and ICMP when connections are handed off:
++// only TCP can be handed to a stream socket, and nothing else may leave.
++var ErrHandoffTCPOnly = errors.New("only TCP is handed off")
++
++// HandoffFilter is the dial filter that goes with Handoff: it refuses
++// everything but TCP.
++func HandoffFilter(req types.DialRequest) error {
++	if req.Network != "tcp" {
++		return ErrHandoffTCPOnly
++	}
++	return nil
++}
+diff --git a/pkg/outbound/handoff_test.go b/pkg/outbound/handoff_test.go
+new file mode 100644
+index 00000000..3abe59cc
+--- /dev/null
++++ b/pkg/outbound/handoff_test.go
+@@ -0,0 +1,102 @@
++package outbound
++
++import (
++	"context"
++	"io"
++	"net"
++	"net/netip"
++	"path/filepath"
++	"time"
++
++	"github.com/containers/gvisor-tap-vsock/pkg/types"
++	"github.com/onsi/ginkgo/v2"
++	"github.com/onsi/gomega"
++)
++
++var _ = ginkgo.Describe("PROXY protocol v2 header", func() {
++	ginkgo.It("encodes TCP over IPv4 as the specification lays it out", func() {
++		h := ProxyHeaderV2(netip.MustParseAddrPort("192.168.127.2:40000"), netip.MustParseAddrPort("203.0.113.10:443"))
++		gomega.Expect(h).To(gomega.Equal([]byte{
++			0x0d, 0x0a, 0x0d, 0x0a, 0x00, 0x0d, 0x0a, 0x51, 0x55, 0x49, 0x54, 0x0a, // signature
++			0x21,       // version 2, PROXY
++			0x11,       // AF_INET, STREAM
++			0x00, 0x0c, // 12 bytes follow
++			192, 168, 127, 2, 203, 0, 113, 10,
++			0x9c, 0x40, 0x01, 0xbb,
++		}))
++	})
++
++	ginkgo.It("encodes TCP over IPv6 as the specification lays it out", func() {
++		h := ProxyHeaderV2(netip.MustParseAddrPort("[fd00::2]:40000"), netip.MustParseAddrPort("[2001:db8::10]:443"))
++		gomega.Expect(h[12:16]).To(gomega.Equal([]byte{0x21, 0x21, 0x00, 0x24}))
++		gomega.Expect(h).To(gomega.HaveLen(16 + 36))
++		gomega.Expect(h[16:32]).To(gomega.Equal(netip.MustParseAddr("fd00::2").AsSlice()))
++		gomega.Expect(h[32:48]).To(gomega.Equal(netip.MustParseAddr("2001:db8::10").AsSlice()))
++		gomega.Expect(h[48:]).To(gomega.Equal([]byte{0x9c, 0x40, 0x01, 0xbb}))
++	})
++
++	ginkgo.It("encodes IPv4-mapped IPv6 addresses as IPv4", func() {
++		h := ProxyHeaderV2(netip.MustParseAddrPort("[::ffff:192.168.127.2]:1"), netip.MustParseAddrPort("[::ffff:203.0.113.10]:2"))
++		gomega.Expect(h[13]).To(gomega.Equal(byte(0x11)))
++	})
++})
++
++var _ = ginkgo.Describe("Handoff", func() {
++	req := types.DialRequest{
++		Network:     "tcp",
++		Destination: netip.MustParseAddrPort("192.168.127.254:8080"),
++		DialAddress: netip.MustParseAddrPort("127.0.0.1:8080"),
++	}
++	source := netip.MustParseAddrPort("192.168.127.2:40000")
++
++	ginkgo.It("writes the header, then carries the connection both ways", func() {
++		path := filepath.Join(ginkgo.GinkgoT().TempDir(), "handoff.sock")
++		ln, err := net.Listen("unix", path)
++		gomega.Expect(err).ToNot(gomega.HaveOccurred())
++		defer ln.Close()
++		got := make(chan []byte, 1)
++		go func() {
++			c, err := ln.Accept()
++			if err != nil {
++				return
++			}
++			defer c.Close()
++			buf := make([]byte, 28+5)
++			if _, err := io.ReadFull(c, buf); err != nil {
++				return
++			}
++			got <- buf
++			_, _ = c.Write([]byte("world"))
++		}()
++
++		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
++		defer cancel()
++		conn, err := Handoff(path)(ctx, source, req)
++		gomega.Expect(err).ToNot(gomega.HaveOccurred())
++		defer conn.Close()
++		_, err = conn.Write([]byte("hello"))
++		gomega.Expect(err).ToNot(gomega.HaveOccurred())
++		var buf []byte
++		gomega.Eventually(got, 5*time.Second).Should(gomega.Receive(&buf))
++		gomega.Expect(buf[:28]).To(gomega.Equal(ProxyHeaderV2(source, req.DialAddress)))
++		gomega.Expect(string(buf[28:])).To(gomega.Equal("hello"))
++		reply := make([]byte, 5)
++		_, err = io.ReadFull(conn, reply)
++		gomega.Expect(err).ToNot(gomega.HaveOccurred())
++		gomega.Expect(string(reply)).To(gomega.Equal("world"))
++	})
++
++	ginkgo.It("fails when nothing listens, so the guest's connection is reset", func() {
++		_, err := Handoff(filepath.Join(ginkgo.GinkgoT().TempDir(), "none.sock"))(context.Background(), source, req)
++		gomega.Expect(err).To(gomega.HaveOccurred())
++	})
++
++	ginkgo.It("goes with a filter that lets only TCP through", func() {
++		gomega.Expect(HandoffFilter(req)).To(gomega.Succeed())
++		for _, network := range []string{"udp", "icmp"} {
++			r := req
++			r.Network = network
++			gomega.Expect(HandoffFilter(r)).To(gomega.MatchError(ErrHandoffTCPOnly))
++		}
++	})
++})
+diff --git a/pkg/types/configuration.go b/pkg/types/configuration.go
+index d984d3c8..6cd6c23b 100644
+--- a/pkg/types/configuration.go
++++ b/pkg/types/configuration.go
+@@ -96,6 +96,12 @@ type Configuration struct {
+ 	// connection.
+ 	DialTCP func(ctx context.Context, source netip.AddrPort, req DialRequest) (net.Conn, error) `yaml:"-"`
+ 
++	// OutboundHandoff, when set, is the path of a unix socket. gvproxy then
++	// opens no outbound connection itself: every TCP connection of the guest
++	// is handed to that socket after a PROXY protocol v2 header, and outbound
++	// UDP and ICMP are dropped. See outbound.Handoff.
++	OutboundHandoff string `yaml:"outboundHandoff,omitempty"`
++
+ 	// DNSObserver, when set, is called with the addresses of every A or AAAA
+ 	// answer the embedded DNS server returns from its upstream resolver,
+ 	// before the answer is sent. name has no trailing dot.
+diff --git a/pkg/virtualnetwork/services.go b/pkg/virtualnetwork/services.go
+index 0bf7f310..4b1c671d 100644
+--- a/pkg/virtualnetwork/services.go
++++ b/pkg/virtualnetwork/services.go
+@@ -36,9 +36,17 @@ func addServices(configuration *types.Configuration, s *stack.Stack, ipPool *tap
+ 		deny = list.Filter
+ 	}
+ 	dialFilter := outbound.Chain(gatewayFilter(configuration), deny, configuration.DialFilter)
++	dialTCP := configuration.DialTCP
++	if configuration.OutboundHandoff != "" {
++		if dialTCP != nil {
++			return nil, errors.New("outbound handoff and DialTCP cannot both be set")
++		}
++		dialTCP = outbound.Handoff(configuration.OutboundHandoff)
++		dialFilter = outbound.Chain(outbound.HandoffFilter, dialFilter)
++	}
+ 
+ 	tcpForwarder := forwarder.TCP(s, translation, &natLock, configuration.Ec2MetadataAccess,
+-		configuration.TCPMaxInFlight, time.Duration(configuration.TCPConnectTimeout)*time.Second, dialFilter, configuration.DialTCP)
++		configuration.TCPMaxInFlight, time.Duration(configuration.TCPConnectTimeout)*time.Second, dialFilter, dialTCP)
+ 	s.SetTransportProtocolHandler(tcp.ProtocolNumber, tcpForwarder.HandlePacket)
+ 	udpForwarder := forwarder.UDP(s, translation, &natLock, configuration.Ec2MetadataAccess, dialFilter)
+ 	s.SetTransportProtocolHandler(udp.ProtocolNumber, udpForwarder.HandlePacket)
+-- 
+2.43.0
+
