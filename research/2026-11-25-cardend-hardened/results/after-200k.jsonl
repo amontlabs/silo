@@ -1,0 +1,10 @@
+{"back":0,"back_bytes":0,"cpu_ms":660,"mode":"same","rss_kb_after":13920,"rss_kb_before":8512,"send_s":0.651344267,"sent":200000,"counts_bytes":68,"count_lines":2,"alive":"yes"}
+{"back":0,"back_bytes":0,"cpu_ms":580,"mode":"arp-spread","rss_kb_after":13908,"rss_kb_before":8748,"send_s":0.567285187,"sent":200000,"counts_bytes":8313,"count_lines":257,"alive":"yes"}
+{"back":0,"back_bytes":0,"cpu_ms":700,"mode":"tcp-spread","rss_kb_after":14000,"rss_kb_before":8688,"send_s":0.696308269,"sent":200000,"counts_bytes":11370,"count_lines":257,"alive":"yes"}
+{"back":0,"back_bytes":0,"cpu_ms":640,"mode":"icmp-spread","rss_kb_after":13984,"rss_kb_before":8620,"send_s":0.6226798,"sent":200000,"counts_bytes":6521,"count_lines":257,"alive":"yes"}
+{"back":0,"back_bytes":0,"cpu_ms":720,"mode":"v6-spread","rss_kb_after":14156,"rss_kb_before":8724,"send_s":0.710082207,"sent":200000,"counts_bytes":17545,"count_lines":257,"alive":"yes"}
+{"back":0,"back_bytes":0,"cpu_ms":690,"mode":"syn22","rss_kb_after":13956,"rss_kb_before":8592,"send_s":0.678775072,"sent":200000,"counts_bytes":90,"count_lines":2,"alive":"yes"}
+{"back":0,"back_bytes":0,"cpu_ms":510,"mode":"spoof22","rss_kb_after":13544,"rss_kb_before":8488,"send_s":0.517667358,"sent":200000,"counts_bytes":54,"count_lines":2,"alive":"yes"}
+{"back":0,"back_bytes":0,"cpu_ms":870,"mode":"frag22","rss_kb_after":13908,"rss_kb_before":8448,"send_s":1.003428729,"sent":200000,"counts_bytes":54,"count_lines":2,"alive":"yes"}
+{"back":0,"back_bytes":0,"cpu_ms":570,"mode":"arp-reply-spread","rss_kb_after":13880,"rss_kb_before":8468,"send_s":0.562617213,"sent":200000,"counts_bytes":91,"count_lines":3,"alive":"yes"}
+{"back":0,"back_bytes":0,"cpu_ms":930,"mode":"big22","rss_kb_after":12332,"rss_kb_before":8856,"send_s":2.306894518,"sent":20000,"counts_bytes":53,"count_lines":2,"alive":"yes"}

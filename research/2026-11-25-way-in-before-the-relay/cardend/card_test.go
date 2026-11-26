@@ -137,7 +137,7 @@ func TestWayInEndToEnd(t *testing.T) {
 	for i := range blob {
 		blob[i] = byte(i * 7)
 	}
-	go func() { c.Write(blob); c.(*gonet.TCPConn).CloseWrite() }()
+	go func() { c.Write(blob); c.(*portConn).CloseWrite() }()
 	got, err := io.ReadAll(c)
 	if err != nil || !bytes.Equal(got, blob) {
 		t.Fatalf("copy broken: %d bytes back, err %v", len(got), err)

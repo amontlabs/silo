@@ -58,14 +58,25 @@ type counter struct {
 	path  string
 }
 
+// maxKinds bounds the count. Main chooses every address it sends to, so without a bound one line
+// per address grows the card's memory, and the file written every half second, without end.
+const maxKinds = 256
+
 // add counts one frame. A kind ending in ":<port>" is counted by its destination address, with
-// its first five ports kept, so a scan is one line and not 65,535.
+// its first five ports kept, so a scan is one line and not 65,535. Once maxKinds lines exist, a
+// new address is counted on its kind's "other addresses" line ("tcp connect, other addresses").
 func (c *counter) add(k string) {
 	port := ""
 	if i := strings.LastIndex(k, ":"); i > 0 && strings.HasPrefix(k, "tcp connect") || strings.HasPrefix(k, "udp") && i > 0 {
 		k, port = k[:i], k[i+1:]
 	}
 	c.mu.Lock()
+	if _, ok := c.kinds[k]; !ok && len(c.kinds) >= maxKinds {
+		if i := strings.LastIndexByte(k, ' '); i > 0 {
+			k = k[:i]
+		}
+		k += ", other addresses"
+	}
 	c.kinds[k]++
 	if port != "" && len(c.ports[k]) < 5 && !slices.Contains(c.ports[k], port) {
 		c.ports[k] = append(c.ports[k], port)
@@ -191,9 +202,21 @@ func arpReply(f []byte, router net.IP) []byte {
 	return out
 }
 
-// forStack is true only for the frames the one connection needs.
-func forStack(f []byte) bool {
-	if len(f) < header.EthernetMinimumSize {
+// maxFrame is the largest frame of a 1,500-byte MTU. The stack is never handed more.
+const maxFrame = header.EthernetMinimumSize + 1500
+
+// forStack is true only for the frames the open connections need: ARP between main's learned
+// address and the Mac end's, and TCP from main's port 22 to a port the Mac end is connected from,
+// unfragmented, with no IP options. Nothing else reaches the stack, so main can neither open a
+// connection nor make the stack answer, ask or route anything.
+func (k *card) forStack(f []byte) bool {
+	if len(f) < header.EthernetMinimumSize || len(f) > maxFrame {
+		return false
+	}
+	k.mu.Lock()
+	g, ok := k.guestAddr, k.learned
+	k.mu.Unlock()
+	if !ok {
 		return false
 	}
 	p := f[header.EthernetMinimumSize:]
@@ -203,17 +226,25 @@ func forStack(f []byte) bool {
 			return false
 		}
 		a := header.ARP(p)
-		return a.IsValid() && tcpip.AddrFrom4Slice(a.ProtocolAddressTarget()) == ourLL
+		return a.IsValid() && tcpip.AddrFrom4Slice(a.ProtocolAddressTarget()) == ourLL &&
+			tcpip.AddrFrom4Slice(a.ProtocolAddressSender()) == g
 	case header.IPv4ProtocolNumber:
 		if len(p) < header.IPv4MinimumSize {
 			return false
 		}
 		ip := header.IPv4(p)
-		if !ip.IsValid(len(p)) || ip.DestinationAddress() != ourLL || ip.TransportProtocol() != header.TCPProtocolNumber {
+		if !ip.IsValid(len(p)) || ip.HeaderLength() != header.IPv4MinimumSize || ip.More() || ip.FragmentOffset() != 0 ||
+			ip.SourceAddress() != g || ip.DestinationAddress() != ourLL || ip.TransportProtocol() != header.TCPProtocolNumber {
 			return false
 		}
 		t := header.TCP(ip.Payload())
-		return len(t) >= header.TCPMinimumSize && t.SourcePort() == 22
+		if len(t) < header.TCPMinimumSize || t.SourcePort() != 22 {
+			return false
+		}
+		k.mu.Lock()
+		open := k.ports[t.DestinationPort()]
+		k.mu.Unlock()
+		return open
 	}
 	return false
 }
@@ -233,13 +264,18 @@ func linkLocal(f []byte) (tcpip.Address, bool) {
 
 // card is the Mac end of one computer's card: what it does with each frame the computer sends.
 type card struct {
-	c       *counter
-	router  net.IP
-	s       *stack.Stack // nil unless the way in is open
-	ch      *channel.Endpoint
-	send    func([]byte) // a frame to the computer
-	learned bool
-	guest   chan tcpip.Address
+	c      *counter
+	router net.IP
+	s      *stack.Stack // nil unless the way in is open
+	ch     *channel.Endpoint
+	send   func([]byte) // a frame to the computer
+	guest  chan tcpip.Address
+
+	mu        sync.Mutex
+	learned   bool
+	guestAddr tcpip.Address
+	ports     map[uint16]bool // the Mac end's ports with a connection open or opening
+	next      uint16
 }
 
 // newStack is the netstack of the way in, with the Mac end's own address on its one card.
@@ -252,10 +288,13 @@ func newStack() (*stack.Stack, *channel.Endpoint) {
 	if e := s.CreateNIC(1, ethernet.New(ch)); e != nil {
 		log.Fatal(e)
 	}
+	// The Mac end's address alone, and no route until main's address is learned: then one route,
+	// to main's address only. The stack can send to nothing else.
 	s.AddProtocolAddress(1, tcpip.ProtocolAddress{Protocol: ipv4.ProtocolNumber,
-		AddressWithPrefix: tcpip.AddressWithPrefix{Address: ourLL, PrefixLen: 16}}, stack.AddressProperties{})
-	sub, _ := tcpip.NewSubnet(tcpip.AddrFrom4([4]byte{169, 254}), tcpip.MaskFromBytes(net.CIDRMask(16, 32)))
-	s.SetRouteTable([]tcpip.Route{{Destination: sub, NIC: 1}})
+		AddressWithPrefix: tcpip.AddressWithPrefix{Address: ourLL, PrefixLen: 32}}, stack.AddressProperties{})
+	// No SACK: the card loses no frames, and it is code main's segments would reach for nothing.
+	sack := tcpip.TCPSACKEnabled(false)
+	s.SetTransportProtocolOption(tcp.ProtocolNumber, &sack)
 	return s, ch
 }
 
@@ -280,13 +319,20 @@ func (k *card) frame(f []byte) {
 		k.send(r)
 		return
 	}
-	if k.s != nil && !k.learned {
-		if a, ok := linkLocal(f); ok {
-			k.learned = true
+	if k.s != nil {
+		k.mu.Lock()
+		learned := k.learned
+		k.mu.Unlock()
+		if a, ok := linkLocal(f); ok && !learned {
+			sub, _ := tcpip.NewSubnet(a, tcpip.MaskFromBytes(net.CIDRMask(32, 32)))
+			k.s.SetRouteTable([]tcpip.Route{{Destination: sub, NIC: 1}})
+			k.mu.Lock()
+			k.learned, k.guestAddr = true, a
+			k.mu.Unlock()
 			k.guest <- a
 		}
 	}
-	if k.s != nil && forStack(f) {
+	if k.s != nil && k.forStack(f) {
 		k.c.add("for the way in")
 		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{Payload: buffer.MakeWithData(append([]byte(nil), f...))})
 		k.ch.InjectInbound(0, pkt)
@@ -296,9 +342,51 @@ func (k *card) frame(f []byte) {
 	k.c.add(classify(f))
 }
 
-// dial is one TCP connection from the Mac end to the computer's port 22.
+// dial is one TCP connection from the Mac end to the computer's port 22. Its local port is chosen
+// here and opened in the filter before the SYN leaves, and closed with the connection.
 func (k *card) dial(g tcpip.Address) (net.Conn, error) {
-	return gonet.DialTCP(k.s, tcpip.FullAddress{NIC: 1, Addr: g, Port: 22}, ipv4.ProtocolNumber)
+	k.mu.Lock()
+	if k.ports == nil {
+		k.ports = map[uint16]bool{}
+	}
+	var port uint16
+	for {
+		k.next++
+		port = 49152 + k.next%16384
+		if !k.ports[port] {
+			break
+		}
+	}
+	k.ports[port] = true
+	k.mu.Unlock()
+	c, err := gonet.DialTCPWithBind(context.Background(), k.s,
+		tcpip.FullAddress{NIC: 1, Addr: ourLL, Port: port}, tcpip.FullAddress{NIC: 1, Addr: g, Port: 22}, ipv4.ProtocolNumber)
+	if err != nil {
+		k.closePort(port)
+		return nil, err
+	}
+	return &portConn{TCPConn: c, close: func() { k.closePort(port) }}, nil
+}
+
+func (k *card) closePort(p uint16) {
+	k.mu.Lock()
+	delete(k.ports, p)
+	k.mu.Unlock()
+}
+
+// portConn closes its port in the filter when it closes. Frames still in flight for it after
+// that are dropped and counted, which is what the stack would answer them with anyway: nothing
+// main needs.
+type portConn struct {
+	*gonet.TCPConn
+	once  sync.Once
+	close func()
+}
+
+func (c *portConn) Close() error {
+	err := c.TCPConn.Close()
+	c.once.Do(c.close)
+	return err
 }
 
 func main() {
@@ -334,7 +422,7 @@ func main() {
 	}
 
 	go func() {
-		buf := make([]byte, 65536)
+		buf := make([]byte, 65536) // a longer datagram is cut, and dropped by forStack as too long
 		for {
 			n, from, err := conn.ReadFromUnix(buf)
 			if err != nil {
@@ -374,7 +462,7 @@ func main() {
 					}
 					defer t.Close()
 					done := make(chan struct{}, 2)
-					go func() { io.Copy(t, a); t.(*gonet.TCPConn).CloseWrite(); done <- struct{}{} }()
+					go func() { io.Copy(t, a); t.(*portConn).CloseWrite(); done <- struct{}{} }()
 					go func() { io.Copy(a, t); done <- struct{}{} }()
 					<-done
 					<-done
