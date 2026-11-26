@@ -85,7 +85,7 @@ def run(S):
     hour_lines = hour_text = hour_rec = 0.0
 
     def parts(held_blocks):
-        ck = held_blocks / GIB
+        ck = held_blocks / GIB * S["store_ratio"]
         b = sum(g for _, g in binned)
         live_forks = sum(g for _, g in forks_live)
         if P["kind"] == "separate":
@@ -178,7 +178,7 @@ def run(S):
                 while over():
                     if tier in ("ckpt", "ckpt24"):
                         cands = [j for j, i in enumerate(ids)
-                                 if j != len(ids) - 1 and store.kind[i] == "auto"
+                                 if j != len(ids) - 1 and store.kind[i] in ("auto", "save", "alert")
                                  and store.protected[i] <= t
                                  and (tier == "ckpt24" or t - K[j] >= 24 * HOUR)]
                         if not cands:
@@ -301,7 +301,7 @@ for p in POLICIES.values():
 
 
 def scenario(work, host, policy, bulk="base", **kw):
-    S = dict(seed=1, nights=30, interval_min=5, work=WORK[work], host=HOSTS[host],
+    S = dict(seed=1, nights=30, store_ratio=1.0, interval_min=5, work=WORK[work], host=HOSTS[host],
              policy=POLICIES[policy], bulk=BULK[bulk], restore_nights=[7, 19],
              big_rewrite_nights=[4, 11, 18, 25])
     S.update(kw)
@@ -335,12 +335,20 @@ def grid2():
     yield scenario("medium", "mac-512", "one-share-own-record", seed=3)
 
 
+def grid3():
+    """With #411's zstd on checkpoints (stored in 24% of what they hold), what else fills the part."""
+    for host in HOSTS:
+        for w in ("medium", "heavy"):
+            for pol in ("one-share-own-record", "one-share-own-record-bin"):
+                yield scenario(w, host, pol, store_ratio=0.24)
+
+
 if __name__ == "__main__":
     want = [a for a in sys.argv[1:] if not a.startswith("--part=")]
     part = [a for a in sys.argv[1:] if a.startswith("--part=")]
     k, n = map(int, part[0][7:].split("/")) if part else (0, 1)
-    g = grid2() if "--grid2" in sys.argv else grid()
-    want = [a for a in want if a != "--grid2"]
+    g = grid3() if "--grid3" in sys.argv else grid2() if "--grid2" in sys.argv else grid()
+    want = [a for a in want if a not in ("--grid2", "--grid3")]
     for idx, S in enumerate(g):
         if idx % n != k or (want and not any(w in S["name"] for w in want)):
             continue
