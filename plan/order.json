@@ -408,6 +408,8 @@
         "no-automatic-undo",
         "one-run-grain",
         "putting-back-a-runs-paths",
+        "putting-back-a-new-path",
+        "restart-after-a-put-back",
         "rewinding-a-conversation",
         "run-commits-in-a-repository",
         "classifier-reads-inside",
