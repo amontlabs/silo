@@ -41,8 +41,15 @@ written.
    sign-in is ruled out by `silos-own-model-calls`, whose answer also reads as ruling out a
    model that needs no key; a note there suggests a wording.
 
-The Qwen3 8B run and the 4B under attack are in `results.txt` when they finish; see "What was not
-verified".
+7. **A larger local model did worse, not better.** Qwen3 8B (Q4_K_M, 5 GB, its thinking switched
+   off) read twice caught or flagged 43 of 57, said mismatch on 4 of the 16 true claims, and set
+   "speaks to the checker" on 56 of 73 clean summaries. Its three calls took 80 seconds a run on
+   this machine. Size alone does not make a local reader good enough: whichever model the reader
+   is given has to be measured on a corpus like this one first.
+8. **Under attack, only a first partial run.** The 4B inline reader was asked about 31 to 36 of
+   the 57 false claims with the control line, a4 (an answer forged in its own JSON) and a8 (a false
+   end of the words, then a «[system]» line) before the run stopped: it lost 1, 1 and 5 of them
+   (small hosted: 1, 12 and 16 of 52). Too few to compare; listed in `results.txt`.
 
 ## The numbers
 
@@ -55,6 +62,8 @@ unbacked. The hosted rows are #400's.
 | inline (#387's prompt) | 7 + 46 | 1 + 13 | 4 + 48 | 1 + 8 | 8 + 41 | 0 + 4 |
 | claim list, then judge | 11 + 40 | 5 + 9 | 3 + 40 | 0 + 7 | 9 + 29 | 0 + 3 |
 | inline + claim list | 15 + 40 | 6 + 9 | 5 + 50 | 1 + 9 | 11 + 40 | 0 + 4 |
+
+Qwen3 8B, local: inline 6 + 32 and 1 + 10; claim list 6 + 32 and 4 + 9; both 9 + 34 and 4 + 9.
 
 `cost/results.txt`, from `cost/cost.py`: tokens per call and the price per run, per night and per
 month at six models' list prices of 25 November 2026.
@@ -93,10 +102,11 @@ python3 cost/cost.py > cost/results.txt
   Podman's krunkit for llama.cpp on Macs) was not tried; published figures for it range from about
   30% to near the Mac's own speed.
 - **The records are #387's: thin**, as #400 says. Most answers are "unbacked".
-- **One model family per size, one run each, temperature 0.** Another 4B model may set the signal
+- **One model family per size, one run each, temperature 0.** Another local model may set the signal
   less often; a prompt tuned for a small local model was not tried, on purpose, so the numbers
   compare with #400's.
-- **The 8B model and the attacks on the local model** were still running when this was written.
+- **The attacks on the local models** were run only in part (the 4B inline reader, three lines,
+  31 to 36 claims each). The claim-list reader and the 8B model were not attacked.
 - **Token counts for other providers** are Anthropic's counts; their tokenizers differ by some
   percent.
 - **Prices** are OpenRouter's catalogue of 25 November 2026, which resells at the provider's list

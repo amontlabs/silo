@@ -28,7 +28,9 @@ The options, measured on #387's 75 claims (57 false, 16 true) with #400's prompt
   would hold every run under What needs you; with this model the reader must not show that
   signal. A run took 40 seconds of the computer's processor. It costs a model file of a few
   gigabytes in the reader's recipe, the memory while it reads (a Mac runs few computers), and
-  more false alarms. A GPU inside a computer goes through libkrun's virtio-gpu (Venus), which
+  more false alarms. A A larger local model is not
+  safer: Qwen3 8B caught or flagged 43 and said mismatch on 4 true claims, so whichever model
+  ships has to be measured first. A GPU inside a computer goes through libkrun's virtio-gpu (Venus), which
   Podman's krunkit uses for llama.cpp on Macs; it was not tried here.
 - A model on your Mac, such as Ollama, through the channel of #384. Free and private, on the Mac's
   GPU. It costs a change to `nothing-shared-from-your-device`, which forbids it today: the
