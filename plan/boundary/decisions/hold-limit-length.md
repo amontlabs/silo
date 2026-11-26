@@ -24,3 +24,9 @@ measured.
 To find out. The record asks, with it, how each agent program takes the error at the limit.
 
 Nothing has been measured yet.
+
+An agent's part, 26 November 2026 (`research/2026-11-25-boundary-end-to-end/heavy-night.md`).
+Built at the boundary with #383's rules: on a night of 128 agents and subagents, 205 destructive
+calls left unanswered were all refused at 90.0 to 92.1 s with "held for a person and not
+answered", as a 403. A held request kept only its connection's thread; the boundary's memory and
+threads stayed those of the same night without holds.

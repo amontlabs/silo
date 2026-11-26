@@ -34,3 +34,10 @@ is `hold-limit`.
 
 - That no wait at the boundary ends by best effort is polarzero's, said of the limits on a hold and
   on every wait at the boundary.
+
+An agent's part, 26 November 2026 (`research/2026-11-25-boundary-end-to-end/heavy-night.md`).
+Built as the answer says: #353's detector with #383's rules in a process of its own, the boundary
+keeping the 2 s wait for its opinion and the hold's 90 s, each with its own timer, and
+`on_no_opinion` set to deny or leave to the rules. The detector decided in 0.1 ms (p50) and
+0.5 ms (p99) on 6,188 requests in two minutes; a unit test ends a precaution that never answers at
+the limit (`boundary/src/hold.zig`).
