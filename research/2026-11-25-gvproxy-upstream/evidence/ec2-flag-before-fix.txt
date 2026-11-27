@@ -1,0 +1,18 @@
+--- FAIL: TestEc2MetadataAccessReachesTheStack (0.00s)
+    config_test.go:769: 
+        	Error Trace:	cmd/gvproxy/config_test.go:769
+        	Error:      	Not equal: 
+        	            	expected: true
+        	            	actual  : false
+        	Test:       	TestEc2MetadataAccessReachesTheStack
+        	Messages:   	flag
+    config_test.go:769: 
+        	Error Trace:	cmd/gvproxy/config_test.go:769
+        	Error:      	Not equal: 
+        	            	expected: true
+        	            	actual  : false
+        	Test:       	TestEc2MetadataAccessReachesTheStack
+        	Messages:   	config file, top-level key
+FAIL
+FAIL	github.com/containers/gvisor-tap-vsock/cmd/gvproxy	0.009s
+FAIL

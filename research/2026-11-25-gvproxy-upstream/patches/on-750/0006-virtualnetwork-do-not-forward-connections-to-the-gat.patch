@@ -1,0 +1,134 @@
+From 33d1bb0cb64aeb6013050f3785df82726d2154a9 Mon Sep 17 00:00:00 2001
+From: silo-research <noreply@anthropic.com>
+Date: Wed, 25 Nov 2026 14:17:00 +0000
+Subject: [PATCH 06/10] virtualnetwork: do not forward connections to the
+ gateway's own address
+
+The stack hands the TCP and UDP forwarders every connection that no
+endpoint accepts, including one to a port of the gateway where gvproxy
+serves nothing, such as 192.168.127.1:8080. The forwarder then dials
+192.168.127.1:8080 on the host, which reaches whatever holds that
+address on the host's own network: on a home or office network that
+uses 192.168.127.0/24 too, a machine of that network. With the gateway
+API turned off, port 80 behaves the same way.
+
+Refuse, with a dial filter applied before the embedder's, a connection
+to the gateway's address that NAT does not translate. A NAT entry for
+the gateway, as Lima sets one to reach the host's loopback, still
+forwards.
+---
+ pkg/virtualnetwork/gateway_test.go | 32 +++++++++++++++++++++++
+ pkg/virtualnetwork/services.go     | 41 +++++++++++++++++++++++++++---
+ 2 files changed, 70 insertions(+), 3 deletions(-)
+ create mode 100644 pkg/virtualnetwork/gateway_test.go
+
+diff --git a/pkg/virtualnetwork/gateway_test.go b/pkg/virtualnetwork/gateway_test.go
+new file mode 100644
+index 00000000..384f609f
+--- /dev/null
++++ b/pkg/virtualnetwork/gateway_test.go
+@@ -0,0 +1,32 @@
++package virtualnetwork
++
++import (
++	"net/netip"
++	"testing"
++
++	"github.com/containers/gvisor-tap-vsock/pkg/types"
++	"github.com/stretchr/testify/assert"
++)
++
++// A connection to a port of the gateway that no service of gvproxy listens
++// on must not leave the virtual network: the host would dial the same address
++// on its own network, where another machine may hold it.
++func TestGatewayIsNotForwarded(t *testing.T) {
++	filter := gatewayFilter(&types.Configuration{
++		GatewayIP: "192.168.127.1",
++		NAT:       map[string]string{"192.168.127.254": "127.0.0.1"},
++	})
++	req := func(network, dst, dial string) types.DialRequest {
++		return types.DialRequest{Network: network, Destination: netip.MustParseAddrPort(dst), DialAddress: netip.MustParseAddrPort(dial)}
++	}
++	assert.Error(t, filter(req("tcp", "192.168.127.1:7790", "192.168.127.1:7790")))
++	assert.Error(t, filter(req("udp", "192.168.127.1:123", "192.168.127.1:123")))
++	assert.NoError(t, filter(req("tcp", "192.168.127.254:22", "127.0.0.1:22")), "a NAT entry is meant to be forwarded")
++	assert.NoError(t, filter(req("tcp", "203.0.113.10:443", "203.0.113.10:443")))
++
++	lima := gatewayFilter(&types.Configuration{
++		GatewayIP: "192.168.5.2",
++		NAT:       map[string]string{"192.168.5.2": "127.0.0.1"},
++	})
++	assert.NoError(t, lima(req("tcp", "192.168.5.2:8080", "127.0.0.1:8080")), "Lima maps the gateway to the host's loopback")
++}
+diff --git a/pkg/virtualnetwork/services.go b/pkg/virtualnetwork/services.go
+index 5036271c..1099f877 100644
+--- a/pkg/virtualnetwork/services.go
++++ b/pkg/virtualnetwork/services.go
+@@ -1,8 +1,10 @@
+ package virtualnetwork
+ 
+ import (
++	"errors"
+ 	"net"
+ 	"net/http"
++	"net/netip"
+ 	"sync"
+ 	"time"
+ 
+@@ -24,13 +26,14 @@ import (
+ func addServices(configuration *types.Configuration, s *stack.Stack, ipPool *tap.IPPool, portsForwarder *forwarder.PortsForwarder) (http.Handler, error) {
+ 	var natLock sync.Mutex
+ 	translation := parseNATTable(configuration)
++	dialFilter := chainFilters(gatewayFilter(configuration), configuration.DialFilter)
+ 
+ 	tcpForwarder := forwarder.TCP(s, translation, &natLock, configuration.Ec2MetadataAccess,
+-		configuration.TCPMaxInFlight, time.Duration(configuration.TCPConnectTimeout)*time.Second, configuration.DialFilter)
++		configuration.TCPMaxInFlight, time.Duration(configuration.TCPConnectTimeout)*time.Second, dialFilter)
+ 	s.SetTransportProtocolHandler(tcp.ProtocolNumber, tcpForwarder.HandlePacket)
+-	udpForwarder := forwarder.UDP(s, translation, &natLock, configuration.Ec2MetadataAccess, configuration.DialFilter)
++	udpForwarder := forwarder.UDP(s, translation, &natLock, configuration.Ec2MetadataAccess, dialFilter)
+ 	s.SetTransportProtocolHandler(udp.ProtocolNumber, udpForwarder.HandlePacket)
+-	icmpForwarder := forwarder.ICMP(s, translation, &natLock, configuration.Ec2MetadataAccess, configuration.DialFilter)
++	icmpForwarder := forwarder.ICMP(s, translation, &natLock, configuration.Ec2MetadataAccess, dialFilter)
+ 	s.SetTransportProtocolHandler(icmp.ProtocolNumber4, icmpForwarder.HandlePacket)
+ 
+ 	dnsMux, err := dnsServer(configuration, s)
+@@ -106,3 +109,35 @@ func dhcpServer(configuration *types.Configuration, s *stack.Stack, ipPool *tap.
+ 	}()
+ 	return server.Mux(), nil
+ }
++
++// gatewayFilter refuses connections to the gateway's own address that NAT
++// does not translate. The stack hands the forwarders every connection that no
++// endpoint accepts, including one to a port of the gateway where gvproxy
++// serves nothing; the host would then dial that address on its own network.
++func gatewayFilter(configuration *types.Configuration) func(types.DialRequest) error {
++	gateway, err := netip.ParseAddr(configuration.GatewayIP)
++	if err != nil {
++		return nil
++	}
++	return func(req types.DialRequest) error {
++		if req.Destination.Addr() == gateway && req.DialAddress == req.Destination {
++			return errors.New("the gateway serves nothing on this port")
++		}
++		return nil
++	}
++}
++
++// chainFilters asks each non-nil filter in turn.
++func chainFilters(filters ...func(types.DialRequest) error) func(types.DialRequest) error {
++	return func(req types.DialRequest) error {
++		for _, f := range filters {
++			if f == nil {
++				continue
++			}
++			if err := f(req); err != nil {
++				return err
++			}
++		}
++		return nil
++	}
++}
+-- 
+2.43.0
+

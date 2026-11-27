@@ -1,0 +1,94 @@
+From 0370a9620975c7d6bacf4f6faf18ddc745d92599 Mon Sep 17 00:00:00 2001
+From: silo-research <noreply@anthropic.com>
+Date: Wed, 25 Nov 2026 14:06:55 +0000
+Subject: [PATCH 10/10] gvproxy: add -sealed and -closed (Silo's fork only, not
+ proposed upstream)
+
+Two shorthands that name the settings Silo uses:
+
+-sealed: -no-gateway-api -no-host-loopback
+         -outbound-deny private,host,host-networks
+-closed: -sealed, -outbound-deny all and -dns-upstream none
+
+Upstream does not need them: once the options they expand to are
+merged, Silo passes those options and this patch is dropped.
+---
+ cmd/gvproxy/config.go      | 15 +++++++++++++++
+ cmd/gvproxy/config_test.go | 24 ++++++++++++++++++++++++
+ 2 files changed, 39 insertions(+)
+
+diff --git a/cmd/gvproxy/config.go b/cmd/gvproxy/config.go
+index 8b8fe317..34ecbe68 100644
+--- a/cmd/gvproxy/config.go
++++ b/cmd/gvproxy/config.go
+@@ -55,6 +55,8 @@ type GvproxyArgs struct {
+ 	dnsUpstream        arrayFlags
+ 	outboundDeny       arrayFlags
+ 	outboundHandoff    string
++	sealed             bool
++	closed             bool
+ }
+ 
+ type GvproxyConfig struct {
+@@ -156,6 +158,8 @@ func GvproxyArgParse(flagSet *flag.FlagSet, args *GvproxyArgs, argv []string) (*
+ 	flagSet.Var(&args.dnsUpstream, "dns-upstream", "DNS server (ip:port) asked for names outside gvproxy's own zones, instead of the host's resolver; repeatable. \"none\" refuses those names")
+ 	flagSet.Var(&args.outboundDeny, "outbound-deny", "Destinations no outbound TCP, UDP or ICMP of the guest may reach: an address, a CIDR, private, host, host-networks or all; repeatable or separated by commas")
+ 	flagSet.StringVar(&args.outboundHandoff, "outbound-handoff", "", "Unix socket path: hand every outbound TCP connection of the guest to it after a PROXY protocol v2 header, dial nothing, drop outbound UDP and ICMP")
++	flagSet.BoolVar(&args.sealed, "sealed", false, "Shorthand: -no-gateway-api -no-host-loopback -outbound-deny private,host,host-networks")
++	flagSet.BoolVar(&args.closed, "closed", false, "Shorthand: -sealed, -outbound-deny all and -dns-upstream none. Forwards into the guest still work")
+ 	if err := flagSet.Parse(argv); err != nil {
+ 		return nil, err
+ 	}
+@@ -265,6 +269,17 @@ func GvproxyConfigure(config *GvproxyConfig, args *GvproxyArgs, version string)
+ 	if config.Stack.GatewayMacAddress == "" {
+ 		config.Stack.GatewayMacAddress = "5a:94:ef:e4:0c:dd"
+ 	}
++	// -sealed and -closed are shorthands, expanded before anything reads the flags they set.
++	if args.sealed || args.closed {
++		args.noGatewayAPI, args.noHostLoopback = true, true
++		args.outboundDeny = append(args.outboundDeny, "private", "host", "host-networks")
++	}
++	if args.closed {
++		args.outboundDeny = append(args.outboundDeny, "all")
++		if len(args.dnsUpstream) == 0 {
++			args.dnsUpstream = arrayFlags{"none"}
++		}
++	}
+ 	if args.noHostLoopback {
+ 		config.NoHostLoopback = true
+ 	}
+diff --git a/cmd/gvproxy/config_test.go b/cmd/gvproxy/config_test.go
+index a662ddcb..a265e9a0 100644
+--- a/cmd/gvproxy/config_test.go
++++ b/cmd/gvproxy/config_test.go
+@@ -899,3 +899,27 @@ func TestOutboundHandoff(t *testing.T) {
+ 		assert.Equal(t, v.want, cnf.Stack.OutboundHandoff, v.name)
+ 	}
+ }
++
++func TestSealedAndClosed(t *testing.T) {
++	t.Parallel()
++	configure := func(argv ...string) *GvproxyConfig {
++		var cnf GvproxyConfig
++		var args GvproxyArgs
++		_, err := GvproxyArgParse(flag.NewFlagSet(os.Args[0], flag.ContinueOnError), &args, argv)
++		require.NoError(t, err)
++		_, err = GvproxyConfigure(&cnf, &args, "testing")
++		require.NoError(t, err)
++		return &cnf
++	}
++	sealed := configure("-sealed")
++	assert.True(t, sealed.NoGatewayAPI)
++	assert.True(t, sealed.NoHostLoopback)
++	assert.Empty(t, sealed.Stack.NAT)
++	assert.Equal(t, []string{"private", "host", "host-networks"}, sealed.Stack.OutboundDeny)
++	assert.Empty(t, sealed.Stack.DNSUpstream)
++
++	closed := configure("-closed")
++	assert.True(t, closed.NoGatewayAPI)
++	assert.Contains(t, closed.Stack.OutboundDeny, "all")
++	assert.Equal(t, []string{"none"}, closed.Stack.DNSUpstream)
++}
+-- 
+2.43.0
+

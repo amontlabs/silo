@@ -277,3 +277,13 @@ faults above has a fix, and a test that fails without it.
   connection from an address no computer has: a key nobody was given reached the provider, and no
   budget applied. Patched, such a connection is refused with "this connection comes from no computer
   Silo knows".
+
+An agent's part, 26 November 2026 (research `2026-11-25-gvproxy-upstream`). #380's patch to gvproxy
+is now ten patches against upstream: nine written to be sent upstream as separate pull requests and
+one, the `-sealed` and `-closed` shorthands, kept only by Silo. If the nine merge, Silo runs
+upstream gvproxy with its own flags and keeps no fork. Three of the nine fix bugs that the stack
+has today, each shown failing first: `-ec2-metadata-access` does nothing, so #395's metadata path
+needs the fix; ping reaches 169.254.0.0/16, which TCP and UDP refuse; and a connection to a port of
+the gateway where gvproxy serves nothing goes to the same address on the host's network. #380's
+suite, extended, passes every case with the series in all seven settings Silo would use. Sending
+anything upstream is polarzero's call.

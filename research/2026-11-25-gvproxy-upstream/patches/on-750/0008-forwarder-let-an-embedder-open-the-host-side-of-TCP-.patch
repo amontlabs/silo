@@ -1,0 +1,200 @@
+From 2b74e5dfa33af51c21f6109107faa3faf8faa6f2 Mon Sep 17 00:00:00 2001
+From: silo-research <noreply@anthropic.com>
+Date: Wed, 25 Nov 2026 14:06:18 +0000
+Subject: [PATCH 08/10] forwarder: let an embedder open the host side of TCP
+ connections
+
+The dial filter lets an embedder refuse a connection of the guest, but
+not open it some other way. An embedder that relays the guest's traffic
+through its own proxy, records it, or opens it from another network
+namespace has to let gvproxy dial and then intercept on the host.
+
+Configuration gains DialTCP. When it is set, the TCP forwarder calls it,
+after DialFilter allowed the request, with the guest's source address
+and port and the same DialRequest, under a context that ends after the
+connect timeout, and relays the guest's connection to the net.Conn it
+returns. An error resets the guest's connection, as a failed dial does.
+When it is nil, nothing changes.
+
+The source is a separate argument so that DialRequest and existing
+filters stay as they are.
+---
+ pkg/services/forwarder/filter_test.go | 55 ++++++++++++++++++++++++++-
+ pkg/services/forwarder/tcp.go         | 20 ++++++++--
+ pkg/types/configuration.go            |  9 +++++
+ pkg/virtualnetwork/services.go        |  2 +-
+ 4 files changed, 80 insertions(+), 6 deletions(-)
+
+diff --git a/pkg/services/forwarder/filter_test.go b/pkg/services/forwarder/filter_test.go
+index 17c3f95a..9d9f4f01 100644
+--- a/pkg/services/forwarder/filter_test.go
++++ b/pkg/services/forwarder/filter_test.go
+@@ -3,6 +3,7 @@ package forwarder
+ import (
+ 	"context"
+ 	"errors"
++	"io"
+ 	"net"
+ 	"net/netip"
+ 	"sync"
+@@ -87,7 +88,7 @@ var _ = ginkgo.Describe("dial filter", func() {
+ 		dial := func(f *recordingFilter) (net.Conn, error) {
+ 			s := newTestStack()
+ 			var natLock sync.Mutex
+-			fwd := TCP(s, natToLoopback, &natLock, false, 0, 0, f.filter)
++			fwd := TCP(s, natToLoopback, &natLock, false, 0, 0, f.filter, nil)
+ 			s.SetTransportProtocolHandler(tcp.ProtocolNumber, fwd.HandlePacket)
+ 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+ 			defer cancel()
+@@ -156,4 +157,56 @@ var _ = ginkgo.Describe("dial filter", func() {
+ 			gomega.Expect(f.seen()).NotTo(gomega.BeEmpty())
+ 		})
+ 	})
++
++	ginkgo.Context("TCP with a dialer of the embedder", func() {
++		ginkgo.It("hands the dialer the guest's source and the request, and carries its connection", func() {
++			s := newTestStack()
++			var natLock sync.Mutex
++			type call struct {
++				source netip.AddrPort
++				req    types.DialRequest
++			}
++			calls := make(chan call, 1)
++			dial := func(_ context.Context, source netip.AddrPort, req types.DialRequest) (net.Conn, error) {
++				calls <- call{source, req}
++				host, guestSide := net.Pipe()
++				go func() {
++					defer guestSide.Close()
++					_, _ = guestSide.Write([]byte("from the dialer"))
++				}()
++				return host, nil
++			}
++			fwd := TCP(s, natToLoopback, &natLock, false, 0, 0, nil, dial)
++			s.SetTransportProtocolHandler(tcp.ProtocolNumber, fwd.HandlePacket)
++			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
++			defer cancel()
++			// Nothing listens on port 9 of the host: only the dialer can answer.
++			c, err := gonet.DialContextTCP(ctx, s, tcpip.FullAddress{NIC: 1, Addr: guestAddr, Port: 9}, ipv4.ProtocolNumber)
++			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
++			defer c.Close()
++			buf := make([]byte, len("from the dialer"))
++			_, err = io.ReadFull(c, buf)
++			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
++			gomega.Expect(string(buf)).To(gomega.Equal("from the dialer"))
++			var got call
++			gomega.Expect(calls).To(gomega.Receive(&got))
++			gomega.Expect(got.req).To(gomega.Equal(natRequest("tcp", 9)))
++			gomega.Expect(got.source.Port()).ToNot(gomega.BeZero())
++			gomega.Expect(got.source.Addr().IsValid()).To(gomega.BeTrue())
++		})
++
++		ginkgo.It("resets the guest's connection when the dialer fails", func() {
++			s := newTestStack()
++			var natLock sync.Mutex
++			dial := func(context.Context, netip.AddrPort, types.DialRequest) (net.Conn, error) {
++				return nil, errors.New("refused by the dialer")
++			}
++			fwd := TCP(s, natToLoopback, &natLock, false, 0, 0, nil, dial)
++			s.SetTransportProtocolHandler(tcp.ProtocolNumber, fwd.HandlePacket)
++			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
++			defer cancel()
++			_, err := gonet.DialContextTCP(ctx, s, tcpip.FullAddress{NIC: 1, Addr: guestAddr, Port: 9}, ipv4.ProtocolNumber)
++			gomega.Expect(err).Should(gomega.HaveOccurred())
++		})
++	})
+ })
+diff --git a/pkg/services/forwarder/tcp.go b/pkg/services/forwarder/tcp.go
+index b031f47a..35c5696b 100644
+--- a/pkg/services/forwarder/tcp.go
++++ b/pkg/services/forwarder/tcp.go
+@@ -4,6 +4,7 @@ import (
+ 	"context"
+ 	"fmt"
+ 	"net"
++	"net/netip"
+ 	"sync"
+ 	"time"
+ 
+@@ -24,7 +25,7 @@ const (
+ 	defaultTCPConnectTimeout = 30 * time.Second
+ )
+ 
+-func TCP(s *stack.Stack, nat map[tcpip.Address]tcpip.Address, natLock *sync.Mutex, ec2MetadataAccess bool, maxInFlight int, connectTimeout time.Duration, filter func(types.DialRequest) error) *tcp.Forwarder {
++func TCP(s *stack.Stack, nat map[tcpip.Address]tcpip.Address, natLock *sync.Mutex, ec2MetadataAccess bool, maxInFlight int, connectTimeout time.Duration, filter func(types.DialRequest) error, dial func(context.Context, netip.AddrPort, types.DialRequest) (net.Conn, error)) *tcp.Forwarder {
+ 	if maxInFlight <= 0 {
+ 		maxInFlight = defaultTCPMaxInFlight
+ 	}
+@@ -45,16 +46,27 @@ func TCP(s *stack.Stack, nat map[tcpip.Address]tcpip.Address, natLock *sync.Mute
+ 		}
+ 		natLock.Unlock()
+ 		address := net.JoinHostPort(localAddress.String(), fmt.Sprint(r.ID().LocalPort))
++		req := dialRequest("tcp", r.ID().LocalAddress, localAddress, r.ID().LocalPort)
+ 		if filter != nil {
+-			if err := filter(dialRequest("tcp", r.ID().LocalAddress, localAddress, r.ID().LocalPort)); err != nil {
++			if err := filter(req); err != nil {
+ 				log.Debugf("dial filter refused tcp %s: %v", address, err)
+ 				r.Complete(true)
+ 				return
+ 			}
+ 		}
+-		outbound, err := net.DialTimeout("tcp", address, connectTimeout)
++		var outbound net.Conn
++		var err error
++		if dial != nil {
++			id := r.ID()
++			src, _ := netip.AddrFromSlice(id.RemoteAddress.AsSlice())
++			ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
++			outbound, err = dial(ctx, netip.AddrPortFrom(src, id.RemotePort), req)
++			cancel()
++		} else {
++			outbound, err = net.DialTimeout("tcp", address, connectTimeout)
++		}
+ 		if err != nil {
+-			log.Tracef("net.DialTimeout() = %v", err)
++			log.Tracef("dial %s: %v", address, err)
+ 			r.Complete(true)
+ 			return
+ 		}
+diff --git a/pkg/types/configuration.go b/pkg/types/configuration.go
+index dfc3361d..d984d3c8 100644
+--- a/pkg/types/configuration.go
++++ b/pkg/types/configuration.go
+@@ -1,6 +1,7 @@
+ package types
+ 
+ import (
++	"context"
+ 	"net"
+ 	"net/netip"
+ 	"regexp"
+@@ -87,6 +88,14 @@ type Configuration struct {
+ 	// the guest with a reset, UDP and ICMP are dropped.
+ 	DialFilter func(DialRequest) error `yaml:"-"`
+ 
++	// DialTCP, when set, opens the host side of every TCP connection the
++	// guest makes to an address that the virtual network does not own, in
++	// place of a dial to req.DialAddress. source is the guest's address and
++	// port. It is called after DialFilter allowed the request, with a context
++	// that ends after TCPConnectTimeout. An error resets the guest's
++	// connection.
++	DialTCP func(ctx context.Context, source netip.AddrPort, req DialRequest) (net.Conn, error) `yaml:"-"`
++
+ 	// DNSObserver, when set, is called with the addresses of every A or AAAA
+ 	// answer the embedded DNS server returns from its upstream resolver,
+ 	// before the answer is sent. name has no trailing dot.
+diff --git a/pkg/virtualnetwork/services.go b/pkg/virtualnetwork/services.go
+index d18a1f23..0bf7f310 100644
+--- a/pkg/virtualnetwork/services.go
++++ b/pkg/virtualnetwork/services.go
+@@ -38,7 +38,7 @@ func addServices(configuration *types.Configuration, s *stack.Stack, ipPool *tap
+ 	dialFilter := outbound.Chain(gatewayFilter(configuration), deny, configuration.DialFilter)
+ 
+ 	tcpForwarder := forwarder.TCP(s, translation, &natLock, configuration.Ec2MetadataAccess,
+-		configuration.TCPMaxInFlight, time.Duration(configuration.TCPConnectTimeout)*time.Second, dialFilter)
++		configuration.TCPMaxInFlight, time.Duration(configuration.TCPConnectTimeout)*time.Second, dialFilter, configuration.DialTCP)
+ 	s.SetTransportProtocolHandler(tcp.ProtocolNumber, tcpForwarder.HandlePacket)
+ 	udpForwarder := forwarder.UDP(s, translation, &natLock, configuration.Ec2MetadataAccess, dialFilter)
+ 	s.SetTransportProtocolHandler(udp.ProtocolNumber, udpForwarder.HandlePacket)
+-- 
+2.43.0
+

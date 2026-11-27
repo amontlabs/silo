@@ -1,0 +1,72 @@
+From 5bec52abc209ef0ad189b5c6f1766c570ab23e04 Mon Sep 17 00:00:00 2001
+From: silo-research <noreply@anthropic.com>
+Date: Wed, 25 Nov 2026 14:00:20 +0000
+Subject: [PATCH 01/10] gvproxy: pass -ec2-metadata-access to the virtual
+ network
+
+Since the configuration file was introduced (#484, v0.8.8), the
+-ec2-metadata-access flag and the top-level `ec2-metadata-access` key of
+the configuration file set GvproxyConfig.Ec2MetadataAccess, which nothing
+reads. The forwarders read Configuration.Ec2MetadataAccess, so with the
+flag set the guest still cannot reach 169.254.169.254 or the Amazon Time
+Sync Service. Only `stack.ec2MetadataAccess` in a configuration file
+works. In v0.8.7 the flag set the stack's field directly.
+
+Copy the setting into the stack's configuration, and test that the flag
+and both keys of the configuration file reach it.
+---
+ cmd/gvproxy/config.go      |  3 +++
+ cmd/gvproxy/config_test.go | 26 ++++++++++++++++++++++++++
+ 2 files changed, 29 insertions(+)
+
+diff --git a/cmd/gvproxy/config.go b/cmd/gvproxy/config.go
+index 9413b173..5523fcb3 100644
+--- a/cmd/gvproxy/config.go
++++ b/cmd/gvproxy/config.go
+@@ -309,6 +309,9 @@ func GvproxyConfigure(config *GvproxyConfig, args *GvproxyArgs, version string)
+ 	if args.ec2MetadataAccess {
+ 		config.Ec2MetadataAccess = true
+ 	}
++	if config.Ec2MetadataAccess {
++		config.Stack.Ec2MetadataAccess = true
++	}
+ 	if args.mtu != 0 {
+ 		config.Stack.MTU = args.mtu
+ 	}
+diff --git a/cmd/gvproxy/config_test.go b/cmd/gvproxy/config_test.go
+index 2fcbf3ac..9076539d 100644
+--- a/cmd/gvproxy/config_test.go
++++ b/cmd/gvproxy/config_test.go
+@@ -743,3 +743,29 @@ stack:
+ 		},
+ 	}
+ }
++
++// The virtual network reads Stack.Ec2MetadataAccess. The flag and the
++// top-level key of the configuration file must both reach it.
++func TestEc2MetadataAccessReachesTheStack(t *testing.T) {
++	t.Parallel()
++	for _, v := range []struct {
++		name   string
++		argv   []string
++		config string
++		want   bool
++	}{
++		{"default", nil, "", false},
++		{"flag", []string{"-ec2-metadata-access"}, "", true},
++		{"config file, top-level key", nil, "ec2-metadata-access: true\n", true},
++		{"config file, stack key", nil, "stack:\n  ec2MetadataAccess: true\n", true},
++	} {
++		var cnf GvproxyConfig
++		var args GvproxyArgs
++		_, err := GvproxyArgParse(flag.NewFlagSet(os.Args[0], flag.ContinueOnError), &args, v.argv)
++		require.NoError(t, err, v.name)
++		require.NoError(t, yaml.Unmarshal([]byte(v.config), &cnf), v.name)
++		_, err = GvproxyConfigure(&cnf, &args, "testing")
++		require.NoError(t, err, v.name)
++		assert.Equal(t, v.want, cnf.Stack.Ec2MetadataAccess, v.name)
++	}
++}
+-- 
+2.43.0
+

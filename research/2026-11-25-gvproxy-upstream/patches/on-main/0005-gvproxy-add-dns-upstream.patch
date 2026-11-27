@@ -1,0 +1,314 @@
+From 966b099dbeea6128c9c9c25254a08506cc86b9b5 Mon Sep 17 00:00:00 2001
+From: silo-research <noreply@anthropic.com>
+Date: Wed, 25 Nov 2026 14:03:20 +0000
+Subject: [PATCH 5/5] gvproxy: add -dns-upstream
+
+The embedded DNS server resolves the names outside its zones with the
+host's resolver. That is right for most users, but not for two cases:
+
+- A guest that must not reach the outside world at all can still send
+  data out in names: a lookup of <data>.attacker.example travels from
+  the host's resolver to the attacker's name server, whatever the guest
+  may connect to.
+- An embedder that decides which destinations the guest may reach wants
+  the guest's lookups answered by its own resolver, which can refuse a
+  name or log it, rather than by the host's.
+
+Configuration gains DNSUpstream, and gvproxy -dns-upstream (repeatable)
+and `stack.dnsUpstream` in the configuration file. Each entry is a
+server's "ip:port", which then answers every record type for the names
+outside the zones, through the same code paths as the host's resolver,
+so answers have the same shape.
+The single entry "none" answers REFUSED and asks nobody. When it is not
+set, nothing changes.
+---
+ README.md                      |  4 +++
+ cmd/gvproxy/config.go          |  8 +++++
+ cmd/gvproxy/config_test.go     | 30 ++++++++++++++++
+ pkg/services/dns/dns.go        | 57 ++++++++++++++++++++++++++++++
+ pkg/services/dns/dns_test.go   | 64 ++++++++++++++++++++++++++++++++++
+ pkg/types/configuration.go     |  5 +++
+ pkg/virtualnetwork/services.go |  2 +-
+ 7 files changed, 169 insertions(+), 1 deletion(-)
+
+diff --git a/README.md b/README.md
+index 72d3ec8e..f90dd54e 100644
+--- a/README.md
++++ b/README.md
+@@ -214,6 +214,10 @@ Activate it by changing the `/etc/resolv.conf` file inside the VM with:
+ nameserver 192.168.127.1
+ ```
+ 
++Names outside its zones are resolved by the host's resolver. `--dns-upstream ip:port` (repeatable)
++sends them to the given servers instead, and `--dns-upstream none` refuses them, so that the VM
++cannot resolve, or send data in, names of the outside world.
++
+ ### Port forwarding
+ 
+ Dynamic port forwarding is supported over the host HTTP API when `gvproxy` was
+diff --git a/cmd/gvproxy/config.go b/cmd/gvproxy/config.go
+index 6bdb6627..07a6da00 100644
+--- a/cmd/gvproxy/config.go
++++ b/cmd/gvproxy/config.go
+@@ -52,6 +52,7 @@ type GvproxyArgs struct {
+ 	apiTokenFile       string
+ 	noGatewayAPI       bool
+ 	noHostLoopback     bool
++	dnsUpstream        arrayFlags
+ }
+ 
+ type GvproxyConfig struct {
+@@ -150,6 +151,7 @@ func GvproxyArgParse(flagSet *flag.FlagSet, args *GvproxyArgs, argv []string) (*
+ 	flagSet.StringVar(&args.apiTokenFile, "api-token-file", "", "Path to file where API token will be read from (needs 0600 permissions on macOS and Linux)")
+ 	flagSet.BoolVar(&args.noGatewayAPI, "no-gateway-api", false, "Do not serve the HTTP API on the gateway's port 80 inside the virtual network; -listen and -services are not affected")
+ 	flagSet.BoolVar(&args.noHostLoopback, "no-host-loopback", false, "Map no address of the virtual network to the host's loopback: no default NAT entry from the host address to 127.0.0.1")
++	flagSet.Var(&args.dnsUpstream, "dns-upstream", "DNS server (ip:port) asked for names outside gvproxy's own zones, instead of the host's resolver; repeatable. \"none\" refuses those names")
+ 	if err := flagSet.Parse(argv); err != nil {
+ 		return nil, err
+ 	}
+@@ -262,6 +264,12 @@ func GvproxyConfigure(config *GvproxyConfig, args *GvproxyArgs, version string)
+ 	if args.noHostLoopback {
+ 		config.NoHostLoopback = true
+ 	}
++	if len(args.dnsUpstream) > 0 {
++		config.Stack.DNSUpstream = args.dnsUpstream
++	}
++	if slices.Contains(config.Stack.DNSUpstream, "none") && len(config.Stack.DNSUpstream) > 1 {
++		return config, fmt.Errorf("dns-upstream: %q cannot be combined with servers", "none")
++	}
+ 	if config.NoHostLoopback {
+ 		for from, to := range config.Stack.NAT {
+ 			if ip := net.ParseIP(to); ip != nil && ip.IsLoopback() {
+diff --git a/cmd/gvproxy/config_test.go b/cmd/gvproxy/config_test.go
+index 15b62b1b..a0d0a204 100644
+--- a/cmd/gvproxy/config_test.go
++++ b/cmd/gvproxy/config_test.go
+@@ -834,3 +834,33 @@ func TestNoHostLoopback(t *testing.T) {
+ 		}
+ 	}
+ }
++
++func TestDNSUpstream(t *testing.T) {
++	t.Parallel()
++	for _, v := range []struct {
++		name   string
++		argv   []string
++		config string
++		want   []string
++		err    string
++	}{
++		{"default", nil, "", nil, ""},
++		{"flag, twice", []string{"-dns-upstream", "127.0.0.1:5353", "-dns-upstream", "[::1]:53"}, "", []string{"127.0.0.1:5353", "[::1]:53"}, ""},
++		{"none", []string{"-dns-upstream", "none"}, "", []string{"none"}, ""},
++		{"config file", nil, "stack:\n  dnsUpstream: [\"192.0.2.53:53\"]\n", []string{"192.0.2.53:53"}, ""},
++		{"none with a server", []string{"-dns-upstream", "none", "-dns-upstream", "127.0.0.1:53"}, "", nil, "cannot be combined"},
++	} {
++		var cnf GvproxyConfig
++		var args GvproxyArgs
++		_, err := GvproxyArgParse(flag.NewFlagSet(os.Args[0], flag.ContinueOnError), &args, v.argv)
++		require.NoError(t, err, v.name)
++		require.NoError(t, yaml.Unmarshal([]byte(v.config), &cnf), v.name)
++		_, err = GvproxyConfigure(&cnf, &args, "testing")
++		if v.err != "" {
++			require.ErrorContains(t, err, v.err, v.name)
++			continue
++		}
++		require.NoError(t, err, v.name)
++		assert.Equal(t, v.want, cnf.Stack.DNSUpstream, v.name)
++	}
++}
+diff --git a/pkg/services/dns/dns.go b/pkg/services/dns/dns.go
+index a326ec94..57bd5379 100644
+--- a/pkg/services/dns/dns.go
++++ b/pkg/services/dns/dns.go
+@@ -8,8 +8,10 @@ import (
+ 	"net"
+ 	"net/http"
+ 	"regexp"
++	"slices"
+ 	"strings"
+ 	"sync"
++	"sync/atomic"
+ 
+ 	"github.com/containers/gvisor-tap-vsock/pkg/apilog"
+ 	"github.com/containers/gvisor-tap-vsock/pkg/types"
+@@ -38,6 +40,9 @@ type dnsHandler struct {
+ 	// forwarded query so that changes to the host's DNS servers are followed.
+ 	nameservers func() []string
+ 	client      *dns.Client
++	// refuseUpstream answers REFUSED for every name no zone holds, and asks
++	// no upstream server.
++	refuseUpstream bool
+ }
+ 
+ func (h *dnsHandler) handle(w dns.ResponseWriter, r *dns.Msg, responseMessageSize int) {
+@@ -151,6 +156,11 @@ func (h *dnsHandler) addAnswers(m *dns.Msg) {
+ 		if done := h.addLocalAnswers(m, q); done {
+ 			return
+ 		}
++		if h.refuseUpstream {
++			m.Rcode = dns.RcodeRefused
++			m.RecursionAvailable = false
++			return
++		}
+ 
+ 		resolver := h.upstream
+ 		switch q.Qtype {
+@@ -345,6 +355,53 @@ func NewWithUpstreamResolver(udpConn net.PacketConn, tcpLn net.Listener, zones [
+ 	return &Server{udpConn: udpConn, tcpLn: tcpLn, handler: handler}, nil
+ }
+ 
++// UpstreamNone, as the only entry of the servers given to
++// NewWithUpstreamServers, refuses every name no zone holds.
++const UpstreamNone = "none"
++
++// NewWithUpstreamServers is New with the names that no zone holds sent to
++// servers, each an "ip:port", instead of to the host's resolver. Every record
++// type goes to them, through the same code paths as with the host's resolver.
++// With servers set to []string{UpstreamNone}, those names are answered
++// REFUSED and nothing is asked. With no servers, it is New.
++func NewWithUpstreamServers(udpConn net.PacketConn, tcpLn net.Listener, zones []types.Zone, servers []string) (*Server, error) {
++	if len(servers) == 0 {
++		return New(udpConn, tcpLn, zones)
++	}
++	if len(servers) == 1 && servers[0] == UpstreamNone {
++		s, err := NewWithUpstreamResolver(udpConn, tcpLn, zones, &net.Resolver{})
++		if err != nil {
++			return nil, err
++		}
++		s.handler.refuseUpstream = true
++		s.handler.nameservers = func() []string { return nil }
++		return s, nil
++	}
++	for _, server := range servers {
++		host, _, err := net.SplitHostPort(server)
++		if err != nil || net.ParseIP(host) == nil {
++			return nil, fmt.Errorf("dns upstream %q: not an ip:port", server)
++		}
++	}
++	list := slices.Clone(servers)
++	var next atomic.Uint32
++	resolver := &net.Resolver{
++		PreferGo: true,
++		// The Go resolver dials each server of the host's resolv.conf in
++		// turn; send every attempt to the configured servers instead.
++		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
++			var d net.Dialer
++			return d.DialContext(ctx, network, list[int(next.Add(1)-1)%len(list)])
++		},
++	}
++	s, err := NewWithUpstreamResolver(udpConn, tcpLn, zones, resolver)
++	if err != nil {
++		return nil, err
++	}
++	s.handler.nameservers = func() []string { return list }
++	return s, nil
++}
++
+ func (s *Server) Serve() error {
+ 	mux := dns.NewServeMux()
+ 	mux.HandleFunc(".", s.handler.handleUDP)
+diff --git a/pkg/services/dns/dns_test.go b/pkg/services/dns/dns_test.go
+index edc29f42..458579d0 100644
+--- a/pkg/services/dns/dns_test.go
++++ b/pkg/services/dns/dns_test.go
+@@ -841,3 +841,67 @@ func startDNSServer(upstream upstreamResolver) (string, func(), error) {
+ 		tcpLn.Close()
+ 	}, nil
+ }
++
++var _ = ginkgo.Describe("upstream servers", func() {
++	query := func(server *Server, name string, qtype uint16) *dns.Msg {
++		m := new(dns.Msg)
++		m.SetQuestion(name, qtype)
++		server.handler.addAnswers(m)
++		return m
++	}
++	zones := []types.Zone{{
++		Name:    "containers.internal.",
++		Records: []types.Record{{Name: "gateway", IP: net.ParseIP("192.168.127.1")}},
++	}}
++
++	ginkgo.It("none refuses every name outside the zones and asks nobody", func() {
++		server, err := NewWithUpstreamServers(nil, nil, zones, []string{UpstreamNone})
++		gomega.Expect(err).ToNot(gomega.HaveOccurred())
++		server.handler.upstream = &failingResolver{err: errors.New("the upstream resolver must not be asked")}
++		server.handler.nameservers = func() []string { panic("no nameserver may be asked") }
++		for _, qtype := range []uint16{dns.TypeA, dns.TypeAAAA, dns.TypeTXT, dns.TypePTR, dns.TypeSOA} {
++			m := query(server, "x1234.exfil.example.", qtype)
++			gomega.Expect(m.Rcode).To(gomega.Equal(dns.RcodeRefused), dns.TypeToString[qtype])
++			gomega.Expect(m.Answer).To(gomega.BeEmpty())
++		}
++		m := query(server, "gateway.containers.internal.", dns.TypeA)
++		gomega.Expect(m.Rcode).To(gomega.Equal(dns.RcodeSuccess))
++		gomega.Expect(m.Answer[0].(*dns.A).A.String()).To(gomega.Equal("192.168.127.1"))
++	})
++
++	ginkgo.It("sends every record type outside the zones to the servers given", func() {
++		mockSrv, err := mockdns.NewServer(map[string]mockdns.Zone{
++			"allowed.example.":           {A: []string{"203.0.113.10"}, TXT: []string{"from the configured server"}},
++			"10.113.0.203.in-addr.arpa.": {PTR: []string{"allowed.example."}},
++		}, false)
++		gomega.Expect(err).ToNot(gomega.HaveOccurred())
++		defer mockSrv.Close()
++		server, err := NewWithUpstreamServers(nil, nil, zones, []string{mockSrv.LocalAddr().String()})
++		gomega.Expect(err).ToNot(gomega.HaveOccurred())
++
++		m := query(server, "allowed.example.", dns.TypeA)
++		gomega.Expect(m.Rcode).To(gomega.Equal(dns.RcodeSuccess))
++		gomega.Expect(m.Answer).To(gomega.HaveLen(1))
++		gomega.Expect(m.Answer[0].(*dns.A).A.String()).To(gomega.Equal("203.0.113.10"))
++
++		m = query(server, "allowed.example.", dns.TypeTXT)
++		gomega.Expect(m.Answer[0].(*dns.TXT).Txt).To(gomega.Equal([]string{"from the configured server"}))
++
++		m = query(server, "10.113.0.203.in-addr.arpa.", dns.TypePTR)
++		gomega.Expect(m.Answer).To(gomega.HaveLen(1))
++		gomega.Expect(m.Answer[0].(*dns.PTR).Ptr).To(gomega.Equal("allowed.example."))
++
++		m = query(server, "unknown.example.", dns.TypeA)
++		gomega.Expect(m.Rcode).To(gomega.Equal(dns.RcodeNameError))
++
++		m = query(server, "gateway.containers.internal.", dns.TypeA)
++		gomega.Expect(m.Answer[0].(*dns.A).A.String()).To(gomega.Equal("192.168.127.1"))
++	})
++
++	ginkgo.It("refuses a server it cannot read", func() {
++		for _, bad := range []string{"127.0.0.1", "resolver.example:53", "none:53"} {
++			_, err := NewWithUpstreamServers(nil, nil, nil, []string{bad})
++			gomega.Expect(err).To(gomega.HaveOccurred(), bad)
++		}
++	})
++})
+diff --git a/pkg/types/configuration.go b/pkg/types/configuration.go
+index 4005e32f..5dbb930e 100644
+--- a/pkg/types/configuration.go
++++ b/pkg/types/configuration.go
+@@ -68,6 +68,11 @@ type Configuration struct {
+ 
+ 	// Timeout in seconds for outbound TCP connection attempts (default: 30)
+ 	TCPConnectTimeout int `yaml:"tcpConnectTimeout,omitempty"`
++
++	// DNSUpstream, when set, replaces the host's resolver for the names that
++	// no zone of the embedded DNS server holds. Each entry is a server's
++	// "ip:port". The single entry "none" refuses those names and asks nobody.
++	DNSUpstream []string `yaml:"dnsUpstream,omitempty"`
+ }
+ 
+ type Protocol string
+diff --git a/pkg/virtualnetwork/services.go b/pkg/virtualnetwork/services.go
+index 7601c5d8..606913c7 100644
+--- a/pkg/virtualnetwork/services.go
++++ b/pkg/virtualnetwork/services.go
+@@ -77,7 +77,7 @@ func dnsServer(configuration *types.Configuration, s *stack.Stack) (http.Handler
+ 		return nil, err
+ 	}
+ 
+-	server, err := dns.New(udpConn, tcpLn, configuration.DNS)
++	server, err := dns.NewWithUpstreamServers(udpConn, tcpLn, configuration.DNS, configuration.DNSUpstream)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-- 
+2.43.0
+
