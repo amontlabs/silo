@@ -1,0 +1,15 @@
+{
+ "body": {
+  "gone": [],
+  "new": [
+   "client_metadata.mcp_attribution:str"
+  ]
+ },
+ "tools": {
+  "gone": [],
+  "new": [
+   "additional:function:request_user_input_async",
+   "additional:function:sleep"
+  ]
+ }
+}

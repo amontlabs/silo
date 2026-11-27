@@ -1,0 +1,95 @@
+{
+ "program": "codex",
+ "version": "0.142.5",
+ "scenario": "task",
+ "trust": "env",
+ "exit": 0,
+ "secs": 2.6,
+ "passed": false,
+ "checks": [
+  {
+   "id": "reaches-the-model",
+   "entry": "reading-each-agent-program",
+   "result": "pass",
+   "detail": "exit 0 in 2.6 s, 3 model calls answered"
+  },
+  {
+   "id": "runs-the-tool-call",
+   "entry": "reading-each-agent-program",
+   "result": "pass",
+   "detail": "the shell tool call the stand-in sent ran"
+  },
+  {
+   "id": "model-hosts-read",
+   "entry": "program-that-cannot-be-read",
+   "result": "pass",
+   "detail": "model calls went to api.openai.com"
+  },
+  {
+   "id": "transports",
+   "entry": "reading-each-agent-program",
+   "result": "n/a",
+   "detail": "websocket"
+  },
+  {
+   "id": "other-hosts",
+   "entry": "reading-each-agent-program",
+   "result": "n/a",
+   "detail": "looked up ab.chatgpt.com, api.github.com, api.openai.com, chatgpt.com, github.com; the boundary refused github.com; 2 handshakes refused Silo's certificate"
+  },
+  {
+   "id": "usage-counted",
+   "entry": "what-a-budget-promises",
+   "result": "fail",
+   "detail": "0 HTTP calls billed 0 in / 0 out; the boundary counted 0 calls, 0 in / 0 out; 3 WebSocket calls billed 20757 in / 128 out, counted 10439 in / 64 out on 1 sockets, as no call of the ledger"
+  },
+  {
+   "id": "model-named",
+   "entry": "what-traffic-gives",
+   "result": "n/a",
+   "detail": "sent [], recorded []"
+  },
+  {
+   "id": "format-known",
+   "entry": "adapters-follow-providers",
+   "result": "pass",
+   "detail": "formats read: responses over WebSocket; 0 unreadable"
+  },
+  {
+   "id": "tool-calls-read",
+   "entry": "tool-calls-from-traffic",
+   "result": "pass",
+   "detail": "1 sent, 1 in the record"
+  },
+  {
+   "id": "tool-results-joined",
+   "entry": "author-from-traffic",
+   "result": "pass",
+   "detail": "1 of 1 results came back naming their call"
+  },
+  {
+   "id": "command-text-readable",
+   "entry": "rule-on-a-tool-calls-text",
+   "result": "pass",
+   "detail": "1 of 1 calls carry the command as text: exec_command"
+  },
+  {
+   "id": "conversation-named",
+   "entry": "recognising-a-conversation",
+   "result": "pass",
+   "detail": "3 requests of the task's conversation; key in prompt_cache_key; 1 distinct"
+  },
+  {
+   "id": "credential-kind",
+   "entry": "claude-key-or-plan",
+   "result": "pass",
+   "detail": "model requests carry authorization:sk-proj-; expected authorization:sk-proj-"
+  },
+  {
+   "id": "shape-unchanged",
+   "entry": "reading-each-agent-program",
+   "result": "fail",
+   "detail": "body: +3 -0; item_types: +1 -0"
+  }
+ ]
+}

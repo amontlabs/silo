@@ -1,0 +1,47 @@
+{
+ "program": "claude-code-plan",
+ "version": "2.1.332",
+ "scenario": "refuse",
+ "trust": "env",
+ "exit": 1,
+ "secs": 1.3,
+ "passed": true,
+ "checks": [
+  {
+   "id": "model-hosts-read",
+   "entry": "program-that-cannot-be-read",
+   "result": "n/a",
+   "detail": "model calls went to no host"
+  },
+  {
+   "id": "transports",
+   "entry": "reading-each-agent-program",
+   "result": "n/a",
+   "detail": "none"
+  },
+  {
+   "id": "other-hosts",
+   "entry": "reading-each-agent-program",
+   "result": "n/a",
+   "detail": "looked up api.anthropic.com; the boundary refused none; 0 handshakes refused Silo's certificate"
+  },
+  {
+   "id": "conversation-named",
+   "entry": "recognising-a-conversation",
+   "result": "n/a",
+   "detail": "0 requests of the task's conversation; key in nothing; 0 distinct"
+  },
+  {
+   "id": "credential-kind",
+   "entry": "claude-key-or-plan",
+   "result": "n/a",
+   "detail": "model requests carry nothing; expected authorization:sk-ant-oat"
+  },
+  {
+   "id": "stops-on-refusal",
+   "entry": "budget-denies-or-holds",
+   "result": "pass",
+   "detail": "1 refused (input); exit 1 after 1.3 s; Silo's sentence shown"
+  }
+ ]
+}

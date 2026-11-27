@@ -1,0 +1,47 @@
+{
+ "program": "codex",
+ "version": "0.172.0",
+ "scenario": "refuse",
+ "trust": "env",
+ "exit": 0,
+ "secs": 1.4,
+ "passed": false,
+ "checks": [
+  {
+   "id": "model-hosts-read",
+   "entry": "program-that-cannot-be-read",
+   "result": "pass",
+   "detail": "model calls went to api.openai.com"
+  },
+  {
+   "id": "transports",
+   "entry": "reading-each-agent-program",
+   "result": "n/a",
+   "detail": "websocket"
+  },
+  {
+   "id": "other-hosts",
+   "entry": "reading-each-agent-program",
+   "result": "n/a",
+   "detail": "looked up ab.chatgpt.com, api.github.com, api.openai.com, chatgpt.com, github.com; the boundary refused github.com; 2 handshakes refused Silo's certificate"
+  },
+  {
+   "id": "conversation-named",
+   "entry": "recognising-a-conversation",
+   "result": "pass",
+   "detail": "2 requests of the task's conversation; key in prompt_cache_key; 1 distinct"
+  },
+  {
+   "id": "credential-kind",
+   "entry": "claude-key-or-plan",
+   "result": "pass",
+   "detail": "model requests carry authorization:sk-proj-; expected authorization:sk-proj-"
+  },
+  {
+   "id": "stops-on-refusal",
+   "entry": "budget-denies-or-holds",
+   "result": "fail",
+   "detail": "0 refused (); exit 0 after 1.4 s; Silo's sentence not shown"
+  }
+ ]
+}

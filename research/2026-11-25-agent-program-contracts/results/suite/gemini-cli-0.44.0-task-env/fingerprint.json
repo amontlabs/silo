@@ -1,0 +1,73 @@
+{
+ "betas": [],
+ "body": [
+  "contents",
+  "generationConfig.maxOutputTokens:int",
+  "generationConfig.responseJsonSchema.properties.complexity_reasoning.description:str",
+  "generationConfig.responseJsonSchema.properties.complexity_reasoning.type:str",
+  "generationConfig.responseJsonSchema.properties.complexity_score.description:str",
+  "generationConfig.responseJsonSchema.properties.complexity_score.type:str",
+  "generationConfig.responseJsonSchema.required[]:str",
+  "generationConfig.responseJsonSchema.type:str",
+  "generationConfig.responseMimeType:str",
+  "generationConfig.temperature:int",
+  "generationConfig.thinkingConfig.includeThoughts:bool",
+  "generationConfig.thinkingConfig.thinkingBudget:int",
+  "generationConfig.thinkingConfig.thinkingLevel:str",
+  "generationConfig.topK:int",
+  "generationConfig.topP:float",
+  "generationConfig.topP:int",
+  "systemInstruction",
+  "tools"
+ ],
+ "headers": [
+  "accept",
+  "accept-encoding",
+  "accept-language",
+  "connection",
+  "content-length",
+  "content-type",
+  "host",
+  "user-agent",
+  "x-gemini-api-privileged-user-id",
+  "x-goog-api-client",
+  "x-goog-api-key"
+ ],
+ "hosts": [
+  "generativelanguage.googleapis.com"
+ ],
+ "item_types": [
+  "part:functionCall",
+  "part:functionResponse",
+  "part:text",
+  "part:thoughtSignature"
+ ],
+ "paths": [
+  "/v1beta/models/<model>:generateContent",
+  "/v1beta/models/<model>:streamGenerateContent?alt=sse"
+ ],
+ "tool_kinds": [
+  "gemini:functionDeclarations"
+ ],
+ "tools": [
+  "function:activate_skill",
+  "function:enter_plan_mode",
+  "function:glob",
+  "function:google_web_search",
+  "function:grep_search",
+  "function:invoke_agent",
+  "function:list_background_processes",
+  "function:list_directory",
+  "function:read_background_output",
+  "function:read_file",
+  "function:replace",
+  "function:run_shell_command",
+  "function:update_topic",
+  "function:web_fetch",
+  "function:write_file"
+ ],
+ "transports": [
+  "json",
+  "sse"
+ ]
+}

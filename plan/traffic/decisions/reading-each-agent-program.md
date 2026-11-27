@@ -371,3 +371,21 @@ sign-in.
   in the token (`chatgpt_account_id`) instead held: shown failing, then passing, in the research.
 - **Code mode.** The model's `exec` script runs inside Codex; its nested calls cross the boundary
   only in Codex's own report, which is off by default (`code-mode-calls-reported`).
+
+## The check built and run (an agent's notes, 26 November 2026)
+
+`research/2026-11-25-agent-program-contracts/` builds the check this entry asks for and ran it on
+eight releases of each program from May to November 2026, through #374's boundary against stand-in
+providers. Claude Code released 158 times in those six months and changed its betas, tools or
+headers in most steps, but never what the boundary reads: all checks pass from 2.1.152 to 2.1.332,
+also with Silo's authority only in the computer's trust store. Codex changed what the boundary reads
+three times (its session in 0.142.5, every tool into `additional_tools` in 0.146.1,
+`custom_tool_call_output` in 0.167.0), and sends its model calls over a WebSocket by default, where
+#374's boundary counts no call. Gemini CLI did not change.
+
+A choice this raises, not yet an entry: Claude Code updates itself, about once a day. A check per
+pinned version holds only if the computer keeps that version. The options are to turn the
+program's own updater off in the recipe and move the pin after the check passes (recommended:
+what the app calls read has then been seen read, at the cost of a day or more behind), or to let it
+update and run the check when the boundary first sees a new version in the `user-agent`, showing
+that version's traffic as "read, not checked" until it passes.

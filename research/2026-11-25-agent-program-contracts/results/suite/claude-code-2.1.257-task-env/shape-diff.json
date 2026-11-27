@@ -1,0 +1,21 @@
+{
+ "betas": {
+  "gone": [],
+  "new": [
+   "cache-diagnosis-2026-04-07"
+  ]
+ },
+ "body": {
+  "gone": [],
+  "new": [
+   "diagnostics.previous_message_id:NoneType"
+  ]
+ },
+ "tools": {
+  "gone": [],
+  "new": [
+   "tool:ListAgents",
+   "tool:ScheduleWakeup"
+  ]
+ }
+}

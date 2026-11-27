@@ -1,0 +1,4 @@
+    1.35 api.anthropic.com A
+    1.35 api.anthropic.com AAAA
+    1.60 api.anthropic.com A
+    1.60 api.anthropic.com AAAA

@@ -1,0 +1,9 @@
+{
+ "headers": {
+  "gone": [],
+  "new": [
+   "x-claude-1p-request-class",
+   "x-claude-code-sandy-plover"
+  ]
+ }
+}

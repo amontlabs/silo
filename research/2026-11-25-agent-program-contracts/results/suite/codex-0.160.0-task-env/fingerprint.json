@@ -1,0 +1,72 @@
+{
+ "betas": [],
+ "body": [
+  "client_metadata.<id>:str",
+  "client_metadata.mcp_attribution:str",
+  "client_metadata.root_turn_id:str",
+  "client_metadata.session_id:str",
+  "client_metadata.thread_id:str",
+  "client_metadata.turn_id:str",
+  "client_metadata.x-codex-installation-id:str",
+  "client_metadata.x-codex-turn-metadata:str",
+  "client_metadata.x-codex-window-id:str",
+  "client_metadata.x-codex-ws-stream-request-start-ms:str",
+  "generate:bool",
+  "include[]:str",
+  "input",
+  "model:str",
+  "parallel_tool_calls:bool",
+  "previous_response_id:str",
+  "prompt_cache_key:str",
+  "reasoning.context:str",
+  "reasoning.effort:str",
+  "store:bool",
+  "stream:bool",
+  "text.verbosity:str",
+  "tool_choice:str",
+  "type:str"
+ ],
+ "headers": [
+  "authorization",
+  "connection",
+  "host",
+  "openai-beta",
+  "originator",
+  "session-id",
+  "thread-id",
+  "upgrade",
+  "user-agent",
+  "version",
+  "x-client-request-id",
+  "x-codex-beta-features",
+  "x-codex-turn-metadata",
+  "x-codex-window-id"
+ ],
+ "hosts": [
+  "api.openai.com"
+ ],
+ "item_types": [
+  "item:additional_tools",
+  "item:message"
+ ],
+ "paths": [
+  "/v1/responses"
+ ],
+ "tool_kinds": [],
+ "tools": [
+  "additional:custom:exec",
+  "additional:function:followup_task",
+  "additional:function:interrupt_agent",
+  "additional:function:list_agents",
+  "additional:function:request_user_input",
+  "additional:function:request_user_input_async",
+  "additional:function:send_message",
+  "additional:function:sleep",
+  "additional:function:spawn_agent",
+  "additional:function:wait",
+  "additional:function:wait_agent"
+ ],
+ "transports": [
+  "websocket"
+ ]
+}
