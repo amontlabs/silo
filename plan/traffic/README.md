@@ -1,7 +1,7 @@
-# Model traffic and spend
+# Model traffic
 
 What an agent program and its model provider say to each other, read at the boundary: model
-calls, spend, budgets.
+calls.
 
 ## For
 
@@ -15,8 +15,8 @@ program to say so, and to act on it at the boundary before the agent program rea
   can reach it, and it sees a call but not its traces.
 - **Adapters follow providers** (`adapters-follow-providers`): three or four formats, not one
   adapter per agent program.
-- **A budget is a rule or a precaution, by what the boundary can see** (`budget-rule-or-precaution`):
-  the same split as everywhere else in Silo, between what is exact and what can be wrong.
+- **Dollars and budgets are not here** (`spend-and-budgets-ship-as-an-extension`). This part records
+  each model call as facts. The part `spend` prices them and holds the budgets.
 - **A change to traffic is never silent** (`denied-tool-call`,
   `no-silent-change-to-traffic`), and each denied call stands alone (`each-call-on-its-own`).
 - **A disagreement between an agent program's own account and the boundary is handled by a

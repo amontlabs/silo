@@ -6,7 +6,7 @@
   ],
   "sets": [
     {
-      "in": "traffic/properties",
+      "in": "spend/properties",
       "id": "fork-spends-its-parents-budget",
       "says": "A fork spends from the budget of the computer it was forked from, unless you give it one of its own.",
       "kind": "safety",

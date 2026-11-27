@@ -6,7 +6,7 @@
   ],
   "sets": [
     {
-      "in": "traffic/properties",
+      "in": "spend/properties",
       "id": "prices-signed-or-yours",
       "says": "Silo counts spend only from prices in a table Silo signed, or from prices you wrote yourself.",
       "kind": "safety",

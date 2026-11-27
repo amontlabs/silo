@@ -6,7 +6,7 @@
   ],
   "sets": [
     {
-      "in": "traffic/properties",
+      "in": "spend/properties",
       "id": "every-budget-applies",
       "says": "Every budget that covers a metered request applies to it: once any one of them is reached, the request does not leave.",
       "kind": "safety",
