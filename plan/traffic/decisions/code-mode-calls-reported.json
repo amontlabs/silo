@@ -1,0 +1,8 @@
+{
+  "asks": "How does Silo read the commands Codex runs in code mode, where the model writes JavaScript that calls the tools?",
+  "answer": "Main's set-up turns on Codex's own report of the calls a script made (`features.executed_tool_call_metadata`). The boundary reads that report from the next request as what Codex says ran, and the script itself as what the model asked. A script whose result comes back with no report, or with the report marked incomplete, is recorded as not read, and its file changes keep only the authors `author-from-traffic` finds without it.",
+  "needs": [
+    "reading-each-agent-program",
+    "main-set-up-for-agents"
+  ]
+}

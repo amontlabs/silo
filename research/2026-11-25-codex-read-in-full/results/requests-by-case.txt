@@ -1,0 +1,57 @@
+key-fn
+   1 GET  api.openai.com/v1/responses  {"originator": "codex_exec", "version": "0.172.0", "openai-beta": "responses_websockets=2026-02-06"}
+   1 GET  chatgpt.com/backend-api/plugins/export/curated  {"originator": "codex_exec"}
+   1 POST ab.chatgpt.com/otlp/v1/metrics  {}
+key-code
+   1 GET  api.openai.com/v1/responses  {"originator": "codex_exec", "version": "0.172.0", "openai-beta": "responses_websockets=2026-02-06"}
+   1 GET  chatgpt.com/backend-api/plugins/export/curated  {"originator": "codex_exec"}
+   1 POST ab.chatgpt.com/otlp/v1/metrics  {}
+key-code-meta
+   1 GET  api.openai.com/v1/responses  {"originator": "codex_exec", "version": "0.172.0", "openai-beta": "responses_websockets=2026-02-06"}
+   1 GET  chatgpt.com/backend-api/plugins/export/curated  {"originator": "codex_exec"}
+   1 POST ab.chatgpt.com/otlp/v1/metrics  {}
+gpt-fn
+   2 GET  chatgpt.com/backend-api/codex/models  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "version": "0.172.0", "authorization": "Bearer \u2026"}
+   1 GET  chatgpt.com/backend-api/wham/accounts/check  {"chatgpt-account-id": "acct-test", "authorization": "Bearer \u2026"}
+   3 GET  chatgpt.com/backend-api/ps/plugins/installed  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "authorization": "Bearer \u2026"}
+   3 GET  chatgpt.com/backend-api/ps/plugins/tooling-state/turtle  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "authorization": "Bearer \u2026"}
+   1 GET  chatgpt.com/backend-api/codex/responses  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "version": "0.172.0", "openai-beta": "responses_websockets=2026-02-06", "authorization": "Bearer \u2026"}
+   3 GET  chatgpt.com/backend-api/ps/plugins/suggested/codex  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "authorization": "Bearer \u2026"}
+   3 POST chatgpt.com/backend-api/codex/analytics-events/events  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "authorization": "Bearer \u2026"}
+   2 POST chatgpt.com/backend-api/ps/mcp  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "authorization": "Bearer \u2026"}
+   1 GET  chatgpt.com/backend-api/wham/settings/user  {"chatgpt-account-id": "acct-test", "authorization": "Bearer \u2026"}
+   1 POST ab.chatgpt.com/otlp/v1/metrics  {}
+gpt-code
+   2 GET  chatgpt.com/backend-api/codex/models  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "version": "0.172.0", "authorization": "Bearer \u2026"}
+   1 GET  chatgpt.com/backend-api/wham/accounts/check  {"chatgpt-account-id": "acct-test", "authorization": "Bearer \u2026"}
+   3 GET  chatgpt.com/backend-api/ps/plugins/installed  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "authorization": "Bearer \u2026"}
+   3 GET  chatgpt.com/backend-api/ps/plugins/tooling-state/turtle  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "authorization": "Bearer \u2026"}
+   2 POST chatgpt.com/backend-api/ps/mcp  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "authorization": "Bearer \u2026"}
+   1 GET  chatgpt.com/backend-api/codex/responses  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "version": "0.172.0", "openai-beta": "responses_websockets=2026-02-06", "authorization": "Bearer \u2026"}
+   4 POST chatgpt.com/backend-api/codex/analytics-events/events  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "authorization": "Bearer \u2026"}
+   3 GET  chatgpt.com/backend-api/ps/plugins/suggested/codex  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "authorization": "Bearer \u2026"}
+   1 GET  chatgpt.com/backend-api/wham/settings/user  {"chatgpt-account-id": "acct-test", "authorization": "Bearer \u2026"}
+   1 POST ab.chatgpt.com/otlp/v1/metrics  {}
+gpt-code-meta
+   3 GET  chatgpt.com/backend-api/ps/plugins/installed  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "authorization": "Bearer \u2026"}
+   1 GET  chatgpt.com/backend-api/wham/accounts/check  {"chatgpt-account-id": "acct-test", "authorization": "Bearer \u2026"}
+   2 GET  chatgpt.com/backend-api/codex/models  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "version": "0.172.0", "authorization": "Bearer \u2026"}
+   3 GET  chatgpt.com/backend-api/ps/plugins/tooling-state/turtle  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "authorization": "Bearer \u2026"}
+   2 POST chatgpt.com/backend-api/ps/mcp  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "authorization": "Bearer \u2026"}
+   1 GET  chatgpt.com/backend-api/codex/responses  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "version": "0.172.0", "openai-beta": "responses_websockets=2026-02-06", "authorization": "Bearer \u2026"}
+   4 POST chatgpt.com/backend-api/codex/analytics-events/events  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "authorization": "Bearer \u2026"}
+   3 GET  chatgpt.com/backend-api/ps/plugins/suggested/codex  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "authorization": "Bearer \u2026"}
+   1 GET  chatgpt.com/backend-api/wham/settings/user  {"chatgpt-account-id": "acct-test", "authorization": "Bearer \u2026"}
+   1 POST ab.chatgpt.com/otlp/v1/metrics  {}
+gpt-refresh
+   1 POST auth.openai.com/oauth/token  {"originator": "codex_exec"}
+   3 GET  chatgpt.com/backend-api/ps/plugins/installed  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "authorization": "Bearer \u2026"}
+   2 GET  chatgpt.com/backend-api/codex/models  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "version": "0.172.0", "authorization": "Bearer \u2026"}
+   1 GET  chatgpt.com/backend-api/wham/accounts/check  {"chatgpt-account-id": "acct-test", "authorization": "Bearer \u2026"}
+   3 GET  chatgpt.com/backend-api/ps/plugins/tooling-state/turtle  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "authorization": "Bearer \u2026"}
+   1 GET  chatgpt.com/backend-api/codex/responses  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "version": "0.172.0", "openai-beta": "responses_websockets=2026-02-06", "authorization": "Bearer \u2026"}
+   2 POST chatgpt.com/backend-api/ps/mcp  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "authorization": "Bearer \u2026"}
+   3 POST chatgpt.com/backend-api/codex/analytics-events/events  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "authorization": "Bearer \u2026"}
+   3 GET  chatgpt.com/backend-api/ps/plugins/suggested/codex  {"chatgpt-account-id": "acct-test", "originator": "codex_exec", "authorization": "Bearer \u2026"}
+   1 GET  chatgpt.com/backend-api/wham/settings/user  {"chatgpt-account-id": "acct-test", "authorization": "Bearer \u2026"}
+   1 POST ab.chatgpt.com/otlp/v1/metrics  {}

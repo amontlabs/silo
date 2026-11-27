@@ -228,3 +228,20 @@ body of a request the boundary does not count, framed with a bare LF or a folded
 the hosts read and the boundary does not. A patch there makes the boundary read requests strictly
 and refuse the rest with a 400; with it, the same test gives 3 served, 3 counted. The property
 holds only if the boundary reads every request exactly as the host will.
+
+## Codex's WebSocket went past the budget (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-codex-read-in-full/`. #374 and #385
+measured Codex over plain requests: their stand-in refused its WebSocket. OpenAI's hosts accept
+it, and Codex then sends every model call as a `response.create` message on one socket. #385's
+boundary read those messages but admitted none: under a budget of $0.0001 with calls of $0.00016,
+Codex made three calls, none was counted, and its tool ran. With a ChatGPT sign-in and with an API
+key alike. The same run with the WebSocket refused was counted and stopped at the second call.
+
+A patch admits each `response.create` against the budgets before a byte of it leaves, settles it
+on the reply's count, and refuses with an `error` event of status 400 (the one Codex shows once,
+`how-a-hold-ends`). Then the warm-up was counted, the budget was reached, the next call was
+refused, Codex stopped with Silo's sentence, and the tool never ran. A refused message sent with
+a shared compression context ends the socket, since the host could not read the next ones. A
+budget reached in the middle of a reply on the socket is not cut: `mid_stream` "cut" covers plain
+requests only.
