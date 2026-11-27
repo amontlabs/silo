@@ -35,7 +35,7 @@ when it is not, and is the only figure there is for a computer whose traffic pas
 `program-that-cannot-be-read` weighed reading a program's own files and recommended against: a
 reader per program, kept up with each version, and files an agent can rewrite. This differs on the
 first point. OpenTelemetry is one format, the program sends it, and Silo reads no file. It shares
-the second: it is an opinion, so it can only drive precautions.
+the second: it is a report, so it can only drive precautions.
 
 ## What it does not give
 
@@ -44,3 +44,33 @@ account's figure, never a computer's. So on such a computer there is no reserve 
 (#376's `budgets-in-dollars-or-a-window`) and no share of it. With a real sign-in each event also
 carries the account and organization ids (read in Claude Code 2.1.332, not run), which would tell
 Silo which computers share one plan.
+
+## The report checked against the connections (25 November 2026)
+
+An agent's part, from `research/2026-11-25-spend-report`. Claude Code 2.1.332 on a made-up plan
+token, its traffic passed on unread over TLS to a stand-in provider, its report sent to Silo.
+
+What an agent in the computer can do to the report:
+
+- Silence it. Of 20 ways tried, 10 did: `CLAUDE_CODE_ENABLE_TELEMETRY` at 0 or empty, an exporter
+  set to `none`, another endpoint or protocol, the same in the user's settings, and a hard kill
+  while exports were held back. Settings Silo writes as managed settings win over the variable and
+  the user's and project's settings, but not over a changed endpoint, and the agent has `sudo`.
+- Forge it. The agent posted a made-up call to Silo's listener with `curl` from its own tool call,
+  and the listener took it. On the report alone, a budget then stops the computer on spend that
+  never happened.
+
+What the boundary still sees settles most of that. A request carries its whole prompt, so its size
+bounds the tokens it holds, and a cache read cannot be longer than an earlier request. Those checks
+flagged every call of three forged reports (counts divided by 10, inputs at zero, cache writes
+reported as reads: 31 of 31 each) and none of 148 honest calls. Calls with no report are estimated
+from the conversation's growth: after the report went silent halfway, 16 calls billed at $0.1964
+were estimated at $0.1932.
+
+So this answer now counts the checked figure, not the report alone. Under a $0.30 precaution, the
+report alone never stopped a silenced or forged run ($0.49 spent), while the checked figure stopped
+the honest and half-silenced runs at $0.30 and the forged ones at $0.35.
+
+Not verified: every byte-per-token figure rests on the stand-in's tokenizer; an image in a prompt
+would trip the size check on an honest call; Anthropic's cache is shared by the organisation, so a
+second computer could honestly read a prefix this one never sent; HTTP/2 was not tried.

@@ -1,0 +1,9 @@
+{"run": "long", "limit": 0.3, "billed_whole_run": 0.4851, "reported": "denied call 19 of 31; billed 0.3269", "checked": "denied call 17 of 31; billed 0.3008"}
+{"run": "long-visible", "limit": 0.3, "billed_whole_run": 0.4851, "reported": "denied call 25 of 31; billed 0.3987", "checked": "denied call 17 of 31; billed 0.3008"}
+{"run": "tampered-silence-half", "limit": 0.3, "billed_whole_run": 0.4851, "reported": "never denied; billed 0.4851", "checked": "denied call 17 of 31; billed 0.3008"}
+{"run": "tampered-deflate", "limit": 0.3, "billed_whole_run": 0.4851, "reported": "never denied; billed 0.4851", "checked": "denied call 21 of 31; billed 0.3506"}
+{"run": "tampered-relabel", "limit": 0.3, "billed_whole_run": 0.4851, "reported": "never denied; billed 0.4851", "checked": "denied call 21 of 31; billed 0.3506"}
+{"run": "tampered-output-only", "limit": 0.3, "billed_whole_run": 0.4851, "reported": "never denied; billed 0.4851", "checked": "denied call 21 of 31; billed 0.3506"}
+{"run": "late-killed", "limit": 0.3, "billed_whole_run": 0.3269, "reported": "never denied; billed 0.3269", "checked": "never denied; billed 0.3269"}
+{"run": "env-off", "limit": 0.3, "billed_whole_run": 0.1738, "reported": "never denied; billed 0.1738", "checked": "never denied; billed 0.1738"}
+{"run": "forged-event", "limit": 0.3, "billed_whole_run": 0.1545, "reported": "denied call 4 of 5; billed 0.1386", "checked": "never denied; billed 0.1545"}

@@ -93,3 +93,19 @@ on a plan, by what Silo sees:
 
 So "18 percent used" in the example is the account's, and a computer's share can be shown as a
 fact only for Google.
+
+## Spend a program reports about itself (25 November 2026)
+
+An agent's part, from `research/2026-11-25-spend-report`, for a computer whose model traffic
+passes unread and whose program reports its own spend (`program-reports-its-own-spend`). Silo
+compares each reported call with the connection it saw, so the figure comes with the report's
+state:
+
+- Whole: "$4.12 today, as Claude Code reports it. Its 212 calls match the connections Silo saw."
+- Silent: "$2.80 as Claude Code reported it until 02:14. Since then, 96 connections to Anthropic
+  with no report; Silo estimates them at $1.90 from their sizes."
+- Contradicted: "Claude Code reported $0.48. The connections Silo saw were larger than that: Silo
+  estimates $4.34." The calls that disagree are listed with their sizes.
+
+The estimate is shown apart from the report and never as a fact. A lower bound from sizes alone is
+not shown: it came to a twentieth of the bill, and an image in a prompt breaks it.
