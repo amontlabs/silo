@@ -29,3 +29,13 @@ whoever builds it.
   precaution's type has no granting or destructive action in it. This is the same rule for every
   shared interface.
   ([source](https://github.com/evmts/guillotine-mini/blob/edafd394bc0aa48a9691b037da36b6f36525121a/client/db/read_only.zig#L183))
+
+## The alternatives, and the check (27 November 2026)
+
+An agent's part. A second agent, as judge, read this entry on its own and found it is about how
+Silo is built, so agents may take it once the entries it needs are taken (`owners-part-on-engine`).
+
+- Count by reading the record back. It costs rules that stop with the recorder.
+- Count in the core. It costs every connection fact passing through the core.
+- Check: with the recorder stopped, rules still decide and counts still advance.
+- Found by the judge: the answer does not say where a count survives a restart of the helper, or where a count that covers several computers lives. A lost count of a budget is a price you pay, so that part is polarzero's.

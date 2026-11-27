@@ -29,3 +29,13 @@ in a ring of 16,384 rows that is never overwritten before the recorder acknowled
 call with `record_behind` when the room left would not hold what the effects under way may still
 add. The finding: with no recorder the ring fills, so the recorder has to be built with the engine,
 in step 1, which is earlier than #348 puts `record-of-a-computer`.
+
+## The alternatives, and the check (27 November 2026)
+
+An agent's part. A second agent, as judge, read this entry on its own and found it is about how
+Silo is built, so agents may take it once the entries it needs are taken (`owners-part-on-engine`).
+
+- A journal file of its own. It costs two files to keep in step at a crash.
+- The recorder reads the engine's log. It costs tying it to the engine's format.
+- Drop the oldest when full. It costs a gap in control facts.
+- Check: with crashes of the engine and the recorder at every step, the recorder holds each event number once, in order, and the table never passes its size.

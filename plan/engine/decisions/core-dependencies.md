@@ -38,3 +38,12 @@ whoever builds it.
   assuming it. A driver states what it supports, for example whether its libkrun build takes memory
   snapshots, and the core decides from that.
   ([source](https://github.com/evmts/guillotine-mini/blob/edafd394bc0aa48a9691b037da36b6f36525121a/client/db/adapter.zig#L480))
+
+## The alternatives, and the check (27 November 2026)
+
+An agent's part. A second agent, as judge, read this entry on its own and found it is about how
+Silo is built, so agents may take it once the entries it needs are taken (`owners-part-on-engine`).
+
+- Pinned, vetted libraries allowed in the core. It costs the check that the core imports nothing, and an audit of each library for determinism.
+- Drivers called straight from the core, with no fake. It costs the simulator.
+- Check: a test of the source that the core imports only the standard library, and a fake of each driver that passes the shared contract tests.

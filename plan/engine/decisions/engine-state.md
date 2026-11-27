@@ -31,3 +31,13 @@ The answer's last sentence was added on 22 November 2026, from these lessons.
   bin, its rows go in the same input and nothing is left that points at it. A drop only moves it to
   the bin (`drop-and-bin`).
   ([source](https://github.com/evmts/guillotine-mini/blob/edafd394bc0aa48a9691b037da36b6f36525121a/docs/context/%5Bpass%201/5%5D%20phase-2-world-state%20%28World%20State%20%28Journal%20%2B%20Snapshot/Restore%29%29.md?plain=1#L27))
+
+## The alternatives, and the check (27 November 2026)
+
+An agent's part. A second agent, as judge, read this entry on its own and found it is about how
+Silo is built, so agents may take it once the entries it needs are taken (`owners-part-on-engine`).
+
+- Objects linked by pointers. It costs saving and replaying the state byte for byte.
+- An embedded database. It costs a dependency and allocation in the core.
+- One integer type for every id. It costs mix-ups that compile.
+- Check: a test that must fail to compile when two kinds of id are mixed, and a source check that no row holds a pointer or a slice.

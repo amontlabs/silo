@@ -29,3 +29,13 @@ The answer's last sentence was added on 22 November 2026, from these lessons.
   and from drivers are types that a call from a client cannot produce; the source check refuses
   building them outside their file.
   ([source](https://github.com/evmts/guillotine/blob/dbdf61bd7902c726cdfb4cf80d60ed0e02da5663/docs/performance/SYNTHETIC-OPCODES.md?plain=1#L209))
+
+## The alternatives, and the check (27 November 2026)
+
+An agent's part. A second agent, as judge, read this entry on its own and found it is about how
+Silo is built, so agents may take it once the entries it needs are taken (`owners-part-on-engine`).
+
+- Drivers and the clock change state through callbacks. It costs replay.
+- Validation in each handler. It costs the one path that forgets it.
+- Several queues. It costs one defined order.
+- Check: the source check refuses an input built outside the validation file, a simulator test shows a rejected input reaches neither the core nor a driver, and validation is fuzzed.
