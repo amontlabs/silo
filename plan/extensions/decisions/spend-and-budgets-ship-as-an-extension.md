@@ -25,20 +25,18 @@ Recommended: an extension that ships with Silo.
 ## polarzero's words
 
 polarzero, 27 November 2026, asked whether budgets and receipts should become extensions: "I'll
-say basically yes spend specific stuff typically is an extension". That is weaker than a yes to
-this entry, so the entry stays not decided.
+say basically yes spend specific stuff typically is an extension".
+
+polarzero, later the same day, shown this entry: "anything from model call that is a hard fact
+deserves to be a fact, stuff that we can have as report can be useful, but to me anything about
+pricing, budgets, price tables, dollars, really seems like an extension to me."
 
 ## What it covers
 
-An agent's part, 27 November 2026. No entry was moved. If polarzero takes this, these entries of
-the part `traffic` describe the extension and move with it: the budgets (`what-a-budget-promises`,
-`what-a-conversation-budget-promises`, `budget-denies-or-holds`, `budget-of-a-fork`,
-`budget-as-a-rate`, `budgets-together`, `budget-and-work-out-of-sight`,
-`budgets-in-dollars-or-a-window`, `budget-on-a-computer`, `budget-on-a-run`, `budgets-on-rates`),
-the prices (`where-prices-come-from`), spend in dollars (`how-spend-is-shown`,
-`spend-per-conversation`, `spend-split-and-forecast`, `program-reports-its-own-spend`) and the
-team's (`pooled-budget-ledger`, `team-budget`, `team-spend`, `spend-the-team-sees`).
+An agent's part, 27 November 2026. The entries about dollars, prices and budgets were in the part
+`traffic`. They are now in the part `spend`, which holds this extension: the budgets, the prices,
+spend in dollars, and the team's budget and spend. Their answers did not change with the move.
 
-To check then: `extension-spend` and `classifier-spend` say an extension's spend is "metered like
-any computer". Counting its model calls stays the core's. Whether "metered" there means dollars is
-to settle with this entry.
+To check: `extension-spend` and `classifier-spend` say an extension's spend is "metered like any
+computer". Counting its model calls stays the core's. Whether "metered" there means dollars is to
+settle.
