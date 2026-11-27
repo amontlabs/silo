@@ -138,3 +138,16 @@ An agent's part, 25 November 2026, from `research/2026-11-25-checkpoint-disk-use
 rebuildable folders left out and zstd. These need checkpoints as Silo's own files
 (`checkpoint-per-system`). With them, the 30 days of this answer are reachable on most Macs, and the
 limit stays as it is.
+
+## With everything else Silo keeps (26 November 2026)
+
+An agent's part, 26 November 2026, from `research/2026-11-25-disk-budget/`. The limit above treats checkpoints as alone on
+the disk. With the bin (two forks a day for 7 days: 42 GiB), recordings (19 GiB in 30 days), the
+record's lines and text (1.2 GiB) and a reserve on the same volume, a 512 GB Mac at 2 GiB written
+an hour keeps checkpoints 1.0 to 2.1 days back under every limit tried, and 4.3 days with #411's
+compression; a 1 TB Mac keeps 10.3 days, and 29.3 with compression. The last 24 hours, kept whole,
+hold about 34 GiB at that rate, so on a 512 GB Mac they are most of what the limit allows.
+Proposed: the limit counts the whole part (see `low-disk`'s notes), and over it the oldest
+automatic checkpoints go first, then the oldest computer in the bin. Everything above a 50 GiB
+floor instead of half of the free space kept 24.3 days on 1 TB against 10.3, at the cost of a
+Mac that always shows 50 GB free.

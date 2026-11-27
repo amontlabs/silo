@@ -52,3 +52,26 @@ free, which is the live disks, the bin, and the checkpoints the limit never remo
 a restore, one an open alert points to, one not yet compared, and those taken by hand). In 30
 simulated nights with that limit, free space never fell under 50 GiB, so neither level of this
 entry was reached; without a limit, the free space ran out within days at 2 GiB written an hour.
+
+## Silo's part of the disk (26 November 2026)
+
+An agent's part, 26 November 2026, from `research/2026-11-25-disk-budget/`: a simulation on Linux of 30 nights on a 512 GB
+and a 1 TB Mac, with checkpoints, the record, recordings, the bin and a reserve file on the same
+volume. Loads are inputs, not measurements.
+
+- **One part for everything Silo keeps.** Checkpoints, the record, the bin and a reserve count
+  under one limit, half of what is free to them with 50 GiB kept free, shown as one number in
+  Disk. Over it, automatic checkpoints older than 24 hours go first, then the oldest computer in
+  the bin. The record's content goes only by its own limit. This entry's levels apply to what is
+  left.
+- **A challenge to "Silo removes nothing by itself", on the heavy case.** On a 512 GB Mac with 8
+  agents writing 5 GiB an hour and four forks a day, the last 24 hours of checkpoints and 7 days
+  of the bin alone pass the free space. With nothing removed past old checkpoints, every computer
+  was paused for 238 hours in 30 nights, 168 of them with agents at work, and the disk was full for
+  9. With the oldest dropped computer removed after old checkpoints, with a fact and an alert:
+  no pause, free space never under 9 GiB. Proposed in place of the second option: remove old
+  automatic checkpoints, then the oldest of the bin, then pause.
+- **One reserve.** #365's reserve file and `record-full-after-bulk`'s room kept aside can be one
+  file of 4 GiB: when the volume fills from any app, Silo deletes it, pauses, and records the gap
+  and the alert into the space it freed. Free space under the pause level can be taken by another
+  app; only the reserve is space Silo knows is there.

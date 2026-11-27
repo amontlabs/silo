@@ -21,3 +21,12 @@ computed from.
 What Silo does when the limit is still reached after that is the open decision
 `record-full-after-bulk`. The record names no check for the last sentence: `simulator` is put
 forward here.
+
+## Against the rest of the disk (26 November 2026)
+
+An agent's part, 26 November 2026, from `research/2026-11-25-disk-budget/`. Removing the record's content before checkpoints
+buys almost no way back: 30 days of message text for 3 agents is 0.8 GiB, under half an hour of
+checkpoints at 2 GiB written an hour. So the record's content goes by this limit only, and a
+limit on everything Silo keeps counts the record but never removes it (`low-disk`'s notes). A
+20 GB limit holds about 8 days of 3 hours of computer use a day recorded at a fixed bitrate, and
+30 days encoded by quality, which is 3.5 times smaller on the same screen.

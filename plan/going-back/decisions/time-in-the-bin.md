@@ -22,3 +22,15 @@ never fills your disk without your knowing.
 The property's sentence holds two claims: that a dropped computer comes back while it is in the
 bin, and that nothing of it but its record remains afterwards. It is copied as the design record
 gives it.
+
+## The bin's size against the disk (26 November 2026)
+
+An agent's part, 26 November 2026, from `research/2026-11-25-disk-budget/`, a simulation on Linux. Two forks a day that each
+rewrite 3 GiB hold 42 GiB in a 7-day bin; four of 6 GiB hold 168 GiB, more than a 512 GB Mac's
+checkpoints and recordings together. A fork's disk is an APFS clone, which #411 found cannot be
+compressed, so after compression the bin is the largest thing Silo keeps. A challenge to "Silo
+never empties the bin early on its own", on the heavy case: with the bin untouched, a 512 GB Mac
+paused every computer for 238 hours in 30 nights; with the oldest dropped computer removed once
+no automatic checkpoint older than 24 hours is left, with a fact naming it and an alert, there
+was no pause. Proposed: the bin counts in Silo's part of the disk, and its oldest computer goes
+second, after old checkpoints and before anything pauses.
