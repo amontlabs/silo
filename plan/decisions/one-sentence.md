@@ -10,6 +10,50 @@ And gives the reason it can be said: only agents work there, so a complete accou
 
 ## The choice
 
+An agent's part, 27 November 2026. polarzero read the sentence of 24 November, which ended on
+"send and spend", and said the description was "just a list that is not super attractive or
+promising". polarzero then said what Silo is for:
+
+> you have the vm, you expect everything that happens inside it to be hostile and untrustworthy
+> and you observe as much as possible from outside the vm. [...] from outside it tracks LLM
+> requests and responses, vm filesystem, etc, and compares with what's reported from inside the vm
+> (the agent harness). Then you could flag if there is a discrepancy
+
+The sentences so far name what Silo keeps: a computer, a record, a checkpoint. None says where
+Silo stands, and that is what the rest follows from. An agent program's own rules and its own
+log live inside the computer, where the agent can reach them. Silo's do not.
+
+A developer lets Claude Code run with every approval off. At the end it writes "All tests pass."
+Silo read the model calls, the commands and the file changes from outside, and shows that a test
+file was deleted before the last run. The developer learns it from Silo, not from the agent.
+
+The options:
+
+- Where Silo stands, then what it does from there (recommended). "Your agents work with full
+  access in a virtual machine of their own. Silo sits outside it, where they cannot reach. It
+  records what they run, change and send, checks what they say against what it saw, and can hold a
+  request at the edge until you answer." It keeps full access, which this audience wants. Each of
+  its three verbs is in the plan: the record (`what-the-record-holds`), a report held against
+  facts (`report-matched`, `own-account-as-a-check`), and a held request (`hold-limit`). It costs
+  three sentences where there was one, and it leaves out the checkpoint, which `what-to-say` keeps.
+- The sentence of 24 November. "Your agents work with full access in a virtual machine on your
+  Mac. Silo records what they run, change, send and spend there, and takes it back to a
+  checkpoint." It costs "spend", which is now the work of an extension
+  (`spend-and-budgets-ship-as-an-extension`), and it says nothing of the outside.
+- The outside and the checkpoint together. "Your agents work with full access in a virtual machine
+  of their own. From outside it, Silo records what they do, checks it against what they say, holds
+  what you told it to hold, and takes the machine back to a checkpoint." It costs a fourth verb in
+  one sentence.
+
+Recommended: where Silo stands. It is the one thing an agent program cannot say of itself.
+"Hostile" stays out of the sentence: it is how Silo is designed (`security-framing`), and
+`guides/writing.md` asks that the site not speak through fear.
+
+"Can hold" and not "holds": a request waits only when a rule or a precaution you set says so
+(`request-waits-only-by-precaution`).
+
+## The earlier choice, 24 November 2026
+
 An agent's part, 24 November 2026. A developer opens the home page from a link. The first words
 they read decide what they file Silo under. Many products for agents already describe themselves
 as computers for agents, so a first sentence that says "a computer of their own" files Silo with

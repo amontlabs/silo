@@ -1,6 +1,6 @@
 {
   "asks": "Who else is Silo for?",
-  "answer": "Developers and teams who run many agents and move fast.",
+  "answer": "Developers and teams who run many agents and move fast. After them, people who study how agents behave: the record, the forks and the extensions let them measure agents on real work.",
   "needs": [
     "who-it-is-for"
   ]

@@ -20,3 +20,11 @@ and which OpenAI's policies forbid trying to extract.
 ## Notes
 
 - OpenAI's terms forbid trying to extract the model's protected reasoning. (Read on 19 November 2026.)
+
+## Not yet seen in a capture
+
+An agent's part, 27 November 2026. The sentence above that OpenAI sends thinking sealed with a
+short summary in plain text is an agent's statement. No capture in the research holds a reasoning
+block: the run on real providers kept sizes and counts, and every later run used stand-in
+providers that sent none. How much reasoning is readable at the boundary, for each agent program,
+is to find out, and `what-silo-cannot-see` depends on it.

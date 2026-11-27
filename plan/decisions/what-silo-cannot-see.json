@@ -1,0 +1,7 @@
+{
+  "asks": "What can Silo not see from outside the computer?",
+  "answer": "Five things. What a model intended: its reasoning reaches the boundary only as the provider chooses to show it. What a provider's own servers do, such as a tool the provider runs. What a connection carries when Silo does not read its host. Which files a program read. And which process did a thing: that comes from the probe inside the computer, so it is a report. Silo says each of these wherever it shows the record, and never fills one in.",
+  "needs": [
+    "one-position"
+  ]
+}

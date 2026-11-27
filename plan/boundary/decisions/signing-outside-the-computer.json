@@ -1,0 +1,7 @@
+{
+  "asks": "How does a computer use a key that signs, when no placeholder can stand for it?",
+  "answer": "Something outside the computer holds the key and signs on a rule you set, and a precaution may hold the request first. An SSH key and a key that signs each request are two cases. A blockchain key is a third: the computer sends the transaction unsigned to a wallet computer that holds the key, through a channel you grant. Whether the boundary signs transactions itself is to find out.",
+  "needs": [
+    "secret-placeholder"
+  ]
+}

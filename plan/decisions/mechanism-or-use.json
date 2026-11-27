@@ -1,6 +1,6 @@
 {
   "asks": "Does the engine hold one use of a mechanism?",
-  "answer": "No. The engine holds the mechanism, never one use of it.",
+  "answer": "No. The engine holds the mechanism, never one use of it. A use that knows a domain, such as dollars or one provider's API, or that takes a position on what is good or bad, is an extension. The uses most people want ship with Silo as extensions.",
   "sets": [
     {
       "in": "principles",

@@ -1,0 +1,15 @@
+{
+  "asks": "How does an agent say what it is about to do?",
+  "answer": "With a declaration, through the `silo` command inside its computer. A declaration names the thing exactly, such as the transactions it will send, and it is a report. Silo may ask you about it once, and your yes covers what it names. An extension then holds each request against what you approved, as a fact against your answer. A declaration by itself changes nothing that is allowed, denied or held.",
+  "needs": [
+    "what-wakes-an-extension",
+    "what-a-report-carries"
+  ],
+  "sets": [
+    {
+      "in": "words",
+      "word": "declaration",
+      "means": "A report in which a program inside the computer says what it is about to do."
+    }
+  ]
+}

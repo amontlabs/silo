@@ -4,8 +4,10 @@ Extensions: rules, a computer, or both, that someone made and you add to Silo.
 
 ## For
 
-To let people watch a lot of agent work in their own way. What an extension executes can never
-grant or destroy anything, and the rules it adds are shown before they are switched on.
+Silo's core holds no view on what is good or bad (`mechanism-or-use`, still to decide). What to
+look for in the record, and which requests to hold at the boundary, is the work of extensions.
+Some ship with Silo, and people write their own. What an extension executes can never grant or
+destroy anything, and the rules it adds are shown before they are switched on.
 
 ## Why it is so
 
@@ -25,6 +27,26 @@ grant or destroy anything, and the rules it adds are shown before they are switc
   the budgets. A budget is a rule or a precaution, by what the boundary can see
   (`budget-rule-or-precaution`). What a budget promises when it is reached, and where prices come
   from, are still to decide (`what-a-budget-promises`, `where-prices-come-from`).
+
+The next ones are proposed in `first-extensions-that-ship`:
+
+- **Said against done** (`said-against-done`). A model gives an opinion on what the agent said it
+  did, from the record alone.
+- **Whose instruction a tool call follows** (`whose-instruction-a-call-follows`). A model that
+  never reads the tool results gives an opinion on whether a call follows from what you asked.
+- **The transaction guard** (`transaction-guard`). It simulates a transaction a computer sends to
+  a blockchain and holds it when value leaves or when you did not approve it.
+- **The rules that hold destructive calls** (`held-calls-ship-as-an-extension`). Rules only, with
+  no computer.
+
+## What an extension needs that is still to decide
+
+- What it receives of a request and of its response: `request-content-to-an-extension`,
+  `response-to-an-extension`.
+- What it says when it holds: `finding-of-an-extension`.
+- How an agent says what it is about to do: `declaration-is-a-report`.
+- A trial on live work before it protects: `extension-tried-live`.
+- How heavy its computer is: `small-computer-for-an-extension`.
 
 ## Three examples
 

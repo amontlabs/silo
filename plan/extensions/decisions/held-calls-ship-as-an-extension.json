@@ -1,0 +1,9 @@
+{
+  "asks": "Are the rules that hold destructive calls part of Silo's core?",
+  "answer": "No. The core reads which operation a request runs, for each format it knows: a REST call, a GraphQL operation, a JSON-RPC method, an AWS action. The list of a provider's operations, what each one does and which ones are held ship as an extension made of rules, with no computer. Without it, Silo holds no call for what it would destroy.",
+  "needs": [
+    "shipped-extensions-use-the-manifest",
+    "operation-of-a-request",
+    "outcome-of-a-call"
+  ]
+}

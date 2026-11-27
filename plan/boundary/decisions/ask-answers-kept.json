@@ -1,0 +1,7 @@
+{
+  "asks": "Is your answer to an ask kept?",
+  "answer": "Yes. Your yes or no to an ask is kept with the ask in the record, as your opinion about that request. A classifier or an extension can be scored against it.",
+  "needs": [
+    "what-an-ask-holds"
+  ]
+}

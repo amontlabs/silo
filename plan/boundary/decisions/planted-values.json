@@ -1,0 +1,7 @@
+{
+  "asks": "Is a value that Silo planted, seen at the boundary, a fact?",
+  "answer": "Yes. Silo can plant in a computer a value that nothing has a reason to use: a secret's placeholder is one, and a file or a variable made for the purpose is another. That value seen in a request, or in what is sent to a model, is a fact. So a rule may act on it.",
+  "needs": [
+    "secret-placeholder"
+  ]
+}

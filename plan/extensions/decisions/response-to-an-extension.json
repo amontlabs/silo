@@ -1,0 +1,7 @@
+{
+  "asks": "Does an extension see the response to a request it read?",
+  "answer": "Yes, after the response has passed. The connection line of that request wakes the extension, with the response's status, headers and body. Nothing waits for it. The content waits in a queue with a limit until the extension has run. Past the limit the content is lost, and the recorder writes a line of the kind gap.",
+  "needs": [
+    "request-content-to-an-extension"
+  ]
+}

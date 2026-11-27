@@ -1,0 +1,7 @@
+{
+  "asks": "May a rule count?",
+  "answer": "Yes. A rule may compare a sum of numbers taken from facts with a limit, each number weighted from a table in the rule's data. A budget is such a rule, on the token counts of model calls and a table of prices.",
+  "needs": [
+    "budget-rule-or-precaution"
+  ]
+}

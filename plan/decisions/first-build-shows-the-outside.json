@@ -1,0 +1,7 @@
+{
+  "asks": "What does the first build show?",
+  "answer": "The first build shows what Silo's position outside the computer gives. An agent program runs in a computer with every approval off. The `silo` command lists the model calls the boundary read, with the agent program's own account beside each one, and marks a mismatch. An extension gives its opinion on what the agent said it did, from the record alone. Another extension holds one request at the boundary, and you answer the ask. Checkpoints and the record of file changes come next, and restore after them.",
+  "needs": [
+    "one-position"
+  ]
+}

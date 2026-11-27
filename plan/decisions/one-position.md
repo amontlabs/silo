@@ -2,6 +2,27 @@
 
 ## The choice
 
+An agent's part, 27 November 2026. The answer of 22 November listed four things the position
+gives: limits, checkpoints, counting spend and a record. polarzero's words of 27 November, quoted
+in `one-sentence`, put two others first: comparing what is reported from inside with what was seen
+from outside, and holding a request at the boundary. Counting spend in dollars is now the work of
+an extension (`spend-and-budgets-ship-as-an-extension`).
+
+One case shows the difference. Claude Code keeps its own log of what it did, and its own rules for
+what it may do. Both are files and processes inside the computer, and an agent with `sudo` can
+change them. Silo's record and Silo's holds are outside, so the same agent cannot.
+
+The options:
+
+- The record, the check and the hold first (recommended). The answer names five things and says
+  why nothing inside can do them. It costs a longer answer.
+- The answer of 22 November. It costs the two things polarzero named first, and it still counts
+  spend as the core's.
+
+Recommended: the record, the check and the hold first.
+
+## The earlier choice, 22 November 2026
+
 An agent's part, 22 November 2026. A visitor asks why one product sets limits, takes checkpoints,
 counts spending and keeps a record, when each exists as a separate tool.
 

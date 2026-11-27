@@ -45,7 +45,7 @@ show what was sent to it, or its size (`record-shows-what-was-sent`).
   `safe-fresh-install`, `channel-list`.
 - Secrets, to decide: `secret-values`, `secret-placeholder`, `ssh-keys`, `exchanged-tokens`,
   `cloud-credentials`, `secret-entry`, `secret-limits`,
-  `secret-and-prompt-cache`.
+  `secret-and-prompt-cache`, `signing-outside-the-computer`, `planted-values`.
 - The network, to decide: `network-modes`, `name-lookups`, `main-network-rules`,
   `package-age-rule`, `package-age-at-the-boundary`, `no-read-freely-preset`.
 - Answered on 22 November 2026, to decide: `hold-limit-length`, `how-a-hold-ends`,

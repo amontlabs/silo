@@ -21,6 +21,30 @@ The options:
 Recommended: macOS first. A Mac of its own is what people already give their agents. On the Mac
 you already have, it costs nothing by the hour.
 
+## The first build and this choice
+
+An agent's part, 27 November 2026. It changes nothing in the answer above, which is polarzero's
+lean of 18 November.
+
+`first-build-shows-the-outside` proposes a first build that shows the boundary, the model traffic
+and extensions before checkpoints. For that build a Linux main on the Mac arrives sooner, for
+reasons that did not exist on 22 November:
+
+- Every extension that executes runs in a Linux computer (`extension-ships-a-computer`), so the
+  Linux driver is built in the first build whichever system main runs.
+- The macOS main waits on macOS 27 on polarzero's Mac and on the Mac tests, none of which has run.
+- Which process did what in a macOS computer needs a permission from Apple that Silo does
+  not have (`processes-from-inside-macos`).
+- Nothing has booted on either system. The prototypes ran in Linux containers.
+
+What it costs is what the first choice says: a Linux machine for agents is what cloud services
+already offer, no agent builds Mac software in it, and by an agent's count the Linux main needs
+35 decisions with no verdict against 25.
+
+One way to keep both: the first build runs a Linux main to show the boundary, and the macOS main
+follows as the product's main once its Mac tests pass. That would need `main-on-linux` and
+`computers-linux-main-on-a-mac`, whose suggestion today is to drop it. It is polarzero's ruling.
+
 ## Notes
 
 polarzero said this, 18 November 2026. polarzero expects much more interest this way.

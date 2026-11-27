@@ -1,0 +1,9 @@
+{
+  "asks": "What does an extension say when it denies or holds a request?",
+  "answer": "It gives a finding: a short text, and the lines of the record it rests on. The ask shows the finding beside what Silo wrote from facts, marked as that extension's words. The record keeps it as that extension's opinion about the request. The computer never sees it.",
+  "needs": [
+    "extension-may-protect",
+    "what-wakes-an-extension",
+    "what-an-ask-shows"
+  ]
+}

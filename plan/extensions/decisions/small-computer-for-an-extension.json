@@ -1,0 +1,7 @@
+{
+  "asks": "How heavy is an extension's computer?",
+  "answer": "Silo offers a small Linux recipe for an extension's computer, and commits to a number for its idle memory, measured before the first extension ships. An extension made only of rules has no computer.",
+  "needs": [
+    "extension-ships-a-computer"
+  ]
+}
