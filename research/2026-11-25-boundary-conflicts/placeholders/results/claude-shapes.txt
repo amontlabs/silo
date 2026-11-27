@@ -1,0 +1,7 @@
+ANTHROPIC_API_KEY        placeholder-not-a-key                    2 requests, messages via x-api-key, oauth beta: False
+ANTHROPIC_API_KEY        sk-ant-api03-Zx9Qw2Lp0Vb7Nc4Mk1Hj6Gf3Ds8Aa5Ee 2 requests, messages via x-api-key, oauth beta: False
+ANTHROPIC_API_KEY        sk-ant-oat01-Zx9Qw2Lp0Vb7Nc4Mk1Hj6Gf3Ds8Aa5Ee 2 requests, messages via x-api-key, oauth beta: False
+CLAUDE_CODE_OAUTH_TOKEN  placeholder-not-a-key                    3 requests, messages via authorization: Bearer, oauth beta: True
+CLAUDE_CODE_OAUTH_TOKEN  sk-ant-oat01-Zx9Qw2Lp0Vb7Nc4Mk1Hj6Gf3Ds8Aa5Ee 3 requests, messages via authorization: Bearer, oauth beta: True
+ANTHROPIC_AUTH_TOKEN     placeholder-not-a-key                    2 requests, messages via authorization: Bearer, oauth beta: False
+claude 2.1.332 (Claude Code)

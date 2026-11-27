@@ -1,0 +1,565 @@
+From 90386593066b2006015593706b970e0405da7c22 Mon Sep 17 00:00:00 2001
+From: silo-research <noreply@anthropic.com>
+Date: Wed, 25 Nov 2026 14:04:35 +0000
+Subject: [PATCH 07/10] gvproxy: add -outbound-deny
+
+A guest that runs untrusted code reaches, through gvproxy, everything
+the host reaches: the host's own services on every address, the
+machines of the host's local network, a cloud's metadata service on
+another range than 169.254.0.0/16, and anything on a VPN. Users ask to
+stop that from the command line (#630), and embedders now can with the
+dial filter, but each has to write the same list.
+
+Add package outbound with a deny list, and Configuration.OutboundDeny,
+gvproxy -outbound-deny and `stack.outboundDeny` to use it. Entries are
+addresses, CIDRs or keywords:
+
+- private: loopback, RFC 1918, carrier-grade NAT, link-local, multicast
+  and reserved networks, IPv4 and IPv6;
+- host: the host's own addresses;
+- host-networks: every network the host is attached to, which private
+  does not cover when an office or a university network uses public
+  addresses, or on a global IPv6 network;
+- all.
+
+host and host-networks follow the host's interfaces as it changes
+networks, reading them at most once a second. The list is a dial filter:
+it is checked on the address dialled after NAT translation, for TCP, UDP
+and ICMP, before the embedder's own DialFilter. IPv4-mapped IPv6
+addresses are checked as IPv4.
+---
+ README.md                           |  15 +++
+ cmd/gvproxy/config.go               |   3 +
+ cmd/gvproxy/config_test.go          |  13 ++
+ pkg/outbound/deny.go                | 196 ++++++++++++++++++++++++++++
+ pkg/outbound/deny_test.go           | 151 +++++++++++++++++++++
+ pkg/outbound/outbound_suite_test.go |  13 ++
+ pkg/types/configuration.go          |   7 +
+ pkg/virtualnetwork/services.go      |  26 ++--
+ 8 files changed, 408 insertions(+), 16 deletions(-)
+ create mode 100644 pkg/outbound/deny.go
+ create mode 100644 pkg/outbound/deny_test.go
+ create mode 100644 pkg/outbound/outbound_suite_test.go
+
+diff --git a/README.md b/README.md
+index f90dd54e..82bf35b9 100644
+--- a/README.md
++++ b/README.md
+@@ -205,6 +205,21 @@ requests without tokens.
+ The executable running on the host runs a virtual gateway that can be used by the VM.
+ It runs a DHCP server. It allows VMs to configure the network automatically (IP, MTU, DNS, search domain, etc.).
+ 
++### Outbound deny list
++
++`--outbound-deny` (repeatable, or separated by commas) lists destinations that no TCP connection,
++UDP datagram or ping of the VM may reach. Each entry is an address, a CIDR, or one of:
++
++- `private`: loopback, RFC 1918, carrier-grade NAT, link-local, multicast and reserved networks;
++- `host`: the host's own addresses;
++- `host-networks`: every network the host is attached to, which `private` misses when a local
++  network uses public addresses or global IPv6;
++- `all`: everything.
++
++For example, `--outbound-deny private,host,host-networks` lets the VM reach the internet but not
++the host nor its local network. It is checked on the address gvproxy dials, after NAT, so
++192.168.127.254 is refused through its loopback target. Forwards into the VM are not affected.
++
+ ### DNS
+ 
+ The gateway also runs a DNS server. It can be configured to serve static zones.
+diff --git a/cmd/gvproxy/config.go b/cmd/gvproxy/config.go
+index 07a6da00..b481e63d 100644
+--- a/cmd/gvproxy/config.go
++++ b/cmd/gvproxy/config.go
+@@ -53,6 +53,7 @@ type GvproxyArgs struct {
+ 	noGatewayAPI       bool
+ 	noHostLoopback     bool
+ 	dnsUpstream        arrayFlags
++	outboundDeny       arrayFlags
+ }
+ 
+ type GvproxyConfig struct {
+@@ -152,6 +153,7 @@ func GvproxyArgParse(flagSet *flag.FlagSet, args *GvproxyArgs, argv []string) (*
+ 	flagSet.BoolVar(&args.noGatewayAPI, "no-gateway-api", false, "Do not serve the HTTP API on the gateway's port 80 inside the virtual network; -listen and -services are not affected")
+ 	flagSet.BoolVar(&args.noHostLoopback, "no-host-loopback", false, "Map no address of the virtual network to the host's loopback: no default NAT entry from the host address to 127.0.0.1")
+ 	flagSet.Var(&args.dnsUpstream, "dns-upstream", "DNS server (ip:port) asked for names outside gvproxy's own zones, instead of the host's resolver; repeatable. \"none\" refuses those names")
++	flagSet.Var(&args.outboundDeny, "outbound-deny", "Destinations no outbound TCP, UDP or ICMP of the guest may reach: an address, a CIDR, private, host, host-networks or all; repeatable or separated by commas")
+ 	if err := flagSet.Parse(argv); err != nil {
+ 		return nil, err
+ 	}
+@@ -264,6 +266,7 @@ func GvproxyConfigure(config *GvproxyConfig, args *GvproxyArgs, version string)
+ 	if args.noHostLoopback {
+ 		config.NoHostLoopback = true
+ 	}
++	config.Stack.OutboundDeny = append(config.Stack.OutboundDeny, args.outboundDeny...)
+ 	if len(args.dnsUpstream) > 0 {
+ 		config.Stack.DNSUpstream = args.dnsUpstream
+ 	}
+diff --git a/cmd/gvproxy/config_test.go b/cmd/gvproxy/config_test.go
+index a0d0a204..2a9426a7 100644
+--- a/cmd/gvproxy/config_test.go
++++ b/cmd/gvproxy/config_test.go
+@@ -864,3 +864,16 @@ func TestDNSUpstream(t *testing.T) {
+ 		assert.Equal(t, v.want, cnf.Stack.DNSUpstream, v.name)
+ 	}
+ }
++
++func TestOutboundDeny(t *testing.T) {
++	t.Parallel()
++	var cnf GvproxyConfig
++	var args GvproxyArgs
++	_, err := GvproxyArgParse(flag.NewFlagSet(os.Args[0], flag.ContinueOnError), &args,
++		[]string{"-outbound-deny", "private,host", "-outbound-deny", "198.51.100.0/24"})
++	require.NoError(t, err)
++	require.NoError(t, yaml.Unmarshal([]byte("stack:\n  outboundDeny: [\"host-networks\"]\n"), &cnf))
++	_, err = GvproxyConfigure(&cnf, &args, "testing")
++	require.NoError(t, err)
++	assert.Equal(t, []string{"host-networks", "private,host", "198.51.100.0/24"}, cnf.Stack.OutboundDeny)
++}
+diff --git a/pkg/outbound/deny.go b/pkg/outbound/deny.go
+new file mode 100644
+index 00000000..b25da2bd
+--- /dev/null
++++ b/pkg/outbound/deny.go
+@@ -0,0 +1,196 @@
++// Package outbound holds policies for the connections that the forwarders
++// open on the host for the guest.
++package outbound
++
++import (
++	"fmt"
++	"net"
++	"net/netip"
++	"strings"
++	"sync"
++	"time"
++
++	"github.com/containers/gvisor-tap-vsock/pkg/types"
++	log "github.com/sirupsen/logrus"
++)
++
++// privatePrefixes are the networks that the keyword "private" stands for:
++// loopback, RFC 1918, shared address space (carrier-grade NAT), link-local,
++// "this network", multicast, reserved and broadcast, and their IPv6
++// counterparts.
++var privatePrefixes = []netip.Prefix{
++	netip.MustParsePrefix("0.0.0.0/8"),
++	netip.MustParsePrefix("10.0.0.0/8"),
++	netip.MustParsePrefix("100.64.0.0/10"),
++	netip.MustParsePrefix("127.0.0.0/8"),
++	netip.MustParsePrefix("169.254.0.0/16"),
++	netip.MustParsePrefix("172.16.0.0/12"),
++	netip.MustParsePrefix("192.168.0.0/16"),
++	netip.MustParsePrefix("224.0.0.0/4"),
++	netip.MustParsePrefix("240.0.0.0/4"),
++	netip.MustParsePrefix("::/128"),
++	netip.MustParsePrefix("::1/128"),
++	netip.MustParsePrefix("fc00::/7"),
++	netip.MustParsePrefix("fe80::/10"),
++	netip.MustParsePrefix("ff00::/8"),
++}
++
++// hostAddrTTL bounds how stale the host's own addresses may be. They change
++// when the host joins a network; reading them costs a system call.
++const hostAddrTTL = time.Second
++
++// DenyList is a set of destinations that no connection of the guest may
++// reach.
++type DenyList struct {
++	prefixes     []netip.Prefix
++	host         bool
++	hostNetworks bool
++
++	// interfaceAddrs is net.InterfaceAddrs, replaced in tests.
++	interfaceAddrs func() ([]net.Addr, error)
++
++	mu        sync.Mutex
++	hostAddrs []netip.Prefix
++	readAt    time.Time
++}
++
++// ParseDenyList reads entries that are each, or list separated by commas:
++//   - an address or a CIDR;
++//   - "private": loopback, RFC 1918, carrier-grade NAT, link-local,
++//     multicast and reserved networks, IPv4 and IPv6;
++//   - "host": every address of the host's own interfaces;
++//   - "host-networks": every network the host's interfaces are attached to,
++//     such as a local network on public addresses or a global IPv6 network;
++//   - "all": every address.
++//
++// "host" and "host-networks" follow the host's interfaces as they change.
++func ParseDenyList(entries []string) (*DenyList, error) {
++	d := &DenyList{interfaceAddrs: net.InterfaceAddrs}
++	for _, entry := range entries {
++		for _, e := range strings.Split(entry, ",") {
++			e = strings.TrimSpace(e)
++			switch e {
++			case "":
++			case "host":
++				d.host = true
++			case "host-networks":
++				d.hostNetworks = true
++			case "private":
++				d.prefixes = append(d.prefixes, privatePrefixes...)
++			case "all":
++				d.prefixes = append(d.prefixes, netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0"))
++			default:
++				p, err := parsePrefix(e)
++				if err != nil {
++					return nil, fmt.Errorf("outbound deny: %q is not an address, a CIDR or one of private, host, host-networks, all", e)
++				}
++				d.prefixes = append(d.prefixes, p)
++			}
++		}
++	}
++	return d, nil
++}
++
++func parsePrefix(s string) (netip.Prefix, error) {
++	if strings.Contains(s, "/") {
++		p, err := netip.ParsePrefix(s)
++		if err != nil {
++			return netip.Prefix{}, err
++		}
++		return netip.PrefixFrom(p.Addr().Unmap(), p.Bits()).Masked(), nil
++	}
++	a, err := netip.ParseAddr(s)
++	if err != nil {
++		return netip.Prefix{}, err
++	}
++	a = a.Unmap()
++	return netip.PrefixFrom(a, a.BitLen()), nil
++}
++
++// Contains reports whether a may not be reached.
++func (d *DenyList) Contains(a netip.Addr) bool {
++	a = a.Unmap()
++	for _, p := range d.prefixes {
++		if p.Contains(a) {
++			return true
++		}
++	}
++	if d.host || d.hostNetworks {
++		for _, p := range d.readHostAddrs() {
++			if d.host && p.Addr() == a {
++				return true
++			}
++			if d.hostNetworks && p.Contains(a) {
++				return true
++			}
++		}
++	}
++	return false
++}
++
++// Filter refuses a request whose dial address, after NAT translation, is
++// denied. It has the signature of types.Configuration.DialFilter.
++func (d *DenyList) Filter(req types.DialRequest) error {
++	if d.Contains(req.DialAddress.Addr()) {
++		return fmt.Errorf("%s is on the outbound deny list", req.DialAddress.Addr())
++	}
++	return nil
++}
++
++func (d *DenyList) readHostAddrs() []netip.Prefix {
++	d.mu.Lock()
++	defer d.mu.Unlock()
++	if d.hostAddrs != nil && time.Since(d.readAt) < hostAddrTTL {
++		return d.hostAddrs
++	}
++	addrs, err := d.interfaceAddrs()
++	if err != nil {
++		// Keep the last addresses read rather than allow everything.
++		log.Warnf("outbound deny: cannot read the host's addresses: %v", err)
++		return d.hostAddrs
++	}
++	list := []netip.Prefix{}
++	for _, a := range addrs {
++		n, ok := a.(*net.IPNet)
++		if !ok {
++			continue
++		}
++		ip, ok := netip.AddrFromSlice(n.IP)
++		if !ok {
++			continue
++		}
++		ones, _ := n.Mask.Size()
++		ip = ip.Unmap()
++		if ip.Is4() && ones > 32 {
++			ones -= 96
++		}
++		list = append(list, netip.PrefixFrom(ip, ones))
++	}
++	d.hostAddrs, d.readAt = list, time.Now()
++	return list
++}
++
++// Chain returns a dial filter that asks each non-nil filter in turn and
++// refuses a request as soon as one refuses it.
++func Chain(filters ...func(types.DialRequest) error) func(types.DialRequest) error {
++	var set []func(types.DialRequest) error
++	for _, f := range filters {
++		if f != nil {
++			set = append(set, f)
++		}
++	}
++	switch len(set) {
++	case 0:
++		return nil
++	case 1:
++		return set[0]
++	}
++	return func(req types.DialRequest) error {
++		for _, f := range set {
++			if err := f(req); err != nil {
++				return err
++			}
++		}
++		return nil
++	}
++}
+diff --git a/pkg/outbound/deny_test.go b/pkg/outbound/deny_test.go
+new file mode 100644
+index 00000000..4b508aca
+--- /dev/null
++++ b/pkg/outbound/deny_test.go
+@@ -0,0 +1,151 @@
++package outbound
++
++import (
++	"errors"
++	"net"
++	"net/netip"
++
++	"github.com/containers/gvisor-tap-vsock/pkg/types"
++	"github.com/onsi/ginkgo/v2"
++	"github.com/onsi/gomega"
++)
++
++// fakeHost returns interface addresses as an office host would have them:
++// a loopback, an address on a local network with public addresses, and a
++// global IPv6 address.
++func fakeHost() ([]net.Addr, error) {
++	var addrs []net.Addr
++	for _, c := range []string{"127.0.0.1/8", "198.51.100.1/24", "2001:db8:5::10/64"} {
++		ip, n, err := net.ParseCIDR(c)
++		if err != nil {
++			return nil, err
++		}
++		n.IP = ip
++		addrs = append(addrs, n)
++	}
++	return addrs, nil
++}
++
++func parse(entries ...string) *DenyList {
++	d, err := ParseDenyList(entries)
++	gomega.Expect(err).ToNot(gomega.HaveOccurred())
++	d.interfaceAddrs = fakeHost
++	return d
++}
++
++var _ = ginkgo.Describe("outbound deny list", func() {
++	ginkgo.DescribeTable("private",
++		func(ip string, denied bool) {
++			gomega.Expect(parse("private").Contains(netip.MustParseAddr(ip))).To(gomega.Equal(denied))
++		},
++		ginkgo.Entry("loopback", "127.0.0.1", true),
++		ginkgo.Entry("loopback, another address", "127.8.9.10", true),
++		ginkgo.Entry("RFC 1918 10/8", "10.77.0.2", true),
++		ginkgo.Entry("RFC 1918 172.16/12", "172.31.255.1", true),
++		ginkgo.Entry("RFC 1918 192.168/16", "192.168.1.1", true),
++		ginkgo.Entry("carrier-grade NAT", "100.100.100.100", true),
++		ginkgo.Entry("link-local, cloud metadata", "169.254.169.254", true),
++		ginkgo.Entry("this network", "0.0.0.1", true),
++		ginkgo.Entry("multicast", "224.0.0.251", true),
++		ginkgo.Entry("broadcast", "255.255.255.255", true),
++		ginkgo.Entry("IPv4-mapped IPv6 of a private address", "::ffff:192.168.1.1", true),
++		ginkgo.Entry("IPv6 loopback", "::1", true),
++		ginkgo.Entry("IPv6 unique local", "fd00::1", true),
++		ginkgo.Entry("IPv6 link-local", "fe80::1", true),
++		ginkgo.Entry("the internet", "203.0.113.10", false),
++		ginkgo.Entry("the internet over IPv6", "2001:db8::1", false),
++		ginkgo.Entry("IPv4-mapped IPv6 of the internet", "::ffff:203.0.113.10", false),
++	)
++
++	ginkgo.It("host denies the host's own addresses and nothing else", func() {
++		d := parse("host")
++		for _, ip := range []string{"127.0.0.1", "198.51.100.1", "2001:db8:5::10", "::ffff:198.51.100.1"} {
++			gomega.Expect(d.Contains(netip.MustParseAddr(ip))).To(gomega.BeTrue(), ip)
++		}
++		for _, ip := range []string{"198.51.100.2", "2001:db8:5::11", "203.0.113.10"} {
++			gomega.Expect(d.Contains(netip.MustParseAddr(ip))).To(gomega.BeFalse(), ip)
++		}
++	})
++
++	ginkgo.It("host-networks denies every network the host is attached to", func() {
++		d := parse("host-networks")
++		for _, ip := range []string{"198.51.100.2", "198.51.100.254", "2001:db8:5::11", "127.0.0.53"} {
++			gomega.Expect(d.Contains(netip.MustParseAddr(ip))).To(gomega.BeTrue(), ip)
++		}
++		for _, ip := range []string{"198.51.101.1", "2001:db8:6::1", "203.0.113.10"} {
++			gomega.Expect(d.Contains(netip.MustParseAddr(ip))).To(gomega.BeFalse(), ip)
++		}
++	})
++
++	ginkgo.It("follows the host's addresses as they change", func() {
++		d := parse("host")
++		gomega.Expect(d.Contains(netip.MustParseAddr("198.51.100.1"))).To(gomega.BeTrue())
++		d.interfaceAddrs = func() ([]net.Addr, error) {
++			_, n, _ := net.ParseCIDR("192.0.2.1/24")
++			n.IP = net.ParseIP("192.0.2.1")
++			return []net.Addr{n}, nil
++		}
++		d.readAt = d.readAt.Add(-2 * hostAddrTTL)
++		gomega.Expect(d.Contains(netip.MustParseAddr("192.0.2.1"))).To(gomega.BeTrue())
++		gomega.Expect(d.Contains(netip.MustParseAddr("198.51.100.1"))).To(gomega.BeFalse())
++	})
++
++	ginkgo.It("keeps the last addresses when they cannot be read", func() {
++		d := parse("host")
++		gomega.Expect(d.Contains(netip.MustParseAddr("198.51.100.1"))).To(gomega.BeTrue())
++		d.interfaceAddrs = func() ([]net.Addr, error) { return nil, errors.New("no interfaces") }
++		d.readAt = d.readAt.Add(-2 * hostAddrTTL)
++		gomega.Expect(d.Contains(netip.MustParseAddr("198.51.100.1"))).To(gomega.BeTrue())
++	})
++
++	ginkgo.It("all denies everything", func() {
++		d := parse("all")
++		for _, ip := range []string{"8.8.8.8", "203.0.113.10", "2001:db8::1", "10.0.0.1"} {
++			gomega.Expect(d.Contains(netip.MustParseAddr(ip))).To(gomega.BeTrue(), ip)
++		}
++	})
++
++	ginkgo.It("takes addresses, CIDRs and lists separated by commas", func() {
++		d := parse("198.51.100.7, 203.0.113.0/28", "2001:db8::/32", "::ffff:192.0.2.9")
++		for ip, denied := range map[string]bool{
++			"198.51.100.7": true, "198.51.100.8": false,
++			"203.0.113.15": true, "203.0.113.16": false,
++			"2001:db8:1::5": true, "192.0.2.9": true,
++		} {
++			gomega.Expect(d.Contains(netip.MustParseAddr(ip))).To(gomega.Equal(denied), ip)
++		}
++	})
++
++	ginkgo.It("refuses an entry it cannot read", func() {
++		for _, bad := range []string{"privat", "10.0.0.0/33", "example.com", "300.1.1.1"} {
++			_, err := ParseDenyList([]string{bad})
++			gomega.Expect(err).To(gomega.HaveOccurred(), bad)
++		}
++	})
++
++	ginkgo.It("filters on the address dialled after NAT", func() {
++		d := parse("private")
++		req := types.DialRequest{
++			Network:     "tcp",
++			Destination: netip.MustParseAddrPort("192.168.127.254:22"),
++			DialAddress: netip.MustParseAddrPort("127.0.0.1:22"),
++		}
++		gomega.Expect(d.Filter(req)).To(gomega.HaveOccurred())
++		req.DialAddress = netip.MustParseAddrPort("203.0.113.10:22")
++		gomega.Expect(d.Filter(req)).ToNot(gomega.HaveOccurred())
++	})
++})
++
++var _ = ginkgo.Describe("Chain", func() {
++	refuse := func(types.DialRequest) error { return errors.New("no") }
++	allow := func(types.DialRequest) error { return nil }
++
++	ginkgo.It("is nil without filters", func() {
++		gomega.Expect(Chain(nil, nil)).To(gomega.BeNil())
++	})
++
++	ginkgo.It("refuses when any filter refuses", func() {
++		gomega.Expect(Chain(allow, nil, refuse)(types.DialRequest{})).To(gomega.HaveOccurred())
++		gomega.Expect(Chain(allow, allow)(types.DialRequest{})).ToNot(gomega.HaveOccurred())
++	})
++})
+diff --git a/pkg/outbound/outbound_suite_test.go b/pkg/outbound/outbound_suite_test.go
+new file mode 100644
+index 00000000..87a8ed51
+--- /dev/null
++++ b/pkg/outbound/outbound_suite_test.go
+@@ -0,0 +1,13 @@
++package outbound
++
++import (
++	"testing"
++
++	"github.com/onsi/ginkgo/v2"
++	"github.com/onsi/gomega"
++)
++
++func TestSuite(t *testing.T) {
++	gomega.RegisterFailHandler(ginkgo.Fail)
++	ginkgo.RunSpecs(t, "outbound suite")
++}
+diff --git a/pkg/types/configuration.go b/pkg/types/configuration.go
+index 1e3d7ba8..dfc3361d 100644
+--- a/pkg/types/configuration.go
++++ b/pkg/types/configuration.go
+@@ -75,6 +75,13 @@ type Configuration struct {
+ 	// "ip:port". The single entry "none" refuses those names and asks nobody.
+ 	DNSUpstream []string `yaml:"dnsUpstream,omitempty"`
+ 
++	// OutboundDeny lists destinations that no connection of the guest may
++	// reach, checked on the address dialled after NAT translation, for TCP,
++	// UDP and ICMP. Each entry is an address, a CIDR, "private", "host",
++	// "host-networks" or "all"; see outbound.ParseDenyList. It applies
++	// before DialFilter.
++	OutboundDeny []string `yaml:"outboundDeny,omitempty"`
++
+ 	// DialFilter, when set, is consulted before every connection the
+ 	// forwarders open for the guest. A non-nil error refuses it: TCP answers
+ 	// the guest with a reset, UDP and ICMP are dropped.
+diff --git a/pkg/virtualnetwork/services.go b/pkg/virtualnetwork/services.go
+index 1099f877..d18a1f23 100644
+--- a/pkg/virtualnetwork/services.go
++++ b/pkg/virtualnetwork/services.go
+@@ -8,6 +8,7 @@ import (
+ 	"sync"
+ 	"time"
+ 
++	"github.com/containers/gvisor-tap-vsock/pkg/outbound"
+ 	"github.com/containers/gvisor-tap-vsock/pkg/services/dhcp"
+ 	"github.com/containers/gvisor-tap-vsock/pkg/services/dns"
+ 	"github.com/containers/gvisor-tap-vsock/pkg/services/forwarder"
+@@ -26,7 +27,15 @@ import (
+ func addServices(configuration *types.Configuration, s *stack.Stack, ipPool *tap.IPPool, portsForwarder *forwarder.PortsForwarder) (http.Handler, error) {
+ 	var natLock sync.Mutex
+ 	translation := parseNATTable(configuration)
+-	dialFilter := chainFilters(gatewayFilter(configuration), configuration.DialFilter)
++	var deny func(types.DialRequest) error
++	if len(configuration.OutboundDeny) > 0 {
++		list, err := outbound.ParseDenyList(configuration.OutboundDeny)
++		if err != nil {
++			return nil, err
++		}
++		deny = list.Filter
++	}
++	dialFilter := outbound.Chain(gatewayFilter(configuration), deny, configuration.DialFilter)
+ 
+ 	tcpForwarder := forwarder.TCP(s, translation, &natLock, configuration.Ec2MetadataAccess,
+ 		configuration.TCPMaxInFlight, time.Duration(configuration.TCPConnectTimeout)*time.Second, dialFilter)
+@@ -126,18 +135,3 @@ func gatewayFilter(configuration *types.Configuration) func(types.DialRequest) e
+ 		return nil
+ 	}
+ }
+-
+-// chainFilters asks each non-nil filter in turn.
+-func chainFilters(filters ...func(types.DialRequest) error) func(types.DialRequest) error {
+-	return func(req types.DialRequest) error {
+-		for _, f := range filters {
+-			if f == nil {
+-				continue
+-			}
+-			if err := f(req); err != nil {
+-				return err
+-			}
+-		}
+-		return nil
+-	}
+-}
+-- 
+2.43.0
+

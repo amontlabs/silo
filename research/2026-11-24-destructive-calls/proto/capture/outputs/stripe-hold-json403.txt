@@ -1,0 +1,6 @@
+$ STRIPE_API_KEY=sk_test_fake123 -- stripe customers delete cus_123 --confirm
+This command will be executed on the account with the following details:
+> Mode: Test
+{"error": "Held by Silo and not answered: deleting volume X needs your yes."}
+--- exit=0 seconds=2.305072462
+--- matching requests held: 1

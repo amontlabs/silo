@@ -1,0 +1,18 @@
+{"t": 1795615878.8563, "kind": "listening", "port": 31021, "holds": {"git": 600, "aws": 50, "pip": 12, "default": 90}, "gather": 2.0}
+{"t": 1795615879.8372, "kind": "ask.opened", "ask": "ask_1", "computer": "main", "ends": 1795617679.8371494}
+{"t": 1795615879.8372, "kind": "request.held", "ask": "ask_1", "line": 1, "desc": "GET 127.0.0.1:31021/simple/pip/"}
+{"t": 1795615879.8373, "kind": "ask.version", "ask": "ask_1", "version": 1, "lines": ["GET 127.0.0.1:31021/simple/pip/"], "list_hash": "9d984e84754d07b0912da06954d5b0a6", "ends": 1795617679.8371494}
+{"t": 1795615881.8731, "kind": "ask.forwarded", "ask": "ask_1", "version": 1, "size": 325}
+{"t": 1795615884.8426, "kind": "hold.ended", "ask": "ask_1", "line": 1, "how": "client closed"}
+{"t": 1795615884.8574, "kind": "request.held", "ask": "ask_1", "line": 2, "desc": "GET 127.0.0.1:31021/simple/leftpad-silo-test/"}
+{"t": 1795615884.8575, "kind": "ask.version", "ask": "ask_1", "version": 2, "lines": ["GET 127.0.0.1:31021/simple/pip/", "GET 127.0.0.1:31021/simple/leftpad-silo-test/"], "list_hash": "387ef8801be2bbd64469cda0699f9e57", "ends": 1795617679.8371494}
+{"t": 1795615886.8963, "kind": "ask.forwarded", "ask": "ask_1", "version": 2, "size": 373}
+{"t": 1795615896.8697, "kind": "hold.ended", "ask": "ask_1", "line": 2, "how": "limit"}
+{"t": 1795615896.87, "kind": "request.refused", "ask": "ask_1", "line": 2, "why": "held, not answered"}
+{"t": 1795615921.8805, "kind": "answer.received", "ask": "ask_1", "version": 2, "verdict": "yes"}
+{"t": 1795615921.8805, "kind": "ask.answered", "ask": "ask_1", "version": 2, "verdict": "yes", "lines": 2, "issued": 1795615921.877925, "via": "phone"}
+{"t": 1795615949.8636, "kind": "request.passed", "ask": "ask_1", "line": 1, "why": "late yes, spent once"}
+{"t": 1795615949.8638, "kind": "request.forwarded", "ask": "ask_1", "line": 1, "status": 200}
+{"t": 1795615949.8851, "kind": "request.passed", "ask": "ask_1", "line": 2, "why": "late yes, spent once"}
+{"t": 1795615949.8851, "kind": "ask.closed", "ask": "ask_1", "why": "answered and done"}
+{"t": 1795615949.8853, "kind": "request.forwarded", "ask": "ask_1", "line": 2, "status": 200}

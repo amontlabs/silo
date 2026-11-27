@@ -1,0 +1,146 @@
+diff --git a/pkg/services/forwarder/handoff_test.go b/pkg/services/forwarder/handoff_test.go
+new file mode 100644
+index 00000000..d133c9f8
+--- /dev/null
++++ b/pkg/services/forwarder/handoff_test.go
+@@ -0,0 +1,101 @@
++package forwarder
++
++import (
++	"bytes"
++	"context"
++	"io"
++	"net"
++	"path/filepath"
++	"sync"
++	"testing"
++	"time"
++
++	"gvisor.dev/gvisor/pkg/tcpip"
++	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
++	"gvisor.dev/gvisor/pkg/tcpip/header"
++	"gvisor.dev/gvisor/pkg/tcpip/link/loopback"
++	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
++	"gvisor.dev/gvisor/pkg/tcpip/stack"
++	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
++)
++
++// In hand-off mode the boundary decides every connection. A connection the guest opens to the
++// cloud metadata address, or to any address the deny list names, must reach the boundary, which
++// answers the metadata server itself and refuses the rest. gvproxy dials nothing in this mode, so
++// its own checks protect nothing and only hide connections from the boundary.
++func TestHandoffReceivesEveryTCPConnection(t *testing.T) {
++	guest := tcpip.AddrFrom4([4]byte{192, 168, 127, 2})
++	s := stack.New(stack.Options{
++		NetworkProtocols:   []stack.NetworkProtocolFactory{ipv4.NewProtocol},
++		TransportProtocols: []stack.TransportProtocolFactory{tcp.NewProtocol},
++	})
++	defer s.Destroy()
++	if err := s.CreateNIC(1, loopback.New()); err != nil {
++		t.Fatal(err)
++	}
++	if err := s.AddProtocolAddress(1, tcpip.ProtocolAddress{Protocol: ipv4.ProtocolNumber, AddressWithPrefix: guest.WithPrefix()}, stack.AddressProperties{}); err != nil {
++		t.Fatal(err)
++	}
++	s.SetSpoofing(1, true)
++	s.SetPromiscuousMode(1, true)
++	s.SetRouteTable([]tcpip.Route{{Destination: header.IPv4EmptySubnet, NIC: 1}})
++
++	sock := filepath.Join(t.TempDir(), "boundary.sock")
++	ln, err := net.Listen("unix", sock)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer ln.Close()
++	var mu sync.Mutex
++	got := map[string]bool{}
++	go func() {
++		for {
++			c, err := ln.Accept()
++			if err != nil {
++				return
++			}
++			go func(c net.Conn) {
++				defer c.Close()
++				h := make([]byte, 28)
++				if _, err := io.ReadFull(c, h); err != nil || !bytes.HasPrefix(h, []byte("\r\n\r\n\x00\r\nQUIT\n")) {
++					return
++				}
++				dst := net.JoinHostPort(net.IP(h[20:24]).String(), "80")
++				mu.Lock()
++				got[dst] = true
++				mu.Unlock()
++				_, _ = c.Write([]byte("ok"))
++			}(c)
++		}
++	}()
++
++	deny, err := ParseDenyList([]string{"private", "host"})
++	if err != nil {
++		t.Fatal(err)
++	}
++	var natLock sync.Mutex
++	fw := TCPWithOutbound(s, map[tcpip.Address]tcpip.Address{}, &natLock, false, 0, 0, &Outbound{Deny: deny, Handoff: sock})
++	s.SetTransportProtocolHandler(tcp.ProtocolNumber, fw.HandlePacket)
++
++	for _, dst := range []string{"169.254.169.254", "10.0.0.7", "203.0.113.10"} {
++		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
++		c, err := gonet.DialTCPWithBind(ctx, s,
++			tcpip.FullAddress{NIC: 1, Addr: guest},
++			tcpip.FullAddress{NIC: 1, Addr: tcpip.AddrFromSlice(net.ParseIP(dst).To4()), Port: 80}, ipv4.ProtocolNumber)
++		cancel()
++		if err != nil {
++			t.Errorf("%s: the guest's connection did not open: %v", dst, err)
++			continue
++		}
++		_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
++		b := make([]byte, 2)
++		_, err = io.ReadFull(c, b)
++		c.Close()
++		mu.Lock()
++		handed := got[dst+":80"]
++		mu.Unlock()
++		if err != nil || !handed {
++			t.Errorf("%s: not handed to the boundary (read: %v)", dst, err)
++		}
++	}
++}
+diff --git a/pkg/services/forwarder/outbound.go b/pkg/services/forwarder/outbound.go
+index 76c10ee1..abcf63f7 100644
+--- a/pkg/services/forwarder/outbound.go
++++ b/pkg/services/forwarder/outbound.go
+@@ -20,7 +20,9 @@ type Outbound struct {
+ 	Deny *DenyList
+ 	// Handoff, when set, is the path of a unix socket. Every TCP connection is handed to it, after a
+ 	// PROXY protocol v2 header that carries the guest's source and the destination it asked for,
+-	// and gvproxy dials nothing itself. UDP and ICMP to such destinations are dropped.
++	// and gvproxy dials nothing itself. UDP and ICMP to such destinations are dropped. Neither Deny
++	// nor the link-local check applies to a TCP connection handed off: the boundary decides it,
++	// including the cloud metadata address, which it may answer itself.
+ 	Handoff string
+ }
+ 
+diff --git a/pkg/services/forwarder/tcp.go b/pkg/services/forwarder/tcp.go
+index 12a8b70f..7fc02567 100644
+--- a/pkg/services/forwarder/tcp.go
++++ b/pkg/services/forwarder/tcp.go
+@@ -38,7 +38,9 @@ func TCPWithOutbound(s *stack.Stack, nat map[tcpip.Address]tcpip.Address, natLoc
+ 	return tcp.NewForwarder(s, 0, maxInFlight, func(r *tcp.ForwarderRequest) {
+ 		localAddress := r.ID().LocalAddress
+ 
+-		if (!ec2MetadataAccess) && linkLocal().Contains(localAddress) {
++		// With a hand-off, the boundary decides every connection and gvproxy dials nothing: the
++		// metadata address and the deny list are the boundary's to refuse, not gvproxy's to drop.
++		if !out.handsOff() && (!ec2MetadataAccess) && linkLocal().Contains(localAddress) {
+ 			r.Complete(true)
+ 			return
+ 		}
+@@ -48,7 +50,7 @@ func TCPWithOutbound(s *stack.Stack, nat map[tcpip.Address]tcpip.Address, natLoc
+ 			localAddress = replaced
+ 		}
+ 		natLock.Unlock()
+-		if out.denied(localAddress, r.ID().LocalPort, "tcp") {
++		if !out.handsOff() && out.denied(localAddress, r.ID().LocalPort, "tcp") {
+ 			r.Complete(true)
+ 			return
+ 		}

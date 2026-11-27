@@ -1,0 +1,19 @@
+{
+  "source": "Rows copied from the providers' price pages as #351 read them on 24 November 2026 (research/2026-11-24-record-and-spend/details/spend.md). Dollars per million tokens. The experiments use the stand-in providers, so the rows only need to be the same kind of table a real one is. Rows of tier \"batch\" are half the standard rows, as all three providers' batch pages say (25 November 2026). Web search: OpenAI $10 per 1,000 calls, Google $14 per 1,000 search queries for Gemini 3. Gemini's cache storage per million tokens per hour is not on the page read; $4.50 is an assumption for the experiment.",
+  "rows": [
+    {"provider": "anthropic", "model": "claude-opus-5-5", "input": 4, "output": 20, "cache_read": 0.2, "cache_write_short": 5, "cache_write_long": 8, "web_search_per_1k": 10},
+    {"provider": "anthropic", "model": "claude-opus-5-5", "tier": "fast", "input": 8, "output": 40, "cache_read": 0.4, "cache_write_short": 10, "cache_write_long": 16},
+    {"provider": "anthropic", "model": "claude-sonnet-5-5", "input": 2, "output": 10, "cache_read": 0.1, "cache_write_short": 2.5, "cache_write_long": 4},
+    {"provider": "anthropic", "model": "claude-fable-5-2", "input": 8, "output": 40, "cache_read": 0.2, "cache_write_short": 10, "cache_write_long": 16},
+    {"provider": "anthropic", "model": "claude-fable-5-2", "tier": "fast", "input": 16, "output": 80, "cache_read": 0.4, "cache_write_short": 20, "cache_write_long": 32},
+    {"provider": "anthropic", "model": "claude-haiku-5-5", "input": 0.1, "output": 0.5, "cache_read": 0.01, "cache_write_short": 0.125, "cache_write_long": 0.2, "long_above": 100000, "long_input_mult": 5, "long_output_mult": 5},
+    {"provider": "openai", "model": "gpt-6.2-sol", "input": 2, "output": 10, "cache_read": 0.1, "cache_write_short": 2.5, "cache_write_long": 5, "long_above": 272000, "long_input_mult": 2, "long_output_mult": 1.5, "web_search_per_1k": 10},
+    {"provider": "openai", "model": "gpt-6.2-sol", "tier": "priority", "input": 4, "output": 20, "cache_read": 0.2, "cache_write_short": 5, "cache_write_long": 10, "long_above": 272000, "long_input_mult": 2, "long_output_mult": 1.5},
+    {"provider": "google", "model": "gemini-3.1-pro-preview", "input": 2, "output": 12, "cache_read": 0.2, "long_above": 200000, "long_input_mult": 2, "long_output_mult": 1.5, "web_search_per_1k": 14, "cache_storage_per_hour": 4.5},
+    {"provider": "google", "model": "gemini-3.8-flash", "from": "2026-01-01", "input": 0.75, "output": 3.75, "cache_read": 0.075},
+    {"provider": "google", "model": "gemini-3.8-flash", "from": "2027-01-01", "input": 1.5, "output": 7.5, "cache_read": 0.15},
+    {"provider": "anthropic", "model": "claude-opus-5-5", "tier": "batch", "input": 2.0, "output": 10.0, "cache_read": 0.1, "cache_write_short": 2.5, "cache_write_long": 4.0},
+    {"provider": "anthropic", "model": "claude-sonnet-5-5", "tier": "batch", "input": 1.0, "output": 5.0, "cache_read": 0.05, "cache_write_short": 1.25, "cache_write_long": 2.0},
+    {"provider": "openai", "model": "gpt-6.2-sol", "tier": "batch", "input": 1, "output": 5, "cache_read": 0.05, "long_above": 272000, "long_input_mult": 2, "long_output_mult": 1.5}
+  ]
+}

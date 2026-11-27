@@ -1,0 +1,1489 @@
+[
+ {
+  "id": "g-viewer",
+  "label": "pass",
+  "steps": [
+   {
+    "step": "gcloud projects add-iam-policy-binding proj1 --member user:dana@example.com --role roles/viewer",
+    "exit": 0,
+    "seconds": 0.91,
+    "out": "auditConfigs:\n- auditLogConfigs:\n  - logType: ADMIN_READ\n  - logType: DATA_READ\n  - logType: DATA_WRITE\n  service: allServices\nbindings:\n- members:\n  - user:alice@example.com\n  role: roles/owner\n- members:\n  - serviceAccount:ci@proj1.iam.gserviceaccount.com\n  role: roles/editor\n- members:\n  - group:team@example.com\n  - user:dana@example.com\n  role: roles/viewer\netag: BwYAAAAC\nversion: 3\nUpdated IAM policy for project [proj1].\n"
+   }
+  ],
+  "writes": [
+   {
+    "request": {
+     "by": "computer",
+     "method": "POST",
+     "host": "cloudresourcemanager.googleapis.com",
+     "target": "/v1/projects/proj1:setIamPolicy?alt=json",
+     "status": 200
+    },
+    "body": "{\"policy\": {\"auditConfigs\": [{\"auditLogConfigs\": [{\"logType\": \"ADMIN_READ\"}, {\"logType\": \"DATA_READ\"}, {\"logType\": \"DATA_WRITE\"}], \"service\": \"allServices\"}], \"bindings\": [{\"members\": [\"user:alice@example.com\"], \"role\": \"roles/owner\"}, {\"members\": [\"serviceAccount:ci@proj1.iam.gserviceaccount.com\"], \"role\": \"roles/editor\"}, {\"members\": [\"group:team@example.com\", \"user:dana@example.com\"], \"role\": \"roles/viewer\"}], \"etag\": \"BwYAAAAB\", \"version\": 3}}",
+    "decisions": {
+     "key": {
+      "kind": "gcp-iam",
+      "key": [
+       "gcp",
+       "cloudresourcemanager.googleapis.com",
+       "projects/proj1"
+      ],
+      "A": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "B": {
+       "hold": true,
+       "why": [
+        "holds powerful grant serviceAccount:ci@proj1.iam.gserviceaccount.com roles/editor",
+        "holds powerful grant user:alice@example.com roles/owner"
+       ],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": false,
+       "why": [],
+       "reads": 0,
+       "before": "relayed"
+      },
+      "E": {
+       "hold": false,
+       "why": [],
+       "reads": 1,
+       "before": "Silo's read"
+      },
+      "F": {
+       "hold": false,
+       "why": [],
+       "reads": 0,
+       "before": "relayed, same etag"
+      }
+     },
+     "nokey": {
+      "kind": "gcp-iam",
+      "key": [
+       "gcp",
+       "cloudresourcemanager.googleapis.com",
+       "projects/proj1"
+      ],
+      "A": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "B": {
+       "hold": true,
+       "why": [
+        "holds powerful grant serviceAccount:ci@proj1.iam.gserviceaccount.com roles/editor",
+        "holds powerful grant user:alice@example.com roles/owner"
+       ],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": false,
+       "why": [],
+       "reads": 0,
+       "before": "relayed"
+      },
+      "E": {
+       "hold": false,
+       "why": [],
+       "reads": 1,
+       "before": "Silo's read"
+      },
+      "F": {
+       "hold": false,
+       "why": [],
+       "reads": 0,
+       "before": "relayed, same etag"
+      }
+     }
+    },
+    "held": false
+   }
+  ],
+  "log": [
+   {
+    "by": "computer",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:getIamPolicy?alt=json",
+    "status": 200
+   },
+   {
+    "by": "silo",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:getIamPolicy",
+    "status": 200
+   },
+   {
+    "by": "silo",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:getIamPolicy",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:setIamPolicy?alt=json",
+    "status": 200
+   }
+  ],
+  "last": {
+   "request": {
+    "by": "computer",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:setIamPolicy?alt=json",
+    "status": 200
+   },
+   "body": "{\"policy\": {\"auditConfigs\": [{\"auditLogConfigs\": [{\"logType\": \"ADMIN_READ\"}, {\"logType\": \"DATA_READ\"}, {\"logType\": \"DATA_WRITE\"}], \"service\": \"allServices\"}], \"bindings\": [{\"members\": [\"user:alice@example.com\"], \"role\": \"roles/owner\"}, {\"members\": [\"serviceAccount:ci@proj1.iam.gserviceaccount.com\"], \"role\": \"roles/editor\"}, {\"members\": [\"group:team@example.com\", \"user:dana@example.com\"], \"role\": \"roles/viewer\"}], \"etag\": \"BwYAAAAB\", \"version\": 3}}",
+   "decisions": {
+    "key": {
+     "kind": "gcp-iam",
+     "key": [
+      "gcp",
+      "cloudresourcemanager.googleapis.com",
+      "projects/proj1"
+     ],
+     "A": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "B": {
+      "hold": true,
+      "why": [
+       "holds powerful grant serviceAccount:ci@proj1.iam.gserviceaccount.com roles/editor",
+       "holds powerful grant user:alice@example.com roles/owner"
+      ],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": false,
+      "why": [],
+      "reads": 0,
+      "before": "relayed"
+     },
+     "E": {
+      "hold": false,
+      "why": [],
+      "reads": 1,
+      "before": "Silo's read"
+     },
+     "F": {
+      "hold": false,
+      "why": [],
+      "reads": 0,
+      "before": "relayed, same etag"
+     }
+    },
+    "nokey": {
+     "kind": "gcp-iam",
+     "key": [
+      "gcp",
+      "cloudresourcemanager.googleapis.com",
+      "projects/proj1"
+     ],
+     "A": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "B": {
+      "hold": true,
+      "why": [
+       "holds powerful grant serviceAccount:ci@proj1.iam.gserviceaccount.com roles/editor",
+       "holds powerful grant user:alice@example.com roles/owner"
+      ],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": false,
+      "why": [],
+      "reads": 0,
+      "before": "relayed"
+     },
+     "E": {
+      "hold": false,
+      "why": [],
+      "reads": 1,
+      "before": "Silo's read"
+     },
+     "F": {
+      "hold": false,
+      "why": [],
+      "reads": 0,
+      "before": "relayed, same etag"
+     }
+    }
+   },
+   "held": false
+  },
+  "state_after": {
+   "gcp|cloudresourcemanager.googleapis.com|projects/proj1": {
+    "version": 3,
+    "etag": "BwYAAAAC",
+    "bindings": [
+     {
+      "members": [
+       "user:alice@example.com"
+      ],
+      "role": "roles/owner"
+     },
+     {
+      "members": [
+       "serviceAccount:ci@proj1.iam.gserviceaccount.com"
+      ],
+      "role": "roles/editor"
+     },
+     {
+      "members": [
+       "group:team@example.com",
+       "user:dana@example.com"
+      ],
+      "role": "roles/viewer"
+     }
+    ],
+    "auditConfigs": [
+     {
+      "service": "allServices",
+      "auditLogConfigs": [
+       {
+        "logType": "ADMIN_READ"
+       },
+       {
+        "logType": "DATA_READ"
+       },
+       {
+        "logType": "DATA_WRITE"
+       }
+      ]
+     }
+    ]
+   },
+   "gcp|storage.googleapis.com|b/b1": {
+    "version": 1,
+    "etag": "CAE=",
+    "bindings": [
+     {
+      "role": "roles/storage.legacyBucketOwner",
+      "members": [
+       "projectOwner:proj1",
+       "projectEditor:proj1"
+      ]
+     },
+     {
+      "role": "roles/storage.legacyBucketReader",
+      "members": [
+       "projectViewer:proj1"
+      ]
+     }
+    ]
+   },
+   "gcp|storage.googleapis.com|b/site": {
+    "version": 1,
+    "etag": "CAE=",
+    "bindings": [
+     {
+      "role": "roles/storage.legacyBucketOwner",
+      "members": [
+       "projectOwner:proj1",
+       "projectEditor:proj1"
+      ]
+     },
+     {
+      "role": "roles/storage.legacyBucketReader",
+      "members": [
+       "projectViewer:proj1"
+      ]
+     },
+     {
+      "role": "roles/storage.objectViewer",
+      "members": [
+       "allUsers"
+      ]
+     }
+    ]
+   },
+   "gcp|run.googleapis.com|projects/proj1/locations/us-central1/services/web": {
+    "version": 1,
+    "etag": "BwYAAAAC",
+    "bindings": [
+     {
+      "role": "roles/run.invoker",
+      "members": [
+       "allUsers"
+      ]
+     }
+    ]
+   }
+  }
+ },
+ {
+  "id": "g-owner",
+  "label": "hold:exposed",
+  "steps": [
+   {
+    "step": "gcloud projects add-iam-policy-binding proj1 --member user:mallory@example.net --role roles/owner",
+    "exit": 1,
+    "seconds": 0.73,
+    "out": "ERROR: (gcloud.projects.add-iam-policy-binding) [None] does not have permission to access projects instance [proj1:setIamPolicy] (or it may not exist): Silo held this request. This command is authenticated with an access token from /opt/wpw/gc-token specified by the [auth/access_token_file] property.\n"
+   }
+  ],
+  "writes": [
+   {
+    "request": {
+     "by": "computer",
+     "method": "POST",
+     "host": "cloudresourcemanager.googleapis.com",
+     "target": "/v1/projects/proj1:setIamPolicy?alt=json",
+     "status": 403
+    },
+    "body": "{\"policy\": {\"auditConfigs\": [{\"auditLogConfigs\": [{\"logType\": \"ADMIN_READ\"}, {\"logType\": \"DATA_READ\"}, {\"logType\": \"DATA_WRITE\"}], \"service\": \"allServices\"}], \"bindings\": [{\"members\": [\"user:alice@example.com\", \"user:mallory@example.net\"], \"role\": \"roles/owner\"}, {\"members\": [\"serviceAccount:ci@proj1.iam.gserviceaccount.com\"], \"role\": \"roles/editor\"}, {\"members\": [\"group:team@example.com\"], \"role\": \"roles/viewer\"}], \"etag\": \"BwYAAAAB\", \"version\": 3}}",
+    "decisions": {
+     "key": {
+      "kind": "gcp-iam",
+      "key": [
+       "gcp",
+       "cloudresourcemanager.googleapis.com",
+       "projects/proj1"
+      ],
+      "A": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "B": {
+       "hold": true,
+       "why": [
+        "holds powerful grant serviceAccount:ci@proj1.iam.gserviceaccount.com roles/editor",
+        "holds powerful grant user:alice@example.com roles/owner",
+        "holds powerful grant user:mallory@example.net roles/owner"
+       ],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": true,
+       "why": [
+        "adds powerful grant user:mallory@example.net roles/owner"
+       ],
+       "reads": 0,
+       "before": "relayed"
+      },
+      "E": {
+       "hold": true,
+       "why": [
+        "adds powerful grant user:mallory@example.net roles/owner"
+       ],
+       "reads": 1,
+       "before": "Silo's read"
+      },
+      "F": {
+       "hold": true,
+       "why": [
+        "adds powerful grant user:mallory@example.net roles/owner"
+       ],
+       "reads": 0,
+       "before": "relayed, same etag"
+      }
+     },
+     "nokey": {
+      "kind": "gcp-iam",
+      "key": [
+       "gcp",
+       "cloudresourcemanager.googleapis.com",
+       "projects/proj1"
+      ],
+      "A": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "B": {
+       "hold": true,
+       "why": [
+        "holds powerful grant serviceAccount:ci@proj1.iam.gserviceaccount.com roles/editor",
+        "holds powerful grant user:alice@example.com roles/owner",
+        "holds powerful grant user:mallory@example.net roles/owner"
+       ],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": true,
+       "why": [
+        "adds powerful grant user:mallory@example.net roles/owner"
+       ],
+       "reads": 0,
+       "before": "relayed"
+      },
+      "E": {
+       "hold": true,
+       "why": [
+        "adds powerful grant user:mallory@example.net roles/owner"
+       ],
+       "reads": 1,
+       "before": "Silo's read"
+      },
+      "F": {
+       "hold": true,
+       "why": [
+        "adds powerful grant user:mallory@example.net roles/owner"
+       ],
+       "reads": 0,
+       "before": "relayed, same etag"
+      }
+     }
+    },
+    "held": true
+   }
+  ],
+  "log": [
+   {
+    "by": "computer",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:getIamPolicy?alt=json",
+    "status": 200
+   },
+   {
+    "by": "silo",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:getIamPolicy",
+    "status": 200
+   },
+   {
+    "by": "silo",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:getIamPolicy",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:setIamPolicy?alt=json",
+    "status": 403
+   }
+  ],
+  "last": {
+   "request": {
+    "by": "computer",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:setIamPolicy?alt=json",
+    "status": 403
+   },
+   "body": "{\"policy\": {\"auditConfigs\": [{\"auditLogConfigs\": [{\"logType\": \"ADMIN_READ\"}, {\"logType\": \"DATA_READ\"}, {\"logType\": \"DATA_WRITE\"}], \"service\": \"allServices\"}], \"bindings\": [{\"members\": [\"user:alice@example.com\", \"user:mallory@example.net\"], \"role\": \"roles/owner\"}, {\"members\": [\"serviceAccount:ci@proj1.iam.gserviceaccount.com\"], \"role\": \"roles/editor\"}, {\"members\": [\"group:team@example.com\"], \"role\": \"roles/viewer\"}], \"etag\": \"BwYAAAAB\", \"version\": 3}}",
+   "decisions": {
+    "key": {
+     "kind": "gcp-iam",
+     "key": [
+      "gcp",
+      "cloudresourcemanager.googleapis.com",
+      "projects/proj1"
+     ],
+     "A": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "B": {
+      "hold": true,
+      "why": [
+       "holds powerful grant serviceAccount:ci@proj1.iam.gserviceaccount.com roles/editor",
+       "holds powerful grant user:alice@example.com roles/owner",
+       "holds powerful grant user:mallory@example.net roles/owner"
+      ],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": true,
+      "why": [
+       "adds powerful grant user:mallory@example.net roles/owner"
+      ],
+      "reads": 0,
+      "before": "relayed"
+     },
+     "E": {
+      "hold": true,
+      "why": [
+       "adds powerful grant user:mallory@example.net roles/owner"
+      ],
+      "reads": 1,
+      "before": "Silo's read"
+     },
+     "F": {
+      "hold": true,
+      "why": [
+       "adds powerful grant user:mallory@example.net roles/owner"
+      ],
+      "reads": 0,
+      "before": "relayed, same etag"
+     }
+    },
+    "nokey": {
+     "kind": "gcp-iam",
+     "key": [
+      "gcp",
+      "cloudresourcemanager.googleapis.com",
+      "projects/proj1"
+     ],
+     "A": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "B": {
+      "hold": true,
+      "why": [
+       "holds powerful grant serviceAccount:ci@proj1.iam.gserviceaccount.com roles/editor",
+       "holds powerful grant user:alice@example.com roles/owner",
+       "holds powerful grant user:mallory@example.net roles/owner"
+      ],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": true,
+      "why": [
+       "adds powerful grant user:mallory@example.net roles/owner"
+      ],
+      "reads": 0,
+      "before": "relayed"
+     },
+     "E": {
+      "hold": true,
+      "why": [
+       "adds powerful grant user:mallory@example.net roles/owner"
+      ],
+      "reads": 1,
+      "before": "Silo's read"
+     },
+     "F": {
+      "hold": true,
+      "why": [
+       "adds powerful grant user:mallory@example.net roles/owner"
+      ],
+      "reads": 0,
+      "before": "relayed, same etag"
+     }
+    }
+   },
+   "held": true
+  },
+  "state_after": {
+   "gcp|cloudresourcemanager.googleapis.com|projects/proj1": {
+    "version": 1,
+    "etag": "BwYAAAAB",
+    "bindings": [
+     {
+      "role": "roles/owner",
+      "members": [
+       "user:alice@example.com"
+      ]
+     },
+     {
+      "role": "roles/editor",
+      "members": [
+       "serviceAccount:ci@proj1.iam.gserviceaccount.com"
+      ]
+     },
+     {
+      "role": "roles/viewer",
+      "members": [
+       "group:team@example.com"
+      ]
+     }
+    ],
+    "auditConfigs": [
+     {
+      "service": "allServices",
+      "auditLogConfigs": [
+       {
+        "logType": "ADMIN_READ"
+       },
+       {
+        "logType": "DATA_READ"
+       },
+       {
+        "logType": "DATA_WRITE"
+       }
+      ]
+     }
+    ]
+   },
+   "gcp|storage.googleapis.com|b/b1": {
+    "version": 1,
+    "etag": "CAE=",
+    "bindings": [
+     {
+      "role": "roles/storage.legacyBucketOwner",
+      "members": [
+       "projectOwner:proj1",
+       "projectEditor:proj1"
+      ]
+     },
+     {
+      "role": "roles/storage.legacyBucketReader",
+      "members": [
+       "projectViewer:proj1"
+      ]
+     }
+    ]
+   },
+   "gcp|storage.googleapis.com|b/site": {
+    "version": 1,
+    "etag": "CAE=",
+    "bindings": [
+     {
+      "role": "roles/storage.legacyBucketOwner",
+      "members": [
+       "projectOwner:proj1",
+       "projectEditor:proj1"
+      ]
+     },
+     {
+      "role": "roles/storage.legacyBucketReader",
+      "members": [
+       "projectViewer:proj1"
+      ]
+     },
+     {
+      "role": "roles/storage.objectViewer",
+      "members": [
+       "allUsers"
+      ]
+     }
+    ]
+   },
+   "gcp|run.googleapis.com|projects/proj1/locations/us-central1/services/web": {
+    "version": 1,
+    "etag": "BwYAAAAC",
+    "bindings": [
+     {
+      "role": "roles/run.invoker",
+      "members": [
+       "allUsers"
+      ]
+     }
+    ]
+   }
+  }
+ },
+ {
+  "id": "g-race-etag",
+  "label": "pass",
+  "steps": [
+   {
+    "step": "curl -sS -X POST -H 'Authorization: Bearer made-up' -H 'Content-Type: application/json' --data '{}' https://cloudresourcemanager.googleapis.com/v1/projects/proj1:getIamPolicy",
+    "exit": 0,
+    "seconds": 0.12,
+    "out": "{\"version\": 1, \"etag\": \"BwYAAAAB\", \"bindings\": [{\"role\": \"roles/owner\", \"members\": [\"user:alice@example.com\"]}, {\"role\": \"roles/editor\", \"members\": [\"serviceAccount:ci@proj1.iam.gserviceaccount.com\"]}, {\"role\": \"roles/viewer\", \"members\": [\"group:team@example.com\"]}], \"auditConfigs\": [{\"service\": \"allServices\", \"auditLogConfigs\": [{\"logType\": \"ADMIN_READ\"}, {\"logType\": \"DATA_READ\"}, {\"logType\": \"DATA_WRITE\"}]}]}"
+   },
+   {
+    "step": "someone outside the computer changes gcp|cloudresourcemanager.googleapis.com|projects/proj1"
+   },
+   {
+    "step": "curl -sS -X POST -H 'Authorization: Bearer made-up' -H 'Content-Type: application/json' --data '{\"policy\": {\"version\": 1, \"etag\": \"BwYAAAAB\", \"bindings\": [{\"role\": \"roles/owner\", \"members\": [\"user:alice@example.com\"]}, {\"role\": \"roles/editor\", \"members\": [\"serviceAccount:ci@proj1.iam.gserviceaccount",
+    "exit": 0,
+    "seconds": 0.07,
+    "out": "{\"error\": {\"code\": 409, \"status\": \"ABORTED\", \"message\": \"There were concurrent policy changes. Please retry the whole read-modify-write with exponential backoff.\"}}"
+   }
+  ],
+  "writes": [
+   {
+    "request": {
+     "by": "computer",
+     "method": "POST",
+     "host": "cloudresourcemanager.googleapis.com",
+     "target": "/v1/projects/proj1:setIamPolicy",
+     "status": 409
+    },
+    "body": "{\"policy\": {\"version\": 1, \"etag\": \"BwYAAAAB\", \"bindings\": [{\"role\": \"roles/owner\", \"members\": [\"user:alice@example.com\"]}, {\"role\": \"roles/editor\", \"members\": [\"serviceAccount:ci@proj1.iam.gserviceaccount.com\"]}, {\"role\": \"roles/viewer\", \"members\": [\"group:team@example.com\"]}, {\"role\": \"roles/viewer\", \"members\": [\"user:dana@example.com\"]}]}}",
+    "decisions": {
+     "key": {
+      "kind": "gcp-iam",
+      "key": [
+       "gcp",
+       "cloudresourcemanager.googleapis.com",
+       "projects/proj1"
+      ],
+      "A": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "B": {
+       "hold": true,
+       "why": [
+        "holds powerful grant serviceAccount:ci@proj1.iam.gserviceaccount.com roles/editor",
+        "holds powerful grant user:alice@example.com roles/owner"
+       ],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": false,
+       "why": [],
+       "reads": 0,
+       "before": "relayed"
+      },
+      "E": {
+       "hold": false,
+       "why": [],
+       "reads": 1,
+       "before": "Silo's read"
+      },
+      "F": {
+       "hold": false,
+       "why": [],
+       "reads": 0,
+       "before": "relayed, same etag"
+      }
+     },
+     "nokey": {
+      "kind": "gcp-iam",
+      "key": [
+       "gcp",
+       "cloudresourcemanager.googleapis.com",
+       "projects/proj1"
+      ],
+      "A": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "B": {
+       "hold": true,
+       "why": [
+        "holds powerful grant serviceAccount:ci@proj1.iam.gserviceaccount.com roles/editor",
+        "holds powerful grant user:alice@example.com roles/owner"
+       ],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": false,
+       "why": [],
+       "reads": 0,
+       "before": "relayed"
+      },
+      "E": {
+       "hold": false,
+       "why": [],
+       "reads": 1,
+       "before": "Silo's read"
+      },
+      "F": {
+       "hold": false,
+       "why": [],
+       "reads": 0,
+       "before": "relayed, same etag"
+      }
+     }
+    },
+    "held": false
+   }
+  ],
+  "log": [
+   {
+    "by": "computer",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:getIamPolicy",
+    "status": 200
+   },
+   {
+    "by": "silo",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:getIamPolicy",
+    "status": 200
+   },
+   {
+    "by": "silo",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:getIamPolicy",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:setIamPolicy",
+    "status": 409
+   }
+  ],
+  "last": {
+   "request": {
+    "by": "computer",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:setIamPolicy",
+    "status": 409
+   },
+   "body": "{\"policy\": {\"version\": 1, \"etag\": \"BwYAAAAB\", \"bindings\": [{\"role\": \"roles/owner\", \"members\": [\"user:alice@example.com\"]}, {\"role\": \"roles/editor\", \"members\": [\"serviceAccount:ci@proj1.iam.gserviceaccount.com\"]}, {\"role\": \"roles/viewer\", \"members\": [\"group:team@example.com\"]}, {\"role\": \"roles/viewer\", \"members\": [\"user:dana@example.com\"]}]}}",
+   "decisions": {
+    "key": {
+     "kind": "gcp-iam",
+     "key": [
+      "gcp",
+      "cloudresourcemanager.googleapis.com",
+      "projects/proj1"
+     ],
+     "A": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "B": {
+      "hold": true,
+      "why": [
+       "holds powerful grant serviceAccount:ci@proj1.iam.gserviceaccount.com roles/editor",
+       "holds powerful grant user:alice@example.com roles/owner"
+      ],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": false,
+      "why": [],
+      "reads": 0,
+      "before": "relayed"
+     },
+     "E": {
+      "hold": false,
+      "why": [],
+      "reads": 1,
+      "before": "Silo's read"
+     },
+     "F": {
+      "hold": false,
+      "why": [],
+      "reads": 0,
+      "before": "relayed, same etag"
+     }
+    },
+    "nokey": {
+     "kind": "gcp-iam",
+     "key": [
+      "gcp",
+      "cloudresourcemanager.googleapis.com",
+      "projects/proj1"
+     ],
+     "A": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "B": {
+      "hold": true,
+      "why": [
+       "holds powerful grant serviceAccount:ci@proj1.iam.gserviceaccount.com roles/editor",
+       "holds powerful grant user:alice@example.com roles/owner"
+      ],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": false,
+      "why": [],
+      "reads": 0,
+      "before": "relayed"
+     },
+     "E": {
+      "hold": false,
+      "why": [],
+      "reads": 1,
+      "before": "Silo's read"
+     },
+     "F": {
+      "hold": false,
+      "why": [],
+      "reads": 0,
+      "before": "relayed, same etag"
+     }
+    }
+   },
+   "held": false
+  },
+  "state_after": {
+   "gcp|cloudresourcemanager.googleapis.com|projects/proj1": {
+    "version": 1,
+    "etag": "BwYAAAAY",
+    "bindings": [
+     {
+      "role": "roles/owner",
+      "members": [
+       "user:alice@example.com"
+      ]
+     },
+     {
+      "role": "roles/editor",
+      "members": [
+       "serviceAccount:ci@proj1.iam.gserviceaccount.com"
+      ]
+     },
+     {
+      "role": "roles/viewer",
+      "members": [
+       "group:team@example.com"
+      ]
+     },
+     {
+      "role": "roles/viewer",
+      "members": [
+       "user:erin@example.com"
+      ]
+     }
+    ],
+    "auditConfigs": [
+     {
+      "service": "allServices",
+      "auditLogConfigs": [
+       {
+        "logType": "ADMIN_READ"
+       },
+       {
+        "logType": "DATA_READ"
+       },
+       {
+        "logType": "DATA_WRITE"
+       }
+      ]
+     }
+    ]
+   },
+   "gcp|storage.googleapis.com|b/b1": {
+    "version": 1,
+    "etag": "CAE=",
+    "bindings": [
+     {
+      "role": "roles/storage.legacyBucketOwner",
+      "members": [
+       "projectOwner:proj1",
+       "projectEditor:proj1"
+      ]
+     },
+     {
+      "role": "roles/storage.legacyBucketReader",
+      "members": [
+       "projectViewer:proj1"
+      ]
+     }
+    ]
+   },
+   "gcp|storage.googleapis.com|b/site": {
+    "version": 1,
+    "etag": "CAE=",
+    "bindings": [
+     {
+      "role": "roles/storage.legacyBucketOwner",
+      "members": [
+       "projectOwner:proj1",
+       "projectEditor:proj1"
+      ]
+     },
+     {
+      "role": "roles/storage.legacyBucketReader",
+      "members": [
+       "projectViewer:proj1"
+      ]
+     },
+     {
+      "role": "roles/storage.objectViewer",
+      "members": [
+       "allUsers"
+      ]
+     }
+    ]
+   },
+   "gcp|run.googleapis.com|projects/proj1/locations/us-central1/services/web": {
+    "version": 1,
+    "etag": "BwYAAAAC",
+    "bindings": [
+     {
+      "role": "roles/run.invoker",
+      "members": [
+       "allUsers"
+      ]
+     }
+    ]
+   }
+  }
+ },
+ {
+  "id": "g-race-no-etag",
+  "label": "hold:outage",
+  "steps": [
+   {
+    "step": "curl -sS -X POST -H 'Authorization: Bearer made-up' -H 'Content-Type: application/json' --data '{}' https://cloudresourcemanager.googleapis.com/v1/projects/proj1:getIamPolicy",
+    "exit": 0,
+    "seconds": 0.07,
+    "out": "{\"version\": 1, \"etag\": \"BwYAAAAB\", \"bindings\": [{\"role\": \"roles/owner\", \"members\": [\"user:alice@example.com\"]}, {\"role\": \"roles/editor\", \"members\": [\"serviceAccount:ci@proj1.iam.gserviceaccount.com\"]}, {\"role\": \"roles/viewer\", \"members\": [\"group:team@example.com\"]}], \"auditConfigs\": [{\"service\": \"allServices\", \"auditLogConfigs\": [{\"logType\": \"ADMIN_READ\"}, {\"logType\": \"DATA_READ\"}, {\"logType\": \"DATA_WRITE\"}]}]}"
+   },
+   {
+    "step": "someone outside the computer changes gcp|cloudresourcemanager.googleapis.com|projects/proj1"
+   },
+   {
+    "step": "curl -sS -X POST -H 'Authorization: Bearer made-up' -H 'Content-Type: application/json' --data '{\"policy\": {\"version\": 1, \"bindings\": [{\"role\": \"roles/owner\", \"members\": [\"user:alice@example.com\"]}, {\"role\": \"roles/editor\", \"members\": [\"serviceAccount:ci@proj1.iam.gserviceaccount.com\"]}, {\"role\": \"r",
+    "exit": 0,
+    "seconds": 0.08,
+    "out": "{\"error\": {\"code\": 403, \"status\": \"PERMISSION_DENIED\", \"message\": \"Silo held this request.\"}}"
+   }
+  ],
+  "writes": [
+   {
+    "request": {
+     "by": "computer",
+     "method": "POST",
+     "host": "cloudresourcemanager.googleapis.com",
+     "target": "/v1/projects/proj1:setIamPolicy",
+     "status": 403
+    },
+    "body": "{\"policy\": {\"version\": 1, \"bindings\": [{\"role\": \"roles/owner\", \"members\": [\"user:alice@example.com\"]}, {\"role\": \"roles/editor\", \"members\": [\"serviceAccount:ci@proj1.iam.gserviceaccount.com\"]}, {\"role\": \"roles/viewer\", \"members\": [\"group:team@example.com\"]}, {\"role\": \"roles/viewer\", \"members\": [\"user:dana@example.com\"]}]}}",
+    "decisions": {
+     "key": {
+      "kind": "gcp-iam",
+      "key": [
+       "gcp",
+       "cloudresourcemanager.googleapis.com",
+       "projects/proj1"
+      ],
+      "A": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "B": {
+       "hold": true,
+       "why": [
+        "holds powerful grant serviceAccount:ci@proj1.iam.gserviceaccount.com roles/editor",
+        "holds powerful grant user:alice@example.com roles/owner"
+       ],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": false,
+       "why": [],
+       "reads": 0,
+       "before": "relayed"
+      },
+      "E": {
+       "hold": true,
+       "why": [
+        "removes owner user:bob@example.com"
+       ],
+       "reads": 1,
+       "before": "Silo's read"
+      },
+      "F": {
+       "hold": true,
+       "why": [
+        "removes owner user:bob@example.com"
+       ],
+       "reads": 1,
+       "before": "Silo's read",
+       "pin": "BwYAAAAZ"
+      }
+     },
+     "nokey": {
+      "kind": "gcp-iam",
+      "key": [
+       "gcp",
+       "cloudresourcemanager.googleapis.com",
+       "projects/proj1"
+      ],
+      "A": {
+       "hold": false,
+       "why": [],
+       "reads": 0
+      },
+      "B": {
+       "hold": true,
+       "why": [
+        "holds powerful grant serviceAccount:ci@proj1.iam.gserviceaccount.com roles/editor",
+        "holds powerful grant user:alice@example.com roles/owner"
+       ],
+       "reads": 0
+      },
+      "C": {
+       "hold": true,
+       "why": [
+        "a whole-document access write"
+       ],
+       "reads": 0
+      },
+      "D": {
+       "hold": false,
+       "why": [],
+       "reads": 0,
+       "before": "relayed"
+      },
+      "E": {
+       "hold": true,
+       "why": [
+        "removes owner user:bob@example.com"
+       ],
+       "reads": 1,
+       "before": "Silo's read"
+      },
+      "F": {
+       "hold": true,
+       "why": [
+        "removes owner user:bob@example.com"
+       ],
+       "reads": 1,
+       "before": "Silo's read",
+       "pin": "BwYAAAAZ"
+      }
+     }
+    },
+    "held": true
+   }
+  ],
+  "log": [
+   {
+    "by": "computer",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:getIamPolicy",
+    "status": 200
+   },
+   {
+    "by": "silo",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:getIamPolicy",
+    "status": 200
+   },
+   {
+    "by": "silo",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:getIamPolicy",
+    "status": 200
+   },
+   {
+    "by": "computer",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:setIamPolicy",
+    "status": 403
+   }
+  ],
+  "last": {
+   "request": {
+    "by": "computer",
+    "method": "POST",
+    "host": "cloudresourcemanager.googleapis.com",
+    "target": "/v1/projects/proj1:setIamPolicy",
+    "status": 403
+   },
+   "body": "{\"policy\": {\"version\": 1, \"bindings\": [{\"role\": \"roles/owner\", \"members\": [\"user:alice@example.com\"]}, {\"role\": \"roles/editor\", \"members\": [\"serviceAccount:ci@proj1.iam.gserviceaccount.com\"]}, {\"role\": \"roles/viewer\", \"members\": [\"group:team@example.com\"]}, {\"role\": \"roles/viewer\", \"members\": [\"user:dana@example.com\"]}]}}",
+   "decisions": {
+    "key": {
+     "kind": "gcp-iam",
+     "key": [
+      "gcp",
+      "cloudresourcemanager.googleapis.com",
+      "projects/proj1"
+     ],
+     "A": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "B": {
+      "hold": true,
+      "why": [
+       "holds powerful grant serviceAccount:ci@proj1.iam.gserviceaccount.com roles/editor",
+       "holds powerful grant user:alice@example.com roles/owner"
+      ],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": false,
+      "why": [],
+      "reads": 0,
+      "before": "relayed"
+     },
+     "E": {
+      "hold": true,
+      "why": [
+       "removes owner user:bob@example.com"
+      ],
+      "reads": 1,
+      "before": "Silo's read"
+     },
+     "F": {
+      "hold": true,
+      "why": [
+       "removes owner user:bob@example.com"
+      ],
+      "reads": 1,
+      "before": "Silo's read",
+      "pin": "BwYAAAAZ"
+     }
+    },
+    "nokey": {
+     "kind": "gcp-iam",
+     "key": [
+      "gcp",
+      "cloudresourcemanager.googleapis.com",
+      "projects/proj1"
+     ],
+     "A": {
+      "hold": false,
+      "why": [],
+      "reads": 0
+     },
+     "B": {
+      "hold": true,
+      "why": [
+       "holds powerful grant serviceAccount:ci@proj1.iam.gserviceaccount.com roles/editor",
+       "holds powerful grant user:alice@example.com roles/owner"
+      ],
+      "reads": 0
+     },
+     "C": {
+      "hold": true,
+      "why": [
+       "a whole-document access write"
+      ],
+      "reads": 0
+     },
+     "D": {
+      "hold": false,
+      "why": [],
+      "reads": 0,
+      "before": "relayed"
+     },
+     "E": {
+      "hold": true,
+      "why": [
+       "removes owner user:bob@example.com"
+      ],
+      "reads": 1,
+      "before": "Silo's read"
+     },
+     "F": {
+      "hold": true,
+      "why": [
+       "removes owner user:bob@example.com"
+      ],
+      "reads": 1,
+      "before": "Silo's read",
+      "pin": "BwYAAAAZ"
+     }
+    }
+   },
+   "held": true
+  },
+  "state_after": {
+   "gcp|cloudresourcemanager.googleapis.com|projects/proj1": {
+    "version": 1,
+    "etag": "BwYAAAAZ",
+    "bindings": [
+     {
+      "role": "roles/owner",
+      "members": [
+       "user:alice@example.com"
+      ]
+     },
+     {
+      "role": "roles/editor",
+      "members": [
+       "serviceAccount:ci@proj1.iam.gserviceaccount.com"
+      ]
+     },
+     {
+      "role": "roles/viewer",
+      "members": [
+       "group:team@example.com"
+      ]
+     },
+     {
+      "role": "roles/owner",
+      "members": [
+       "user:bob@example.com"
+      ]
+     }
+    ],
+    "auditConfigs": [
+     {
+      "service": "allServices",
+      "auditLogConfigs": [
+       {
+        "logType": "ADMIN_READ"
+       },
+       {
+        "logType": "DATA_READ"
+       },
+       {
+        "logType": "DATA_WRITE"
+       }
+      ]
+     }
+    ]
+   },
+   "gcp|storage.googleapis.com|b/b1": {
+    "version": 1,
+    "etag": "CAE=",
+    "bindings": [
+     {
+      "role": "roles/storage.legacyBucketOwner",
+      "members": [
+       "projectOwner:proj1",
+       "projectEditor:proj1"
+      ]
+     },
+     {
+      "role": "roles/storage.legacyBucketReader",
+      "members": [
+       "projectViewer:proj1"
+      ]
+     }
+    ]
+   },
+   "gcp|storage.googleapis.com|b/site": {
+    "version": 1,
+    "etag": "CAE=",
+    "bindings": [
+     {
+      "role": "roles/storage.legacyBucketOwner",
+      "members": [
+       "projectOwner:proj1",
+       "projectEditor:proj1"
+      ]
+     },
+     {
+      "role": "roles/storage.legacyBucketReader",
+      "members": [
+       "projectViewer:proj1"
+      ]
+     },
+     {
+      "role": "roles/storage.objectViewer",
+      "members": [
+       "allUsers"
+      ]
+     }
+    ]
+   },
+   "gcp|run.googleapis.com|projects/proj1/locations/us-central1/services/web": {
+    "version": 1,
+    "etag": "BwYAAAAC",
+    "bindings": [
+     {
+      "role": "roles/run.invoker",
+      "members": [
+       "allUsers"
+      ]
+     }
+    ]
+   }
+  }
+ }
+]

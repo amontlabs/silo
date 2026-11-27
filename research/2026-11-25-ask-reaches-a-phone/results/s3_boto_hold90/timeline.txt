@@ -1,0 +1,15 @@
+   -0.83  mac    listening          {"port": 21232, "holds": {"git": 600, "aws": 90, "pip": 12, "default": 90}, "gather": 2.0}
+    0.00  agent  command.start      {"run": "/tmp/claude-0/bv/bin/python {P}/s3put.py {B} db/dump.sql"}
+    0.24  mac    ask.opened         {"ask": "ask_1", "computer": "main", "ends": 1795617679.7237656}
+    0.24  mac    request.held       {"ask": "ask_1", "line": 1, "desc": "PUT 127.0.0.1:21232/prod-backups/db/dump.sql (1000 bytes)"}
+    0.24  mac    ask.version        {"ask": "ask_1", "version": 1, "lines": ["PUT 127.0.0.1:21232/prod-backups/db/dump.sql (1000 bytes)"], "list_hash": "b9aeb0735a22b68abde47d5b89e21119", "ends": 1795617679.7237656}
+    2.30  mac    ask.forwarded      {"ask": "ask_1", "version": 1, "size": 351}
+    2.30  phone  shown              {"ask": "ask_1", "version": 1, "lines": ["PUT 127.0.0.1:21232/prod-backups/db/dump.sql (1000 bytes)"], "sent": 1795615881.7710288, "in_transit": 0.0152}
+   60.30  mac    hold.ended         {"ask": "ask_1", "line": 1, "how": "client closed"}
+   60.34  mac    request.joined     {"ask": "ask_1", "line": 1, "desc": "PUT 127.0.0.1:21232/prod-backups/db/dump.sql (1000 bytes)"}
+   75.31  phone  answered           {"ask": "ask_1", "version": 1, "verdict": "yes", "lines": 1}
+   75.31  mac    answer.received    {"ask": "ask_1", "version": 1, "verdict": "yes"}
+   75.31  mac    ask.answered       {"ask": "ask_1", "version": 1, "verdict": "yes", "lines": 1, "issued": 1795615954.7868762, "via": "phone"}
+   75.31  mac    ask.closed         {"ask": "ask_1", "why": "answered and done"}
+   75.31  mac    request.forwarded  {"ask": "ask_1", "line": 1, "status": 200}
+   75.40  agent  command.end        {"exit": 0, "run": "/tmp/claude-0/bv/bin/python {P}/s3put.py {B} db/dump.sql"}

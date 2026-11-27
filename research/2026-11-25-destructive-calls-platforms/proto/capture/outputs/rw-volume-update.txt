@@ -1,0 +1,4 @@
+$ RAILWAY_TOKEN=test-token-123 -- railway volume update --volume pg-data --name pg-data-2
+> Select a volume pg-data
+Successfully updated the name of volume "pg-data" to "pg-data-2"
+--- exit=0 seconds=.238450229

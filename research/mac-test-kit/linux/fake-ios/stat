@@ -1,0 +1,8 @@
+#!/bin/sh
+# A fake of macOS's stat for the Linux runs of tests 24 to 27: "stat -f %Su /dev/console" names who
+# is on the fake computer's screen (root when nobody, as on macOS). Anything else is the real stat.
+if [ "$1" = -f ] && [ "$2" = %Su ] && [ "$3" = /dev/console ]; then
+  cat "$HOME/.fake-console" 2>/dev/null || echo root; exit 0
+fi
+for s in /usr/bin/stat /bin/stat; do [ -x "$s" ] && exec "$s" "$@"; done
+exit 127

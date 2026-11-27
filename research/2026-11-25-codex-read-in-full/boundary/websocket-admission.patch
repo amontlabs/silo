@@ -1,0 +1,346 @@
+diff -ru a/src/main.zig b/src/main.zig
+--- a/src/main.zig	2026-11-25 14:16:27.451658745 +0000
++++ b/src/main.zig	2026-11-25 14:19:15.051865568 +0000
+@@ -367,9 +367,9 @@
+     var kind: []const u8 = "unknown";
+     var account: ?[]const u8 = null;
+     if (spend.credentialOf(head, path)) |cv| {
+-        for (st.cfg.computers[comp].credentials) |cr| if (std.mem.eql(u8, cr.value, cv)) {
++        for (st.cfg.computers[comp].credentials) |cr| if (spend.credentialMatches(gpa, cr, cv)) {
+             kind = cr.kind;
+-            if (std.mem.eql(u8, cr.kind, "plan")) account = cr.value;
++            if (std.mem.eql(u8, cr.kind, "plan")) account = cr.account orelse cr.value;
+         };
+     }
+     // The input, estimated before it leaves: from the conversation's last reply when there is
+@@ -1287,11 +1287,22 @@
+     }
+ }
+ 
++/// One whole message from the program on a WebSocket, and whether it may leave.
++const WsVerdict = struct { end: u64, refusal: ?[]u8 = null };
++
+ const ClientWs = struct {
+     id: u32,
+     messages: u32 = 0,
++    /// Admission on the socket (research of 25 November 2026, Codex read in full): with a budget
++    /// state and a computer, each `response.create` is a model call, admitted against the budgets
++    /// before a byte of it leaves, as a plain request is. Null: forwarded as it comes, as #374.
++    admit: ?struct { st: *State, comp: usize, path: []const u8, head: []const u8, ctx: *RespCtx } = null,
++    verdicts: std.ArrayList(WsVerdict) = .empty,
++    end_at: u64 = 0,
++
+     pub fn onMessage(self: *ClientWs, m: ws.Message) !void {
+         self.messages += 1;
++        if (self.admit != null) try self.verdicts.append(gpa, .{ .end = self.end_at });
+         if (m.opcode != 1) return;
+         var results = try stream.toolResultIds(gpa, .openai, m.data);
+         defer {
+@@ -1312,11 +1323,65 @@
+         };
+         record("\"conn\":{d},\"kind\":\"ws-request\",\"type\":{f},\"bytes\":{d},\"previous_response_id\":{f},\"results\":{d}", .{ self.id, j(typ), m.data.len, j(prev), results.items.len });
+         noteResults(results.items, self.id);
++        const a = self.admit orelse return;
++        if (!std.mem.eql(u8, typ, "response.create")) return;
++        if (a.ctx.call) |open| {
++            // A new call on the socket before the last one ended: the last one is settled first.
++            endCall(a.st, open, "superseded");
++            if (!open.kept) {
++                open.deinit();
++                gpa.destroy(open);
++            }
++            a.ctx.call = null;
++        }
++        var msg_buf: [512]u8 = undefined;
++        const v = &self.verdicts.items[self.verdicts.items.len - 1];
++        switch (try beginCall(a.st, a.comp, self.id, .responses, a.path, a.head, m.data, &msg_buf)) {
++            .pass => {},
++            .refuse => |r| v.refusal = try gpa.dupe(u8, r),
++            .wait => |wt| v.refusal = try gpa.dupe(u8, wt.msg),
++            .call => |cl| a.ctx.call = cl,
++        }
+     }
+ };
+ 
++/// Silo's refusal of one call on a WebSocket: an `error` event with status 400, which Codex shows
++/// once and does not retry (`how-a-hold-ends`, "A refusal on Codex's WebSocket").
++fn wsRefusal(client: Side, msg: []const u8) !void {
++    const body = try std.fmt.allocPrint(gpa, "{{\"type\":\"error\",\"status\":400,\"error\":{{\"type\":\"invalid_request_error\",\"code\":\"silo_budget_reached\",\"message\":{f}}}}}", .{std.json.fmt(msg, .{})});
++    defer gpa.free(body);
++    var h: [10]u8 = undefined;
++    h[0] = 0x81;
++    var n: usize = 2;
++    if (body.len < 126) {
++        h[1] = @intCast(body.len);
++    } else if (body.len < 65536) {
++        h[1] = 126;
++        std.mem.writeInt(u16, h[2..4], @intCast(body.len), .big);
++        n = 4;
++    } else {
++        h[1] = 127;
++        std.mem.writeInt(u64, h[2..10], body.len, .big);
++        n = 10;
++    }
++    try client.writeAll(h[0..n]);
++    try client.writeAll(body);
++}
++
++/// Settles the call on the socket once its reply has ended.
++fn wsSettle(ctx: *RespCtx, how: []const u8, force: bool) void {
++    const cl = ctx.call orelse return;
++    if (!force and !cl.meter.final) return;
++    endCall(state.?, cl, how);
++    if (!cl.kept) {
++        cl.deinit();
++        gpa.destroy(cl);
++    }
++    ctx.call = null;
++}
++
+ /// After a 101: both directions, read and forwarded as they come, in one thread.
+-fn wsRelay(client: Side, up: Side, provider: stream.Provider, id: u32, head: *const Head, cextra: []const u8, uextra: []const u8) !void {
++fn wsRelay(client: Side, up: Side, provider: stream.Provider, id: u32, head: *const Head, cextra: []const u8, uextra: []const u8, comp: ?usize, path: []const u8, req_head: []const u8) !void {
+     var cr: ws.Reader = .{ .gpa = gpa, .deflate = head.ws_deflate, .no_context_takeover = head.ws_client_nctx };
+     defer cr.deinit();
+     var hr: ws.Reader = .{ .gpa = gpa, .deflate = head.ws_deflate, .no_context_takeover = head.ws_server_nctx };
+@@ -1325,10 +1390,15 @@
+     var ctx: RespCtx = .{ .to = client, .provider = provider, .conn = id, .watcher = stream.Watcher.init(gpa, provider), .event_stream = false };
+     defer ctx.watcher.deinit();
+     defer ctx.held.deinit(gpa);
+-    record("\"conn\":{d},\"kind\":\"websocket\",\"deflate\":{}", .{ id, head.ws_deflate });
++    const admitting = state != null and comp != null and provider == .openai and std.mem.endsWith(u8, path[0 .. std.mem.indexOfScalar(u8, path, '?') orelse path.len], "/responses");
++    if (admitting) csink.admit = .{ .st = state.?, .comp = comp.?, .path = path, .head = req_head, .ctx = &ctx };
++    var pend: Pending = .{};
++    defer pend.bytes.deinit(gpa);
++    defer csink.verdicts.deinit(gpa);
++    defer wsSettle(&ctx, "connection-ended", true);
++    record("\"conn\":{d},\"kind\":\"websocket\",\"deflate\":{},\"admitting\":{}", .{ id, head.ws_deflate, admitting });
+     if (cextra.len > 0) {
+-        try cr.feed(cextra, &csink);
+-        try up.writeAll(cextra);
++        if (try fromProgram(client, up, &cr, &csink, &pend, cextra, head, id)) return;
+     }
+     if (uextra.len > 0) {
+         try hr.feed(uextra, &ctx);
+@@ -1342,34 +1412,88 @@
+             if (fds[0].revents != 0) {
+                 const n = try client.read(&buf);
+                 if (n == 0) break;
+-                try cr.feed(buf[0..n], &csink);
+-                try up.writeAll(buf[0..n]);
++                if (try fromProgram(client, up, &cr, &csink, &pend, buf[0..n], head, id)) break;
+             }
+             if (fds[1].revents != 0) {
+                 const n = try up.read(&buf);
+                 if (n == 0) break;
+                 try hr.feed(buf[0..n], &ctx);
+                 try ctx.release(buf[0..n], false);
++                wsSettle(&ctx, "whole", false);
+             }
+             continue;
+         }
+         if (c.SSL_pending(client.ssl) > 0) {
+             const n = try client.read(&buf);
+             if (n == 0) break;
+-            try cr.feed(buf[0..n], &csink);
+-            try up.writeAll(buf[0..n]);
++            if (try fromProgram(client, up, &cr, &csink, &pend, buf[0..n], head, id)) break;
+         }
+         if (c.SSL_pending(up.ssl) > 0) {
+             const n = try up.read(&buf);
+             if (n == 0) break;
+             try hr.feed(buf[0..n], &ctx);
+             try ctx.release(buf[0..n], false);
++            wsSettle(&ctx, "whole", false);
+         }
+     }
+     if (ctx.held.items.len > 0) try client.writeAll(ctx.held.items);
+     record("\"conn\":{d},\"kind\":\"websocket-closed\",\"from_program\":{d},\"from_host\":{d},\"tool_calls\":{d},\"holds\":{d},\"held_ms\":{d:.2},\"input_tokens\":{d},\"output_tokens\":{d}", .{ id, csink.messages, ctx.messages, ctx.watcher.done.items.len, ctx.holds, ctx.held_ms_total, ctx.watcher.input_tokens orelse -1, ctx.watcher.output_tokens orelse -1 });
+ }
+ 
++/// The program's bytes on a socket that have not left yet, and where in the stream they start.
++const Pending = struct { bytes: std.ArrayList(u8) = .empty, base: u64 = 0 };
++
++/// Bytes from the program on a socket. Without admission they leave as they come. With it, they
++/// leave once each message in them is whole and admitted; a refused message does not leave, and
++/// the program gets Silo's refusal in its place. Returns true when the socket must end: a refused
++/// message compressed with a shared context would leave the host unable to read the next ones.
++fn fromProgram(client: Side, up: Side, cr: *ws.Reader, csink: *ClientWs, pend: *Pending, in: []const u8, head: *const Head, id: u32) !bool {
++    if (csink.admit == null) {
++        try cr.feed(in, csink);
++        try up.writeAll(in);
++        return false;
++    }
++    try pend.bytes.appendSlice(gpa, in);
++    // Each message's end is known only inside `feed`; the reader says where it is as it goes.
++    var sink = struct {
++        inner: *ClientWs,
++        reader: *ws.Reader,
++        pub fn onMessage(self: *@This(), m: ws.Message) !void {
++            self.inner.end_at = self.reader.at;
++            try self.inner.onMessage(m);
++        }
++    }{ .inner = csink, .reader = cr };
++    try cr.feed(in, &sink);
++    var refused = false;
++    for (csink.verdicts.items) |v| {
++        const upto: usize = @intCast(v.end - pend.base);
++        if (v.refusal) |msg| {
++            defer gpa.free(msg);
++            record("\"conn\":{d},\"kind\":\"ws-refused\",\"message\":{f}", .{ id, j(msg) });
++            try wsRefusal(client, msg);
++            refused = true;
++        } else try up.writeAll(pend.bytes.items[0..upto]);
++        std.mem.copyForwards(u8, pend.bytes.items[0 .. pend.bytes.items.len - upto], pend.bytes.items[upto..]);
++        pend.bytes.shrinkRetainingCapacity(pend.bytes.items.len - upto);
++        pend.base = v.end;
++    }
++    csink.verdicts.clearRetainingCapacity();
++    // Control frames and anything else whole since the last message leave too.
++    if (cr.safe_at > pend.base) {
++        const upto: usize = @intCast(cr.safe_at - pend.base);
++        try up.writeAll(pend.bytes.items[0..upto]);
++        std.mem.copyForwards(u8, pend.bytes.items[0 .. pend.bytes.items.len - upto], pend.bytes.items[upto..]);
++        pend.bytes.shrinkRetainingCapacity(pend.bytes.items.len - upto);
++        pend.base = cr.safe_at;
++    }
++    if (refused and head.ws_deflate and !head.ws_client_nctx) {
++        record("\"conn\":{d},\"kind\":\"ws-ended\",\"why\":\"refused message shared a compression context\"", .{id});
++        client.writeAll("\x88\x02\x03\xe8") catch {};
++        return true;
++    }
++    return false;
++}
++
+ fn watcherProvider(p: spend.Provider) stream.Provider {
+     return switch (p) {
+         .anthropic => .anthropic,
+@@ -1498,7 +1622,7 @@
+             // A credential this computer was not given does not leave a host Silo reads.
+             if (st.cfg.deny_unknown_credentials and provider != null) if (spend.credentialOf(req.raw, path)) |cv| {
+                 var known = false;
+-                for (st.cfg.computers[k].credentials) |cr| known = known or std.mem.eql(u8, cr.value, cv);
++                for (st.cfg.computers[k].credentials) |cr| known = known or spend.credentialMatches(gpa, cr, cv);
+                 if (!known) {
+                     record("\"conn\":{d},\"kind\":\"refused\",\"why\":\"unknown-credential\",\"line\":{f},\"credential_tail\":{f}", .{ id, j(req.first), j(cv[cv.len -| 4..]) });
+                     try writeRefusal(client, fmt orelse defaultFormat(provider), "Silo: this computer was not given this key, so it cannot be used here. Add it to Silo to use it.");
+@@ -1568,7 +1692,7 @@
+             };
+         }
+         try client.writeAll(resp.raw);
+-        if (resp.status == 101) return wsRelay(client, up, watcherProvider(provider orelse .openai), id, &resp, cextra.items, uextra.items);
++        if (resp.status == 101) return wsRelay(client, up, watcherProvider(provider orelse .openai), id, &resp, cextra.items, uextra.items, comp, path, req.raw);
+         var ctx: RespCtx = .{ .to = client, .provider = watcherProvider(provider orelse .openai), .conn = id, .watcher = stream.Watcher.init(gpa, watcherProvider(provider orelse .openai)), .event_stream = resp.event_stream, .call = call, .capture = work != .none };
+         defer ctx.watcher.deinit();
+         defer ctx.sse.deinit(gpa);
+diff -ru a/src/spend.zig b/src/spend.zig
+--- a/src/spend.zig	2026-11-25 14:16:27.451832435 +0000
++++ b/src/spend.zig	2026-11-25 14:19:15.051151661 +0000
+@@ -11,8 +11,63 @@
+     value: []const u8,
+     /// "key": billed per call (an API key). "plan": a subscription's sign-in.
+     kind: []const u8 = "key",
++    /// A ChatGPT sign-in: its account id. Codex refreshes its access token (at least every 8
++    /// days, and on a 401), so a fixed `value` stops matching; the account in the token does not.
++    account: ?[]const u8 = null,
+ };
+ 
++/// Whether a credential a request carries is this one: the same value, or for a ChatGPT sign-in,
++/// an access token naming the same account. The token's signature is not checked here: a token
++/// made up inside the computer is refused by OpenAI, and a real one of another account names
++/// another account.
++pub fn credentialMatches(gpa: Allocator, cr: Credential, value: []const u8) bool {
++    if (std.mem.eql(u8, cr.value, value)) return true;
++    const want = cr.account orelse return false;
++    const got = chatgptAccount(gpa, value) orelse return false;
++    defer gpa.free(got);
++    return std.mem.eql(u8, want, got);
++}
++
++/// The ChatGPT account id in an access token (a JWT), or null.
++pub fn chatgptAccount(gpa: Allocator, token: []const u8) ?[]u8 {
++    var it = std.mem.splitScalar(u8, token, '.');
++    _ = it.next() orelse return null;
++    const payload = it.next() orelse return null;
++    _ = it.next() orelse return null;
++    if (payload.len > 16 << 10) return null;
++    const dec = std.base64.url_safe_no_pad.Decoder;
++    const n = dec.calcSizeForSlice(payload) catch return null;
++    const buf = gpa.alloc(u8, n) catch return null;
++    defer gpa.free(buf);
++    dec.decode(buf, payload) catch return null;
++    var parsed = std.json.parseFromSlice(std.json.Value, gpa, buf, .{}) catch return null;
++    defer parsed.deinit();
++    if (parsed.value != .object) return null;
++    const auth = parsed.value.object.get("https://api.openai.com/auth") orelse return null;
++    if (auth != .object) return null;
++    const id = auth.object.get("chatgpt_account_id") orelse return null;
++    if (id != .string) return null;
++    return gpa.dupe(u8, id.string) catch null;
++}
++
++test "a refreshed ChatGPT token names the same account" {
++    const gpa = std.testing.allocator;
++    // {"alg":"none"} . {"https://api.openai.com/auth":{"chatgpt_account_id":"acct-1"},"exp":2} . sig
++    const t1 = "eyJhbGciOiJub25lIn0.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjdC0xIn0sImV4cCI6Mn0.sig";
++    // the same account, another token
++    const t2 = "eyJhbGciOiJub25lIn0.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjdC0xIn0sImV4cCI6M30.sig";
++    // another account
++    const t3 = "eyJhbGciOiJub25lIn0.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjdC0yIn0sImV4cCI6Mn0.sig";
++    const by_value: Credential = .{ .value = t1, .kind = "plan" };
++    const by_account: Credential = .{ .value = t1, .kind = "plan", .account = "acct-1" };
++    try std.testing.expect(credentialMatches(gpa, by_value, t1));
++    try std.testing.expect(!credentialMatches(gpa, by_value, t2));
++    try std.testing.expect(credentialMatches(gpa, by_account, t2));
++    try std.testing.expect(!credentialMatches(gpa, by_account, t3));
++    try std.testing.expect(!credentialMatches(gpa, by_account, "sk-proj-x"));
++    try std.testing.expect(!credentialMatches(gpa, by_account, "a.!!!.b"));
++}
++
+ pub const Computer = struct {
+     name: []const u8,
+     /// The address the computer's programs reach the boundary at. In the experiments, each
+diff -ru a/src/ws.zig b/src/ws.zig
+--- a/src/ws.zig	2026-11-25 14:16:27.451939145 +0000
++++ b/src/ws.zig	2026-11-25 14:16:48.677276205 +0000
+@@ -20,6 +20,13 @@
+     strm_ready: bool = false,
+     max_message: usize = 64 << 20,
+     closed: bool = false,
++    /// Bytes of the stream read whole into frames so far, counted from its first byte.
++    total: u64 = 0,
++    /// Where in the stream the frame that ended the message given to `onMessage` ends.
++    at: u64 = 0,
++    /// The last place in the stream where no message is under way: everything before it is
++    /// whole messages and control frames.
++    safe_at: u64 = 0,
+ 
+     pub fn deinit(self: *Reader) void {
+         self.buf.deinit(self.gpa);
+@@ -32,7 +39,9 @@
+     pub fn feed(self: *Reader, in: []const u8, sink: anytype) !void {
+         try self.buf.appendSlice(self.gpa, in);
+         var off: usize = 0;
++        const base = self.total;
+         defer {
++            self.total = base + off;
+             const rest = self.buf.items.len - off;
+             std.mem.copyForwards(u8, self.buf.items[0..rest], self.buf.items[off..]);
+             self.buf.shrinkRetainingCapacity(rest);
+@@ -67,6 +76,7 @@
+             off += h + @as(usize, @intCast(len));
+             if (opcode >= 8) {
+                 if (opcode == 8) self.closed = true;
++                if (self.msg.items.len == 0) self.safe_at = base + off;
+                 continue; // control frames carry no message
+             }
+             if (opcode != 0) {
+@@ -77,6 +87,8 @@
+             if (self.msg.items.len + payload.len > self.max_message) return error.MessageTooLarge;
+             try self.msg.appendSlice(self.gpa, payload);
+             if (!fin) continue;
++            self.at = base + off;
++            self.safe_at = base + off;
+             if (self.msg_compressed) {
+                 try self.inflate(self.msg.items);
+                 try sink.onMessage(.{ .opcode = self.msg_opcode, .data = self.inflated.items });

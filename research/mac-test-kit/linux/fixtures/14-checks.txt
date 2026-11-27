@@ -1,0 +1,95 @@
+=== sw_vers
+ProductName:		macOS
+ProductVersion:		27.2
+BuildVersion:		27C55
+--- status 0
+=== fdesetup
+FileVault is Off.
+--- status 0
+=== securetoken
+2026-11-24 10:00:00.000 sysadminctl[812:4410] Secure token is ENABLED for user Silo-Kit
+--- status 0
+=== apfs_users
+Cryptographic users for disk3s5 (2 found)
+|
++-- 1C2B3A4D-0000-0000-0000-000000000001
+|   Type: Local Open Directory User
+|   Volume Owner: Yes
+|
++-- EBC6C064-0000-11AA-AA11-00306543ECAC
+    Type: MDM Bootstrap Token External Key
+    Volume Owner: No
+--- status 0
+=== keychain_list
+    "/Users/silokit/Library/Keychains/login.keychain-db"
+    "/Library/Keychains/System.keychain"
+--- status 0
+=== keychain_default
+    "/Users/silokit/Library/Keychains/login.keychain-db"
+--- status 0
+=== keychain_info
+security: SecKeychainCopySettings /Users/silokit/Library/Keychains/login.keychain-db: User interaction is not allowed.
+--- status 36
+=== keychain_write
+security: SecKeychainItemCreateFromContent (<default>): User interaction is not allowed.
+--- status 36
+=== keychain_read
+security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.
+--- status 44
+=== screenlock
+2026-11-24 10:00:01.000 sysadminctl[820:4420] screenLock delay is 300 seconds
+--- status 0
+=== pmset
+System-wide power settings:
+Currently in use:
+ standby              0
+ sleep                1
+ displaysleep         10
+ disksleep            10
+ powernap             0
+--- status 0
+=== admin
+yes silokit is a member of admin
+--- status 0
+=== sudo_nopass
+sudo: a password is required
+--- status 1
+=== spotlight
+/:
+	Indexing enabled. 
+--- status 0
+=== gatekeeper
+assessments enabled
+--- status 0
+=== sip
+System Integrity Protection status: enabled.
+--- status 0
+=== setup_assistant
+--- status 1
+=== login_session
+silokit  console  Nov 24 09:58
+silokit  ttys000  Nov 24 10:00 	(192.168.64.1)
+--- status 0
+=== sshd
+system/com.openssh.sshd = {
+	active count = 1
+	state = running
+--- status 0
+=== remotelogin
+You need administrator access to run this tool... exiting!
+--- status 1
+=== autologin
+silokit
+--- status 0
+=== kcpassword
+-rw-------  1 root  wheel  12 Nov 24 09:57 /etc/kcpassword
+--- status 0
+=== setup_done
+-r--------  1 root  wheel  0 Nov 24 09:57 /private/var/db/.AppleSetupDone
+--- status 0
+=== softwareupdate
+Software Update Tool
+
+Finding available software
+No new software available.
+--- status 0

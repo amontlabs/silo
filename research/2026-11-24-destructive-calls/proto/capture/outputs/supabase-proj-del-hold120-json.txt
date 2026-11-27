@@ -1,0 +1,7 @@
+$ SUPABASE_ACCESS_TOKEN=sbp_FAKE -- supabase projects delete abcdefghijklmnopqrst --yes
+Confirmed by --yes: Delete project abcdefghijklmnopqrst
+│
+◇  Deleting project...
+failed to delete project: request timed out
+Try rerunning the command with --debug to troubleshoot the error.
+--- exit=1 seconds=364.748688466

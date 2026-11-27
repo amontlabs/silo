@@ -1,0 +1,18 @@
+{
+ "betas": {
+  "gone": [],
+  "new": [
+   "thinking-token-count-2026-05-13"
+  ]
+ },
+ "tools": {
+  "gone": [
+   "tool:AskUserQuestion",
+   "tool:Glob",
+   "tool:Grep"
+  ],
+  "new": [
+   "tool:ReportFindings"
+  ]
+ }
+}

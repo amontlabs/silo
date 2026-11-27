@@ -1,0 +1,4 @@
+$ FLY_API_TOKEN=test-token-123 -- flyctl volumes destroy vol_123 -a my-app --yes
+Error: failed destroying volume: failed to destroy volume vol_123: request returned non-2xx status: 403: Held by Silo and not answered: deleting volume X needs your yes.
+--- exit=1 seconds=2.194824336
+--- matching requests held: 1

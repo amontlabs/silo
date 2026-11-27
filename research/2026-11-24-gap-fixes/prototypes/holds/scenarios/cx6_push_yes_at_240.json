@@ -1,0 +1,1 @@
+{"probe": false, "steps": [{"calls": [{"name": "exec_command", "input": {"cmd": "git push http://127.0.0.1:8753/repo.git main"}}]}, {"calls": [{"name": "write_stdin", "input": {"session_id": "$LAST", "chars": "", "yield_time_ms": 300000}}]}]}

@@ -1,0 +1,22 @@
+# One line per program: name | env | command. Sourced by matrix.sh.
+A=sk-ant-api03-fakefakefake
+P_gem="NODE_USE_SYSTEM_CA=1 GEMINI_API_KEY=AIzaFakeKey000 GEMINI_CLI_TRUST_WORKSPACE=true|gemini -p Do_the_task. --yolo"
+P_oc="ANTHROPIC_API_KEY=$A|opencode run -m anthropic/claude-sonnet-4-5 Do_the_task."
+P_cl="|cline -t 400 -P anthropic -k $A -m claude-sonnet-4-5 --json Do_the_task."
+P_ai="SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt ANTHROPIC_API_KEY=$A|aider --model anthropic/claude-sonnet-4-5 --message Do_the_task. --yes-always --no-check-update --no-show-model-warnings --analytics-disable"
+P_go="ANTHROPIC_API_KEY=$A GOOSE_PROVIDER=anthropic GOOSE_MODEL=claude-sonnet-4-5 GOOSE_MODE=auto|goose run -t Do_the_task."
+P_cob="COPILOT_PROVIDER_TYPE=anthropic COPILOT_PROVIDER_BASE_URL=https://api.anthropic.com COPILOT_PROVIDER_API_KEY=$A COPILOT_MODEL=claude-sonnet-4-5|copilot -p Do_the_task. --allow-all-tools"
+P_co="COPILOT_GITHUB_TOKEN=gho_fakefakefakefakefake|copilot -p Do_the_task. --allow-all-tools"
+P_am="AMP_API_KEY=sgamp_user_fakefakefake|amp -x Do_the_task. --dangerously-allow-all"
+P_cu="CURSOR_API_KEY=key_fakefakefakefake|cursor-agent -p Do_the_task. --force --output-format json"
+P_ki="KIRO_API_KEY=ksk_fakefakefakefake|kiro-cli chat --no-interactive --trust-all-tools Do_the_task."
+P_cc="ANTHROPIC_API_KEY=$A IS_SANDBOX=1 DISABLE_AUTOUPDATER=1|claude -p Do_the_task. --dangerously-skip-permissions"
+P_cx="OPENAI_API_KEY=sk-proj-fakefakefake|codex exec -m gpt-5.5 --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check Do_the_task."
+O=http://127.0.0.1:11434
+P_go_ol="GOOSE_PROVIDER=ollama OLLAMA_HOST=$O GOOSE_MODEL=qwen3-coder:30b GOOSE_MODE=auto|goose run -t Do_the_task."
+P_ai_ol="OLLAMA_API_BASE=$O|aider --model ollama_chat/qwen3-coder:30b --message Do_the_task. --yes-always --no-check-update --no-show-model-warnings --analytics-disable"
+P_cob_ol="COPILOT_PROVIDER_BASE_URL=$O/v1 COPILOT_MODEL=qwen3-coder:30b COPILOT_OFFLINE=true|copilot -p Do_the_task. --allow-all-tools"
+P_cx_ol="CODEX_OSS_BASE_URL=$O/v1|codex exec --oss --local-provider ollama -m fake-model:latest --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check Do_the_task."
+P_cc_ol="ANTHROPIC_BASE_URL=$O ANTHROPIC_AUTH_TOKEN=ollama ANTHROPIC_API_KEY= IS_SANDBOX=1|claude -p Do_the_task. --model qwen3-coder:30b --dangerously-skip-permissions"
+P_cl_ol="|cline -t 40 -P ollama -m qwen3-coder:30b --json Do_the_task."
+P_cx_lms="CODEX_OSS_BASE_URL=http://127.0.0.1:1234/v1|codex exec --oss --local-provider lmstudio -m fake-model --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check Do_the_task."

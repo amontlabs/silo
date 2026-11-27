@@ -1,0 +1,91 @@
+{
+ "betas": [
+  "advanced-tool-use-2025-11-20",
+  "cache-diagnosis-2026-04-07",
+  "claude-code-20250219",
+  "context-management-2025-06-27",
+  "effort-2025-11-24",
+  "interleaved-thinking-2025-05-14",
+  "mid-conversation-system-clear-at-2026-08-21",
+  "mid-conversation-tool-changes-2026-07-01",
+  "per-turn-control-2026-07-01",
+  "prompt-caching-scope-2026-01-05",
+  "thinking-binding-controls-2026-08-01",
+  "thinking-display-updates-2026-08-18",
+  "thinking-token-count-2026-05-13"
+ ],
+ "body": [
+  "context_management.edits[].keep:str",
+  "context_management.edits[].type:str",
+  "diagnostics.previous_message_id:NoneType",
+  "diagnostics.previous_message_id:str",
+  "max_tokens:int",
+  "messages",
+  "metadata.user_id:str",
+  "model:str",
+  "output_config.effort:str",
+  "stream:bool",
+  "system",
+  "thinking.display:str",
+  "thinking.type:str",
+  "tools"
+ ],
+ "headers": [
+  "accept",
+  "accept-encoding",
+  "anthropic-beta",
+  "anthropic-dangerous-direct-browser-access",
+  "anthropic-version",
+  "connection",
+  "content-length",
+  "content-type",
+  "host",
+  "user-agent",
+  "x-api-key",
+  "x-app",
+  "x-claude-code-prev-tool-durations",
+  "x-claude-code-prompt-id",
+  "x-claude-code-request-class",
+  "x-claude-code-session-id",
+  "x-client-request-id",
+  "x-stainless-arch",
+  "x-stainless-lang",
+  "x-stainless-os",
+  "x-stainless-package-version",
+  "x-stainless-retry-count",
+  "x-stainless-runtime",
+  "x-stainless-runtime-version",
+  "x-stainless-timeout"
+ ],
+ "hosts": [
+  "api.anthropic.com"
+ ],
+ "item_types": [
+  "block:text",
+  "block:tool_result",
+  "block:tool_use"
+ ],
+ "paths": [
+  "/v1/messages?beta=true"
+ ],
+ "tool_kinds": [
+  "custom"
+ ],
+ "tools": [
+  "tool:Agent",
+  "tool:Bash",
+  "tool:DeferredToolPlaceholder",
+  "tool:Edit",
+  "tool:ListAgents",
+  "tool:Read",
+  "tool:ReportFindings",
+  "tool:ScheduleWakeup",
+  "tool:Skill",
+  "tool:ToolSearch",
+  "tool:Workflow",
+  "tool:Write"
+ ],
+ "transports": [
+  "sse"
+ ]
+}

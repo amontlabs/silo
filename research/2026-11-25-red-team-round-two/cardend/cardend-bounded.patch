@@ -1,0 +1,63 @@
+--- a/main.go
++++ b/main.go
+@@ -58,14 +58,23 @@
+ 	path  string
+ }
+ 
++// countBound is how many lines the count holds. Every frame is still counted: once the bound is
++// reached, a frame of a new destination goes to its kind's "other destinations" line. Without a
++// bound, main decides how much of the Mac's memory and disk the count takes (a scan of 10.0.0.0/8
++// is 16.7 million lines, rewritten twice a second).
++const countBound = 256
++
+ // add counts one frame. A kind ending in ":<port>" is counted by its destination address, with
+ // its first five ports kept, so a scan is one line and not 65,535.
+ func (c *counter) add(k string) {
+ 	port := ""
+-	if i := strings.LastIndex(k, ":"); i > 0 && strings.HasPrefix(k, "tcp connect") || strings.HasPrefix(k, "udp") && i > 0 {
++	if i := strings.LastIndex(k, ":"); i > 0 && (strings.HasPrefix(k, "tcp connect") || strings.HasPrefix(k, "udp")) {
+ 		k, port = k[:i], k[i+1:]
+ 	}
+ 	c.mu.Lock()
++	if _, ok := c.kinds[k]; !ok && len(c.kinds) >= countBound {
++		k, port = otherOf(k), ""
++	}
+ 	c.kinds[k]++
+ 	if port != "" && len(c.ports[k]) < 5 && !slices.Contains(c.ports[k], port) {
+ 		c.ports[k] = append(c.ports[k], port)
+@@ -73,6 +82,16 @@
+ 	c.mu.Unlock()
+ }
+ 
++// otherOf is the line a kind is counted in once the count is full: its first two words, so
++// "tcp connect 10.0.4.2" becomes "tcp connect, other destinations".
++func otherOf(k string) string {
++	w := strings.Fields(k)
++	if len(w) > 2 {
++		w = w[:2]
++	}
++	return strings.Join(w, " ") + ", other destinations"
++}
++
+ func (c *counter) write() {
+ 	c.mu.Lock()
+ 	defer c.mu.Unlock()
+@@ -212,8 +231,17 @@
+ 		if !ip.IsValid(len(p)) || ip.DestinationAddress() != ourLL || ip.TransportProtocol() != header.TCPProtocolNumber {
+ 			return false
+ 		}
++		// A fragment is never the way in: the stack would hold it for reassembly, and its later
++		// pieces carry no TCP header to check.
++		if ip.More() || ip.FragmentOffset() != 0 {
++			return false
++		}
+ 		t := header.TCP(ip.Payload())
+-		return len(t) >= header.TCPMinimumSize && t.SourcePort() == 22
++		if len(t) < header.TCPMinimumSize || t.SourcePort() != 22 {
++			return false
++		}
++		// Only the Mac end opens: a SYN from main without ACK would be main opening a connection.
++		return t.Flags()&header.TCPFlagSyn == 0 || t.Flags()&header.TCPFlagAck != 0
+ 	}
+ 	return false
+ }

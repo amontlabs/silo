@@ -1,0 +1,12 @@
+case	proxy: connections allowed, refused	TLS side: handshakes done, failed (how)
+cc-none	0, 0	0, 0 
+cc-proxy-node-ca	12, 0	12, 0 
+cc-proxy-lower-node-ca	12, 0	12, 0 
+cc-proxy-no-ca	27, 0	0, 27 {'closed by the client': 27}
+cc-proxy-ssl-cert-file	12, 0	12, 0 
+cc-proxy-no-updater	12, 0	12, 0 
+cc-proxy-no-traffic	6, 0	6, 0 
+cx-none	0, 0	0, 0 
+cx-proxy	5, 0	2, 0 
+cx-proxy-lower	5, 0	2, 0 
+cx-proxy-no-ca	61, 0	0, 53 {'alert unknown_ca': 53}

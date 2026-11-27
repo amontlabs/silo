@@ -1,0 +1,30 @@
+
+== 1. sign in inside computer c1, the vendor's own way
+Paste code here if prompted > Login successful.
+
+== 2. work in c1
+exit=0 result=success 'Done.'
+
+== 3. hostile code copies c1's login file out, and uses it from the internet
+  use the access token: 401 {"type": "error", "error": {"type": "authentication_error", "message": "OAuth unknown token"}}
+  refresh with the refresh token: 400 {"error": "invalid_grant", "error_description": "invalid_grant: unknown refresh token"}
+
+== 4. time passes (every access token expires), and c1 works
+exit=0 result=success 'Done.'
+
+== 5. a fork c2 keeps the login (fork-and-sign-in: you said so)
+
+== 6. both computers work, three rounds; every access token expires before each round, and c2 runs 11 s after c1
+c1: exit=0 result=success 'Done.'
+c2: exit=0 result=success 'Done.'
+c1: exit=0 result=success 'Done.'
+c2: exit=0 result=success 'Done.'
+c1: exit=0 result=success 'Done.'
+c2: exit=0 result=success 'Done.'
+
+== 7. hostile code copies c1's login file into c2 and uses it there
+c2 with c1's file: exit=1 result=success 'Failed to authenticate: OAuth session expired and could not be refreshed'
+
+== what the vault did
+{"swapped": 26, "refused": 3, "upstream_refresh": 4, "local_refresh": 0}
+tokens the provider issued: 15; real ones in the file the attacker copied at step 3: 0; in the computers' files at the end: 0 (26 files searched)

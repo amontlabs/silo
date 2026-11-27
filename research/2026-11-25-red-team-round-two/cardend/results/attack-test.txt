@@ -1,0 +1,18 @@
+== cardend as drafted
+    attack_test.go:55: 100000 SYNs to 100000 addresses: 100000 lines held, counts file 4000672 bytes
+    attack_test.go:57: the count holds 100000 lines; a computer decides how many
+    attack_test.go:60: the counts file is 4000672 bytes, rewritten twice a second
+--- FAIL: TestAttackCountsStayBounded (0.28s)
+    attack_test.go:90: bare SYN from 22: main opening a connection: handed to the stack = true, want false
+    attack_test.go:90: first fragment, more to come: handed to the stack = true, want false
+    attack_test.go:90: later fragment: handed to the stack = true, want false
+--- FAIL: TestAttackStackSeesOnlyTheConnectionItOpened (0.00s)
+FAIL
+FAIL	cardend	0.281s
+FAIL
+== cardend with cardend-bounded.patch
+    attack_test.go:55: 100000 SYNs to 100000 addresses: 257 lines held, counts file 9918 bytes
+--- PASS: TestAttackCountsStayBounded (0.09s)
+--- PASS: TestAttackStackSeesOnlyTheConnectionItOpened (0.00s)
+PASS
+ok  	cardend	(cached)

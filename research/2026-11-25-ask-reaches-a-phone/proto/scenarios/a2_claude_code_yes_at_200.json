@@ -1,0 +1,2 @@
+{"holds": {"git": 600}, "policy": {"delay": 198, "verdict": "yes"},
+ "commands": [{"at": 0, "run": "sed 's#BOUNDARY#{B}#g' {P}/agents/cc_wait.json > /tmp/claude-0/-home-user/56cb5b83-c27d-5ecb-ae7c-5c4957f3a75c/scratchpad/agents/cc_wait.json && KILL_AFTER=400 bash /home/user/silo/research/2026-11-24-gap-fixes/prototypes/holds/rig/run_cc.sh /tmp/claude-0/-home-user/56cb5b83-c27d-5ecb-ae7c-5c4957f3a75c/scratchpad/agents/cc_wait.json /tmp/claude-0/-home-user/56cb5b83-c27d-5ecb-ae7c-5c4957f3a75c/scratchpad/agents/cc_wait {W}"}], "after": 3}

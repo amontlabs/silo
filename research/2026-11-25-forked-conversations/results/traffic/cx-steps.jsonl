@@ -1,0 +1,12 @@
+{"computer":"main","branch":"A","prompt":"Write the login page, part 1.","session":"01a21412-323b-7f11-a503-23700dfdeaf4","first":1,"last":2,"how":""}
+{"computer":"main","branch":"A","prompt":"Write the login page, part 2.","session":"01a21412-323b-7f11-a503-23700dfdeaf4","first":3,"last":4,"how":"resume 01a21412-323b-7f11-a503-23700dfdeaf4"}
+{"computer":"fork","branch":"B","prompt":"Try the risky refactor, part 1.","session":"01a21412-323b-7f11-a503-23700dfdeaf4","first":5,"last":6,"how":"resume 01a21412-323b-7f11-a503-23700dfdeaf4"}
+{"computer":"fork","branch":"B","prompt":"Try the risky refactor, part 2.","session":"01a21412-323b-7f11-a503-23700dfdeaf4","first":7,"last":8,"how":"resume 01a21412-323b-7f11-a503-23700dfdeaf4"}
+{"computer":"main","branch":"A","prompt":"Write the login page, part 3.","session":"01a21412-323b-7f11-a503-23700dfdeaf4","first":9,"last":10,"how":"resume 01a21412-323b-7f11-a503-23700dfdeaf4"}
+{"computer":"forkid","branch":"C","prompt":"Try another refactor.","session":"01a21412-323b-7f11-a503-23700dfdeaf4","first":11,"last":12,"how":"resume 01a21412-323b-7f11-a503-23700dfdeaf4"}
+{"computer":"old","branch":"D","prompt":"From the checkpoint, try a third way.","session":"01a21412-323b-7f11-a503-23700dfdeaf4","first":13,"last":14,"how":"resume 01a21412-323b-7f11-a503-23700dfdeaf4"}
+{"computer":"fork2","branch":"E","prompt":"On the fork of the fork, go on.","session":"01a21412-323b-7f11-a503-23700dfdeaf4","first":15,"last":16,"how":"resume 01a21412-323b-7f11-a503-23700dfdeaf4"}
+{"computer":"main","branch":"F","prompt":"Branch inside main: try plan B.","session":"01a21412-4b04-7731-a688-11ded197b26d","first":17,"last":18,"how":"fork 01a21412-323b-7f11-a503-23700dfdeaf4"}
+{"computer":"main","branch":"F","prompt":"Branch inside main: plan B, part 2.","session":"01a21412-4b04-7731-a688-11ded197b26d","first":19,"last":20,"how":"resume 01a21412-4b04-7731-a688-11ded197b26d"}
+{"computer":"main","branch":"A","prompt":"Write the login page, part 4.","session":"01a21412-323b-7f11-a503-23700dfdeaf4","first":21,"last":22,"how":"resume 01a21412-323b-7f11-a503-23700dfdeaf4"}
+{"computer":"main","branch":"G","prompt":"Now main again, go on from the refactor.","session":"01a21412-323b-7f11-a503-23700dfdeaf4","first":23,"last":24,"how":"resume 01a21412-323b-7f11-a503-23700dfdeaf4"}

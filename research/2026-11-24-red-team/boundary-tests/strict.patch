@@ -1,0 +1,97 @@
+--- src/main.orig.zig	2026-11-24 16:08:27.907022839 +0000
++++ src/main.zig	2026-11-24 16:08:27.921306955 +0000
+@@ -30,6 +30,7 @@
+ var server_ctx: ?*c.SSL_CTX = null;
+ var client_ctx: ?*c.SSL_CTX = null;
+ var conn_counter = std.atomic.Value(u32).init(0);
++var strict = false;
+ 
+ // ---- the record ----
+ var record_mu: std.Thread.Mutex = .{};
+@@ -164,8 +165,29 @@
+     ws_client_nctx: bool = false,
+     host: []const u8 = "",
+     status: u16 = 0,
++    // Red-team patch: what a strict reading of RFC 9112 refuses.
++    cl_count: u8 = 0,
++    te_count: u8 = 0,
++    te_exact: bool = true,
++    host_count: u8 = 0,
++    bad_line: bool = false,
+ };
+ 
++/// Red-team patch: why a request head is refused, or null when it is one the boundary and any
++/// conforming host read the same way.
++fn strictProblem(h: *const Head, sni: []const u8) ?[]const u8 {
++    if (h.bad_line) return "header name with whitespace, or a line without a colon";
++    if (h.cl_count > 1) return "two Content-Length headers";
++    if (h.te_count > 1 or !h.te_exact) return "Transfer-Encoding other than one plain chunked";
++    if (h.cl_count > 0 and h.te_count > 0) return "both Content-Length and Transfer-Encoding";
++    if (h.host_count != 1) return "not exactly one Host header";
++    var host = h.host;
++    if (std.mem.endsWith(u8, host, ":443")) host = host[0 .. host.len - 4];
++    if (!std.ascii.eqlIgnoreCase(host, sni)) return "Host differs from the name in the handshake";
++    if (h.encoding == .other) return "a body encoding the boundary cannot read";
++    return null;
++}
++
+ /// Reads until the end of a head. Bytes read past it stay in `extra`.
+ fn readHead(side: Side, extra: *std.ArrayList(u8)) !?Head {
+     var buf: [16384]u8 = undefined;
+@@ -183,8 +205,19 @@
+     var it = std.mem.splitSequence(u8, raw[0 .. raw.len - 4], "\r\n");
+     h.first = it.next() orelse return error.BadHead;
+     while (it.next()) |line| {
+-        const colon = std.mem.indexOfScalar(u8, line, ':') orelse continue;
+-        const name = std.mem.trim(u8, line[0..colon], " ");
++        const colon = std.mem.indexOfScalar(u8, line, ':') orelse {
++            h.bad_line = true;
++            continue;
++        };
++        const raw_name = line[0..colon];
++        if (raw_name.len == 0 or std.mem.indexOfAny(u8, raw_name, " \t") != null) h.bad_line = true;
++        const name = std.mem.trim(u8, raw_name, " ");
++        if (std.ascii.eqlIgnoreCase(name, "content-length")) h.cl_count += 1;
++        if (std.ascii.eqlIgnoreCase(name, "host")) h.host_count += 1;
++        if (std.ascii.eqlIgnoreCase(name, "transfer-encoding")) {
++            h.te_count += 1;
++            if (!std.ascii.eqlIgnoreCase(std.mem.trim(u8, line[colon + 1 ..], " \t"), "chunked")) h.te_exact = false;
++        }
+         const value = std.mem.trim(u8, line[colon + 1 ..], " \t");
+         if (std.ascii.eqlIgnoreCase(name, "content-length")) h.content_length = std.fmt.parseInt(u64, value, 10) catch return error.BadHead;
+         if (std.ascii.eqlIgnoreCase(name, "transfer-encoding") and std.ascii.indexOfIgnoreCase(value, "chunked") != null) h.chunked = true;
+@@ -578,10 +611,26 @@
+         var req = (try readHead(client, &cextra)) orelse return;
+         defer gpa.free(req.raw);
+         const t_req = now_ms();
++        if (strict) if (strictProblem(&req, sni)) |why| {
++            record("\"conn\":{d},\"kind\":\"refused-request\",\"why\":{f}", .{ id, j(why) });
++            return;
++        };
+         var rc: ReqCtx = .{};
+         defer rc.body.deinit(gpa);
+         defer rc.raw.deinit(gpa);
+         if (req.content_length != null or req.chunked) _ = try pumpBody(client, &req, &cextra, &rc);
++        if (strict and rc.body.items.len > 0) {
++            // A body the boundary cannot read is not forwarded: what is not read cannot be ruled on.
++            const ok = blk: {
++                var parsed = std.json.parseFromSlice(std.json.Value, gpa, rc.body.items, .{}) catch break :blk false;
++                parsed.deinit();
++                break :blk true;
++            };
++            if (!ok) {
++                record("\"conn\":{d},\"kind\":\"refused-request\",\"why\":\"a body that does not parse as JSON, duplicate keys included\"", .{id});
++                return;
++            }
++        }
+         // The program answered a call Silo denied: disarm first, and wait for the probe.
+         var results = try stream.toolResultIds(gpa, provider, rc.body.items);
+         defer {
+@@ -641,6 +690,7 @@
+         .record = env("RECORD") orelse "record.jsonl",
+         .hold = !std.mem.eql(u8, env("HOLD") orelse "1", "0"),
+     };
++    strict = std.mem.eql(u8, env("STRICT") orelse "0", "1");
+     record_fd = try posix.open(cfg.record, .{ .ACCMODE = .WRONLY, .CREAT = true, .APPEND = true }, 0o644);
+     if (cfg.probe_ctl) |p| probe_ctl_fd = try posix.open(p, .{ .ACCMODE = .RDWR }, 0);
+     if (cfg.probe_ack) |p| probe_ack_fd = try posix.open(p, .{ .ACCMODE = .RDWR, .NONBLOCK = true }, 0);

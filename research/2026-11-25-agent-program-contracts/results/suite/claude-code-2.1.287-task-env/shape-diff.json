@@ -1,0 +1,38 @@
+{
+ "betas": {
+  "gone": [
+   "context-1m-2025-08-07",
+   "fallback-credit-2026-06-01",
+   "structured-outputs-2025-12-15"
+  ],
+  "new": [
+   "mid-conversation-system-clear-at-2026-08-21",
+   "mid-conversation-tool-changes-2026-07-01",
+   "per-turn-control-2026-07-01",
+   "thinking-binding-controls-2026-08-01",
+   "thinking-display-updates-2026-08-18"
+  ]
+ },
+ "body": {
+  "gone": [
+   "output_config.format.schema.additionalProperties:bool",
+   "output_config.format.schema.properties.title.type:str",
+   "output_config.format.schema.required[]:str",
+   "output_config.format.schema.type:str",
+   "output_config.format.type:str",
+   "temperature:int"
+  ],
+  "new": [
+   "diagnostics.previous_message_id:str",
+   "thinking.display:str"
+  ]
+ },
+ "headers": {
+  "gone": [],
+  "new": [
+   "x-claude-code-prev-tool-durations",
+   "x-claude-code-prompt-id",
+   "x-claude-code-request-class"
+  ]
+ }
+}

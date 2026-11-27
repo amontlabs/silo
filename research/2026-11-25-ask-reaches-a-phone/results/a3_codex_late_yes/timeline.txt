@@ -1,0 +1,16 @@
+   -0.92  mac    listening          {"port": 22999, "holds": {"git": 60, "aws": 50, "pip": 12, "default": 90}, "gather": 2.0}
+    0.00  agent  command.start      {"run": "sed 's#BOUNDARY#{B}#g' {P}/agents/cx_late.json > /tmp/claude-0/-home-user/56cb5b83-c27d-5ecb-ae7c-5c4957f3a75c/scratchpad/agents/cx_late.json && CODEX=/tmp/claude-0/tools/node_modules/.bin/codex KILL_AFTER=400 b
+    1.17  mac    ask.opened         {"ask": "ask_1", "computer": "main", "ends": 1795618074.1831253}
+    1.17  mac    request.held       {"ask": "ask_1", "line": 1, "desc": "push main to 127.0.0.1:22999/repo.git (76c8cf0)"}
+    1.17  mac    ask.version        {"ask": "ask_1", "version": 1, "lines": ["push main to 127.0.0.1:22999/repo.git (76c8cf0)"], "list_hash": "44e2c0bea3dd7ddb687eb604bec6ba96", "ends": 1795618074.1831253}
+    3.21  mac    ask.forwarded      {"ask": "ask_1", "version": 1, "size": 341}
+    3.21  phone  shown              {"ask": "ask_1", "version": 1, "lines": ["push main to 127.0.0.1:22999/repo.git (76c8cf0)"], "sent": 1795616276.2132862, "in_transit": 0.013}
+   61.27  mac    hold.ended         {"ask": "ask_1", "line": 1, "how": "limit"}
+   61.27  mac    request.refused    {"ask": "ask_1", "line": 1, "why": "held, not answered"}
+   91.22  phone  answered           {"ask": "ask_1", "version": 1, "verdict": "yes", "lines": 1}
+   91.22  mac    answer.received    {"ask": "ask_1", "version": 1, "verdict": "yes"}
+   91.22  mac    ask.answered       {"ask": "ask_1", "version": 1, "verdict": "yes", "lines": 1, "issued": 1795616364.2269387, "via": "phone"}
+  111.34  mac    request.passed     {"ask": "ask_1", "line": 1, "why": "late yes, spent once"}
+  111.34  mac    ask.closed         {"ask": "ask_1", "why": "answered and done"}
+  111.35  mac    request.forwarded  {"ask": "ask_1", "line": 1, "status": 200}
+  111.57  agent  command.end        {"exit": 0, "run": "sed 's#BOUNDARY#{B}#g' {P}/agents/cx_late.json > /tmp/claude-0/-home-user/56cb5b83-c27d-5ecb-ae7c-5c4957f3a75c/scratchpad/agents/cx_late.json && CODEX=/tmp/claude-0/tools/node_modules/.bin/codex KILL_

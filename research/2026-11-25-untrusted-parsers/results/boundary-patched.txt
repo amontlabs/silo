@@ -1,0 +1,23 @@
+api.anthropic.com                    /v1/messages                                  -> HTTP/1.1 200 OK
+api.anthropic.com                    /v1/messages                                  -> HTTP/1.1 200 OK
+api.anthropic.com                    /v1/messages                                  -> HTTP/1.1 200 OK
+api.anthropic.com                    https://api.anthropic.com/v1/messages         -> HTTP/1.1 400 Bad Request
+api.anthropic.com                    //v1/messages                                 -> HTTP/1.1 400 Bad Request
+api.anthropic.com                    /v1//messages                                 -> HTTP/1.1 400 Bad Request
+api.anthropic.com                    /v1/./messages                                -> HTTP/1.1 400 Bad Request
+api.anthropic.com                    /v1/x/../messages                             -> HTTP/1.1 400 Bad Request
+api.anthropic.com                    /%761/messages                                -> HTTP/1.1 400 Bad Request
+api.openai.com                       //v1/responses                                -> HTTP/1.1 400 Bad Request
+api.openai.com                       /v1/./responses                               -> HTTP/1.1 400 Bad Request
+generativelanguage.googleapis.com    /v1beta/models/gemini-3.1-pro-preview:generateContent/ -> HTTP/1.1 400 Bad Request
+
+upstream served 3 model calls (72 dollars at its counts) under a $50 budget
+boundary record kinds: {'listening': 1, 'open': 12, 'request': 3, 'call': 3, 'ledgers': 3, 'reply': 3, 'alert': 1, 'reached': 1, 'refused': 9}
+bare-LF TE  : ['HTTP/1.1 400 Bad Request']
+obs-fold CL : ['HTTP/1.1 400 Bad Request']
+space colon : ['HTTP/1.1 400 Bad Request']
+CL with _   : ['HTTP/1.1 400 Bad Request']
+upstream served 0 model calls; boundary counted 0
+boundary at rest: 7 MiB peak
+zstd body of 64 KiB decoding to 2048 MiB: answer b''; boundary peak 134 MiB
+boundary still running: True

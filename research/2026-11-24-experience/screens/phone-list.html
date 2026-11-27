@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Silo phone list</title>
+<style>
+:root {
+  --paper: #f2f2ef; --surface: #fff; --ink: #282a2f; --muted: #666a73; --faint: #8a8e92;
+  --line: #e2e3e0; --rule: #c6c9c5; --accent: #ff9f0a; --accent-ink: #995700; --accent-wash: #fff2dc;
+  --no: #c4493c; --hover: #f1f1ee;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #111314; --surface: #202425; --ink: #e5e7e4; --muted: #a5adaa; --faint: #7f8785;
+    --line: #2f3535; --rule: #4b5454; --accent-ink: #e8b66e; --accent-wash: #30291f; --no: #ee7d70; --hover: #282d2e;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #111314; --surface: #202425; --ink: #e5e7e4; --muted: #a5adaa; --faint: #7f8785;
+  --line: #2f3535; --rule: #4b5454; --accent-ink: #e8b66e; --accent-wash: #30291f; --no: #ee7d70; --hover: #282d2e;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--paper); color: var(--ink); overflow: hidden;
+  font: 15px/20px -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, system-ui, sans-serif;
+}
+code { font: 13px/20px ui-monospace, "SF Mono", Menlo, "JetBrains Mono", monospace; }
+.status { height: 54px; display: flex; justify-content: space-between; align-items: center; padding: 14px 32px 0; font-weight: 600; font-size: 16px; }
+.island { position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 124px; height: 36px; background: #000; border-radius: 20px; }
+.bars { display: inline-flex; gap: 2px; align-items: flex-end; height: 11px; }
+.bars i { width: 3px; background: var(--ink); border-radius: 1px; display: block; }
+.wrap { padding: 8px 16px 0; }
+h1 { font-size: 30px; line-height: 40px; margin: 4px 0 12px; font-weight: 700; }
+
+.card { background: var(--surface); border-radius: 12px; }
+.away { display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 16px; }
+.away .t { font-weight: 500; }
+.away .t span { color: var(--muted); font-weight: 400; }
+.switch { width: 51px; height: 31px; border-radius: 16px; background: var(--rule); position: relative; flex: none; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+.switch.on { background: var(--accent); }
+.switch.on::after { left: 22px; }
+
+h2 { font-size: 13px; line-height: 20px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 20px 16px 6px; display: flex; gap: 6px; }
+h2 .c { color: var(--faint); font-weight: 500; }
+
+.item { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: center; padding: 10px 16px; min-height: 60px; }
+.item + .item { border-top: 1px solid var(--line); margin-left: 16px; padding-left: 0; }
+.item .l1 { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item .l2 { color: var(--muted); font-size: 13px; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item .l1 code { font-weight: 500; }
+
+.btn {
+  font: inherit; font-size: 14px; font-weight: 500; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--rule); border-radius: 8px; height: 32px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px;
+}
+.btn.primary { background: var(--accent-wash); border-color: var(--accent); color: var(--accent-ink); }
+.btn svg { width: 13px; height: 13px; }
+.ask .btns { grid-column: 1 / -1; display: flex; gap: 8px; margin-top: 8px; }
+.ask .btns .btn { flex: 1; justify-content: center; height: 36px; }
+.left { color: var(--accent-ink); font-variant-numeric: tabular-nums; font-size: 13px; font-weight: 600; align-self: start; }
+
+.m { font-family: "DejaVu Sans", -apple-system, sans-serif; font-size: 12px; color: var(--muted); }
+.m.op { color: var(--accent-ink); }
+.q::before { content: "«"; color: var(--faint); } .q::after { content: "»"; color: var(--faint); }
+.mismatch { color: var(--no); }
+
+.tabbar { position: absolute; left: 0; right: 0; bottom: 0; height: 34px; }
+.home { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 134px; height: 5px; border-radius: 3px; background: var(--ink); }
+
+.day { display: none; }
+body.is-day .night { display: none; }
+body.is-day .day { display: block; }
+body.is-day .day.s { display: inline; }
+body.is-day .away.day { display: flex; }
+</style>
+</head>
+<body>
+<div class="island"></div>
+<div class="status"><span class="night s">06:58</span><span class="day s">14:20</span><span class="bars"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:11px"></i></span></div>
+
+<div class="wrap">
+  <h1>Silo</h1>
+
+  <div class="card away night">
+    <span class="t">Away <span>until 07:00</span></span>
+    <span class="switch on" role="switch" aria-checked="true" aria-label="Away until 07:00"></span>
+  </div>
+  <div class="card away day">
+    <span class="t">Away</span>
+    <span class="switch" role="switch" aria-checked="false" aria-label="Away"></span>
+  </div>
+
+  <!-- morning, away on: nothing is held, so no asks -->
+  <section class="night">
+    <h2>Refused while you were away <span class="c">1</span></h2>
+    <div class="card">
+      <div class="item">
+        <div style="min-width:0">
+          <div class="l1">2 pushes to ana/app</div>
+          <div class="l2">main · <span class="m op" role="img" aria-label="Opinion of which-run-did-it">◇</span> claude #2 · 01:12</div>
+        </div>
+        <button class="btn">Allow next time</button>
+      </div>
+    </div>
+
+    <h2>For the morning <span class="c">3</span></h2>
+    <div class="card">
+      <div class="item">
+        <div style="min-width:0">
+          <div class="l1"><code>~/work/shared-fixtures</code></div>
+          <div class="l2">main · deleted 02:47 · 3,412 files</div>
+        </div>
+        <button class="btn primary">Put back</button>
+      </div>
+      <div class="item">
+        <div style="min-width:0">
+          <div class="l1"><span class="m op" role="img" aria-label="Opinion of how-each-run-is-going">◇</span> codex stuck since 04:58</div>
+          <div class="l2">try-bun · no model call for 2 h</div>
+        </div>
+        <button class="btn">Stop run</button>
+      </div>
+      <div class="item">
+        <div style="min-width:0">
+          <div class="l1">claude #1 ended · <span class="m op" role="img" aria-label="Opinion of the claims classifier">◇</span> <span class="mismatch">mismatch</span></div>
+          <div class="l2"><span class="q" aria-label="Words claude #1 wrote">All tests pass</span> · <span class="m" role="img" aria-label="Told by the probe, unverified">◌</span> 3 failed</div>
+        </div>
+        <button class="btn">Receipt</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- day, away off: asks wait for an answer -->
+  <section class="day">
+    <h2>Asks <span class="c">2</span></h2>
+    <div class="card">
+      <div class="item ask">
+        <div style="min-width:0">
+          <div class="l1">Push to github.com/ana/app, main</div>
+          <div class="l2">main · 3 commits · <span class="m op" role="img" aria-label="Opinion of which-run-did-it">◇</span> claude #2</div>
+          <div class="l2"><span class="q" aria-label="Words claude #2 wrote">tests pass, pushing the fix</span></div>
+        </div>
+        <span class="left">74 s</span>
+        <div class="btns">
+          <button class="btn">Deny</button>
+          <button class="btn primary" aria-label="Allow once, needs Face ID">Allow once <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="7" width="11" height="8" rx="2" fill="currentColor"/><path d="M5 7V5a3 3 0 0 1 6 0v2" stroke="currentColor" stroke-width="1.6" fill="none"/></svg></button>
+        </div>
+      </div>
+      <div class="item ask">
+        <div style="min-width:0">
+          <div class="l1">POST to api.stripe.com/v1/refunds</div>
+          <div class="l2">try-bun · secret STRIPE_TEST_KEY · <span class="m op" role="img" aria-label="Opinion of which-run-did-it">◇</span> codex</div>
+        </div>
+        <span class="left">41 s</span>
+        <div class="btns">
+          <button class="btn">Deny</button>
+          <button class="btn primary" aria-label="Allow once, needs Face ID">Allow once <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="7" width="11" height="8" rx="2" fill="currentColor"/><path d="M5 7V5a3 3 0 0 1 6 0v2" stroke="currentColor" stroke-width="1.6" fill="none"/></svg></button>
+        </div>
+      </div>
+    </div>
+
+    <h2>Alerts <span class="c">1</span></h2>
+    <div class="card">
+      <div class="item">
+        <div style="min-width:0">
+          <div class="l1">New host bun.sh</div>
+          <div class="l2">try-bun · 38 MB in · 2 KB out</div>
+        </div>
+        <button class="btn">Deny this host</button>
+      </div>
+    </div>
+  </section>
+</div>
+<div class="home"></div>
+<script>
+if (location.hash === '#day') document.body.classList.add('is-day');
+</script>
+</body>
+</html>

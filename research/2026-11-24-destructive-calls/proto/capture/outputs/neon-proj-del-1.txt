@@ -1,0 +1,3 @@
+$ NEON_API_KEY=test-token-123 -- neonctl projects delete proj-123 --output json
+ERROR: The "chunk" argument must be of type string or an instance of Buffer, TypedArray, or DataView. Received undefined
+--- exit=1 seconds=.964340752

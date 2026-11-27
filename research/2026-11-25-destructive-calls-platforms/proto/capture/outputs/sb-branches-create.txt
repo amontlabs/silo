@@ -1,0 +1,11 @@
+$ SUPABASE_ACCESS_TOKEN=<redacted> SUPABASE_YES=1 DO_NOT_TRACK=1 -- supabase branches create feature --project-ref abcdefghijklmnopqrst
+Warning: --project-ref is deprecated and will be removed in v4. Use --remote=<ref> instead
+Target: project abcdefghijklmnopqrst
+Confirmed by SUPABASE_YES: Create preview branch feature on project abcdefghijklmnopqrst
+Created preview branch:
+
+  
+   ID                   | NAME    | DEFAULT | GIT BRANCH | WITH DATA | STATUS             | CREATED AT (UTC)    | UPDATED AT (UTC)    
+  ----------------------|---------|---------|------------|-----------|--------------------|---------------------|---------------------
+   bbbbbbbbbbbbbbbbbbbb | feature | false   |            | false     | FUNCTIONS_DEPLOYED | 2026-11-24 00:00:00 | 2026-11-24 00:00:00 
+--- exit=0 seconds=.511975284

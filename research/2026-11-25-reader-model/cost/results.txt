@@ -1,0 +1,17 @@
+Tokens per call, #400's 75 clean summaries (small model's calls, Anthropic count, CLI overhead removed)
+  inline   in    558 (max 771)  out   95  n=75
+  extract  in    780 (max 840)  out  112  n=75
+  judge    in    627 (max 826)  out   89  n=75
+  two readings, three calls: in 1966, out 295
+
+Price of one summary read twice (three calls), USD. batch: the providers' batch price (half)
+  model                    one summary     batch    4 runs   50 runs  50 runs x 30
+  Claude Haiku 5.5             0.00034   0.00017    0.0014     0.017          0.52
+  Claude Sonnet 5.5            0.00688   0.00344    0.0275     0.344         10.33
+  GPT-5 nano                   0.00022   0.00011    0.0009     0.011          0.32
+  GPT-5 mini                   0.00108   0.00054    0.0043     0.054          1.62
+  Gemini 3.1 Flash-Lite        0.00093   0.00047    0.0037     0.047          1.40
+  Gemini 3.5 Flash             0.00561   0.00280    0.0224     0.280          8.41
+
+  with #371's receipt of claude #1 (~1029 tokens, read by two of the three calls): Claude Haiku 5.5 0.0005, Claude Sonnet 5.5 0.0110, GPT-5 nano 0.0003, GPT-5 mini 0.0016, Gemini 3.1 Flash-Lite 0.0014, Gemini 3.5 Flash 0.0087
+  with a long run: 200 commands, 50 files (~7143 tokens, read by two of the three calls): Claude Haiku 5.5 0.0018, Claude Sonnet 5.5 0.0355, GPT-5 nano 0.0009, GPT-5 mini 0.0047, Gemini 3.1 Flash-Lite 0.0045, Gemini 3.5 Flash 0.0270

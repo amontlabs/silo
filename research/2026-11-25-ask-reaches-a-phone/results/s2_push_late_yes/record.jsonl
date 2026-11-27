@@ -1,0 +1,18 @@
+{"t": 1795615878.7963, "kind": "listening", "port": 37114, "holds": {"git": 60, "aws": 50, "pip": 12, "default": 90}, "gather": 2.0}
+{"t": 1795615879.5405, "kind": "ask.opened", "ask": "ask_1", "computer": "main", "ends": 1795617679.540537}
+{"t": 1795615879.5406, "kind": "request.held", "ask": "ask_1", "line": 1, "desc": "push main to 127.0.0.1:37114/repo.git (51935bb)"}
+{"t": 1795615879.5406, "kind": "ask.version", "ask": "ask_1", "version": 1, "lines": ["push main to 127.0.0.1:37114/repo.git (51935bb)"], "list_hash": "9d57ac3f163862c4f6219f658e571d5b", "ends": 1795617679.540537}
+{"t": 1795615881.556, "kind": "ask.forwarded", "ask": "ask_1", "version": 1, "size": 340}
+{"t": 1795615939.604, "kind": "hold.ended", "ask": "ask_1", "line": 1, "how": "limit"}
+{"t": 1795615939.6043, "kind": "request.refused", "ask": "ask_1", "line": 1, "why": "held, not answered"}
+{"t": 1795615969.5642, "kind": "answer.received", "ask": "ask_1", "version": 1, "verdict": "yes"}
+{"t": 1795615969.5644, "kind": "ask.answered", "ask": "ask_1", "version": 1, "verdict": "yes", "lines": 1, "issued": 1795615969.5606816, "via": "phone"}
+{"t": 1795615999.5388, "kind": "request.passed", "ask": "ask_1", "line": 1, "why": "late yes, spent once"}
+{"t": 1795615999.5389, "kind": "ask.closed", "ask": "ask_1", "why": "answered and done"}
+{"t": 1795615999.5555, "kind": "request.forwarded", "ask": "ask_1", "line": 1, "status": 200}
+{"t": 1795616019.6073, "kind": "ask.opened", "ask": "ask_2", "computer": "main", "ends": 1795617819.60725}
+{"t": 1795616019.6074, "kind": "request.held", "ask": "ask_2", "line": 1, "desc": "push main to 127.0.0.1:37114/repo.git (07d844c)"}
+{"t": 1795616019.6074, "kind": "ask.version", "ask": "ask_2", "version": 1, "lines": ["push main to 127.0.0.1:37114/repo.git (07d844c)"], "list_hash": "305b52aa3216d2fc12200764b7bdeef8", "ends": 1795617819.60725}
+{"t": 1795616021.6435, "kind": "ask.forwarded", "ask": "ask_2", "version": 1, "size": 338}
+{"t": 1795616079.6805, "kind": "hold.ended", "ask": "ask_2", "line": 1, "how": "limit"}
+{"t": 1795616079.6807, "kind": "request.refused", "ask": "ask_2", "line": 1, "why": "held, not answered"}

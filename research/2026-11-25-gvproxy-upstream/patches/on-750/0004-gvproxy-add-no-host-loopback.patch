@@ -1,0 +1,129 @@
+From 96413ae800b7d46474bdf80e90d5956d6a523915 Mon Sep 17 00:00:00 2001
+From: silo-research <noreply@anthropic.com>
+Date: Wed, 25 Nov 2026 14:02:02 +0000
+Subject: [PATCH 04/10] gvproxy: add -no-host-loopback
+
+By default the NAT table maps the host address of the virtual network
+(192.168.127.254) to 127.0.0.1, so the guest reaches every service bound
+to the host's loopback interface. Those services are often bound there
+precisely because they trust their callers: development servers,
+databases, credential helpers, the API of other tools.
+
+The configuration file cannot turn this off: an empty `stack.nat` is
+replaced by the default entry.
+
+-no-host-loopback, or `no-host-loopback: true` in the configuration
+file, leaves out the default NAT entry and the gateway virtual IP that
+goes with it. NAT entries of the configuration file are kept, but one
+that leads to a loopback address is refused, so that the setting means
+what it says. Forwards from the host into the guest are unchanged.
+---
+ cmd/gvproxy/config.go      | 16 +++++++++++++--
+ cmd/gvproxy/config_test.go | 42 ++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 56 insertions(+), 2 deletions(-)
+
+diff --git a/cmd/gvproxy/config.go b/cmd/gvproxy/config.go
+index b9ca10eb..6bdb6627 100644
+--- a/cmd/gvproxy/config.go
++++ b/cmd/gvproxy/config.go
+@@ -51,6 +51,7 @@ type GvproxyArgs struct {
+ 	ec2MetadataAccess  bool
+ 	apiTokenFile       string
+ 	noGatewayAPI       bool
++	noHostLoopback     bool
+ }
+ 
+ type GvproxyConfig struct {
+@@ -72,6 +73,7 @@ type GvproxyConfig struct {
+ 	NotificationSocket string                 `yaml:"notification,omitempty"`
+ 	APITokenFile       string                 `yaml:"api-token-file,omitempty"`
+ 	NoGatewayAPI       bool                   `yaml:"no-gateway-api,omitempty"`
++	NoHostLoopback     bool                   `yaml:"no-host-loopback,omitempty"`
+ }
+ 
+ type GvproxyConfigForward struct {
+@@ -147,6 +149,7 @@ func GvproxyArgParse(flagSet *flag.FlagSet, args *GvproxyArgs, argv []string) (*
+ 	flagSet.StringVar(&args.notificationSocket, "notification", "", "Socket to be used to send network-ready notifications")
+ 	flagSet.StringVar(&args.apiTokenFile, "api-token-file", "", "Path to file where API token will be read from (needs 0600 permissions on macOS and Linux)")
+ 	flagSet.BoolVar(&args.noGatewayAPI, "no-gateway-api", false, "Do not serve the HTTP API on the gateway's port 80 inside the virtual network; -listen and -services are not affected")
++	flagSet.BoolVar(&args.noHostLoopback, "no-host-loopback", false, "Map no address of the virtual network to the host's loopback: no default NAT entry from the host address to 127.0.0.1")
+ 	if err := flagSet.Parse(argv); err != nil {
+ 		return nil, err
+ 	}
+@@ -256,12 +259,21 @@ func GvproxyConfigure(config *GvproxyConfig, args *GvproxyArgs, version string)
+ 	if config.Stack.GatewayMacAddress == "" {
+ 		config.Stack.GatewayMacAddress = "5a:94:ef:e4:0c:dd"
+ 	}
+-	if len(config.Stack.NAT) == 0 {
++	if args.noHostLoopback {
++		config.NoHostLoopback = true
++	}
++	if config.NoHostLoopback {
++		for from, to := range config.Stack.NAT {
++			if ip := net.ParseIP(to); ip != nil && ip.IsLoopback() {
++				return config, fmt.Errorf("no-host-loopback: the NAT table maps %s to the loopback address %s", from, to)
++			}
++		}
++	} else if len(config.Stack.NAT) == 0 {
+ 		config.Stack.NAT = map[string]string{
+ 			config.Stack.HostIP: "127.0.0.1",
+ 		}
+ 	}
+-	if len(config.Stack.GatewayVirtualIPs) == 0 {
++	if !config.NoHostLoopback && len(config.Stack.GatewayVirtualIPs) == 0 {
+ 		config.Stack.GatewayVirtualIPs = []string{
+ 			config.Stack.HostIP,
+ 		}
+diff --git a/cmd/gvproxy/config_test.go b/cmd/gvproxy/config_test.go
+index 7ace7645..15b62b1b 100644
+--- a/cmd/gvproxy/config_test.go
++++ b/cmd/gvproxy/config_test.go
+@@ -792,3 +792,45 @@ func TestNoGatewayAPI(t *testing.T) {
+ 		assert.Equal(t, v.want, cnf.NoGatewayAPI, v.name)
+ 	}
+ }
++
++func TestNoHostLoopback(t *testing.T) {
++	t.Parallel()
++	for _, v := range []struct {
++		name      string
++		argv      []string
++		config    string
++		nat       map[string]string
++		virtualIP []string
++		err       string
++	}{
++		{"default", nil, "", map[string]string{"192.168.127.254": "127.0.0.1"}, []string{"192.168.127.254"}, ""},
++		{"flag", []string{"-no-host-loopback"}, "", nil, nil, ""},
++		{"config file", nil, "no-host-loopback: true\n", nil, nil, ""},
++		{"own NAT to another address is kept", []string{"-no-host-loopback"},
++			"stack:\n  nat:\n    192.168.127.253: 192.0.2.7\n", map[string]string{"192.168.127.253": "192.0.2.7"}, nil, ""},
++		{"own NAT to the loopback is refused", []string{"-no-host-loopback"},
++			"stack:\n  nat:\n    192.168.127.253: 127.0.0.1\n", nil, nil, "no-host-loopback"},
++	} {
++		var cnf GvproxyConfig
++		var args GvproxyArgs
++		_, err := GvproxyArgParse(flag.NewFlagSet(os.Args[0], flag.ContinueOnError), &args, v.argv)
++		require.NoError(t, err, v.name)
++		require.NoError(t, yaml.Unmarshal([]byte(v.config), &cnf), v.name)
++		_, err = GvproxyConfigure(&cnf, &args, "testing")
++		if v.err != "" {
++			require.ErrorContains(t, err, v.err, v.name)
++			continue
++		}
++		require.NoError(t, err, v.name)
++		if v.nat == nil {
++			assert.Empty(t, cnf.Stack.NAT, v.name)
++		} else {
++			assert.Equal(t, v.nat, cnf.Stack.NAT, v.name)
++		}
++		if v.virtualIP == nil {
++			assert.Empty(t, cnf.Stack.GatewayVirtualIPs, v.name)
++		} else {
++			assert.Equal(t, v.virtualIP, cnf.Stack.GatewayVirtualIPs, v.name)
++		}
++	}
++}
+-- 
+2.43.0
+

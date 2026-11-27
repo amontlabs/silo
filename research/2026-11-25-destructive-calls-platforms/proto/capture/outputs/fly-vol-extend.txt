@@ -1,0 +1,28 @@
+$ FLY_API_TOKEN=FlyV1 fm2_test-token-123 FLY_NO_UPDATE_CHECK=1 FLY_METRICS_TOKEN=- -- flyctl volumes extend vol_123 -a my-app -s 20 --yes
+panic: runtime error: invalid memory address or nil pointer dereference
+[signal SIGSEGV: segmentation violation code=0x1 addr=0x0 pc=0x27c631d]
+
+goroutine 1 [running]:
+github.com/superfly/flyctl/internal/command/volumes.printVolume({0x4e6cc18, 0x3ae86d782048}, 0x0, {0x7ffedf667e3c, 0x6})
+	/root/go/pkg/mod/github.com/superfly/flyctl@v0.5.17/internal/command/volumes/volumes.go:55 +0x7d
+github.com/superfly/flyctl/internal/command/volumes.runExtend({0x4e981d0, 0x3ae86dae2ff0})
+	/root/go/pkg/mod/github.com/superfly/flyctl@v0.5.17/internal/command/volumes/extend.go:111 +0x46a
+github.com/superfly/flyctl/internal/tracing.RunWorkflow({0x4e981d0, 0x3ae86da31860}, {0x28b8427, 0x12}, {0x7ffedf667e3c?, 0x0?}, 0x4eb6a88)
+	/root/go/pkg/mod/github.com/superfly/flyctl@v0.5.17/internal/tracing/workflow.go:32 +0x158
+github.com/superfly/flyctl/internal/command.newRunE.func1(0x3ae86e170608, {0x3ae86e0f8720?, 0x4?, 0x285478d?})
+	/root/go/pkg/mod/github.com/superfly/flyctl@v0.5.17/internal/command/command.go:168 +0x43d
+github.com/spf13/cobra.(*Command).execute(0x3ae86e170608, {0x3ae86e0f86c0, 0x6, 0x6})
+	/root/go/pkg/mod/github.com/spf13/cobra@v1.10.2/command.go:1015 +0xb3c
+github.com/spf13/cobra.(*Command).ExecuteC(0x3ae86dcb2908)
+	/root/go/pkg/mod/github.com/spf13/cobra@v1.10.2/command.go:1148 +0x450
+github.com/spf13/cobra.(*Command).ExecuteContextC(...)
+	/root/go/pkg/mod/github.com/spf13/cobra@v1.10.2/command.go:1080
+github.com/superfly/flyctl/internal/command/root.ExecuteContextC({0x4e981d0, 0x3ae86d75ae10}, 0x3ae86dcb2908)
+	/root/go/pkg/mod/github.com/superfly/flyctl@v0.5.17/internal/command/root/execute.go:49 +0x16b
+github.com/superfly/flyctl/internal/cli.Run({0x4e98358, 0x3ae86da3f080}, 0x3ae86e089e00, {0x3ae86d7dc010, 0x8, 0x8})
+	/root/go/pkg/mod/github.com/superfly/flyctl@v0.5.17/internal/cli/cli.go:98 +0x830
+main.run()
+	/root/go/pkg/mod/github.com/superfly/flyctl@v0.5.17/main.go:47 +0x165
+main.main()
+	/root/go/pkg/mod/github.com/superfly/flyctl@v0.5.17/main.go:26 +0x18
+--- exit=2 seconds=.094603546

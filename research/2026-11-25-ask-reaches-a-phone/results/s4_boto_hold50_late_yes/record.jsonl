@@ -1,0 +1,12 @@
+{"t": 1795615878.8443, "kind": "listening", "port": 39842, "holds": {"git": 600, "aws": 50, "pip": 12, "default": 90}, "gather": 2.0}
+{"t": 1795615879.7678, "kind": "ask.opened", "ask": "ask_1", "computer": "main", "ends": 1795617679.7678356}
+{"t": 1795615879.7679, "kind": "request.held", "ask": "ask_1", "line": 1, "desc": "PUT 127.0.0.1:39842/prod-backups/db/dump.sql (1000 bytes)"}
+{"t": 1795615879.768, "kind": "ask.version", "ask": "ask_1", "version": 1, "lines": ["PUT 127.0.0.1:39842/prod-backups/db/dump.sql (1000 bytes)"], "list_hash": "1b888109a80366ab10e388796b6750fb", "ends": 1795617679.7678356}
+{"t": 1795615881.8081, "kind": "ask.forwarded", "ask": "ask_1", "version": 1, "size": 350}
+{"t": 1795615929.8206, "kind": "hold.ended", "ask": "ask_1", "line": 1, "how": "limit"}
+{"t": 1795615929.8209, "kind": "request.refused", "ask": "ask_1", "line": 1, "why": "held, not answered"}
+{"t": 1795615949.8152, "kind": "answer.received", "ask": "ask_1", "version": 1, "verdict": "yes"}
+{"t": 1795615949.8152, "kind": "ask.answered", "ask": "ask_1", "version": 1, "verdict": "yes", "lines": 1, "issued": 1795615949.8124003, "via": "phone"}
+{"t": 1795615979.7539, "kind": "request.passed", "ask": "ask_1", "line": 1, "why": "late yes, spent once"}
+{"t": 1795615979.754, "kind": "ask.closed", "ask": "ask_1", "why": "answered and done"}
+{"t": 1795615979.7541, "kind": "request.forwarded", "ask": "ask_1", "line": 1, "status": 200}

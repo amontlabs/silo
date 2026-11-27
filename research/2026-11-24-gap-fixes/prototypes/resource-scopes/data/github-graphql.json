@@ -1,0 +1,2555 @@
+{
+"source": "docs.github.com/public/fpt/schema.docs.graphql",
+"mutations": {
+"abortQueuedMigrations": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.ownerId"
+],
+"why": "name names a setting of who may do what"
+},
+"abortRepositoryMigration": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.migrationId"
+],
+"why": "name names a setting of who may do what"
+},
+"acceptEnterpriseAdministratorInvitation": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.invitationId"
+],
+"why": "name names a setting of who may do what"
+},
+"acceptEnterpriseMemberInvitation": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.invitationId"
+],
+"why": "name names a setting of who may do what"
+},
+"acceptTopicSuggestion": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.repositoryId"
+],
+"why": "name starts with a verb that edits"
+},
+"accessUserNamespaceRepository": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId",
+"input.repositoryId"
+],
+"why": "exact"
+},
+"addAssigneesToAssignable": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.agentAssignment.targetRepositoryId",
+"input.assignableId",
+"input.assigneeIds",
+"input.assignees.actorId"
+],
+"why": "name starts with a verb that edits"
+},
+"addBlockedBy": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.blockingIssueId",
+"input.issueId"
+],
+"why": "name starts with a verb that edits"
+},
+"addCloseIssueReferences": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.issueId",
+"input.pullRequestIds"
+],
+"why": "name starts with a verb that edits"
+},
+"addComment": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.subjectId"
+],
+"why": "name starts with a verb that edits"
+},
+"addDiscussionComment": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.discussionId",
+"input.replyToId"
+],
+"why": "name starts with a verb that edits"
+},
+"addDiscussionPollVote": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.pollOptionId"
+],
+"why": "name starts with a verb that edits"
+},
+"addEnterpriseOrganizationMember": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId",
+"input.organizationId",
+"input.userIds"
+],
+"why": "name names a setting of who may do what"
+},
+"addEnterpriseSupportEntitlement": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"addLabelsToLabelable": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.labelIds",
+"input.labelableId",
+"input.labels.labelId"
+],
+"why": "name starts with a verb that edits"
+},
+"addProjectCard": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.contentId",
+"input.projectColumnId"
+],
+"why": "name starts with a verb that edits"
+},
+"addProjectColumn": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.projectId"
+],
+"why": "name starts with a verb that edits"
+},
+"addProjectV2DraftIssue": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.assigneeIds",
+"input.projectId"
+],
+"why": "name starts with a verb that edits"
+},
+"addProjectV2ItemById": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.contentId",
+"input.projectId"
+],
+"why": "name starts with a verb that edits"
+},
+"addPullRequestCreationCapBypassUsers": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.repositoryId",
+"input.userIds"
+],
+"why": "exact"
+},
+"addPullRequestReview": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.pullRequestId"
+],
+"why": "name starts with a verb that edits"
+},
+"addPullRequestReviewComment": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.pullRequestId",
+"input.pullRequestReviewId"
+],
+"why": "name starts with a verb that edits"
+},
+"addPullRequestReviewThread": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.pullRequestId",
+"input.pullRequestReviewId"
+],
+"why": "name starts with a verb that edits"
+},
+"addPullRequestReviewThreadReply": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.pullRequestReviewId",
+"input.pullRequestReviewThreadId"
+],
+"why": "name starts with a verb that edits"
+},
+"addReaction": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.subjectId"
+],
+"why": "name starts with a verb that edits"
+},
+"addRelatesTo": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.issueId",
+"input.relatedIssueId"
+],
+"why": "name starts with a verb that edits"
+},
+"addStar": {
+"effect": "change",
+"tags": [
+"account"
+],
+"places": [
+"input.starrableId"
+],
+"why": "exact"
+},
+"addSubIssue": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.issueId",
+"input.subIssueId"
+],
+"why": "name starts with a verb that edits"
+},
+"addUpvote": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.subjectId"
+],
+"why": "name starts with a verb that edits"
+},
+"addVerifiableDomain": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.ownerId"
+],
+"why": "name names a setting of who may do what"
+},
+"applyPendingIssueSuggestions": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.actorId",
+"input.issueId",
+"input.suggestions.assigneeId",
+"input.suggestions.issueFieldId",
+"input.suggestions.issueTypeId",
+"input.suggestions.labelId"
+],
+"why": "name starts with a verb that edits"
+},
+"approveDeployments": {
+"effect": "runs",
+"tags": [
+"deploy"
+],
+"places": [
+"input.environmentIds",
+"input.workflowRunId"
+],
+"why": "exact"
+},
+"approveVerifiableDomain": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.id"
+],
+"why": "name names a setting of who may do what"
+},
+"archiveProjectV2Item": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.itemId",
+"input.projectId"
+],
+"why": "name starts with a verb that edits"
+},
+"archivePullRequest": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.pullRequestId"
+],
+"why": "name starts with a verb that edits"
+},
+"archiveRepository": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.repositoryId"
+],
+"why": "exact"
+},
+"cancelEnterpriseAdminInvitation": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.invitationId"
+],
+"why": "name names a setting of who may do what"
+},
+"cancelEnterpriseMemberInvitation": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.invitationId"
+],
+"why": "name names a setting of who may do what"
+},
+"cancelSponsorship": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.sponsorId",
+"input.sponsorLogin",
+"input.sponsorableId",
+"input.sponsorableLogin"
+],
+"why": "name starts with a verb that edits"
+},
+"changeUserStatus": {
+"effect": "change",
+"tags": [
+"account"
+],
+"places": [
+"input.organizationId"
+],
+"why": "exact"
+},
+"clearLabelsFromLabelable": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.labelableId"
+],
+"why": "name starts with a verb that edits"
+},
+"clearProjectV2ItemFieldValue": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.fieldId",
+"input.itemId",
+"input.projectId"
+],
+"why": "name starts with a verb that edits"
+},
+"cloneProject": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.sourceId",
+"input.targetOwnerId"
+],
+"why": "name starts with a verb that edits"
+},
+"cloneTemplateRepository": {
+"effect": "create",
+"tags": [],
+"places": [
+"input.ownerId",
+"input.repositoryId"
+],
+"why": "exact"
+},
+"closeDiscussion": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.discussionId"
+],
+"why": "name starts with a verb that edits"
+},
+"closeIssue": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.duplicateIssueId",
+"input.issueId"
+],
+"why": "name starts with a verb that edits"
+},
+"closePullRequest": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.pullRequestId"
+],
+"why": "name starts with a verb that edits"
+},
+"convertProjectCardNoteToIssue": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.projectCardId",
+"input.repositoryId"
+],
+"why": "name starts with a verb that edits"
+},
+"convertProjectV2DraftIssueItemToIssue": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.itemId",
+"input.repositoryId"
+],
+"why": "name starts with a verb that edits"
+},
+"convertPullRequestToDraft": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.pullRequestId"
+],
+"why": "name starts with a verb that edits"
+},
+"copyProjectV2": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.ownerId",
+"input.projectId"
+],
+"why": "name starts with a verb that edits"
+},
+"createAttributionInvitation": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.ownerId",
+"input.sourceId",
+"input.targetId"
+],
+"why": "exact"
+},
+"createBranchProtectionRule": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.bypassForcePushActorIds",
+"input.bypassPullRequestActorIds",
+"input.pushActorIds",
+"input.repositoryId",
+"input.requiredStatusChecks.appId",
+"input.reviewDismissalActorIds"
+],
+"why": "name names a setting of who may do what"
+},
+"createCheckRun": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.externalId",
+"input.repositoryId"
+],
+"why": "name starts with a verb that edits"
+},
+"createCheckSuite": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.repositoryId"
+],
+"why": "name starts with a verb that edits"
+},
+"createCommitOnBranch": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.branch.id",
+"input.branch.repositoryNameWithOwner"
+],
+"why": "name starts with a verb that edits"
+},
+"createDeployment": {
+"effect": "change",
+"tags": [
+"deploy"
+],
+"places": [
+"input.refId",
+"input.repositoryId"
+],
+"why": "exact"
+},
+"createDeploymentStatus": {
+"effect": "change",
+"tags": [
+"deploy"
+],
+"places": [
+"input.deploymentId"
+],
+"why": "exact"
+},
+"createDiscussion": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.categoryId",
+"input.repositoryId"
+],
+"why": "name starts with a verb that edits"
+},
+"createEnterpriseOrganization": {
+"effect": "create",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "exact"
+},
+"createEnvironment": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.repositoryId"
+],
+"why": "name names a setting of who may do what"
+},
+"createIpAllowListEntry": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.ownerId"
+],
+"why": "name names a setting of who may do what"
+},
+"createIssue": {
+"effect": "change",
+"tags": [
+"body"
+],
+"places": [
+"input.agentAssignment.targetRepositoryId",
+"input.assigneeIds",
+"input.issueFields.fieldId",
+"input.issueFields.multiSelectOptionIds",
+"input.issueFields.singleSelectOptionId",
+"input.issueTypeId",
+"input.labelIds",
+"input.milestoneId",
+"input.parentIssueId",
+"input.projectIds",
+"input.repositoryId",
+"input.statusId"
+],
+"why": "exact"
+},
+"createIssueField": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.ownerId"
+],
+"why": "name starts with a verb that edits"
+},
+"createIssueFieldValue": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.issueField.fieldId",
+"input.issueField.multiSelectOptionIds",
+"input.issueField.singleSelectOptionId",
+"input.issueId"
+],
+"why": "name starts with a verb that edits"
+},
+"createIssueType": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.ownerId"
+],
+"why": "name starts with a verb that edits"
+},
+"createLabel": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.repositoryId"
+],
+"why": "name starts with a verb that edits"
+},
+"createLinkedBranch": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.issueId",
+"input.repositoryId"
+],
+"why": "name starts with a verb that edits"
+},
+"createMigrationSource": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.ownerId"
+],
+"why": "name names a setting of who may do what"
+},
+"createProject": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.ownerId",
+"input.repositoryIds"
+],
+"why": "name starts with a verb that edits"
+},
+"createProjectV2": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.ownerId",
+"input.repositoryId",
+"input.teamId"
+],
+"why": "name starts with a verb that edits"
+},
+"createProjectV2Field": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.iterationConfiguration.iterations.id",
+"input.multiSelectOptions.id",
+"input.projectId",
+"input.singleSelectOptions.id"
+],
+"why": "name starts with a verb that edits"
+},
+"createProjectV2IssueField": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.issueFieldId",
+"input.projectId"
+],
+"why": "name starts with a verb that edits"
+},
+"createProjectV2StatusUpdate": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.projectId"
+],
+"why": "name starts with a verb that edits"
+},
+"createProjectV2View": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.configuration.visibleFieldIds",
+"input.projectId"
+],
+"why": "name starts with a verb that edits"
+},
+"createPullRequest": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.headRepositoryId",
+"input.repositoryId"
+],
+"why": "name starts with a verb that edits"
+},
+"createRef": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.repositoryId"
+],
+"why": "name starts with a verb that edits"
+},
+"createRepository": {
+"effect": "create",
+"tags": [],
+"places": [
+"input.ownerId",
+"input.teamId"
+],
+"why": "exact"
+},
+"createRepositoryCustomProperty": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.sourceId"
+],
+"why": "name names a setting of who may do what"
+},
+"createRepositoryRuleset": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.bypassActors.actorId",
+"input.bypassActors.enterpriseRoleDatabaseId",
+"input.bypassActors.repositoryRoleDatabaseId",
+"input.conditions.repositoryId.repositoryIds",
+"input.rules.id",
+"input.sourceId"
+],
+"why": "name names a setting of who may do what"
+},
+"createSponsorsListing": {
+"effect": "expose",
+"tags": [
+"publish"
+],
+"places": [
+"input.fiscalHostLogin",
+"input.sponsorableLogin"
+],
+"why": "exact"
+},
+"createSponsorsTier": {
+"effect": "expose",
+"tags": [
+"publish"
+],
+"places": [
+"input.repositoryId",
+"input.repositoryOwnerLogin",
+"input.sponsorableId",
+"input.sponsorableLogin"
+],
+"why": "exact"
+},
+"createSponsorship": {
+"effect": "expose",
+"tags": [
+"pays"
+],
+"places": [
+"input.sponsorId",
+"input.sponsorLogin",
+"input.sponsorableId",
+"input.sponsorableLogin",
+"input.tierId"
+],
+"why": "exact"
+},
+"createSponsorships": {
+"effect": "expose",
+"tags": [
+"pays"
+],
+"places": [
+"input.sponsorLogin",
+"input.sponsorships.sponsorableId",
+"input.sponsorships.sponsorableLogin"
+],
+"why": "exact"
+},
+"createUserList": {
+"effect": "change",
+"tags": [],
+"places": [],
+"why": "name starts with a verb that edits"
+},
+"declineTopicSuggestion": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.repositoryId"
+],
+"why": "name starts with a verb that edits"
+},
+"deleteBranchProtectionRule": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.branchProtectionRuleId"
+],
+"why": "name names a setting of who may do what"
+},
+"deleteDeployment": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.id"
+],
+"why": "name starts with delete"
+},
+"deleteDiscussion": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.id"
+],
+"why": "name starts with delete"
+},
+"deleteDiscussionComment": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.id"
+],
+"why": "name starts with delete"
+},
+"deleteEnvironment": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.id"
+],
+"why": "name names a setting of who may do what"
+},
+"deleteIpAllowListEntry": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.ipAllowListEntryId"
+],
+"why": "name names a setting of who may do what"
+},
+"deleteIssue": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.issueId"
+],
+"why": "name starts with delete"
+},
+"deleteIssueComment": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.id"
+],
+"why": "name starts with delete"
+},
+"deleteIssueField": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.fieldId"
+],
+"why": "name starts with delete"
+},
+"deleteIssueFieldValue": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.fieldId",
+"input.issueId"
+],
+"why": "name starts with delete"
+},
+"deleteIssueType": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.issueTypeId"
+],
+"why": "name starts with delete"
+},
+"deleteLabel": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.id"
+],
+"why": "name starts with delete"
+},
+"deleteLinkedBranch": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.linkedBranchId"
+],
+"why": "name starts with delete"
+},
+"deletePackageVersion": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.packageVersionId"
+],
+"why": "name starts with delete"
+},
+"deleteProject": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.projectId"
+],
+"why": "name starts with delete"
+},
+"deleteProjectCard": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.cardId"
+],
+"why": "name starts with delete"
+},
+"deleteProjectColumn": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.columnId"
+],
+"why": "name starts with delete"
+},
+"deleteProjectV2": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.projectId"
+],
+"why": "name starts with delete"
+},
+"deleteProjectV2Field": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.fieldId"
+],
+"why": "name starts with delete"
+},
+"deleteProjectV2Item": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.itemId",
+"input.projectId"
+],
+"why": "name starts with delete"
+},
+"deleteProjectV2StatusUpdate": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.statusUpdateId"
+],
+"why": "name starts with delete"
+},
+"deleteProjectV2View": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.viewId"
+],
+"why": "name starts with delete"
+},
+"deleteProjectV2Workflow": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.workflowId"
+],
+"why": "name starts with delete"
+},
+"deletePullRequestReview": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.pullRequestReviewId"
+],
+"why": "name starts with delete"
+},
+"deletePullRequestReviewComment": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.id"
+],
+"why": "name starts with delete"
+},
+"deleteRef": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.refId"
+],
+"why": "name starts with delete"
+},
+"deleteRepositoryCustomProperty": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.id"
+],
+"why": "name names a setting of who may do what"
+},
+"deleteRepositoryRuleset": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.repositoryRulesetId"
+],
+"why": "name names a setting of who may do what"
+},
+"deleteUserList": {
+"effect": "destroy",
+"tags": [],
+"places": [
+"input.listId"
+],
+"why": "name starts with delete"
+},
+"deleteVerifiableDomain": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.id"
+],
+"why": "name names a setting of who may do what"
+},
+"dequeuePullRequest": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.id"
+],
+"why": "name starts with a verb that edits"
+},
+"disablePullRequestAutoMerge": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.pullRequestId"
+],
+"why": "name starts with a verb that edits"
+},
+"dismissPullRequestReview": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.pullRequestReviewId"
+],
+"why": "name starts with a verb that edits"
+},
+"dismissRepositoryVulnerabilityAlert": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.repositoryVulnerabilityAlertId"
+],
+"why": "name starts with a verb that edits"
+},
+"enablePullRequestAutoMerge": {
+"effect": "change",
+"tags": [
+"merge"
+],
+"places": [
+"input.pullRequestId"
+],
+"why": "exact"
+},
+"enqueuePullRequest": {
+"effect": "change",
+"tags": [
+"merge"
+],
+"places": [
+"input.pullRequestId"
+],
+"why": "exact"
+},
+"followOrganization": {
+"effect": "change",
+"tags": [
+"account"
+],
+"places": [
+"input.organizationId"
+],
+"why": "exact"
+},
+"followUser": {
+"effect": "change",
+"tags": [
+"account"
+],
+"places": [
+"input.userId"
+],
+"why": "exact"
+},
+"grantEnterpriseOrganizationsMigratorRole": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"grantMigratorRole": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.organizationId"
+],
+"why": "name names a setting of who may do what"
+},
+"importProject": {
+"effect": "change",
+"tags": [],
+"places": [],
+"why": "name starts with a verb that edits"
+},
+"inviteEnterpriseAdmin": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"inviteEnterpriseMember": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"linkProjectV2ToRepository": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.projectId",
+"input.repositoryId"
+],
+"why": "name starts with a verb that edits"
+},
+"linkProjectV2ToTeam": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.projectId",
+"input.teamId"
+],
+"why": "name starts with a verb that edits"
+},
+"linkRepositoryToProject": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.projectId",
+"input.repositoryId"
+],
+"why": "name starts with a verb that edits"
+},
+"lockLockable": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.lockableId"
+],
+"why": "name starts with a verb that edits"
+},
+"markDiscussionCommentAsAnswer": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.id"
+],
+"why": "name starts with a verb that edits"
+},
+"markFileAsViewed": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.pullRequestId"
+],
+"why": "name starts with a verb that edits"
+},
+"markProjectV2AsTemplate": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.projectId"
+],
+"why": "name starts with a verb that edits"
+},
+"markPullRequestReadyForReview": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.pullRequestId"
+],
+"why": "name starts with a verb that edits"
+},
+"mergeBranch": {
+"effect": "change",
+"tags": [
+"merge"
+],
+"places": [
+"input.repositoryId"
+],
+"why": "exact"
+},
+"mergePullRequest": {
+"effect": "change",
+"tags": [
+"merge"
+],
+"places": [
+"input.pullRequestId"
+],
+"why": "exact"
+},
+"minimizeComment": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.subjectId"
+],
+"why": "name starts with a verb that edits"
+},
+"moveProjectCard": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.afterCardId",
+"input.cardId",
+"input.columnId"
+],
+"why": "name starts with a verb that edits"
+},
+"moveProjectColumn": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.afterColumnId",
+"input.columnId"
+],
+"why": "name starts with a verb that edits"
+},
+"pinEnvironment": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.environmentId"
+],
+"why": "name names a setting of who may do what"
+},
+"pinIssue": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.issueId"
+],
+"why": "name starts with a verb that edits"
+},
+"pinIssueComment": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.issueCommentId"
+],
+"why": "name starts with a verb that edits"
+},
+"promoteRepositoryCustomProperty": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.repositoryCustomPropertyId"
+],
+"why": "name names a setting of who may do what"
+},
+"publishSponsorsTier": {
+"effect": "expose",
+"tags": [
+"publish"
+],
+"places": [
+"input.tierId"
+],
+"why": "exact"
+},
+"regenerateEnterpriseIdentityProviderRecoveryCodes": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"regenerateVerifiableDomainToken": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.id"
+],
+"why": "name names a setting of who may do what"
+},
+"rejectDeployments": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.environmentIds",
+"input.workflowRunId"
+],
+"why": "name starts with a verb that edits"
+},
+"rejectPendingIssueSuggestions": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.actorId",
+"input.issueId",
+"input.suggestions.assigneeId",
+"input.suggestions.issueFieldId",
+"input.suggestions.issueTypeId",
+"input.suggestions.labelId"
+],
+"why": "name starts with a verb that edits"
+},
+"removeAssigneesFromAssignable": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.assignableId",
+"input.assigneeIds"
+],
+"why": "name starts with a verb that edits"
+},
+"removeBlockedBy": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.blockingIssueId",
+"input.issueId"
+],
+"why": "name starts with a verb that edits"
+},
+"removeCloseIssueReferences": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.issueId",
+"input.pullRequestIds"
+],
+"why": "name starts with a verb that edits"
+},
+"removeEnterpriseAdmin": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"removeEnterpriseIdentityProvider": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"removeEnterpriseMember": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId",
+"input.userId"
+],
+"why": "name names a setting of who may do what"
+},
+"removeEnterpriseOrganization": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId",
+"input.organizationId"
+],
+"why": "name names a setting of who may do what"
+},
+"removeEnterpriseSupportEntitlement": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"removeLabelsFromLabelable": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.labelIds",
+"input.labelableId"
+],
+"why": "name starts with a verb that edits"
+},
+"removeOutsideCollaborator": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.organizationId",
+"input.userId"
+],
+"why": "exact"
+},
+"removePullRequestCreationCapBypassUsers": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.repositoryId",
+"input.userIds"
+],
+"why": "name starts with a verb that edits"
+},
+"removeReaction": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.subjectId"
+],
+"why": "name starts with a verb that edits"
+},
+"removeRelatesTo": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.issueId",
+"input.relatedIssueId"
+],
+"why": "name starts with a verb that edits"
+},
+"removeStar": {
+"effect": "change",
+"tags": [
+"account"
+],
+"places": [
+"input.starrableId"
+],
+"why": "exact"
+},
+"removeSubIssue": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.issueId",
+"input.subIssueId"
+],
+"why": "name starts with a verb that edits"
+},
+"removeUpvote": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.subjectId"
+],
+"why": "name starts with a verb that edits"
+},
+"reopenDiscussion": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.discussionId"
+],
+"why": "name starts with a verb that edits"
+},
+"reopenIssue": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.issueId"
+],
+"why": "name starts with a verb that edits"
+},
+"reopenPullRequest": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.pullRequestId"
+],
+"why": "name starts with a verb that edits"
+},
+"reorderEnvironment": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.environmentId"
+],
+"why": "name names a setting of who may do what"
+},
+"replaceActorsForAssignable": {
+"effect": "change",
+"tags": [
+"body"
+],
+"places": [
+"input.actorIds",
+"input.agentAssignment.targetRepositoryId",
+"input.assignableId",
+"input.assignees.actorId"
+],
+"why": "exact"
+},
+"reprioritizeSubIssue": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.afterId",
+"input.beforeId",
+"input.issueId",
+"input.subIssueId"
+],
+"why": "name starts with a verb that edits"
+},
+"requestCopilotCodeReview": {
+"effect": "runs",
+"tags": [],
+"places": [
+"input.pullRequestId"
+],
+"why": "exact"
+},
+"requestReviews": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.botIds",
+"input.pullRequestId",
+"input.teamIds",
+"input.userIds"
+],
+"why": "name starts with a verb that edits"
+},
+"requestReviewsByLogin": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.pullRequestId"
+],
+"why": "name starts with a verb that edits"
+},
+"rerequestCheckSuite": {
+"effect": "runs",
+"tags": [],
+"places": [
+"input.checkSuiteId",
+"input.repositoryId"
+],
+"why": "exact"
+},
+"rerequestReviews": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.botIds",
+"input.pullRequestId",
+"input.teamIds",
+"input.userIds"
+],
+"why": "name starts with a verb that edits"
+},
+"resolveReviewThread": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.threadId"
+],
+"why": "name starts with a verb that edits"
+},
+"retireSponsorsTier": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.tierId"
+],
+"why": "name starts with a verb that edits"
+},
+"revertPullRequest": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.pullRequestId"
+],
+"why": "name starts with a verb that edits"
+},
+"revokeEnterpriseOrganizationsMigratorRole": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"revokeMigratorRole": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.organizationId"
+],
+"why": "name names a setting of who may do what"
+},
+"setEnterpriseIdentityProvider": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"setIssueFieldValue": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.issueFields.fieldId",
+"input.issueFields.multiSelectOptionIds",
+"input.issueFields.singleSelectOptionId",
+"input.issueId"
+],
+"why": "name starts with a verb that edits"
+},
+"setIssueStatus": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.duplicateIssueId",
+"input.issueId",
+"input.statusId"
+],
+"why": "name starts with a verb that edits"
+},
+"setOrganizationInteractionLimit": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.organizationId"
+],
+"why": "name names a setting of who may do what"
+},
+"setRepositoryCustomPropertyValues": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.repositoryId"
+],
+"why": "name names a setting of who may do what"
+},
+"setRepositoryInteractionLimit": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.repositoryId"
+],
+"why": "name names a setting of who may do what"
+},
+"setUserInteractionLimit": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.userId"
+],
+"why": "name names a setting of who may do what"
+},
+"startOrganizationMigration": {
+"effect": "create",
+"tags": [],
+"places": [
+"input.targetEnterpriseId"
+],
+"why": "exact"
+},
+"startRepositoryMigration": {
+"effect": "create",
+"tags": [],
+"places": [
+"input.ownerId",
+"input.sourceId"
+],
+"why": "exact"
+},
+"submitPullRequestReview": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.pullRequestId",
+"input.pullRequestReviewId"
+],
+"why": "name starts with a verb that edits"
+},
+"transferEnterpriseOrganization": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.destinationEnterpriseId",
+"input.organizationId"
+],
+"why": "exact"
+},
+"transferIssue": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.issueId",
+"input.repositoryId"
+],
+"why": "exact"
+},
+"unarchiveProjectV2Item": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.itemId",
+"input.projectId"
+],
+"why": "name starts with a verb that edits"
+},
+"unarchivePullRequest": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.pullRequestId"
+],
+"why": "name starts with a verb that edits"
+},
+"unarchiveRepository": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.repositoryId"
+],
+"why": "exact"
+},
+"unfollowOrganization": {
+"effect": "change",
+"tags": [
+"account"
+],
+"places": [
+"input.organizationId"
+],
+"why": "exact"
+},
+"unfollowUser": {
+"effect": "change",
+"tags": [
+"account"
+],
+"places": [
+"input.userId"
+],
+"why": "exact"
+},
+"unlinkProjectV2FromRepository": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.projectId",
+"input.repositoryId"
+],
+"why": "name starts with a verb that edits"
+},
+"unlinkProjectV2FromTeam": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.projectId",
+"input.teamId"
+],
+"why": "name starts with a verb that edits"
+},
+"unlinkRepositoryFromProject": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.projectId",
+"input.repositoryId"
+],
+"why": "name starts with a verb that edits"
+},
+"unlockLockable": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.lockableId"
+],
+"why": "name starts with a verb that edits"
+},
+"unmarkDiscussionCommentAsAnswer": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.id"
+],
+"why": "name starts with a verb that edits"
+},
+"unmarkFileAsViewed": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.pullRequestId"
+],
+"why": "name starts with a verb that edits"
+},
+"unmarkIssueAsDuplicate": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.canonicalId",
+"input.duplicateId"
+],
+"why": "name starts with a verb that edits"
+},
+"unmarkProjectV2AsTemplate": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.projectId"
+],
+"why": "name starts with a verb that edits"
+},
+"unminimizeComment": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.subjectId"
+],
+"why": "name starts with a verb that edits"
+},
+"unpinIssue": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.issueId"
+],
+"why": "name starts with a verb that edits"
+},
+"unpinIssueComment": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.issueCommentId"
+],
+"why": "name starts with a verb that edits"
+},
+"unresolveReviewThread": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.threadId"
+],
+"why": "name starts with a verb that edits"
+},
+"updateBranchProtectionRule": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.branchProtectionRuleId",
+"input.bypassForcePushActorIds",
+"input.bypassPullRequestActorIds",
+"input.pushActorIds",
+"input.requiredStatusChecks.appId",
+"input.reviewDismissalActorIds"
+],
+"why": "name names a setting of who may do what"
+},
+"updateCheckRun": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.checkRunId",
+"input.externalId",
+"input.repositoryId"
+],
+"why": "name starts with a verb that edits"
+},
+"updateCheckSuitePreferences": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.autoTriggerPreferences.appId",
+"input.repositoryId"
+],
+"why": "name starts with a verb that edits"
+},
+"updateDiscussion": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.categoryId",
+"input.discussionId"
+],
+"why": "name starts with a verb that edits"
+},
+"updateDiscussionComment": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.commentId"
+],
+"why": "name starts with a verb that edits"
+},
+"updateEnterpriseAdministratorRole": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateEnterpriseAllowPrivateRepositoryForkingSetting": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateEnterpriseCopilotCodeReviewPolicy": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateEnterpriseDefaultRepositoryPermissionSetting": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateEnterpriseDeployKeySetting": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateEnterpriseMembersCanChangeRepositoryVisibilitySetting": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateEnterpriseMembersCanCreateRepositoriesSetting": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateEnterpriseMembersCanDeleteIssuesSetting": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateEnterpriseMembersCanDeleteRepositoriesSetting": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateEnterpriseMembersCanInviteCollaboratorsSetting": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateEnterpriseMembersCanMakePurchasesSetting": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateEnterpriseMembersCanUpdateProtectedBranchesSetting": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateEnterpriseMembersCanViewDependencyInsightsSetting": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateEnterpriseOrganizationProjectsSetting": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateEnterpriseOwnerOrganizationRole": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId",
+"input.organizationId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateEnterpriseProfile": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateEnterpriseRepositoryProjectsSetting": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateEnterpriseTwoFactorAuthenticationDisallowedMethodsSetting": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateEnterpriseTwoFactorAuthenticationRequiredSetting": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.enterpriseId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateEnvironment": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.environmentId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateIpAllowListEnabledSetting": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.ownerId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateIpAllowListEntry": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.ipAllowListEntryId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateIpAllowListForInstalledAppsEnabledSetting": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.ownerId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateIpAllowListUserLevelEnforcementEnabledSetting": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.ownerId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateIssue": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.agentAssignment.targetRepositoryId",
+"input.assigneeIds",
+"input.assignees.actorId",
+"input.id",
+"input.issueType.issueTypeId",
+"input.issueTypeId",
+"input.labelIds",
+"input.labels.labelId",
+"input.milestoneId",
+"input.projectIds",
+"input.stateInput.duplicateIssueId",
+"input.statusId"
+],
+"why": "name starts with a verb that edits"
+},
+"updateIssueComment": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.id"
+],
+"why": "name starts with a verb that edits"
+},
+"updateIssueField": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.id"
+],
+"why": "name starts with a verb that edits"
+},
+"updateIssueFieldValue": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.issueField.fieldId",
+"input.issueField.multiSelectOptionIds",
+"input.issueField.singleSelectOptionId",
+"input.issueId"
+],
+"why": "name starts with a verb that edits"
+},
+"updateIssueIssueType": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.issueId",
+"input.issueTypeId"
+],
+"why": "name starts with a verb that edits"
+},
+"updateIssueType": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.issueTypeId"
+],
+"why": "name starts with a verb that edits"
+},
+"updateLabel": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.id"
+],
+"why": "name starts with a verb that edits"
+},
+"updateNotificationRestrictionSetting": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.ownerId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateOrganizationAllowPrivateRepositoryForkingSetting": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.organizationId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateOrganizationCopilotCodeReviewPolicy": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.organizationId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateOrganizationCopilotCodeReviewRunnerConfiguration": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.organizationId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateOrganizationCopilotCodeReviewSettings": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.organizationId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateOrganizationWebCommitSignoffSetting": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.organizationId"
+],
+"why": "name names a setting of who may do what"
+},
+"updatePatreonSponsorability": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.sponsorableLogin"
+],
+"why": "name starts with a verb that edits"
+},
+"updateProject": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.projectId"
+],
+"why": "name starts with a verb that edits"
+},
+"updateProjectCard": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.projectCardId"
+],
+"why": "name starts with a verb that edits"
+},
+"updateProjectColumn": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.projectColumnId"
+],
+"why": "name starts with a verb that edits"
+},
+"updateProjectV2": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.projectId"
+],
+"why": "name starts with a verb that edits"
+},
+"updateProjectV2Collaborators": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.collaborators.teamId",
+"input.collaborators.userId",
+"input.projectId"
+],
+"why": "exact"
+},
+"updateProjectV2DraftIssue": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.assigneeIds",
+"input.draftIssueId"
+],
+"why": "name starts with a verb that edits"
+},
+"updateProjectV2Field": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.fieldId",
+"input.iterationConfiguration.iterations.id",
+"input.multiSelectOptions.id",
+"input.singleSelectOptions.id"
+],
+"why": "name starts with a verb that edits"
+},
+"updateProjectV2ItemFieldValue": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.fieldId",
+"input.itemId",
+"input.projectId",
+"input.value.iterationId",
+"input.value.multiSelectOptionIds",
+"input.value.singleSelectOptionId"
+],
+"why": "name starts with a verb that edits"
+},
+"updateProjectV2ItemPosition": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.afterId",
+"input.itemId",
+"input.projectId"
+],
+"why": "name starts with a verb that edits"
+},
+"updateProjectV2StatusUpdate": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.statusUpdateId"
+],
+"why": "name starts with a verb that edits"
+},
+"updateProjectV2View": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.configuration.visibleFieldIds",
+"input.viewId"
+],
+"why": "name starts with a verb that edits"
+},
+"updatePullRequest": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.assigneeIds",
+"input.labelIds",
+"input.milestoneId",
+"input.projectIds",
+"input.pullRequestId"
+],
+"why": "name starts with a verb that edits"
+},
+"updatePullRequestBranch": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.pullRequestId"
+],
+"why": "name starts with a verb that edits"
+},
+"updatePullRequestReview": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.pullRequestReviewId"
+],
+"why": "name starts with a verb that edits"
+},
+"updatePullRequestReviewComment": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.pullRequestReviewCommentId"
+],
+"why": "name starts with a verb that edits"
+},
+"updateRef": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.refId"
+],
+"why": "name starts with a verb that edits"
+},
+"updateRefs": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.repositoryId"
+],
+"why": "name starts with a verb that edits"
+},
+"updateRepository": {
+"effect": "change",
+"tags": [
+"body"
+],
+"places": [
+"input.repositoryId"
+],
+"why": "exact"
+},
+"updateRepositoryCopilotCodeReviewSettings": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.repositoryId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateRepositoryCustomProperty": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.repositoryCustomPropertyId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateRepositoryRuleset": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.bypassActors.actorId",
+"input.bypassActors.enterpriseRoleDatabaseId",
+"input.bypassActors.repositoryRoleDatabaseId",
+"input.conditions.repositoryId.repositoryIds",
+"input.repositoryRulesetId",
+"input.rules.id"
+],
+"why": "name names a setting of who may do what"
+},
+"updateRepositoryWebCommitSignoffSetting": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.repositoryId"
+],
+"why": "name names a setting of who may do what"
+},
+"updateSponsorshipPreferences": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.sponsorId",
+"input.sponsorLogin",
+"input.sponsorableId",
+"input.sponsorableLogin"
+],
+"why": "name starts with a verb that edits"
+},
+"updateSubscription": {
+"effect": "change",
+"tags": [
+"account"
+],
+"places": [
+"input.subscribableId"
+],
+"why": "exact"
+},
+"updateTeamReviewAssignment": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.excludedTeamMemberIds",
+"input.id"
+],
+"why": "name names a setting of who may do what"
+},
+"updateTeamsRepository": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.repositoryId",
+"input.teamIds"
+],
+"why": "exact"
+},
+"updateTopics": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.repositoryId"
+],
+"why": "name starts with a verb that edits"
+},
+"updateUserList": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.listId"
+],
+"why": "name starts with a verb that edits"
+},
+"updateUserListsForItem": {
+"effect": "change",
+"tags": [],
+"places": [
+"input.itemId",
+"input.listIds",
+"input.suggestedListIds"
+],
+"why": "name starts with a verb that edits"
+},
+"verifyVerifiableDomain": {
+"effect": "expose",
+"tags": [],
+"places": [
+"input.id"
+],
+"why": "name names a setting of who may do what"
+}
+},
+"query_fields": [
+"codeOfConduct",
+"codesOfConduct",
+"enterprise",
+"enterpriseAdministratorInvitation",
+"enterpriseAdministratorInvitationByToken",
+"enterpriseMemberInvitation",
+"enterpriseMemberInvitationByToken",
+"id",
+"license",
+"licenses",
+"marketplaceCategories",
+"marketplaceCategory",
+"marketplaceListing",
+"marketplaceListings",
+"meta",
+"node",
+"nodes",
+"organization",
+"rateLimit",
+"relay",
+"repository",
+"repositoryOwner",
+"resource",
+"search",
+"securityAdvisories",
+"securityAdvisory",
+"securityVulnerabilities",
+"sponsorables",
+"topic",
+"user",
+"viewer"
+]
+}

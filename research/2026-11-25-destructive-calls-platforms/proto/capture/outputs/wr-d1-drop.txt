@@ -1,0 +1,11 @@
+$ CLOUDFLARE_API_TOKEN=test-token-123 CLOUDFLARE_ACCOUNT_ID=acc123 WRANGLER_SEND_METRICS=false -- wrangler d1 execute mydb --remote --command DROP TABLE users -y
+
+ ⛅️ wrangler 4.168.0
+────────────────────
+Resource location: remote 
+
+🌀 Executing on remote database mydb (11111111-2222-3333-4444-555555555555):
+🌀 To execute on your local development database, remove the --remote flag from your wrangler command.
+🚣 Executed 1 command in 0.00ms
+{}
+--- exit=0 seconds=.788069354

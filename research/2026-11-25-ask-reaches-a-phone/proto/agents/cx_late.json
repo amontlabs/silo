@@ -1,0 +1,5 @@
+{"probe": false, "steps": [
+ {"calls": [{"name": "exec_command", "input": {"cmd": "git push http://BOUNDARY/repo.git main"}}]},
+ {"calls": [{"name": "write_stdin", "input": {"session_id": "$LAST", "chars": "", "yield_time_ms": 300000}}]},
+ {"calls": [{"name": "exec_command", "input": {"cmd": "sleep 50; git push http://BOUNDARY/repo.git main"}}]},
+ {"calls": [{"name": "write_stdin", "input": {"session_id": "$LAST", "chars": "", "yield_time_ms": 300000}}]}]}

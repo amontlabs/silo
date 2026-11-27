@@ -1,0 +1,3 @@
+cardend as drafted: 200,000 SYNs to 200,000 addresses in 3 s; cardend holds 132 MiB, counts file 8.0 MB
+cardend as drafted: 1,000,000 SYNs: not done after 110 s, stopped (the fixed one took 5 s)
+cardend with the fix: 1,000,000 SYNs to 1,000,000 addresses in 5 s; cardend holds 13 MiB, counts file 0.0 MB

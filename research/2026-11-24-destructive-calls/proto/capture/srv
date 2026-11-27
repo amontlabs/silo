@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# srv <cli> [server args]: (re)start that CLI's capture server in the background.
+cd "$(dirname "$0")"
+ip=$(awk -v c="$1" '$2==c{print $1}' clihosts.txt)
+pkill -f "server.py --bind $ip " 2>/dev/null; sleep 0.3
+nohup ./run.sh serve "$@" > /opt/clis/srv-$1.log 2>&1 &
+sleep 0.8; cat /opt/clis/srv-$1.log

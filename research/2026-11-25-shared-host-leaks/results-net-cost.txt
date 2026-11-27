@@ -1,0 +1,8 @@
+200 computers made: 22 ms each (namespace, link, addresses, route); kernel memory 226 KiB each
+metadata server, 200 listeners: 15748 KiB resident, 203 open files
+token request from computer 1, 200 links, no firewall: p50 59 µs, p99 155 µs
+throughput computer 1 to the boundary, no firewall:        15.8 Gbit/s 15.6 Gbit/s 15.8 Gbit/s 
+throughput, the group table (5 rules for every link):      15.3 Gbit/s 15.0 Gbit/s 15.1 Gbit/s 
+token request, the group table:                             p50 63 µs, p99 144 µs
+throughput, 600 rules, one set per link, computer 1's last: 10.3 Gbit/s 11.2 Gbit/s 11.2 Gbit/s 
+token request, rules per link:                              p50 110 µs, p99 247 µs

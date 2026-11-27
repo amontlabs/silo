@@ -1,0 +1,7 @@
+{
+ "steps": [
+  {"text": "Adding a test.", "commands": ["printf \"test('negative', () => assert.strictEqual(sum([-1, 1]), 0));\\n\" >> sum.test.js"]},
+  {"text": "Running the suite.", "commands": ["npm test 2>&1 | tail -12"]}
+ ],
+ "final": "Added a test for negative numbers. All tests pass (3/3)."
+}

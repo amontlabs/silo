@@ -1,0 +1,6 @@
+$ SUPABASE_ACCESS_TOKEN=<redacted> SUPABASE_YES=1 DO_NOT_TRACK=1 -- supabase ssl-enforcement update --disable-db-ssl-enforcement --project-ref abcdefghijklmnopqrst --experimental --yes
+Warning: --project-ref is deprecated and will be removed in v4. Use --remote=<ref> instead
+Target: project abcdefghijklmnopqrst
+Confirmed by --yes: Disable SSL enforcement for database connections on project abcdefghijklmnopqrst
+SSL is *NOT* being enforced.
+--- exit=0 seconds=.505918682

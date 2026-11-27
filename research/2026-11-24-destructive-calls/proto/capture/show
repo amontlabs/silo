@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+# show <cli> [from_line]: compact view of a capture
+import json,sys
+p=f"/home/user/silo/research/2026-11-24-destructive-calls/proto/capture/captures/{sys.argv[1]}.jsonl"
+start=int(sys.argv[2]) if len(sys.argv)>2 else 0
+for i,l in enumerate(open(p)):
+    if i<start: continue
+    d=json.loads(l); e=d.get('event')
+    if e=='request':
+        extra=''
+        if d.get('graphql'): extra=' GQL '+'; '.join(f"{g.get('operationName')}/{g.get('firstRootField')}" for g in d['graphql'])
+        if d.get('aws'): extra+=' AWS '+json.dumps(d['aws'])
+        if d.get('git_pktlines'): extra+=' GIT '+json.dumps(d['git_pktlines'])[:600]
+        b=d.get('body','')
+        print(i,d['conn'],d['method'],d['host'],d['target'][:150],d['http'],d.get('body_encoding',''),extra, ('BODY '+b[:300]) if b and not d.get('graphql') else '')
+    elif e in('tls',): print(i,d['conn'],'tls',d.get('alpn'))
+    elif e in ('client_closed',): pass
+    else: print(i,d.get('conn'),e,{k:v for k,v in d.items() if k not in('t','conn','event')})

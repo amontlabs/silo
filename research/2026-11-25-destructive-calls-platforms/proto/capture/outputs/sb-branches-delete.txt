@@ -1,0 +1,8 @@
+$ SUPABASE_ACCESS_TOKEN=<redacted> SUPABASE_YES=1 DO_NOT_TRACK=1 -- supabase branches delete br-1 --project-ref abcdefghijklmnopqrst --yes
+Warning: --project-ref is deprecated and will be removed in v4. Use --remote=<ref> instead
+Target: project abcdefghijklmnopqrst
+Confirmed by --yes: Delete preview branch br-1 on project abcdefghijklmnopqrst
+failed to delete preview branch: SchemaError(Missing key
+  at ["message"])
+Try rerunning the command with --debug to troubleshoot the error.
+--- exit=1 seconds=.491692467

@@ -1,0 +1,9 @@
+$ HEROKU_API_KEY=test-token-123 -- heroku apps:destroy -a my-app --confirm my-app
+Destroying my-app (including all add-ons)... !
+    Error: HTTP Error 403 for DELETE https://api.heroku.com/apps/my-app
+    {
+      error: 'Held by Silo and not answered: deleting volume X needs your 
+    yes.'
+    }
+--- exit=1 seconds=2.947936356
+--- matching requests held: 1

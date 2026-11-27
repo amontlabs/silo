@@ -1,0 +1,6 @@
+$ FLY_API_TOKEN=FlyV1 fm2_test-token-123 FLY_NO_UPDATE_CHECK=1 FLY_METRICS_TOKEN=- -- flyctl scale count 0 -a my-app --yes
+App 'my-app' is going to be scaled according to this plan:
+  -1 machines for group 'app' on region 'cdg' of size 'shared-cpu-1x'
+Executing scale plan
+  Destroyed 3d8d1 group:app region:cdg size:shared-cpu-1x
+--- exit=0 seconds=.111579739

@@ -1,0 +1,32 @@
+   -0.71  mac    listening          {"port": 37352, "holds": {"git": 600, "aws": 50, "pip": 12, "default": 30}, "gather": 2.0}
+    0.00  agent  command.start      {"run": "curl -s -d amount=4000 http://{B}/v1/charges"}
+    0.02  mac    ask.opened         {"ask": "ask_1", "computer": "main", "ends": 1795615954.5806448}
+    0.02  mac    request.held       {"ask": "ask_1", "line": 1, "desc": "POST 127.0.0.1:37352/v1/charges (11 bytes)"}
+    0.02  mac    ask.version        {"ask": "ask_1", "version": 1, "lines": ["POST 127.0.0.1:37352/v1/charges (11 bytes)"], "list_hash": "14fbbad9a9946d8b9e6cadb1cd114959", "ends": 1795615954.5806448}
+    2.06  mac    ask.forwarded      {"ask": "ask_1", "version": 1, "size": 336}
+    2.06  phone  shown              {"ask": "ask_1", "version": 1, "lines": ["POST 127.0.0.1:37352/v1/charges (11 bytes)"], "sent": 1795615881.6096172, "in_transit": 0.0095}
+   30.05  mac    hold.ended         {"ask": "ask_1", "line": 1, "how": "limit"}
+   30.05  mac    request.refused    {"ask": "ask_1", "line": 1, "why": "held, not answered"}
+   30.06  agent  command.end        {"exit": 0, "run": "curl -s -d amount=4000 http://{B}/v1/charges"}
+   40.00  agent  command.start      {"run": "curl -s -d amount=4000 http://{B}/v1/charges"}
+   40.01  mac    request.joined     {"ask": "ask_1", "line": 1, "desc": "POST 127.0.0.1:37352/v1/charges (11 bytes)"}
+   41.00  agent  command.start      {"run": "curl -s -d amount=990000 http://{B}/v1/charges"}
+   41.01  mac    request.held       {"ask": "ask_1", "line": 2, "desc": "POST 127.0.0.1:37352/v1/charges (13 bytes)"}
+   41.01  mac    ask.version        {"ask": "ask_1", "version": 2, "lines": ["POST 127.0.0.1:37352/v1/charges (11 bytes)", "POST 127.0.0.1:37352/v1/charges (13 bytes)"], "list_hash": "ab256b752993f8bc09eeb922f1d651c8", "ends": 1795615954.5806448}
+   43.03  mac    ask.forwarded      {"ask": "ask_1", "version": 2, "size": 381}
+   43.03  phone  shown              {"ask": "ask_1", "version": 2, "lines": ["POST 127.0.0.1:37352/v1/charges (11 bytes)", "POST 127.0.0.1:37352/v1/charges (13 bytes)"], "sent": 1795615922.5903301, "in_transit": 0.003}
+   70.04  agent  command.end        {"exit": 0, "run": "curl -s -d amount=4000 http://{B}/v1/charges"}
+   70.04  mac    hold.ended         {"ask": "ask_1", "line": 1, "how": "limit"}
+   70.04  mac    request.refused    {"ask": "ask_1", "line": 1, "why": "held, not answered"}
+   71.04  agent  command.end        {"exit": 0, "run": "curl -s -d amount=990000 http://{B}/v1/charges"}
+   71.04  mac    hold.ended         {"ask": "ask_1", "line": 2, "how": "limit"}
+   71.04  mac    request.refused    {"ask": "ask_1", "line": 2, "why": "held, not answered"}
+   75.30  mac    ask.closed         {"ask": "ask_1", "why": "ask's own limit"}
+   80.00  agent  command.start      {"run": "curl -s -m 5 -d amount=4000 http://{B}/v1/charges"}
+   80.01  mac    ask.opened         {"ask": "ask_2", "computer": "main", "ends": 1795616034.57126}
+   80.01  mac    request.held       {"ask": "ask_2", "line": 1, "desc": "POST 127.0.0.1:37352/v1/charges (11 bytes)"}
+   80.01  mac    ask.version        {"ask": "ask_2", "version": 1, "lines": ["POST 127.0.0.1:37352/v1/charges (11 bytes)"], "list_hash": "14fbbad9a9946d8b9e6cadb1cd114959", "ends": 1795616034.57126}
+   82.06  mac    ask.forwarded      {"ask": "ask_2", "version": 1, "size": 334}
+   82.06  phone  shown              {"ask": "ask_2", "version": 1, "lines": ["POST 127.0.0.1:37352/v1/charges (11 bytes)"], "sent": 1795615961.6183856, "in_transit": 0.0045}
+   85.02  mac    hold.ended         {"ask": "ask_2", "line": 1, "how": "client closed"}
+   85.02  agent  command.end        {"exit": 28, "run": "curl -s -m 5 -d amount=4000 http://{B}/v1/charges"}

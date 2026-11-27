@@ -1,0 +1,7 @@
+FAIL: test_dot_segments (test_uploads.Evasions.test_dot_segments)
+FAIL: test_encoded_slash_in_owner (test_uploads.Evasions.test_encoded_slash_in_owner)
+FAIL: test_method_override_header (test_uploads.Evasions.test_method_override_header)
+Ran 19 tests in 0.003s
+FAILED (failures=3)
+FAIL: test_encoded_destination_bucket (test_uploads.Evasions.test_encoded_destination_bucket)
+FAILED (failures=1)

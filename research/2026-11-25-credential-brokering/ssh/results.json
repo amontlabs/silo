@@ -1,0 +1,338 @@
+[
+ [
+  "silo",
+  "ssh to an allowed host, OpenSSH 9.6",
+  true,
+  ""
+ ],
+ [
+  "silo",
+  "10 logins, mean seconds",
+  true,
+  "0.183"
+ ],
+ [
+  "silo",
+  "ssh to a host not on the key's list",
+  false,
+  "sign: host not on this key's list"
+ ],
+ [
+  "silo",
+  "host now answers with a key the boundary does not know",
+  false,
+  [
+   "Host key verification failed."
+  ]
+ ],
+ [
+  "silo",
+  "same, with the computer accepting any host key",
+  false,
+  "bind: host key not in the boundary's known_hosts for this name"
+ ],
+ [
+  "silo",
+  "login to a server reached without crossing the boundary",
+  false,
+  "bind: host signature never seen on an open connection of this computer"
+ ],
+ [
+  "silo",
+  "relay attack: an outsider logs in with the computer's agent",
+  false,
+  "bind: host signature never seen on an open connection of this computer"
+ ],
+ [
+  "silo",
+  "relay attack through a tunnel the computer carries",
+  true,
+  ""
+ ],
+ [
+  "silo",
+  "raw userauth sign request with no bind",
+  false,
+  "sign: userauth on an agent connection with no session-bind"
+ ],
+ [
+  "silo",
+  "git clone and push over SSH",
+  true,
+  "warning: You appear to have cloned an empty repository."
+ ],
+ [
+  "silo",
+  "git commit -S with gpg.format=ssh",
+  true,
+  ""
+ ],
+ [
+  "silo",
+  "ssh-keygen -Y sign in namespace 'file'",
+  false,
+  "sshsig: namespace not allowed for this key"
+ ],
+ [
+  "silo",
+  "ssh -A: the first login",
+  true,
+  [
+   "agent=0"
+  ]
+ ],
+ [
+  "silo",
+  "ssh -A, then ssh from the server onward",
+  false,
+  "bind: forwarding onward from the computer"
+ ],
+ [
+  "silo",
+  "Paramiko client with the agent",
+  false,
+  "sign: userauth on an agent connection with no session-bind"
+ ],
+ [
+  "silo",
+  "asyncssh client with the agent",
+  false,
+  "sign: userauth on an agent connection with no session-bind"
+ ],
+ [
+  "silo",
+  "Go x/crypto/ssh client with the agent",
+  false,
+  "sign: userauth on an agent connection with no session-bind"
+ ],
+ [
+  "silo",
+  "ssh-add -L lists",
+  true,
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMhe... polarzero@mac"
+ ],
+ [
+  "silo+infer",
+  "ssh to an allowed host, OpenSSH 9.6",
+  true,
+  ""
+ ],
+ [
+  "silo+infer",
+  "10 logins, mean seconds",
+  true,
+  "0.184"
+ ],
+ [
+  "silo+infer",
+  "ssh to a host not on the key's list",
+  false,
+  "sign: host not on this key's list"
+ ],
+ [
+  "silo+infer",
+  "host now answers with a key the boundary does not know",
+  false,
+  [
+   "Host key verification failed."
+  ]
+ ],
+ [
+  "silo+infer",
+  "same, with the computer accepting any host key",
+  false,
+  "bind: host key not in the boundary's known_hosts for this name"
+ ],
+ [
+  "silo+infer",
+  "login to a server reached without crossing the boundary",
+  false,
+  "bind: host signature never seen on an open connection of this computer"
+ ],
+ [
+  "silo+infer",
+  "relay attack: an outsider logs in with the computer's agent",
+  false,
+  "bind: host signature never seen on an open connection of this computer"
+ ],
+ [
+  "silo+infer",
+  "relay attack through a tunnel the computer carries",
+  true,
+  ""
+ ],
+ [
+  "silo+infer",
+  "raw userauth sign request with no bind",
+  false,
+  "sign: no open connection of this computer has this session id"
+ ],
+ [
+  "silo+infer",
+  "git clone and push over SSH",
+  true,
+  "warning: remote HEAD refers to nonexistent ref, unable to checkout"
+ ],
+ [
+  "silo+infer",
+  "git commit -S with gpg.format=ssh",
+  true,
+  ""
+ ],
+ [
+  "silo+infer",
+  "ssh-keygen -Y sign in namespace 'file'",
+  false,
+  "sshsig: namespace not allowed for this key"
+ ],
+ [
+  "silo+infer",
+  "ssh -A: the first login",
+  true,
+  [
+   "agent=0"
+  ]
+ ],
+ [
+  "silo+infer",
+  "ssh -A, then ssh from the server onward",
+  false,
+  "bind: forwarding onward from the computer"
+ ],
+ [
+  "silo+infer",
+  "Paramiko client with the agent",
+  true,
+  ""
+ ],
+ [
+  "silo+infer",
+  "asyncssh client with the agent",
+  true,
+  ""
+ ],
+ [
+  "silo+infer",
+  "Go x/crypto/ssh client with the agent",
+  true,
+  ""
+ ],
+ [
+  "silo+infer",
+  "ssh-add -L lists",
+  true,
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMhe... polarzero@mac"
+ ],
+ [
+  "plain",
+  "ssh to an allowed host, OpenSSH 9.6",
+  true,
+  ""
+ ],
+ [
+  "plain",
+  "10 logins, mean seconds",
+  true,
+  "0.183"
+ ],
+ [
+  "plain",
+  "ssh to a host not on the key's list",
+  true,
+  ""
+ ],
+ [
+  "plain",
+  "host now answers with a key the boundary does not know",
+  false,
+  [
+   "Host key verification failed."
+  ]
+ ],
+ [
+  "plain",
+  "same, with the computer accepting any host key",
+  true,
+  ""
+ ],
+ [
+  "plain",
+  "login to a server reached without crossing the boundary",
+  true,
+  ""
+ ],
+ [
+  "plain",
+  "relay attack: an outsider logs in with the computer's agent",
+  true,
+  ""
+ ],
+ [
+  "plain",
+  "relay attack through a tunnel the computer carries",
+  true,
+  ""
+ ],
+ [
+  "plain",
+  "raw userauth sign request with no bind",
+  true,
+  ""
+ ],
+ [
+  "plain",
+  "git clone and push over SSH",
+  true,
+  "warning: remote HEAD refers to nonexistent ref, unable to checkout"
+ ],
+ [
+  "plain",
+  "git commit -S with gpg.format=ssh",
+  true,
+  ""
+ ],
+ [
+  "plain",
+  "ssh-keygen -Y sign in namespace 'file'",
+  true,
+  ""
+ ],
+ [
+  "plain",
+  "ssh -A: the first login",
+  true,
+  [
+   "agent=0"
+  ]
+ ],
+ [
+  "plain",
+  "ssh -A, then ssh from the server onward",
+  true,
+  ""
+ ],
+ [
+  "plain",
+  "Paramiko client with the agent",
+  true,
+  ""
+ ],
+ [
+  "plain",
+  "asyncssh client with the agent",
+  true,
+  ""
+ ],
+ [
+  "plain",
+  "Go x/crypto/ssh client with the agent",
+  true,
+  ""
+ ],
+ [
+  "plain",
+  "ssh-add -L lists",
+  true,
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMhe... polarzero@mac"
+ ]
+]

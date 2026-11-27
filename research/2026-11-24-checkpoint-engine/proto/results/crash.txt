@@ -1,0 +1,9 @@
+{"rounds":300,"ops_reported":4048,"restores_started":595,"checkpoints_now":1164,"ok":true}
+mutant two-renames:
+round 7: FileNotFound
+error: FileNotFound
+mutant no-tmp:
+round 3: FileNotFound
+error: FileNotFound
+random kills, mutant two-renames:
+{"rounds":400,"ops_reported":572,"restores_started":126,"checkpoints_now":35,"ok":true}

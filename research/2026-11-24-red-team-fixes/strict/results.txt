@@ -1,0 +1,297 @@
+1/1 strict.test.an ordinary request is read...OK
+All 1 tests passed.
+50 cases
+== 00-ordinary   strict: read
+   node     POST /v1/messages host=api.anthropic.com body=88:06fa7f
+   go       POST /v1/messages host=api.anthropic.com body=88:06fa7f
+   h11      POST /v1/messages host=api.anthropic.com body=88:06fa7f
+   lenient  POST /v1/messages host=api.anthropic.com body=88:06fa7f
+== 01-ordinary-two-on-one-connection   strict: read
+   node     POST /v1/messages host=api.anthropic.com body=88:06fa7f | POST /v1/messages host=api.anthropic.com body=191:637a88
+   go       POST /v1/messages host=api.anthropic.com body=88:06fa7f | POST /v1/messages host=api.anthropic.com body=191:637a88
+   h11      POST /v1/messages host=api.anthropic.com body=88:06fa7f | POST /v1/messages host=api.anthropic.com body=191:637a88
+   lenient  POST /v1/messages host=api.anthropic.com body=88:06fa7f | POST /v1/messages host=api.anthropic.com body=191:637a88
+== 02-ordinary-chunked   strict: read
+   node     POST /v1/messages host=api.anthropic.com body=88:06fa7f
+   go       POST /v1/messages host=api.anthropic.com body=88:06fa7f
+   h11      POST /v1/messages host=api.anthropic.com body=88:06fa7f
+   lenient  POST /v1/messages host=api.anthropic.com body=88:06fa7f
+== 03-ordinary-gzip   strict: read
+   node     POST /v1/messages host=api.anthropic.com body=96:7210d7
+   go       POST /v1/messages host=api.anthropic.com body=96:7210d7
+   h11      POST /v1/messages host=api.anthropic.com body=96:7210d7
+   lenient  POST /v1/messages host=api.anthropic.com body=96:7210d7
+== 10-host-not-the-handshake-name   strict: a Host that is not the name in the TLS handshake
+   node     POST /v1/messages host=attacker.example body=88:06fa7f
+   go       POST /v1/messages host=attacker.example body=88:06fa7f
+   h11      POST /v1/messages host=attacker.example body=88:06fa7f
+   lenient  POST /v1/messages host=attacker.example body=88:06fa7f
+== 11-absolute-form-target   strict: a request target not in origin form (absolute, authority or asterisk)
+   node     POST http://attacker.example/v1/messages host=api.anthropic.com body=88:06fa7f
+   go       POST http://attacker.example/v1/messages host=attacker.example body=88:06fa7f
+   h11      POST http://attacker.example/v1/messages host=api.anthropic.com body=88:06fa7f
+   lenient  POST http://attacker.example/v1/messages host=api.anthropic.com body=88:06fa7f
+== 12-two-host-headers   strict: a header that may appear once appears twice
+   node     POST /v1/messages host=api.anthropic.com body=88:06fa7f
+   go       refused
+   h11      refused
+   lenient  POST /v1/messages host=api.anthropic.com body=88:06fa7f
+== 13-host-with-trailing-dot   strict: a Host that is not the name in the TLS handshake
+   node     POST /v1/messages host=api.anthropic.com. body=88:06fa7f
+   go       POST /v1/messages host=api.anthropic.com. body=88:06fa7f
+   h11      POST /v1/messages host=api.anthropic.com. body=88:06fa7f
+   lenient  POST /v1/messages host=api.anthropic.com. body=88:06fa7f
+== 14-target-with-two-slashes   strict: a request target that starts with two slashes
+   node     POST //attacker.example/v1/messages host=api.anthropic.com body=88:06fa7f
+   go       POST //attacker.example/v1/messages host=api.anthropic.com body=88:06fa7f
+   h11      POST //attacker.example/v1/messages host=api.anthropic.com body=88:06fa7f
+   lenient  POST //attacker.example/v1/messages host=api.anthropic.com body=88:06fa7f
+== 20-two-content-lengths   strict: a header that may appear once appears twice
+   node     refused
+   go       refused
+   h11      refused
+   lenient  POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+== 21-content-length-list   strict: a Content-Length with something other than digits (a sign, a list, a space)
+   node     refused
+   go       refused
+   h11      POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+   lenient  POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+== 22-content-length-plus-sign   strict: a Content-Length with something other than digits (a sign, a list, a space)
+   node     refused
+   go       refused
+   h11      refused
+   lenient  POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+== 23-length-and-chunked   strict: both Content-Length and Transfer-Encoding
+   node     refused
+   go       POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+   h11      POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+   lenient  POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+== 24-tab-before-colon   strict: a header name with a character outside the token set (whitespace before the colon, say)
+   node     refused
+   go       refused
+   h11      refused
+   lenient  POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+== 25-space-before-colon   strict: a header name with a character outside the token set (whitespace before the colon, say)
+   node     refused
+   go       refused
+   h11      refused
+   lenient  POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+== 26-chunked-with-a-twist   strict: a Transfer-Encoding other than one plain chunked
+   node     refused
+   go       ?
+   h11      refused
+   lenient  POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+== 27-chunked-twice-listed   strict: a Transfer-Encoding other than one plain chunked
+   node     refused
+   go       ?
+   h11      refused
+   lenient  POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+== 28-bare-lf-header-hides-a-length   strict: a line that ends in a bare LF
+   node     refused
+   go       POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+   h11      POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+   lenient  POST /v1/messages host=api.anthropic.com body=0:e3b0c4
+== 29-bare-lf-everywhere   strict: a line that ends in a bare LF
+   node     refused
+   go       POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+   h11      POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+   lenient  POST /v1/messages host=api.anthropic.com body=191:637a88
+== 30-folded-header   strict: a folded header line (obs-fold)
+   node     refused
+   go       POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+   h11      POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+   lenient  POST /v1/messages host=api.anthropic.com body=99:9bd4d3
+== 31-bare-cr-in-a-value   strict: a bare CR in the head
+   node     refused
+   go       refused
+   h11      refused
+   lenient  POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+== 32-nul-in-a-value   strict: a control character in the head
+   node     refused
+   go       refused
+   h11      refused
+   lenient  POST /v1/messages host=api.anthropic.com body=88:06fa7f
+== 33-chunk-extension   strict: a chunk size with something other than hex digits (an extension, a space, a sign, a 0x)
+   node     POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+   go       POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+   h11      POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+   lenient  POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+== 34-chunk-size-0x   strict: a chunk size with something other than hex digits (an extension, a space, a sign, a 0x)
+   node     refused
+   go       refused
+   h11      refused
+   lenient  POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+== 35-chunk-size-overflow   strict: a chunk size that is empty, longer than 15 hex digits, or carries an extension
+   node     refused
+   go       refused
+   h11      refused
+   lenient  refused
+== 36-chunk-data-then-bare-lf   strict: chunk data not followed by CRLF
+   node     refused
+   go       refused
+   h11      refused
+   lenient  refused
+== 37-trailer-after-last-chunk   strict: a trailer field after the last chunk
+   node     refused
+   go       POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+   h11      POST /v1/messages host=api.anthropic.com body=2:44136f | POST /v1/messages host=api.anthropic.com body=191:637a88
+   lenient  POST /v1/messages host=api.anthropic.com body=2:44136f | ntent-Length: 330 host=None body=0:e3b0c4 | POST /v1/messages host=api.anthropic.com body=191:637a88
+== 38-http-1.0   strict: a version other than HTTP/1.1
+   node     POST /v1/messages host=api.anthropic.com body=88:06fa7f
+   go       POST /v1/messages host=api.anthropic.com body=88:06fa7f
+   h11      POST /v1/messages host=api.anthropic.com body=88:06fa7f
+   lenient  POST /v1/messages host=api.anthropic.com body=88:06fa7f
+== 39-lower-case-method   strict: a method that is not an upper-case token
+   node     refused
+   go       post /v1/messages host=api.anthropic.com body=88:06fa7f
+   h11      post /v1/messages host=api.anthropic.com body=88:06fa7f
+   lenient  post /v1/messages host=api.anthropic.com body=88:06fa7f
+== 40-two-spaces-in-request-line   strict: a request line with more than three parts
+   node     POST /v1/messages host=api.anthropic.com body=88:06fa7f
+   go       refused
+   h11      refused
+   lenient  POST  host=api.anthropic.com body=88:06fa7f
+== 41-upgrade-h2c   strict: an Upgrade to something other than a WebSocket (h2c, say)
+   node     POST /v1/messages host=api.anthropic.com body=88:06fa7f
+   go       POST /v1/messages host=api.anthropic.com body=88:06fa7f
+   h11      POST /v1/messages host=api.anthropic.com body=88:06fa7f
+   lenient  POST /v1/messages host=api.anthropic.com body=88:06fa7f
+== 42-two-authorizations   strict: a header that may appear once appears twice
+   node     POST /v1/messages host=api.anthropic.com body=88:06fa7f
+   go       POST /v1/messages host=api.anthropic.com body=88:06fa7f
+   h11      POST /v1/messages host=api.anthropic.com body=88:06fa7f
+   lenient  POST /v1/messages host=api.anthropic.com body=88:06fa7f
+== 50-unknown-encoding-br   strict: a body encoding the boundary cannot decode (br, a list, an unknown one)
+   node     POST /v1/messages host=api.anthropic.com body=152:8bb48f
+   go       POST /v1/messages host=api.anthropic.com body=152:8bb48f
+   h11      POST /v1/messages host=api.anthropic.com body=152:8bb48f
+   lenient  POST /v1/messages host=api.anthropic.com body=152:8bb48f
+== 51-encoding-list   strict: a body encoding the boundary cannot decode (br, a list, an unknown one)
+   node     POST /v1/messages host=api.anthropic.com body=187:ac2777
+   go       POST /v1/messages host=api.anthropic.com body=187:ac2777
+   h11      POST /v1/messages host=api.anthropic.com body=187:ac2777
+   lenient  POST /v1/messages host=api.anthropic.com body=187:ac2777
+== 52-gzip-then-garbage   strict: bytes after the end of the compressed body (a second gzip member, say)
+   node     POST /v1/messages host=api.anthropic.com body=100:ae380f
+   go       POST /v1/messages host=api.anthropic.com body=100:ae380f
+   h11      POST /v1/messages host=api.anthropic.com body=100:ae380f
+   lenient  POST /v1/messages host=api.anthropic.com body=100:ae380f
+== 53-two-gzip-members   strict: bytes after the end of the compressed body (a second gzip member, say)
+   node     POST /v1/messages host=api.anthropic.com body=164:0f4de6
+   go       POST /v1/messages host=api.anthropic.com body=164:0f4de6
+   h11      POST /v1/messages host=api.anthropic.com body=164:0f4de6
+   lenient  POST /v1/messages host=api.anthropic.com body=164:0f4de6
+== 60-duplicate-key   strict: a JSON object with the same key twice
+   node     POST /v1/messages host=api.anthropic.com body=120:14ac5c
+   go       POST /v1/messages host=api.anthropic.com body=120:14ac5c
+   h11      POST /v1/messages host=api.anthropic.com body=120:14ac5c
+   lenient  POST /v1/messages host=api.anthropic.com body=120:14ac5c
+   json/python parsed, web_fetch=True, max_tokens=10
+   json/node   parsed, web_fetch=True, max_tokens=10
+   json/go     parsed, web_fetch=True, max_tokens=10
+== 61-keys-equal-but-for-case   strict: a JSON object with two keys equal but for case
+   node     POST /v1/messages host=api.anthropic.com body=120:872ad5
+   go       POST /v1/messages host=api.anthropic.com body=120:872ad5
+   h11      POST /v1/messages host=api.anthropic.com body=120:872ad5
+   lenient  POST /v1/messages host=api.anthropic.com body=120:872ad5
+   json/python parsed, web_fetch=False, max_tokens=10
+   json/node   parsed, web_fetch=False, max_tokens=10
+   json/go     parsed, web_fetch=True, max_tokens=10
+== 62-escaped-duplicate-key   strict: a JSON object with the same key twice
+   node     POST /v1/messages host=api.anthropic.com body=125:46283f
+   go       POST /v1/messages host=api.anthropic.com body=125:46283f
+   h11      POST /v1/messages host=api.anthropic.com body=125:46283f
+   lenient  POST /v1/messages host=api.anthropic.com body=125:46283f
+   json/python parsed, web_fetch=True, max_tokens=10
+   json/node   parsed, web_fetch=True, max_tokens=10
+   json/go     parsed, web_fetch=True, max_tokens=10
+== 63-lone-surrogate-key   strict: a JSON string with a lone surrogate escape
+   node     POST /v1/messages host=api.anthropic.com body=126:fac8db
+   go       POST /v1/messages host=api.anthropic.com body=126:fac8db
+   h11      POST /v1/messages host=api.anthropic.com body=126:fac8db
+   lenient  POST /v1/messages host=api.anthropic.com body=126:fac8db
+   json/python parsed, web_fetch=False, max_tokens=10
+   json/node   parsed, web_fetch=False, max_tokens=10
+   json/go     parsed, web_fetch=False, max_tokens=10
+== 64-trailing-document   strict: a body that does not parse as JSON (comments, a trailing comma, NaN, trailing bytes...)
+   node     POST /v1/messages host=api.anthropic.com body=121:21c2a9
+   go       POST /v1/messages host=api.anthropic.com body=121:21c2a9
+   h11      POST /v1/messages host=api.anthropic.com body=121:21c2a9
+   lenient  POST /v1/messages host=api.anthropic.com body=121:21c2a9
+   json/python refused, web_fetch=False, max_tokens=None
+   json/node   refused, web_fetch=False, max_tokens=None
+   json/go     refused, web_fetch=False, max_tokens=
+== 65-byte-order-mark   strict: a JSON body that starts with a byte order mark
+   node     POST /v1/messages host=api.anthropic.com body=53:17cced
+   go       POST /v1/messages host=api.anthropic.com body=53:17cced
+   h11      POST /v1/messages host=api.anthropic.com body=53:17cced
+   lenient  POST /v1/messages host=api.anthropic.com body=53:17cced
+   json/python parsed, web_fetch=False, max_tokens=10
+   json/node   refused, web_fetch=False, max_tokens=None
+   json/go     refused, web_fetch=False, max_tokens=
+== 66-comment   strict: a body that does not parse as JSON (comments, a trailing comma, NaN, trailing bytes...)
+   node     POST /v1/messages host=api.anthropic.com body=68:d1b26c
+   go       POST /v1/messages host=api.anthropic.com body=68:d1b26c
+   h11      POST /v1/messages host=api.anthropic.com body=68:d1b26c
+   lenient  POST /v1/messages host=api.anthropic.com body=68:d1b26c
+   json/python refused, web_fetch=False, max_tokens=None
+   json/node   refused, web_fetch=False, max_tokens=None
+   json/go     refused, web_fetch=False, max_tokens=
+== 67-trailing-comma   strict: a body that does not parse as JSON (comments, a trailing comma, NaN, trailing bytes...)
+   node     POST /v1/messages host=api.anthropic.com body=51:a5de2d
+   go       POST /v1/messages host=api.anthropic.com body=51:a5de2d
+   h11      POST /v1/messages host=api.anthropic.com body=51:a5de2d
+   lenient  POST /v1/messages host=api.anthropic.com body=51:a5de2d
+   json/python refused, web_fetch=False, max_tokens=None
+   json/node   refused, web_fetch=False, max_tokens=None
+   json/go     refused, web_fetch=False, max_tokens=
+== 68-nan   strict: a body that does not parse as JSON (comments, a trailing comma, NaN, trailing bytes...)
+   node     POST /v1/messages host=api.anthropic.com body=51:313226
+   go       POST /v1/messages host=api.anthropic.com body=51:313226
+   h11      POST /v1/messages host=api.anthropic.com body=51:313226
+   lenient  POST /v1/messages host=api.anthropic.com body=51:313226
+   json/python parsed, web_fetch=False, max_tokens=nan
+   json/node   refused, web_fetch=False, max_tokens=None
+   json/go     refused, web_fetch=False, max_tokens=
+== 69-integer-past-2-53   strict: a JSON integer past 2^53, read differently by doubles and integers
+   node     POST /v1/messages host=api.anthropic.com body=64:ab5230
+   go       POST /v1/messages host=api.anthropic.com body=64:ab5230
+   h11      POST /v1/messages host=api.anthropic.com body=64:ab5230
+   lenient  POST /v1/messages host=api.anthropic.com body=64:ab5230
+   json/python parsed, web_fetch=False, max_tokens=9007199254740993
+   json/node   parsed, web_fetch=False, max_tokens=9007199254740992
+   json/go     parsed, web_fetch=False, max_tokens=9007199254740993
+== 70-number-1e400   strict: a JSON number past the largest double (infinity for some parsers, an error for others)
+   node     POST /v1/messages host=api.anthropic.com body=53:f58faa
+   go       POST /v1/messages host=api.anthropic.com body=53:f58faa
+   h11      POST /v1/messages host=api.anthropic.com body=53:f58faa
+   lenient  POST /v1/messages host=api.anthropic.com body=53:f58faa
+   json/python parsed, web_fetch=False, max_tokens=inf
+   json/node   parsed, web_fetch=False, max_tokens=Infinity
+   json/go     parsed, web_fetch=False, max_tokens=1e400
+== 71-nesting-5000   strict: JSON nested deeper than 128
+   node     POST /v1/messages host=api.anthropic.com body=10062:c9ba6d
+   go       POST /v1/messages host=api.anthropic.com body=10062:c9ba6d
+   h11      POST /v1/messages host=api.anthropic.com body=10062:c9ba6d
+   lenient  POST /v1/messages host=api.anthropic.com body=10062:c9ba6d
+   json/python parsed, web_fetch=False, max_tokens=10
+   json/node   parsed, web_fetch=False, max_tokens=10
+   json/go     parsed, web_fetch=False, max_tokens=10
+== 72-invalid-utf8   strict: a JSON body that is not valid UTF-8
+   node     POST /v1/messages host=api.anthropic.com body=80:75221c
+   go       POST /v1/messages host=api.anthropic.com body=80:75221c
+   h11      POST /v1/messages host=api.anthropic.com body=80:75221c
+   lenient  POST /v1/messages host=api.anthropic.com body=80:75221c
+   json/python refused, web_fetch=False, max_tokens=None
+   json/node   parsed, web_fetch=False, max_tokens=10
+   json/go     parsed, web_fetch=False, max_tokens=10
+== 73-control-char-in-string   strict: a body that does not parse as JSON (comments, a trailing comma, NaN, trailing bytes...)
+   node     POST /v1/messages host=api.anthropic.com body=81:02f499
+   go       POST /v1/messages host=api.anthropic.com body=81:02f499
+   h11      POST /v1/messages host=api.anthropic.com body=81:02f499
+   lenient  POST /v1/messages host=api.anthropic.com body=81:02f499
+   json/python refused, web_fetch=False, max_tokens=None
+   json/node   refused, web_fetch=False, max_tokens=None
+   json/go     refused, web_fetch=False, max_tokens=
+
+50 cases; 33 hostile cases read in more than one way, or carrying the hidden request, by at least one parser; strict reader wrong on 0

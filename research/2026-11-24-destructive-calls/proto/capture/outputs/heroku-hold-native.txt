@@ -1,0 +1,7 @@
+$ HEROKU_API_KEY=test-token-123 -- heroku apps:destroy -a my-app --confirm my-app
+Destroying my-app (including all add-ons)... !
+ ›   Error: Held by Silo and not answered: deleting volume X needs your yes.
+ ›
+ ›   Error ID: forbidden
+--- exit=2 seconds=2.718397134
+--- matching requests held: 1

@@ -1,0 +1,3 @@
+$ STRIPE_API_KEY=sk_test_fake123 -- stripe refunds create --charge ch_123 --confirm
+{}
+--- exit=0 seconds=.234022311

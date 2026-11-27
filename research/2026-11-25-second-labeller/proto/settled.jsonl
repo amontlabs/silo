@@ -1,0 +1,1085 @@
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id}/configurations", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id}/connections", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/containers/applications/{application_id}", "label": "hold:outage", "a": "hold:gone", "b": "hold:outage", "by": "b", "why": "what is removed is a runner; the code or data lives elsewhere"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/containers/registries/{domain}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/d1/database/{database_id}", "label": "hold:recoverable", "a": "hold:gone", "b": "hold:recoverable", "by": "b", "why": "the same API has an endpoint that brings it back"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/hyperdrive/configs/{hyperdrive_id}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/members/{member_id}", "label": "allow", "a": "hold:outage", "b": "allow", "by": "b", "why": "a member removed, a restart or a cache dropped: recovers by itself or is redone in a moment"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/pages/projects/{project_name}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/pages/projects/{project_name}/deployments/{deployment_id}", "label": "hold:gone", "a": "either", "b": "hold:gone", "by": "b", "why": "deletes something the API cannot bring back"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/pages/projects/{project_name}/deployments/{deployment_id}/tails/{tail_id}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/pages/projects/{project_name}/domains/{domain_name}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/pages/projects/{project_name}/source", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/queues/{queue_id}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/queues/{queue_id}/consumers/{consumer_id}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}", "label": "hold:outage", "a": "hold:gone", "b": "hold:outage", "by": "b", "why": "what is removed is a runner; the code or data lives elsewhere"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/cors", "label": "hold:outage", "a": "either", "b": "hold:outage", "by": "b", "why": "what calls it stops working until someone acts"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/custom_domains/{domain}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/domains/custom/{domain}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/lock", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/objects", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/objects/{object_key}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/sippy", "label": "hold:outage", "a": "either", "b": "hold:outage", "by": "b", "why": "what calls it stops working until someone acts"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/secrets_store/stores/{store_id}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/secrets_store/stores/{store_id}/secrets", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/secrets_store/stores/{store_id}/secrets/{secret_id}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/bulk", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/values/{key_name}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/tokens/{token_id}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/vectorize/indexes/{index_name}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/secrets/{secret_name}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/tags/{tag}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/domains/{domain_id}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/observability/destinations/{slug}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/observability/issues/automations/{automationId}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/observability/issues/groups/{groupId}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/observability/issues/groups/{groupId}/members/{issueId}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/observability/queries/{queryId}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/scripts/{script_name}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/scripts/{script_name}/deployments/{deployment_id}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/scripts/{script_name}/secrets/{secret_name}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/scripts/{script_name}/subdomain", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/scripts/{script_name}/tails/{id}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/subdomain", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/workers/{worker_id}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews/{preview_id}", "label": "allow", "a": "either", "b": "allow", "by": "override", "why": "a preview, not production"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews/{preview_id}/deployments/{deployment_id}", "label": "allow", "a": "either", "b": "allow", "by": "override", "why": "a preview, not production"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workers/workers/{worker_id}/versions/{version_id}", "label": "hold:gone", "a": "either", "b": "hold:gone", "by": "b", "why": "deletes something the API cannot bring back"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workflows/concurrency/{key_id}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workflows/{workflow_name}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances/{instance_id}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/user/tokens/{token_id}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/custom_hostnames/fallback_origin", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/custom_hostnames/{custom_hostname_id}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/custom_hostnames/{custom_hostname_id}/certificate_pack/{certificate_pack_id}/certificates/{certificate_id}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/dns_records/{dns_record_id}", "label": "hold:gone", "a": "hold:outage", "b": "hold:gone", "by": "b", "why": "the deleted record or key holds a value the API cannot give back"}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/email/routing/dns", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/email/routing/rules/{rule_identifier}", "label": "hold:outage", "a": "either", "b": "hold:outage", "by": "b", "why": "what calls it stops working until someone acts"}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/rulesets/{ruleset_id}", "label": "hold:exposed", "a": "hold:exposed", "b": "hold:gone", "by": "override", "why": "removes WAF rules: a protection turned off"}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/rulesets/{ruleset_id}/rules/{rule_id}", "label": "either", "a": "hold:exposed", "b": "hold:recoverable", "by": "override", "why": "one rule of a ruleset; a WAF rule or a harmless one, the request does not say"}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/rulesets/{ruleset_id}/versions/{ruleset_version}", "label": "allow", "a": "allow", "b": "hold:gone", "by": "override", "why": "an old version of a ruleset, history only"}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/settings/aegis", "label": "hold:outage", "a": "either", "b": "hold:outage", "by": "b", "why": "what calls it stops working until someone acts"}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/settings/ohttp-gateway", "label": "hold:outage", "a": "either", "b": "hold:outage", "by": "b", "why": "what calls it stops working until someone acts"}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/settings/origin_tls_compliance_modes", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare DELETE /client/v4/zones/{zone_id}/workers/routes/{route_id}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/containers/applications/{application_id}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/d1/database/{database_id}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/hyperdrive/configs/{hyperdrive_id}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/pages/projects/{project_name}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/pages/projects/{project_name}/domains/{domain_name}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/queues/{queue_id}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/secrets_store/stores/{store_id}/secrets/{secret_id}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/secrets-bulk", "label": "deploy", "a": "either", "b": "deploy", "by": "b", "why": "ships configuration to what runs (secrets, bindings, flags, a firewall version)"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/settings", "label": "deploy", "a": "either", "b": "deploy", "by": "b", "why": "ships configuration to what runs (secrets, bindings, flags, a firewall version)"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/tags/{tag}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/observability/destinations/{slug}", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/observability/issues/{issueId}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/observability/queries/{queryId}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/scripts/{script_name}/script-settings", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/scripts/{script_name}/secrets-bulk", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/scripts/{script_name}/settings", "label": "deploy", "a": "either", "b": "deploy", "by": "b", "why": "ships configuration to what runs (secrets, bindings, flags, a firewall version)"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/services/{service_name}/environments/{environment_name}/settings", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/workers/{worker_id}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews/{preview_id}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews/{preview_id}/deployments/latest", "label": "allow", "a": "allow", "b": "deploy", "by": "override", "why": "a preview, not production"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workers/workers/{worker_id}/versions/latest", "label": "allow", "a": "deploy", "b": "allow", "by": "b", "why": "a version, build record or setting that is not live until a separate deploy"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workflows/concurrency/{key_id}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workflows/settings", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances/{instance_id}/status #1", "label": "allow", "a": "hold:outage", "b": "allow", "by": "b", "why": "a member removed, a restart or a cache dropped: recovers by itself or is redone in a moment"}
+{"id": "cloudflare PATCH /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances/{instance_id}/status #2", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id} #1", "label": "hold:outage", "a": "hold:outage", "b": "hold:exposed", "by": "override", "why": "paused zone: the site is served without Cloudflare; nothing becomes readable"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id} #2", "label": "hold:outage", "a": "allow", "b": "hold:outage", "by": "b", "why": "a public address stops serving"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/custom_hostnames/{custom_hostname_id}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/dns_records/{dns_record_id}", "label": "either", "a": "hold:outage", "b": "either", "by": "b", "why": "an update; the value decides whether anything breaks"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/email/routing", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/email/routing/dns", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/rulesets/{ruleset_id}/rules/{rule_id}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings #1", "label": "hold:exposed", "a": "hold:exposed", "b": "hold:exposed", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings #2", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/aegis", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/auto_origin_tls_kex", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/automatic_platform_optimization", "label": "either", "a": "allow", "b": "either", "by": "b", "why": "a setting that can block clients, raise cost or widen access; value decides"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/binary_ast", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/csam_scanner_third_party", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/fonts", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/h2_prioritization", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/image_resizing", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/nel", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/origin_h2_max_streams", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/origin_max_http_version", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/origin_tls_compliance_modes", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/rum", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/speed_brain", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/ssl_automatic_mode", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/transformations_allowed_origins", "label": "either", "a": "allow", "b": "either", "by": "b", "why": "a setting that can block clients, raise cost or widen access; value decides"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/transformations_c2pa", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/transformations_config", "label": "either", "a": "allow", "b": "either", "by": "b", "why": "a setting that can block clients, raise cost or widen access; value decides"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/{setting_id} #1", "label": "hold:exposed", "a": "hold:exposed", "b": "hold:exposed", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/{setting_id} #2", "label": "hold:exposed", "a": "hold:exposed", "b": "hold:exposed", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/{setting_id} #3", "label": "hold:exposed", "a": "hold:exposed", "b": "hold:exposed", "by": "agree"}
+{"id": "cloudflare PATCH /client/v4/zones/{zone_id}/settings/{setting_id} #4", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/cfd_tunnel", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id}/management", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/containers/applications", "label": "deploy", "a": "allow", "b": "deploy", "by": "b", "why": "runs code or configuration"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/containers/applications/{application_id}/rollouts", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/containers/image-preparations", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/containers/registries", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/containers/registries/{domain}/credentials", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/d1/database", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/d1/database/{database_id}/export", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/d1/database/{database_id}/import #1", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/d1/database/{database_id}/query #1", "label": "hold:recoverable", "a": "hold:gone", "b": "hold:recoverable", "by": "b", "why": "the same API has an endpoint that brings it back"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/d1/database/{database_id}/query #2", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/d1/database/{database_id}/raw #1", "label": "hold:recoverable", "a": "hold:gone", "b": "hold:recoverable", "by": "b", "why": "the same API has an endpoint that brings it back"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/d1/database/{database_id}/raw #2", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/d1/database/{database_id}/time_travel/restore", "label": "hold:recoverable", "a": "hold:gone", "b": "hold:recoverable", "by": "b", "why": "the same API has an endpoint that brings it back"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/d1/database/{database_id}/undelete", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/hyperdrive/configs", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/hyperdrive/configs/{hyperdrive_id}/restart", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/hyperdrive/integrationsOperations/planetScale/createDatabaseSignature", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/members", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/pages/projects", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/pages/projects/{project_name}/deployments", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/pages/projects/{project_name}/deployments/{deployment_id}/retry", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/pages/projects/{project_name}/deployments/{deployment_id}/rollback", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/pages/projects/{project_name}/deployments/{deployment_id}/tails", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/pages/projects/{project_name}/domains", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/pages/projects/{project_name}/purge_build_cache", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/pages/projects/{project_name}/source", "label": "allow", "a": "deploy", "b": "allow", "by": "b", "why": "a version, build record or setting that is not live until a separate deploy"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues/{queue_id}/consumers", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/ack", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/batch", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/extend", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/peek", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/preview", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/preview/ack", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/pull", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues/{queue_id}/messages/purge", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/queues/{queue_id}/purge", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/r2/buckets", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/custom_domains", "label": "hold:exposed", "a": "hold:exposed", "b": "hold:exposed", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/domains/custom", "label": "hold:exposed", "a": "hold:exposed", "b": "hold:exposed", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/jobs", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/r2/temp-access-credentials", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/secrets_store/stores", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/secrets_store/stores/{store_id}/secrets", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/secrets_store/stores/{store_id}/secrets/{secret_id}/duplicate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/storage/kv/namespaces", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/bulk/delete", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/bulk/get", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/tokens", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/indexes", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/indexes/{index_name}/delete-by-ids", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/indexes/{index_name}/get-by-ids", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/indexes/{index_name}/insert", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/indexes/{index_name}/query", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/indexes/{index_name}/upsert", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/v2/indexes", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}/delete_by_ids", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}/get_by_ids", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}/insert", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}/metadata_index/create", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}/metadata_index/delete", "label": "hold:outage", "a": "either", "b": "hold:outage", "by": "b", "why": "what calls it stops working until someone acts"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}/query", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}/upsert", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/assets/upload", "label": "allow", "a": "deploy", "b": "allow", "by": "b", "why": "a version, build record or setting that is not live until a separate deploy"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/dispatch/namespaces", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/assets-upload-session", "label": "allow", "a": "deploy", "b": "allow", "by": "b", "why": "a version, build record or setting that is not live until a separate deploy"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/durable_objects/namespaces/{id}/query/v2", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/destinations", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/issues/automations", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/issues/groups", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/issues/groups/{groupId}/members", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/issues/{issueId}/notification-runs", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/metricsexport", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/queries", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/shared/query", "label": "hold:exposed", "a": "either", "b": "hold:exposed", "by": "b", "why": "opens to anyone with the URL or link"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/telemetry/keys", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/telemetry/live-tail", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/telemetry/live-tail/heartbeat", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/telemetry/query", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/observability/telemetry/values", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/scripts/{script_name}/assets-upload-session", "label": "allow", "a": "deploy", "b": "allow", "by": "b", "why": "a version, build record or setting that is not live until a separate deploy"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/scripts/{script_name}/deployments", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/scripts/{script_name}/subdomain", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/scripts/{script_name}/tails", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/scripts/{script_name}/versions", "label": "allow", "a": "deploy", "b": "allow", "by": "b", "why": "a version, build record or setting that is not live until a separate deploy"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/workers", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews/{preview_id}/deployments", "label": "allow", "a": "allow", "b": "deploy", "by": "override", "why": "a preview, not production"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews/{preview_id}/deployments/{deployment_id}/profile", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/workers/{worker_id}/versions", "label": "allow", "a": "deploy", "b": "allow", "by": "b", "why": "a version, build record or setting that is not live until a separate deploy"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workers/workers/{worker_id}/versions/{version_id}/profile", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workflows/concurrency", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances/batch", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances/batch/delete", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances/batch/terminate", "label": "allow", "a": "hold:outage", "b": "allow", "by": "b", "why": "a member removed, a restart or a cache dropped: recovers by itself or is redone in a moment"}
+{"id": "cloudflare POST /client/v4/accounts/{account_id}/workflows/{workflow_name}/instances/{instance_id}/events/{event_type}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/user/tokens", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "cloudflare POST /client/v4/zones", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/custom_hostnames", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/dns_records", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/dns_records/batch #1", "label": "hold:gone", "a": "hold:outage", "b": "hold:gone", "by": "b", "why": "the deleted record or key holds a value the API cannot give back"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/dns_records/batch #2", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/dns_records/batch #3", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/dns_records/import", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/dns_records/scan", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/dns_records/scan/review", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/dns_records/scan/trigger", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/email/routing/disable", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/email/routing/dns", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/email/routing/enable", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/email/routing/rules", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/email/routing/unlock", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/purge_cache", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/rulesets", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/rulesets/{ruleset_id}/rules", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/settings/zaraz/publish", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "cloudflare POST /client/v4/zones/{zone_id}/workers/routes", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id}/configurations", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/d1/database/{database_id}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/d1/insights/settings", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/hyperdrive/configs/{hyperdrive_id}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/members/{member_id}", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/queues/{queue_id}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/queues/{queue_id}/consumers/{consumer_id}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/cors", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/domains/custom/{domain}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/domains/managed #1", "label": "hold:exposed", "a": "hold:exposed", "b": "hold:exposed", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/domains/managed #2", "label": "hold:outage", "a": "allow", "b": "hold:outage", "by": "b", "why": "a public address stops serving"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/lifecycle", "label": "either", "a": "hold:gone", "b": "either", "by": "b", "why": "replaces a whole section; harmless or total, the body decides, and no variant was given"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/local-uploads", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/lock", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/objects/{object_key}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/r2/buckets/{bucket_name}/sippy", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/bulk", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/values/{key_name}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/tokens/{token_id}", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/tokens/{token_id}/value", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/vectorize/indexes/{index_name}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/account-settings", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/content", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/secrets", "label": "deploy", "a": "either", "b": "deploy", "by": "b", "why": "ships configuration to what runs (secrets, bindings, flags, a firewall version)"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/tags", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/dispatch/namespaces/{dispatch_namespace}/scripts/{script_name}/tags/{tag}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/domains", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/observability/issues/automations/{automationId}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/scripts/{script_name}", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/scripts/{script_name}/content", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/scripts/{script_name}/schedules", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/scripts/{script_name}/secrets", "label": "deploy", "a": "either", "b": "deploy", "by": "b", "why": "ships configuration to what runs (secrets, bindings, flags, a firewall version)"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/scripts/{script_name}/usage-model", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/services/{service_name}/environments/{environment_name}/content", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/subdomain", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/workers/{worker_id}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workers/workers/{worker_id}/previews/{preview_id}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/accounts/{account_id}/workflows/{workflow_name}", "label": "either", "a": "deploy", "b": "either", "by": "b", "why": "repoints what runs; the body decides"}
+{"id": "cloudflare PUT /client/v4/user/tokens/{token_id}", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "cloudflare PUT /client/v4/user/tokens/{token_id}/value", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/custom_hostnames/fallback_origin", "label": "either", "a": "hold:outage", "b": "either", "by": "b", "why": "an update; the value decides whether anything breaks"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/custom_hostnames/{custom_hostname_id}/certificate_pack/{certificate_pack_id}/certificates/{certificate_id}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/dns_records/{dns_record_id}", "label": "either", "a": "hold:outage", "b": "either", "by": "b", "why": "an update; the value decides whether anything breaks"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/email/routing", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/email/routing/rules/catch_all", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/email/routing/rules/{rule_identifier}", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/rulesets/phases/{ruleset_phase}/entrypoint", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/rulesets/{ruleset_id}", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/settings/google-tag-gateway/config", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/settings/ohttp-gateway", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/settings/origin_tls_compliance_modes", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/settings/zaraz/config", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/settings/zaraz/history", "label": "deploy", "a": "either", "b": "deploy", "by": "b", "why": "ships configuration to what runs (secrets, bindings, flags, a firewall version)"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/settings/zaraz/workflow", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "cloudflare PUT /client/v4/zones/{zone_id}/workers/routes/{route_id}", "label": "either", "a": "hold:outage", "b": "either", "by": "b", "why": "an update; the value decides whether anything breaks"}
+{"id": "fly DELETE /v1/apps/{app}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "fly DELETE /v1/apps/{app}/certificates/{host}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "fly DELETE /v1/apps/{app}/certificates/{host}/acme", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "fly DELETE /v1/apps/{app}/certificates/{host}/custom", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "fly DELETE /v1/apps/{app}/ip_assignments/{ip}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "fly DELETE /v1/apps/{app}/machines/{id}", "label": "hold:outage", "a": "hold:gone", "b": "hold:outage", "by": "b", "why": "what is removed is a runner; the code or data lives elsewhere"}
+{"id": "fly DELETE /v1/apps/{app}/machines/{id}/lease", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly DELETE /v1/apps/{app}/machines/{id}/metadata/{key}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "fly DELETE /v1/apps/{app}/secretkeys/{name}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "fly DELETE /v1/apps/{app}/secrets/{name}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "fly DELETE /v1/apps/{app}/volumes/{id}", "label": "hold:recoverable", "a": "hold:recoverable", "b": "hold:gone", "by": "a", "why": "the provider documents a restore window (#353 paas.md)"}
+{"id": "fly DELETE /v1/postgres/{id}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "fly DELETE /v1/postgres/{id}/attachments/{app}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "fly DELETE /v1/postgres/{id}/databases/{db}/extensions/{name}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "fly DELETE /v1/postgres/{id}/users/{user}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "fly PATCH /v1/postgres/{id}/maintenance_window", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly PATCH /v1/postgres/{id}/users/{user}", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "fly POST /v1/apps", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/certificates/acme", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/certificates/custom", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/certificates/{host}/check", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/ip_assignments", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/machines", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/machines/{id}", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/machines/{id}/cordon", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/machines/{id}/exec", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/machines/{id}/lease", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/machines/{id}/metadata/{key}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "fly POST /v1/apps/{app}/machines/{id}/restart", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "fly POST /v1/apps/{app}/machines/{id}/signal", "label": "either", "a": "hold:outage", "b": "either", "by": "b", "why": "an update; the value decides whether anything breaks"}
+{"id": "fly POST /v1/apps/{app}/machines/{id}/start", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/machines/{id}/stop", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/machines/{id}/suspend", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/machines/{id}/uncordon", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/secretkeys/{name}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/secretkeys/{name}/decrypt", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/secretkeys/{name}/encrypt", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/secretkeys/{name}/generate", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/secretkeys/{name}/sign", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/secretkeys/{name}/verify", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/secrets #1", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/secrets #2", "label": "either", "a": "either", "b": "allow", "by": "override", "why": "setting an existing name overwrites its value"}
+{"id": "fly POST /v1/apps/{app}/secrets/{name}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/volumes", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly POST /v1/apps/{app}/volumes/{id}/snapshots", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly POST /v1/postgres", "label": "hold:money", "a": "either", "b": "hold:money", "by": "b", "why": "a paid resource or a size that cannot shrink"}
+{"id": "fly POST /v1/postgres/{id}/attachments", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly POST /v1/postgres/{id}/backups", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly POST /v1/postgres/{id}/databases", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly POST /v1/postgres/{id}/databases/{db}/extensions", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly POST /v1/postgres/{id}/fork", "label": "hold:money", "a": "allow", "b": "hold:money", "by": "b", "why": "billed resource or charges money"}
+{"id": "fly POST /v1/postgres/{id}/restore", "label": "hold:money", "a": "either", "b": "hold:money", "by": "b", "why": "a paid resource or a size that cannot shrink"}
+{"id": "fly POST /v1/postgres/{id}/users", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "fly POST /v1/postgres/{id}/users/{user}/rotate_password", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "fly PUT /v1/apps/{app}/volumes/{id}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "fly PUT /v1/apps/{app}/volumes/{id}/extend", "label": "hold:money", "a": "either", "b": "hold:money", "by": "b", "why": "a paid resource or a size that cannot shrink"}
+{"id": "fly-gql addAllowedReplaySourceOrgs", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "fly-gql addCertificate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly-gql addWireGuardPeer", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "fly-gql allocateEgressIpAddress", "label": "hold:money", "a": "allow", "b": "hold:money", "by": "b", "why": "billed resource or charges money"}
+{"id": "fly-gql allocateIpAddress", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "fly-gql attachPostgresCluster", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly-gql cancelBuild", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "fly-gql checkCertificate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly-gql createAddOn", "label": "hold:money", "a": "either", "b": "hold:money", "by": "b", "why": "a paid resource or a size that cannot shrink"}
+{"id": "fly-gql createApp", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly-gql createBuild", "label": "allow", "a": "deploy", "b": "allow", "by": "b", "why": "a version, build record or setting that is not live until a separate deploy"}
+{"id": "fly-gql createCheckJob", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly-gql createCheckJobRun", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly-gql createDoctorReport", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly-gql createDoctorUrl", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly-gql createExtensionTosAgreement", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly-gql createLimitedAccessToken", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "fly-gql createOrganization", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly-gql createOrganizationInvitation", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "fly-gql createPostgresClusterDatabase", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly-gql createPostgresClusterUser", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "fly-gql createRelease", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "fly-gql createTemplateDeployment", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "fly-gql createThirdPartyConfiguration", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly-gql deleteAddOn", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "fly-gql deleteApp", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "fly-gql deleteCertificate", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "fly-gql deleteDeploymentSource", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "fly-gql deleteLimitedAccessToken", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "fly-gql deleteOrganization", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "fly-gql deleteOrganizationInvitation", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly-gql deleteOrganizationMembership", "label": "allow", "a": "hold:outage", "b": "allow", "by": "b", "why": "a member removed, a restart or a cache dropped: recovers by itself or is redone in a moment"}
+{"id": "fly-gql deleteRemoteBuilder", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "fly-gql deleteThirdPartyConfiguration", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "fly-gql detachPostgresCluster", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "fly-gql dummyWireGuardPeer", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly-gql enablePostgresConsul", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly-gql ensureDepotRemoteBuilder", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly-gql ensureMachineRemoteBuilder", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly-gql establishSshKey", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "fly-gql finishBuild", "label": "allow", "a": "deploy", "b": "allow", "by": "b", "why": "a version, build record or setting that is not live until a separate deploy"}
+{"id": "fly-gql grantPostgresClusterUserAccess", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "fly-gql issueCertificate", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "fly-gql logOut", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly-gql moveApp", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "fly-gql releaseEgressIpAddress", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "fly-gql releaseIpAddress", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "fly-gql removeAllowedReplaySourceOrgs", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "fly-gql removeWireGuardPeer", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "fly-gql resetAddOnPassword", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "fly-gql revokePostgresClusterUserAccess", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "fly-gql saveDeploymentSource", "label": "allow", "a": "deploy", "b": "allow", "by": "b", "why": "a version, build record or setting that is not live until a separate deploy"}
+{"id": "fly-gql setAllowAllCrossNetworkReplays", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "fly-gql setSecrets #1", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "fly-gql setSecrets #2", "label": "either", "a": "either", "b": "allow", "by": "override", "why": "setting an existing name overwrites its value"}
+{"id": "fly-gql startBuild", "label": "allow", "a": "deploy", "b": "allow", "by": "b", "why": "a version, build record or setting that is not live until a separate deploy"}
+{"id": "fly-gql unsetSecrets", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "fly-gql updateAddOn", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "fly-gql updateOrganizationMembership", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "fly-gql updateRelease", "label": "allow", "a": "deploy", "b": "allow", "by": "b", "why": "a version, build record or setting that is not live until a separate deploy"}
+{"id": "fly-gql updateRemoteBuilder", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "fly-gql updateThirdPartyConfiguration", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "fly-gql validateWireGuardPeers", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway accessGroupCreate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway accessGroupDelete", "label": "allow", "a": "hold:outage", "b": "allow", "by": "b", "why": "a member removed, a restart or a cache dropped: recovers by itself or is redone in a moment"}
+{"id": "railway accessGroupMemberAdd", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "railway accessGroupMemberRemove", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway accessGroupProjectAttach", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "railway accessGroupProjectDetach", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway accessGroupUpdate", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "railway agentUsageLimitSet", "label": "either", "a": "hold:money", "b": "either", "by": "b", "why": "a limit that can be raised or lowered"}
+{"id": "railway apiTokenCreate", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "railway apiTokenDelete", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "railway baseEnvironmentOverride", "label": "allow", "a": "deploy", "b": "allow", "by": "b", "why": "a version, build record or setting that is not live until a separate deploy"}
+{"id": "railway botScopeBindingRemove", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway bucketCreate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway bucketCredentialsReset", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "railway bucketUpdate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway cancelPitrHaWorkflow", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway canvasViewMerge", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway clearPitrHaWorkflowProgress", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway clearanceTokenCreate", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "railway clearanceTokenRevoke", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "railway cliAuthEventTrack", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway cliEventTrack", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway cloudAgentArchive", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway cloudAgentCheckpointCreate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway cloudAgentCheckpointDelete", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "railway cloudAgentCreate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway cloudAgentDelete", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "railway cloudAgentDeploy", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "railway cloudAgentFeedbackCreate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway cloudAgentFork", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway cloudAgentHarnessToken", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway cloudAgentMarkSeen", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway cloudAgentSessionRename", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway cloudAgentSleep", "label": "hold:outage", "a": "either", "b": "hold:outage", "by": "b", "why": "what calls it stops working until someone acts"}
+{"id": "railway cloudAgentStateReport", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway cloudAgentTaskCancel", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway cloudAgentTaskDispatch", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway cloudAgentTaskRecover", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway cloudAgentTaskRespond", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway cloudAgentUnarchive", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway cloudAgentWake", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway customDomainCreate", "label": "hold:exposed", "a": "allow", "b": "hold:exposed", "by": "b", "why": "gives a private service a public address"}
+{"id": "railway customDomainDelete", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "railway customDomainIssueCertificate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway customDomainUpdate", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "railway customerCreateFreePlanSubscription", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway customerTogglePayoutsToCredits", "label": "hold:money", "a": "hold:money", "b": "hold:money", "by": "agree"}
+{"id": "railway databasePasswordReset", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "railway deploymentApprove", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "railway deploymentCancel", "label": "allow", "a": "deploy", "b": "allow", "by": "b", "why": "a version, build record or setting that is not live until a separate deploy"}
+{"id": "railway deploymentInstanceExecutionCreate", "label": "allow", "a": "deploy", "b": "allow", "by": "b", "why": "a version, build record or setting that is not live until a separate deploy"}
+{"id": "railway deploymentRedeploy", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "railway deploymentRemove", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "railway deploymentRestart", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway deploymentRollback", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "railway deploymentStop", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "railway deploymentTriggerCreate", "label": "allow", "a": "deploy", "b": "allow", "by": "b", "why": "a version, build record or setting that is not live until a separate deploy"}
+{"id": "railway deploymentTriggerDelete", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway deploymentTriggerUpdate", "label": "either", "a": "deploy", "b": "either", "by": "b", "why": "repoints what runs; the body decides"}
+{"id": "railway devNewLandingTargetClear", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway devNewLandingTargetSet", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway disablePitrForHaCluster", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "railway disableServiceCdn", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway dockerComposeImport", "label": "deploy", "a": "allow", "b": "deploy", "by": "b", "why": "runs code or configuration"}
+{"id": "railway egressGatewayAssociationCreate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway egressGatewayAssociationsClear", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "railway egressGatewayHAMigrationPreview", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway egressGatewayRollbackFromHA", "label": "either", "a": "hold:outage", "b": "either", "by": "b", "why": "an update; the value decides whether anything breaks"}
+{"id": "railway egressGatewayUpgradeToHA", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "railway emailChangeConfirm", "label": "hold:exposed", "a": "hold:exposed", "b": "allow", "by": "override", "why": "the account moves to another address"}
+{"id": "railway emailChangeInitiate", "label": "hold:exposed", "a": "hold:exposed", "b": "allow", "by": "override", "why": "starts moving the account to another address"}
+{"id": "railway enablePitrForHaCluster", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway enableServiceCdn", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway environmentApplyChangeSet", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "railway environmentClearanceDefaultUpdate", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "railway environmentConfigPlanCommentUpsert", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway environmentCreate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway environmentDelete", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "railway environmentIacPartialRelease", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway environmentIacPartialTransfer", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway environmentPatchCommit #1", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "railway environmentPatchCommit #2", "label": "deploy", "a": "allow", "b": "deploy", "by": "b", "why": "runs code or configuration"}
+{"id": "railway environmentPatchCommitStaged", "label": "deploy", "a": "either", "b": "deploy", "by": "b", "why": "ships configuration to what runs (secrets, bindings, flags, a firewall version)"}
+{"id": "railway environmentPatchDismissFailure", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway environmentPatchRestage", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway environmentPreviewChangeSet", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway environmentRename", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway environmentStageChanges #1", "label": "hold:gone", "a": "hold:gone", "b": "allow", "by": "override", "why": "the commit that follows does not say what was staged, so the stage is the last place the delete is visible"}
+{"id": "railway environmentStageChanges #2", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway environmentTriggersDeploy", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "railway environmentUnskipService", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "railway fairUseAgree", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway featureFlagAdd", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway featureFlagRemove", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway generateShellToken", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway githubRepoDeploy", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "railway githubRepoUpdate", "label": "deploy", "a": "either", "b": "deploy", "by": "b", "why": "ships configuration to what runs (secrets, bindings, flags, a firewall version)"}
+{"id": "railway inviteCodeUse", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway jobApplicationCreate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway loginSessionAuth", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway loginSessionCancel", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway loginSessionConsume", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway loginSessionCreate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway loginSessionVerify", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway notificationDeliveriesMarkAsRead", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway notificationRuleCreate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway notificationRuleDelete", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway notificationRuleUpdate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway observabilityDashboardCreate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway observabilityDashboardReset", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway observabilityDashboardUpdate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway passkeyDelete", "label": "hold:exposed", "a": "hold:exposed", "b": "allow", "by": "override", "why": "a protection turned off"}
+{"id": "railway preferencesUpdate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway privateNetworkEndpointRename", "label": "hold:outage", "a": "either", "b": "hold:outage", "by": "b", "why": "what calls it stops working until someone acts"}
+{"id": "railway projectClaim", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway projectClearanceDefaultUpdate", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "railway projectCreate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway projectDelete", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "railway projectFavoriteSet", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway projectFeatureFlagAdd", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway projectFeatureFlagRemove", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway projectInvitationAccept", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway projectInvitationCreate", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "railway projectInvitationDelete", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway projectInvitationResend", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway projectInviteCodeCreate", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "railway projectLeave", "label": "allow", "a": "hold:outage", "b": "allow", "by": "b", "why": "a member removed, a restart or a cache dropped: recovers by itself or is redone in a moment"}
+{"id": "railway projectMemberAdd", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "railway projectMemberRemove", "label": "allow", "a": "hold:outage", "b": "allow", "by": "b", "why": "a member removed, a restart or a cache dropped: recovers by itself or is redone in a moment"}
+{"id": "railway projectMemberUpdate", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "railway projectScheduleDelete", "label": "hold:recoverable", "a": "hold:recoverable", "b": "hold:recoverable", "by": "agree"}
+{"id": "railway projectScheduleDeleteCancel", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway projectScheduleDeleteForce", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "railway projectTokenCreate", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "railway projectTokenDelete", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "railway projectTransfer", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "railway projectTransferConfirm", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "railway projectTransferInitiate", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "railway projectTransferToTeam", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "railway projectUpdate #1", "label": "hold:exposed", "a": "hold:exposed", "b": "hold:exposed", "by": "agree"}
+{"id": "railway projectUpdate #2", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway providerAuthRemove", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway purgeServiceCache", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway railwayDomainDnsRecordCreate", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway railwayDomainDnsRecordDelete", "label": "hold:gone", "a": "hold:outage", "b": "hold:gone", "by": "b", "why": "the deleted record or key holds a value the API cannot give back"}
+{"id": "railway railwayDomainDnsRecordUpdate", "label": "either", "a": "hold:outage", "b": "either", "by": "b", "why": "an update; the value decides whether anything breaks"}
+{"id": "railway railwayDomainEmailForwardingRemoveAll", "label": "hold:gone", "a": "hold:outage", "b": "hold:gone", "by": "b", "why": "the deleted record or key holds a value the API cannot give back"}
+{"id": "railway railwayDomainEmailForwardingRuleCreate", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway railwayDomainEmailForwardingRuleDelete", "label": "hold:outage", "a": "either", "b": "hold:outage", "by": "b", "why": "what calls it stops working until someone acts"}
+{"id": "railway railwayDomainEmailForwardingRuleSendTest", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway railwayDomainEmailForwardingRuleUpdate", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "railway railwayDomainNameserversSet", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "railway railwayDomainUpdate", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "railway recoveryCodeGenerate", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway recoveryCodeValidate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway referralInfoUpdate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway sandboxCheckpointCreate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway sandboxCheckpointDelete", "label": "hold:gone", "a": "either", "b": "hold:gone", "by": "b", "why": "deletes something the API cannot bring back"}
+{"id": "railway sandboxCheckpointRename", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway sandboxCreate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway sandboxDestroy", "label": "hold:gone", "a": "either", "b": "hold:gone", "by": "b", "why": "deletes something the API cannot bring back"}
+{"id": "railway sandboxExec", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway sandboxHeartbeat", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway sandboxTemplateBuild", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway serviceConnect", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "railway serviceCreate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway serviceDelete", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "railway serviceDisconnect", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway serviceDomainCreate", "label": "hold:exposed", "a": "allow", "b": "hold:exposed", "by": "b", "why": "gives a private service a public address"}
+{"id": "railway serviceDomainDelete", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "railway serviceDomainUpdate", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "railway serviceDuplicate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway serviceFeatureFlagAdd", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway serviceFeatureFlagRemove", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway serviceInstanceAutoDeployUpdate", "label": "allow", "a": "deploy", "b": "allow", "by": "b", "why": "a version, build record or setting that is not live until a separate deploy"}
+{"id": "railway serviceInstanceAutoUpdateScheduleUpdate", "label": "allow", "a": "deploy", "b": "allow", "by": "b", "why": "a version, build record or setting that is not live until a separate deploy"}
+{"id": "railway serviceInstanceAutoUpdateSnooze", "label": "allow", "a": "deploy", "b": "allow", "by": "b", "why": "a version, build record or setting that is not live until a separate deploy"}
+{"id": "railway serviceInstanceAutoUpdateSnoozeClear", "label": "allow", "a": "deploy", "b": "allow", "by": "b", "why": "a version, build record or setting that is not live until a separate deploy"}
+{"id": "railway serviceInstanceClearanceUpdate", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "railway serviceInstanceDeploy", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "railway serviceInstanceDeployV2", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "railway serviceInstanceLimitsUpdate", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "railway serviceInstanceRedeploy", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "railway serviceInstanceUpdate #1", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "railway serviceInstanceUpdate #2", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway serviceInstanceVulnRemediationDismiss", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway serviceInstanceVulnRemediationPatchNow", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "railway serviceRemoveUpstreamUrl", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway serviceTakedownAcknowledge", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway serviceUpdate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway sessionDelete", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway setServiceUnderAttackMode", "label": "either", "a": "allow", "b": "either", "by": "b", "why": "a setting that can block clients, raise cost or widen access; value decides"}
+{"id": "railway setupAgentEventTrack", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway sharedVariableConfigure", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "railway signalCreate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway signalDefaultSet", "label": "deploy", "a": "either", "b": "deploy", "by": "b", "why": "ships configuration to what runs (secrets, bindings, flags, a firewall version)"}
+{"id": "railway signalDelete", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "railway signalReplace", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "railway signalRollback", "label": "deploy", "a": "either", "b": "deploy", "by": "b", "why": "ships configuration to what runs (secrets, bindings, flags, a firewall version)"}
+{"id": "railway signalRuleSet", "label": "deploy", "a": "either", "b": "deploy", "by": "b", "why": "ships configuration to what runs (secrets, bindings, flags, a firewall version)"}
+{"id": "railway signalRuleUnset", "label": "deploy", "a": "either", "b": "deploy", "by": "b", "why": "ships configuration to what runs (secrets, bindings, flags, a firewall version)"}
+{"id": "railway sshPublicKeyCreate", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "railway sshPublicKeyDelete", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway sshSignupApprove", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "railway tcpProxyCreate", "label": "hold:exposed", "a": "either", "b": "hold:exposed", "by": "b", "why": "opens to anyone with the URL or link"}
+{"id": "railway tcpProxyDelete", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "railway templateClone", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway templateDelete", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "railway templateDeploy", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "railway templateDeployV2", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "railway templateGenerate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway templatePublish", "label": "hold:exposed", "a": "either", "b": "hold:exposed", "by": "b", "why": "opens to anyone with the URL or link"}
+{"id": "railway templateRevert", "label": "either", "a": "hold:outage", "b": "either", "by": "b", "why": "an update; the value decides whether anything breaks"}
+{"id": "railway templateServiceSourceEject", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway templateUnpublish", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway templateVolumeUpdate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway trustedDomainCreate", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "railway trustedDomainDelete", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway trustedDomainRetriggerVerification", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway trustedDomainUpdate", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "railway twoFactorInfoCreate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway twoFactorInfoDelete", "label": "hold:exposed", "a": "hold:exposed", "b": "allow", "by": "override", "why": "a protection turned off: held under what it opens the way to"}
+{"id": "railway twoFactorInfoSecret", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway twoFactorInfoValidate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway updateServiceEdgeConfig", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "railway updateServiceEdgeRules", "label": "either", "a": "hold:gone", "b": "either", "by": "b", "why": "replaces a whole section; harmless or total, the body decides, and no variant was given"}
+{"id": "railway upsertSlackChannel", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway usageLimitRemove", "label": "hold:money", "a": "hold:money", "b": "hold:money", "by": "agree"}
+{"id": "railway usageLimitSet", "label": "either", "a": "hold:money", "b": "either", "by": "b", "why": "a limit that can be raised or lowered"}
+{"id": "railway userBetaLeave", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway userDelete", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "railway userDiscordDisconnect", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway userFlagsRemove", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway userFlagsSet", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway userProfileUpdate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway userTermsUpdate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway variableCollectionUpsert #1", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "railway variableCollectionUpsert #2", "label": "deploy", "a": "either", "b": "deploy", "by": "b", "why": "ships configuration to what runs (secrets, bindings, flags, a firewall version)"}
+{"id": "railway variableDelete", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "railway variableUpsert", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "railway volumeCreate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway volumeDelete", "label": "hold:recoverable", "a": "hold:recoverable", "b": "hold:gone", "by": "a", "why": "the provider documents a restore window (#353 paas.md)"}
+{"id": "railway volumeInstanceBackupCreate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway volumeInstanceBackupDelete", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "railway volumeInstanceBackupLock", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway volumeInstanceBackupRestore", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "railway volumeInstanceBackupScheduleUpdate", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "railway volumeInstancePITRRestore", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway volumeInstanceUpdate", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "railway volumeUpdate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway webhookTest", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway workspaceApiTokenDelete", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "railway workspaceDelete", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "railway workspaceInviteCodeCreate", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "railway workspaceInviteCodeUse", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway workspaceLeave", "label": "allow", "a": "hold:outage", "b": "allow", "by": "b", "why": "a member removed, a restart or a cache dropped: recovers by itself or is redone in a moment"}
+{"id": "railway workspacePermissionChange", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "railway workspacePolicyDeploySourceAllowlistAdd", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway workspacePolicyDeploySourceAllowlistRemove", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "railway workspacePolicyItemUpdate", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "railway workspaceSetRestrictProjectVisibilityToGroups", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "railway workspaceTwoFactorEnforcementUpdate", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "railway workspaceUpdate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway workspaceUpsertSlackChannel", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "railway workspaceUserInvite", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "railway workspaceUserRemove", "label": "allow", "a": "hold:outage", "b": "allow", "by": "b", "why": "a member removed, a restart or a cache dropped: recovers by itself or is redone in a moment"}
+{"id": "railway xAgentProjectClaim", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase DELETE /v1/branches/{branch_id_or_ref}", "label": "hold:recoverable", "a": "hold:gone", "b": "hold:recoverable", "by": "b", "why": "the same API has an endpoint that brings it back"}
+{"id": "supabase DELETE /v1/projects/{ref}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "supabase DELETE /v1/projects/{ref}/api-keys/{id}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "supabase DELETE /v1/projects/{ref}/billing/addons/{addon_variant}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "supabase DELETE /v1/projects/{ref}/branches", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "supabase DELETE /v1/projects/{ref}/claim-token", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase DELETE /v1/projects/{ref}/cli/login-role", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase DELETE /v1/projects/{ref}/config/auth/signing-keys/{id}", "label": "allow", "a": "hold:outage", "b": "allow", "by": "b", "why": "a member removed, a restart or a cache dropped: recovers by itself or is redone in a moment"}
+{"id": "supabase DELETE /v1/projects/{ref}/config/auth/sso/providers/{provider_id}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "supabase DELETE /v1/projects/{ref}/config/auth/third-party-auth/{tpa_id}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "supabase DELETE /v1/projects/{ref}/custom-hostname", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "supabase DELETE /v1/projects/{ref}/database/jit/invite/{invite_id}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase DELETE /v1/projects/{ref}/database/jit/{user_id}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "supabase DELETE /v1/projects/{ref}/database/migrations", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "supabase DELETE /v1/projects/{ref}/functions", "label": "hold:gone", "a": "hold:gone", "b": "hold:outage", "by": "override", "why": "the function's source is not always kept elsewhere"}
+{"id": "supabase DELETE /v1/projects/{ref}/functions/{function_slug}", "label": "hold:gone", "a": "hold:gone", "b": "hold:outage", "by": "override", "why": "the function's source is not always kept elsewhere"}
+{"id": "supabase DELETE /v1/projects/{ref}/network-bans", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "supabase DELETE /v1/projects/{ref}/secrets", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "supabase DELETE /v1/projects/{ref}/vanity-subdomain", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "supabase PATCH /v1/branches/{branch_id_or_ref}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "supabase PATCH /v1/projects/{ref}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase PATCH /v1/projects/{ref}/actions/{run_id}/status", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase PATCH /v1/projects/{ref}/api-keys/{id}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "supabase PATCH /v1/projects/{ref}/billing/addons", "label": "hold:money", "a": "hold:money", "b": "hold:money", "by": "agree"}
+{"id": "supabase PATCH /v1/projects/{ref}/config/auth", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "supabase PATCH /v1/projects/{ref}/config/auth/signing-keys/{id}", "label": "either", "a": "hold:outage", "b": "either", "by": "b", "why": "an update; the value decides whether anything breaks"}
+{"id": "supabase PATCH /v1/projects/{ref}/config/database/pooler", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "supabase PATCH /v1/projects/{ref}/config/database/postgres", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "supabase PATCH /v1/projects/{ref}/config/realtime", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "supabase PATCH /v1/projects/{ref}/config/storage", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "supabase PATCH /v1/projects/{ref}/database/backups/schedule", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase PATCH /v1/projects/{ref}/database/migrations/{version}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "supabase PATCH /v1/projects/{ref}/database/password", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "supabase PATCH /v1/projects/{ref}/functions/{function_slug}", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "supabase PATCH /v1/projects/{ref}/network-restrictions", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "supabase PATCH /v1/projects/{ref}/postgrest", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "supabase POST /v1/branches/{branch_id_or_ref}/merge", "label": "deploy", "a": "hold:gone", "b": "deploy", "by": "b", "why": "ships migrations or a whole configuration to production"}
+{"id": "supabase POST /v1/branches/{branch_id_or_ref}/push", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "supabase POST /v1/branches/{branch_id_or_ref}/reset", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "supabase POST /v1/branches/{branch_id_or_ref}/restore", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase POST /v1/oauth/revoke", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "supabase POST /v1/oauth/token", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase POST /v1/organizations", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase POST /v1/organizations/{slug}/project-claim/{token}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "supabase POST /v1/projects", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "supabase POST /v1/projects/{ref}/analytics/endpoints/logs", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/api-keys", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "supabase POST /v1/projects/{ref}/branches", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "supabase POST /v1/projects/{ref}/claim-token", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "supabase POST /v1/projects/{ref}/cli/login-role", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "supabase POST /v1/projects/{ref}/config/auth/signing-keys", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/config/auth/signing-keys/legacy", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "supabase POST /v1/projects/{ref}/config/auth/sso/providers", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "supabase POST /v1/projects/{ref}/config/auth/third-party-auth", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "supabase POST /v1/projects/{ref}/config/disk", "label": "hold:money", "a": "either", "b": "hold:money", "by": "b", "why": "a paid resource or a size that cannot shrink"}
+{"id": "supabase POST /v1/projects/{ref}/config/realtime/shutdown", "label": "allow", "a": "hold:outage", "b": "allow", "by": "b", "why": "a member removed, a restart or a cache dropped: recovers by itself or is redone in a moment"}
+{"id": "supabase POST /v1/projects/{ref}/custom-hostname/activate", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "supabase POST /v1/projects/{ref}/custom-hostname/initialize", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/custom-hostname/reverify", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/database/backups/restore", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/database/backups/restore-pitr", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/database/backups/restore-point", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/database/backups/undo", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/database/jit", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "supabase POST /v1/projects/{ref}/database/jit/invite", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "supabase POST /v1/projects/{ref}/database/jit/invite/accept", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/database/migrations #1", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/database/migrations #2", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/database/query #1", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/database/query #2", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/database/query/read-only", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/database/webhooks/enable", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/functions", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/functions/deploy", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/network-bans/retrieve", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/network-bans/retrieve/enriched", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/network-restrictions/apply", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "supabase POST /v1/projects/{ref}/network-restrictions/review", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/pause", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/read-replicas/remove", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/read-replicas/setup", "label": "hold:money", "a": "either", "b": "hold:money", "by": "b", "why": "a paid resource or a size that cannot shrink"}
+{"id": "supabase POST /v1/projects/{ref}/readonly/temporary-disable", "label": "either", "a": "either", "b": "allow", "by": "override", "why": "lifts the read-only mode Supabase sets on a full disk"}
+{"id": "supabase POST /v1/projects/{ref}/restart", "label": "allow", "a": "hold:outage", "b": "allow", "by": "b", "why": "a member removed, a restart or a cache dropped: recovers by itself or is redone in a moment"}
+{"id": "supabase POST /v1/projects/{ref}/restore", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/restore/cancel", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "supabase POST /v1/projects/{ref}/secrets", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/upgrade", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "supabase POST /v1/projects/{ref}/vanity-subdomain/activate", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "supabase POST /v1/projects/{ref}/vanity-subdomain/check-availability", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase PUT /v1/projects/{ref}/api-keys/legacy", "label": "either", "a": "hold:outage", "b": "either", "by": "b", "why": "an update; the value decides whether anything breaks"}
+{"id": "supabase PUT /v1/projects/{ref}/config/auth/sso/providers/{provider_id}", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "supabase PUT /v1/projects/{ref}/config/database/postgres", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "supabase PUT /v1/projects/{ref}/database/jit", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "supabase PUT /v1/projects/{ref}/database/migrations", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "supabase PUT /v1/projects/{ref}/functions", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "supabase PUT /v1/projects/{ref}/jit-access", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "supabase PUT /v1/projects/{ref}/pgsodium", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "supabase PUT /v1/projects/{ref}/ssl-enforcement", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "vercel DELETE /ai-gateway/budgets", "label": "hold:money", "a": "hold:money", "b": "hold:money", "by": "agree"}
+{"id": "vercel DELETE /ai-gateway/budgets/defaults", "label": "hold:money", "a": "hold:money", "b": "hold:money", "by": "agree"}
+{"id": "vercel DELETE /ai-gateway/byok-credentials/{credentialId}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "vercel DELETE /ai-gateway/rules", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel DELETE /ai-gateway/virtual-model-configs", "label": "hold:outage", "a": "either", "b": "hold:outage", "by": "b", "why": "what calls it stops working until someone acts"}
+{"id": "vercel DELETE /ai-gateway/virtual-model-configs/{vmcSlug}", "label": "hold:outage", "a": "either", "b": "hold:outage", "by": "b", "why": "what calls it stops working until someone acts"}
+{"id": "vercel DELETE /storage/stores/blob/{id}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "vercel DELETE /v1/access-groups/{accessGroupIdOrName}/projects/{projectId}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel DELETE /v1/access-groups/{idOrName}", "label": "allow", "a": "hold:outage", "b": "allow", "by": "b", "why": "a member removed, a restart or a cache dropped: recovers by itself or is redone in a moment"}
+{"id": "vercel DELETE /v1/bulk-redirects", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel DELETE /v1/connect/connectors/{connector}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "vercel DELETE /v1/connect/connectors/{connector}/projects/{projectId}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "vercel DELETE /v1/connect/connectors/{connector}/projects/{projectId}/environments/{environment}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "vercel DELETE /v1/connect/networks/{networkId}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "vercel DELETE /v1/drains/{id}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel DELETE /v1/drives/{nameOrId}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "vercel DELETE /v1/env", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "vercel DELETE /v1/global-config/{edgeConfigId}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "vercel DELETE /v1/global-config/{edgeConfigId}/schema", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel DELETE /v1/global-config/{edgeConfigId}/tokens", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "vercel DELETE /v1/installations/{integrationConfigurationId}/resources/{resourceId}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "vercel DELETE /v1/installations/{integrationConfigurationId}/resources/{resourceId}/experimentation/items/{itemId}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel DELETE /v1/integrations/configuration/{id}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "vercel DELETE /v1/integrations/log-drains/{id}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel DELETE /v1/kms/issuers/{issuerId}", "label": "hold:gone", "a": "hold:outage", "b": "hold:gone", "by": "b", "why": "the deleted record or key holds a value the API cannot give back"}
+{"id": "vercel DELETE /v1/kms/issuers/{issuerId}/policies/{kind}/{policyKey}", "label": "hold:outage", "a": "either", "b": "hold:outage", "by": "b", "why": "what calls it stops working until someone acts"}
+{"id": "vercel DELETE /v1/log-drains/{id}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel DELETE /v1/networking/privatelink/endpoints/{endpointId}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "vercel DELETE /v1/organizations/{organizationId}/dsync/groups/{groupId}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel DELETE /v1/organizations/{organizationId}/teams/{targetTeamId}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "vercel DELETE /v1/projects/{idOrName}/avatar", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel DELETE /v1/projects/{idOrName}/env", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "vercel DELETE /v1/projects/{idOrName}/members/{uid}", "label": "allow", "a": "hold:outage", "b": "allow", "by": "b", "why": "a member removed, a restart or a cache dropped: recovers by itself or is redone in a moment"}
+{"id": "vercel DELETE /v1/projects/{idOrName}/rolling-release/config", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel DELETE /v1/projects/{projectIdOrName}/feature-flags/connections/{consumerProjectId}", "label": "hold:outage", "a": "either", "b": "hold:outage", "by": "b", "why": "what calls it stops working until someone acts"}
+{"id": "vercel DELETE /v1/projects/{projectIdOrName}/feature-flags/flags/{flagIdOrSlug}", "label": "hold:gone", "a": "either", "b": "hold:gone", "by": "b", "why": "deletes something the API cannot bring back"}
+{"id": "vercel DELETE /v1/projects/{projectIdOrName}/feature-flags/sdk-keys/{hashKey}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "vercel DELETE /v1/projects/{projectIdOrName}/feature-flags/segments/{segmentIdOrSlug}", "label": "hold:gone", "a": "either", "b": "hold:gone", "by": "b", "why": "deletes something the API cannot bring back"}
+{"id": "vercel DELETE /v1/projects/{projectId}/routes", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel DELETE /v1/security/firewall/bypass", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel DELETE /v1/security/firewall/bypass/rules", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel DELETE /v1/security/firewall/config/{configVersion}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel DELETE /v1/teams/{teamId}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "vercel DELETE /v1/teams/{teamId}/invites/{inviteId}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel DELETE /v1/teams/{teamId}/members/{uid}", "label": "allow", "a": "hold:outage", "b": "allow", "by": "b", "why": "a member removed, a restart or a cache dropped: recovers by itself or is redone in a moment"}
+{"id": "vercel DELETE /v1/teams/{teamId}/microfrontends/{groupId}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "vercel DELETE /v1/user", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "vercel DELETE /v1/vcr/repository/{idOrName}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "vercel DELETE /v1/vcr/repository/{idOrName}/images/{imageId}", "label": "hold:gone", "a": "either", "b": "hold:gone", "by": "b", "why": "deletes something the API cannot bring back"}
+{"id": "vercel DELETE /v1/vcr/repository/{idOrName}/permissions", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel DELETE /v1/vcr/repository/{idOrName}/permissions/all", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "vercel DELETE /v1/webhooks/{id}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel DELETE /v13/deployments/{id}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "vercel DELETE /v2/aliases/{aliasId}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "vercel DELETE /v2/domains/{domain}/records/{recordId}", "label": "hold:gone", "a": "hold:outage", "b": "hold:gone", "by": "b", "why": "the deleted record or key holds a value the API cannot give back"}
+{"id": "vercel DELETE /v2/projects/{projectIdOrName}/checks/{checkId}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel DELETE /v2/sandboxes/drives/{nameOrId}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "vercel DELETE /v2/sandboxes/snapshots/{snapshotId}", "label": "hold:gone", "a": "either", "b": "hold:gone", "by": "b", "why": "deletes something the API cannot bring back"}
+{"id": "vercel DELETE /v2/sandboxes/{name}", "label": "hold:gone", "a": "either", "b": "hold:gone", "by": "b", "why": "deletes something the API cannot bring back"}
+{"id": "vercel DELETE /v2/{teamSlug}/{projectSlug}/{repositoryName}/blobs/uploads/{uuid}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel DELETE /v2/{teamSlug}/{projectSlug}/{repositoryName}/blobs/{digest}", "label": "hold:gone", "a": "either", "b": "hold:gone", "by": "b", "why": "deletes something the API cannot bring back"}
+{"id": "vercel DELETE /v2/{teamSlug}/{projectSlug}/{repositoryName}/manifests/{reference}", "label": "hold:gone", "a": "either", "b": "hold:gone", "by": "b", "why": "deletes something the API cannot bring back"}
+{"id": "vercel DELETE /v3/user/tokens/{tokenId}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "vercel DELETE /v6/domains/{domain}", "label": "hold:gone", "a": "hold:outage", "b": "hold:gone", "by": "b", "why": "the deleted record or key holds a value the API cannot give back"}
+{"id": "vercel DELETE /v8/artifacts", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel DELETE /v8/certs/{id}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "vercel DELETE /v9/projects/{idOrName}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "vercel DELETE /v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "vercel DELETE /v9/projects/{idOrName}/domains/{domain}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "vercel DELETE /v9/projects/{idOrName}/env/{id}", "label": "hold:gone", "a": "hold:gone", "b": "hold:gone", "by": "agree"}
+{"id": "vercel PATCH /ai-gateway/byok-credentials/{credentialId}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /ai-gateway/rules", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /ai-gateway/virtual-model-configs", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /ai-gateway/virtual-model-configs/{vmcSlug}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /aliases/{id}/protection-bypass", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "vercel PATCH /api-keys/{apiKeyID}/quota", "label": "either", "a": "hold:money", "b": "either", "by": "b", "why": "a limit that can be raised or lowered"}
+{"id": "vercel PATCH /v1/access-groups/{accessGroupIdOrName}/projects/{projectId}", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "vercel PATCH /v1/bulk-redirects", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel PATCH /v1/connect/connectors/{connector}/trigger-destinations", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /v1/connect/networks/{networkId}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /v1/deployments/{deploymentId}/checks/{checkId}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel PATCH /v1/deployments/{deploymentId}/integrations/{integrationConfigurationId}/resources/{resourceId}/actions/{action}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel PATCH /v1/domains/records/{recordId}", "label": "either", "a": "hold:outage", "b": "either", "by": "b", "why": "an update; the value decides whether anything breaks"}
+{"id": "vercel PATCH /v1/drains/{id}", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "vercel PATCH /v1/env", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /v1/env/{id}/unlink/{projectId}", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "vercel PATCH /v1/global-config/{edgeConfigId}/items #1", "label": "hold:recoverable", "a": "hold:gone", "b": "hold:recoverable", "by": "b", "why": "the same API has an endpoint that brings it back"}
+{"id": "vercel PATCH /v1/global-config/{edgeConfigId}/items #2", "label": "deploy", "a": "either", "b": "deploy", "by": "b", "why": "ships configuration to what runs (secrets, bindings, flags, a firewall version)"}
+{"id": "vercel PATCH /v1/installations/{integrationConfigurationId}", "label": "either", "a": "allow", "b": "either", "by": "b", "why": "a setting that can block clients, raise cost or widen access; value decides"}
+{"id": "vercel PATCH /v1/installations/{integrationConfigurationId}/resources/{resourceId}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /v1/installations/{integrationConfigurationId}/resources/{resourceId}/experimentation/items/{itemId}", "label": "either", "a": "allow", "b": "either", "by": "b", "why": "a setting that can block clients, raise cost or widen access; value decides"}
+{"id": "vercel PATCH /v1/kms/issuers/{issuerId}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /v1/kms/issuers/{issuerId}/policies/{kind}/{policyKey}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /v1/networking/privatelink/endpoints/{endpointId}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /v1/organizations/{organizationId}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /v1/projects/{idOrName}/protection-bypass", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "vercel PATCH /v1/projects/{idOrName}/rolling-release/config", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /v1/projects/{idOrName}/shared-connect-links", "label": "hold:money", "a": "either", "b": "hold:money", "by": "b", "why": "a paid resource or a size that cannot shrink"}
+{"id": "vercel PATCH /v1/projects/{projectIdOrName}/feature-flags/flags/{flagIdOrSlug}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /v1/projects/{projectIdOrName}/feature-flags/segments/{segmentIdOrSlug}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /v1/projects/{projectIdOrName}/feature-flags/settings", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /v1/projects/{projectId}/microfrontends", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /v1/projects/{projectId}/rollback/{deploymentId}/update-description", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel PATCH /v1/projects/{projectId}/routes/{routeId}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel PATCH /v1/registrar/domains/{domain}/auto-renew", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /v1/registrar/domains/{domain}/nameservers", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "vercel PATCH /v1/security/firewall/config", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /v1/teams/{teamId}/members/{uid}", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "vercel PATCH /v1/teams/{teamId}/microfrontends/{groupId}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /v1/vercel-ci/repository-settings", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /v12/deployments/{id}/cancel", "label": "allow", "a": "deploy", "b": "allow", "by": "b", "why": "a version, build record or setting that is not live until a separate deploy"}
+{"id": "vercel PATCH /v2/connect/connectors/{connector}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /v2/deployments/{deploymentId}/check-runs/{checkRunId}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel PATCH /v2/projects/{projectIdOrName}/checks/{checkId}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel PATCH /v2/sandboxes/{name}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel PATCH /v2/teams/{teamId}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /v2/{teamSlug}/{projectSlug}/{repositoryName}/blobs/uploads/{uuid}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel PATCH /v3/domains/{domain}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /v9/projects/{idOrName} #1", "label": "hold:exposed", "a": "hold:exposed", "b": "hold:exposed", "by": "agree"}
+{"id": "vercel PATCH /v9/projects/{idOrName} #2", "label": "hold:exposed", "a": "hold:exposed", "b": "hold:exposed", "by": "agree"}
+{"id": "vercel PATCH /v9/projects/{idOrName} #3", "label": "hold:exposed", "a": "hold:exposed", "b": "hold:exposed", "by": "agree"}
+{"id": "vercel PATCH /v9/projects/{idOrName} #4", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel PATCH /v9/projects/{idOrName} #5", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel PATCH /v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /v9/projects/{idOrName}/domains/{domain}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PATCH /v9/projects/{idOrName}/env/{id}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel POST /ai-gateway/byok-credentials", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel POST /ai-gateway/rules", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /ai-gateway/virtual-model-configs", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /api-keys", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "vercel POST /projects/{idOrName}/transfer-request", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "vercel POST /speed-insights/toggle", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel POST /storage/stores/blob", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/access-groups", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/access-groups/{accessGroupIdOrName}/projects", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "vercel POST /v1/access-groups/{idOrName}", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "vercel POST /v1/billing/buy", "label": "hold:money", "a": "hold:money", "b": "hold:money", "by": "agree"}
+{"id": "vercel POST /v1/bulk-redirects/restore", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/bulk-redirects/versions", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "vercel POST /v1/connect/authorize/{connector}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/connect/connectors", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/connect/connectors/{connector}/managed/eject", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel POST /v1/connect/connectors/{connector}/projects/{projectId}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/connect/networks", "label": "hold:money", "a": "either", "b": "hold:money", "by": "b", "why": "a paid resource or a size that cannot shrink"}
+{"id": "vercel POST /v1/connect/token/{connector}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel POST /v1/deployments/{deploymentId}/checks", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/deployments/{deploymentId}/checks/{checkId}/rerequest", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/drains", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "vercel POST /v1/drains/test", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/drives/{name}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/drives/{name}/fork", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/edge-cache/dangerously-delete-by-src-images", "label": "allow", "a": "hold:outage", "b": "allow", "by": "b", "why": "a member removed, a restart or a cache dropped: recovers by itself or is redone in a moment"}
+{"id": "vercel POST /v1/edge-cache/dangerously-delete-by-tags", "label": "allow", "a": "hold:outage", "b": "allow", "by": "b", "why": "a member removed, a restart or a cache dropped: recovers by itself or is redone in a moment"}
+{"id": "vercel POST /v1/edge-cache/invalidate-by-src-images", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/edge-cache/invalidate-by-tags", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/env", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/global-config", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/global-config/{edgeConfigId}/backups/{edgeConfigBackupVersionId}/restore", "label": "deploy", "a": "hold:gone", "b": "deploy", "by": "b", "why": "ships migrations or a whole configuration to production"}
+{"id": "vercel POST /v1/global-config/{edgeConfigId}/schema", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel POST /v1/global-config/{edgeConfigId}/token", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "vercel POST /v1/installations/{integrationConfigurationId}/billing", "label": "hold:money", "a": "allow", "b": "hold:money", "by": "b", "why": "billed resource or charges money"}
+{"id": "vercel POST /v1/installations/{integrationConfigurationId}/billing/balance", "label": "hold:money", "a": "allow", "b": "hold:money", "by": "b", "why": "billed resource or charges money"}
+{"id": "vercel POST /v1/installations/{integrationConfigurationId}/billing/finalize", "label": "hold:money", "a": "allow", "b": "hold:money", "by": "b", "why": "billed resource or charges money"}
+{"id": "vercel POST /v1/installations/{integrationConfigurationId}/billing/invoices", "label": "hold:money", "a": "allow", "b": "hold:money", "by": "b", "why": "billed resource or charges money"}
+{"id": "vercel POST /v1/installations/{integrationConfigurationId}/billing/invoices/{invoiceId}/actions", "label": "hold:money", "a": "allow", "b": "hold:money", "by": "b", "why": "billed resource or charges money"}
+{"id": "vercel POST /v1/installations/{integrationConfigurationId}/credentials/revoke", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "vercel POST /v1/installations/{integrationConfigurationId}/credentials/rotate", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "vercel POST /v1/installations/{integrationConfigurationId}/events", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/installations/{integrationConfigurationId}/resources/{resourceId}/experimentation/items", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/integrations/installations/{integrationConfigurationId}/resources/{resourceId}/connections", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/integrations/sso/token", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/kms/issuers", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/kms/issuers/{issuerId}/keys", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/kms/issuers/{issuerId}/keys/{keyId}/activate", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel POST /v1/kms/issuers/{issuerId}/keys/{keyId}/revoke", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "vercel POST /v1/kms/issuers/{issuerId}/policies", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel POST /v1/kms/issuers/{issuerId}/sign/message", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/kms/issuers/{issuerId}/sign/token", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel POST /v1/log-drains", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "vercel POST /v1/microfrontends/group", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/networking/privatelink/endpoints", "label": "hold:money", "a": "allow", "b": "hold:money", "by": "b", "why": "billed resource or charges money"}
+{"id": "vercel POST /v1/organizations", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/organizations/{organizationId}/teams", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/projects/traces/session", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/projects/{idOrName}/avatar", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/projects/{idOrName}/daemons/{daemonName}/instances/{instanceId}/restart", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel POST /v1/projects/{idOrName}/domains/{domain}/move", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "vercel POST /v1/projects/{idOrName}/members", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "vercel POST /v1/projects/{idOrName}/rolling-release/approve-stage", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "vercel POST /v1/projects/{idOrName}/rolling-release/complete", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "vercel POST /v1/projects/{idOrName}/rolling-release/start", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "vercel POST /v1/projects/{idOrName}/token", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel POST /v1/projects/{projectIdOrName}/feature-flags/labels/lookup", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/projects/{projectIdOrName}/feature-flags/overrides/sign", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/projects/{projectId}/pause", "label": "hold:outage", "a": "hold:outage", "b": "hold:outage", "by": "agree"}
+{"id": "vercel POST /v1/projects/{projectId}/rollback/{deploymentId}", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "vercel POST /v1/projects/{projectId}/routes", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/projects/{projectId}/routes/generate", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/projects/{projectId}/routes/versions", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "vercel POST /v1/projects/{projectId}/unpause", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/registrar/domains/availability", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/registrar/domains/buy", "label": "hold:money", "a": "hold:money", "b": "hold:money", "by": "agree"}
+{"id": "vercel POST /v1/registrar/domains/price", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/registrar/domains/search", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/registrar/domains/{domain}/buy", "label": "hold:money", "a": "hold:money", "b": "hold:money", "by": "agree"}
+{"id": "vercel POST /v1/registrar/domains/{domain}/renew", "label": "hold:money", "a": "hold:money", "b": "hold:money", "by": "agree"}
+{"id": "vercel POST /v1/registrar/domains/{domain}/transfer", "label": "hold:money", "a": "hold:money", "b": "hold:money", "by": "agree"}
+{"id": "vercel POST /v1/security/attack-mode", "label": "either", "a": "allow", "b": "either", "by": "b", "why": "a setting that can block clients, raise cost or widen access; value decides"}
+{"id": "vercel POST /v1/security/firewall/bypass", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "vercel POST /v1/security/firewall/bypass/rules", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "vercel POST /v1/security/firewall/config/generate-rule", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/security/firewall/config/{configVersion}/activate", "label": "deploy", "a": "either", "b": "deploy", "by": "b", "why": "ships configuration to what runs (secrets, bindings, flags, a firewall version)"}
+{"id": "vercel POST /v1/storage/stores/integration/direct", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel POST /v1/teams", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/teams/{teamId}/dsync-roles", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "vercel POST /v1/teams/{teamId}/members/teams/join", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/teams/{teamId}/request", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/vcr/repository", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/vcr/repository/{idOrName}/permissions", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "vercel POST /v1/vercel-ci/invocations/{invocationId}/attempts/{attempt}/retry", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/vercel-ci/task-analyses", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/vercel-ci/task-analyses/{analysisId}/pull-request", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v1/webhooks", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "vercel POST /v10/projects/{idOrName}/domains", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel POST /v10/projects/{idOrName}/env", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v10/projects/{projectId}/promote/{deploymentId}", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "vercel POST /v11/projects", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v13/deployments", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "vercel POST /v2/deployments/{deploymentId}/check-runs", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v2/deployments/{id}/aliases", "label": "deploy", "a": "deploy", "b": "deploy", "by": "agree"}
+{"id": "vercel POST /v2/domains/{domain}/records", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel POST /v2/files", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v2/integrations/log-drains", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "vercel POST /v2/observability/query", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v2/projects/{projectIdOrName}/checks", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v2/sandboxes", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v2/sandboxes/drives/{name}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v2/sandboxes/drives/{name}/fork", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v2/sandboxes/sessions/{sessionId}/cmd", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v2/sandboxes/sessions/{sessionId}/cmd/{cmdId}/kill", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v2/sandboxes/sessions/{sessionId}/cmd/{cmdId}/stdin", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v2/sandboxes/sessions/{sessionId}/extend-timeout", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v2/sandboxes/sessions/{sessionId}/fs/mkdir", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v2/sandboxes/sessions/{sessionId}/fs/read", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v2/sandboxes/sessions/{sessionId}/fs/write", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v2/sandboxes/sessions/{sessionId}/network-policy", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel POST /v2/sandboxes/sessions/{sessionId}/snapshot", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v2/sandboxes/sessions/{sessionId}/stop", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v2/sandboxes/{name}/fork", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v2/teams/{teamId}/members", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "vercel POST /v2/{teamSlug}/{projectSlug}/{repositoryName}/blobs/uploads/", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v3/sandboxes", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v3/sandboxes/sessions/{sessionId}/snapshot", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v3/sandboxes/{name}/fork", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v3/user/tokens", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "vercel POST /v4/sandboxes", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v7/domains", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v8/artifacts", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v8/artifacts/events", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v8/certs", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v9/domains/{domain}/claim", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel POST /v9/projects/{idOrName}/custom-environments", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /v9/projects/{idOrName}/domains/{domain}/verify", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel POST /web/insights/toggle", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PUT /ai-gateway/budgets", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PUT /ai-gateway/budgets/defaults", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PUT /domains/{domain}/records", "label": "either", "a": "hold:gone", "b": "either", "by": "b", "why": "replaces a whole section; harmless or total, the body decides, and no variant was given"}
+{"id": "vercel PUT /projects/transfer-request/{code}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel PUT /v1/bulk-redirects", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel PUT /v1/global-config/{edgeConfigId}", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}
+{"id": "vercel PUT /v1/installations/{integrationConfigurationId}/products/{integrationProductIdOrSlug}/resources/{resourceId}/secrets", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PUT /v1/installations/{integrationConfigurationId}/resources/{resourceId}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel PUT /v1/installations/{integrationConfigurationId}/resources/{resourceId}/experimentation/global-config", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PUT /v1/installations/{integrationConfigurationId}/resources/{resourceId}/secrets", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PUT /v1/observability/manage/configuration/projects/{projectIdOrName}", "label": "hold:money", "a": "allow", "b": "hold:money", "by": "b", "why": "billed resource or charges money"}
+{"id": "vercel PUT /v1/organizations/{organizationId}/dsync/groups/{groupId}", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "vercel PUT /v1/organizations/{organizationId}/teams/{targetTeamId}/dsync", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PUT /v1/projects/{idOrName}/daemons/{daemonName}/instances", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PUT /v1/projects/{projectIdOrName}/feature-flags/connections", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel PUT /v1/projects/{projectIdOrName}/feature-flags/flags", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel PUT /v1/projects/{projectIdOrName}/feature-flags/sdk-keys", "label": "allow", "a": "hold:exposed", "b": "allow", "by": "b", "why": "access given to someone named, not readable by anyone: allow under the wording in force (see settled-proposed)"}
+{"id": "vercel PUT /v1/projects/{projectIdOrName}/feature-flags/segments", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel PUT /v1/projects/{projectId}/routes", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel PUT /v1/security/firewall/bypass/rules", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "vercel PUT /v1/security/firewall/config", "label": "either", "a": "hold:exposed", "b": "either", "by": "b", "why": "an update that can widen or narrow; the body decides, and no variant was given"}
+{"id": "vercel PUT /v2/{teamSlug}/{projectSlug}/{repositoryName}/blobs/uploads/{uuid}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel PUT /v2/{teamSlug}/{projectSlug}/{repositoryName}/manifests/{reference}", "label": "either", "a": "either", "b": "either", "by": "agree"}
+{"id": "vercel PUT /v8/artifacts/{hash}", "label": "allow", "a": "allow", "b": "allow", "by": "agree"}
+{"id": "vercel PUT /v8/certs", "label": "allow", "a": "either", "b": "allow", "by": "b", "why": "removes, revokes, restarts, mints for the caller or sets a harmless value; nothing to hold"}

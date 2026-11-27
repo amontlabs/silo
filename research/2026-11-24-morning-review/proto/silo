@@ -1,0 +1,803 @@
+#!/usr/bin/env python3
+"""silo: the morning review, read from the record.
+
+    silo                         what needs you, what happened while you were away, what is done
+    silo receipt <run>           the account of one run, made from the record, not by the agent
+    silo timeline <computer> [--around <alert>] [--all]
+    silo chain <alert> [--json]  from what raised an alert down to what you asked
+    silo network                 hosts, what was sent, what was denied or held, spend by provider
+    silo diff <computer> [<ckA> <ckB>]   what changed between two checkpoints, grouped, books balanced
+    silo why <path>              the chain of the last change to a path
+    silo putback <alert>         put back the paths an alert is about, from the checkpoint before
+    silo record [--json]         the lines themselves
+    silo verify                  check the record's chain of hashes
+
+Marks: no mark = a fact Silo saw · ◌ a report, told by the probe, unverified · ◇ an opinion, with
+whose · «» words an agent, a program or a host wrote.
+"""
+import json, os, re, sys, time, collections, shutil, urllib.request
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import record as R
+import classify as C
+
+NIGHT = os.environ.get("SILO_NIGHT") or os.path.expanduser("~/.silo-night")
+ROOT = os.path.join(NIGHT, "record")
+LEGEND = "◌ told by the probe, unverified · ◇ opinion · «» words of an agent, a program or a host"
+WIDTH = 100
+
+
+def hm(at):
+    return at[11:19]
+
+
+def dur(s):
+    s = int(round(s))
+    if s < 60:
+        return f"{s} s"
+    if s < 3600:
+        return f"{s // 60} min {s % 60:02d} s" if s % 60 else f"{s // 60} min"
+    return f"{s // 3600} h {s % 3600 // 60:02d}"
+
+
+def size(n):
+    n = abs(n)
+    for u in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.0f} {u}" if u == "B" else f"{n:.1f} {u}"
+        n /= 1024
+    return f"{n:.1f} TB"
+
+
+def usd(x):
+    return f"${x:,.2f}" if x >= 0.995 else f"${x:,.3f}"
+
+
+def words(s, n=90):
+    s = " ".join((s or "").split())
+    return "«" + (s if len(s) <= n else s[: n - 1] + "…") + "»"
+
+
+def short(s, n=70):
+    s = " ".join((s or "").split())
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+class Morning:
+    def __init__(self):
+        self.v = C.View(ROOT)
+        self.cfg = json.load(open(os.path.join(NIGHT, "night.json")))
+        left = open(os.path.join(NIGHT, "left-at")).read().strip()
+        self.left = R.ts_of(left[:-2] + ":" + left[-2:]) if re.search(r"[+-]\d{4}$", left) else R.ts_of(left)
+
+    def t(self, c, p):
+        return self.v.tilde(c, p)
+
+    # ------------------------------------------------------------ who, as opinions
+    def run_label(self, run):
+        return f"◇{run['name']}" if run else "◇unattributed"
+
+    def alert_runs(self, a):
+        """The runs an alert is about, by which-run-did-it."""
+        runs = collections.OrderedDict()
+        for i in a.get("about") or []:
+            l = self.v.by_id.get(i)
+            if not l:
+                continue
+            if l["line"] == "file":
+                r = l["_by"]["run"]
+                runs[r["id"] if r else None] = r
+            elif l["line"] == "connection":
+                pid = self.v.owner.get(l["id"])
+                r = self.v.run_of_pid(l["computer"], pid) if pid else None
+                runs[r["id"] if r else None] = r
+            elif l["kind"] == "opinion":
+                for x in l["about"]:
+                    r = self.v.runs_by_launch.get(x)
+                    if r:
+                        runs[r["id"]] = r
+        return list(runs.values())
+
+    def alerts(self):
+        out = []
+        for a in self.v.control("alert raised"):
+            merged = [m for m in self.v.control("alert merged") if m["into"] == a["id"]]
+            runs = {}
+            for x in [a] + merged:
+                for r in self.alert_runs(x):
+                    runs[r["id"] if r else None] = r
+            out.append({**a, "_merged": merged, "_runs": list(runs.values())})
+        # the ones whose way back is held by a kept checkpoint first, then newest first
+        out.sort(key=lambda a: (0 if a.get("pins") else 1, -R.ts_of(a["at"])))
+        return out
+
+    def conn_run(self, f):
+        pid = self.v.owner.get(f["id"])
+        return self.v.run_of_pid(f["computer"], pid) if pid else None
+
+    # ------------------------------------------------------------ the first screen
+    def first(self):
+        v = self.v
+        out = []
+        now = time.time()
+        turns = sum(1 for m in v.calls if not m.get("side"))
+        spend = sum(m.get("cost_usd") or 0 for m in v.calls)
+        unknown = collections.Counter(m["model_answered"] or m["model_asked"] for m in v.calls if not m.get("price_known"))
+        pinned = {a["pins"] for a in self.alerts() if a.get("pins")}
+        sp = usd(spend) + ("" if not unknown else " + " + ", ".join(f"{k}: not known" for k in unknown))
+        out.append(f" Since you left at {time.strftime('%H:%M', time.localtime(self.left))} · {dur(now - self.left)} · {len(v.runs)} runs · {turns} turns · {sp} · {len(pinned)} checkpoint kept for an alert")
+        out.append("")
+        out.append(" NEEDS YOU")
+        for a in self.alerts():
+            out += self.alert_lines(a)
+        asks = v.control("ask raised")
+        ends = {e["about"][0]: e for e in v.control("ask ended")}
+        denied = [f for f in v.facts("connection") if f["decision"] == "denied"]
+        if asks or denied:
+            out.append("")
+            out.append(" WHILE YOU WERE AWAY")
+            for a in asks:
+                e = ends.get(a["id"])
+                f = next((f for f in v.facts("connection") if f.get("ask") == a["id"]), None)
+                r = self.conn_run(f) if f else None
+                ended = "nobody answered within its hold limit, so it was refused" if e and e.get("answer") is None else (f"you said {e['answer']}" if e else "still waiting")
+                out.append(f" {a['computer']:<8} {self.run_label(r):<12} ask: {a['host']} · {hm(a['at'])} · {ended}")
+            for f in denied:
+                r = self.conn_run(f)
+                out.append(f" {f['computer']:<8} {self.run_label(r):<12} denied: {f['host']} · {hm(f['at'])} · {f['decided_by']}")
+        out.append("")
+        out.append(" DONE")
+        for r in v.runs:
+            st = v.state(r)
+            if st["state"] != "ended":
+                continue
+            out += self.done_lines(r)
+        alive = [r for r in v.runs if v.state(r)["state"] != "ended"]
+        if alive:
+            out.append("")
+            out.append(" STILL RUNNING")
+            for r in alive:
+                st = v.state(r)
+                s = v.spend(r)
+                out.append(f" {r['computer']:<8} {r['name']:<12} ◇{st['state']} for {dur(st['for_s'])} · {self.spend_text(s)} · {how_going(st)}")
+        out.append("")
+        out.append(" next: silo receipt <run> · silo chain <alert> · silo timeline <computer> · silo diff <computer>")
+        out.append(" " + LEGEND)
+        return "\n".join(out)
+
+    def alert_lines(self, a):
+        v = self.v
+        runs = a["_runs"]
+        who = " ".join(self.run_label(r) for r in runs) if runs else "silo"
+        by = a["by"].split(":", 1)
+        kind, rule = by[0], by[1]
+        count = f" ×{len(a['_merged']) + 1}" if a["_merged"] else ""
+        text = a["text"]
+        if a["_merged"]:
+            text = text + "; " + "; ".join(m["text"] for m in a["_merged"])
+        lines = [f" {a['computer']:<8} {who:<12} {short(text, 78)}{count}"] if len(who) <= 12 else [f" {a['computer']:<8} {who}", f" {'':<21}{short(text, 78)}{count}"]
+        extra = [f"your {kind} {rule}", hm(a["at"]), a["id"]]
+        if a.get("pins"):
+            extra.append(f"the checkpoint before it, {a['pins']}, is kept for this alert")
+        files = [v.by_id[i] for i in a.get("about") or [] if i in v.by_id and v.by_id[i]["line"] == "file"]
+        if files and kind == "rule" and "deleted" in a["text"]:
+            extra.insert(0, f"{len(files)} files · {size(sum(-f['size_change'] for f in files))}")
+            lines.append(f" {'':<21}{' · '.join(extra[:3])}")
+            lines.append(f" {'':<21}{' · '.join(extra[3:])}")
+            lines.append(f" {'':<21}[put back: silo putback {a['id']}]  [open: silo chain {a['id']}]")
+        else:
+            lines.append(f" {'':<21}{' · '.join(extra)}")
+        return lines
+
+    def spend_text(self, s):
+        if s["unknown"]:
+            return "spend not known (no price for " + ", ".join(m for m in s["models"] if m) + ")"
+        return usd(s["usd"])
+
+    def done_lines(self, r):
+        v = self.v
+        st = v.state(r)
+        s = v.spend(r)
+        files = v.files_of(r)
+        took = R.ts_of(r["end"]) - R.ts_of(r["start"])
+        cmds = v.commands(r)
+        tests = [c for c in cmds if C.TEST_CMD.search(c["command"] or "")]
+        head = f" {r['computer']:<8} {r['name']:<12} {dur(took)} · {self.spend_text(s)} · {len(files)} files ◇"
+        out = [head]
+        sub = []
+        if tests:
+            t = tests[-1]
+            sub.append(f"last test command `{short(t['command'], 40)}` exit {t['result_exit']}")
+        left = [p for c in cmds for p in c["still_running"]]
+        if left:
+            sub.append(f"◌ left running: {short(left[0]['command'], 40)}")
+        outside = [f for f in files if not f["path"].startswith((r.get("cwd") or "") + "/") and self.group(r["computer"], f["path"]) != "agent program's own files"]
+        if outside:
+            sub.append(f"{len(outside)} file{'s' if len(outside) > 1 else ''} outside {self.t(r['computer'], r.get('cwd'))} ◇")
+        if sub:
+            out.append(f" {'':<21}" + " · ".join(sub))
+        for cl in v.claims(r):
+            if cl["says"] in ("mismatch", "unbacked"):
+                out.append(f" {'':<21}◇ {cl['says']}: its words say {words(cl['claim'], 50)} · {cl['rests_on']}")
+        return out
+
+    # ------------------------------------------------------------ the receipt
+    def receipt(self, name):
+        v = self.v
+        r = v.run(name)
+        if not r:
+            return f"silo: no run named {name}. Runs: " + ", ".join(x["name"] for x in v.runs)
+        st = v.state(r)
+        s = v.spend(r)
+        cv = v.main_conv(r)
+        o = []
+        rule = " " + "─" * (WIDTH - 2)
+        prog = {"claude": "Claude Code", "codex": "Codex CLI"}.get(r["program"], r["program"])
+        o.append(f" RECEIPT  {r['name']} · {prog} · {r['computer']} · {self.t(r['computer'], r.get('cwd'))}")
+        end = r["end"] or None
+        took = (R.ts_of(end) if end else time.time()) - R.ts_of(r["start"])
+        turns = len(cv["calls"]) if cv else 0
+        o.append(f"          {hm(r['start'])} → {hm(end) if end else 'now'} · {dur(took)} · {'◌ ' + st['how'] if end else '◇ ' + st['state'] + ', not finished'} · {turns} turns · {self.spend_text(s)}")
+        o.append(rule)
+        cmds = v.commands(r)
+        tests = [c for c in cmds if C.TEST_CMD.search(c["command"] or "")]
+        files = v.files_of(r)
+        cwd = r.get("cwd") or ""
+        inside = [f for f in files if f["path"].startswith(cwd + "/")]
+        outside = [f for f in files if f not in inside and not C.own_file(f["path"])]
+        left = [p for c in cmds for p in c["still_running"]]
+        # outcome: facts and reports only
+        oc = []
+        full = [c for c in tests if not C.FILTERED.search(c["command"])]
+        if full:
+            c = full[-1]
+            oc.append(f"last run of the whole suite {hm(c['tc']['asked_at'])}: `{short(c['command'], 44)}` · exit {c['result_exit']} (sent to the model) · ◌ exit {c['probe_exit']} (probe)")
+        if tests and (not full or tests[-1] is not full[-1]):
+            c = tests[-1]
+            oc.append(f"last test command of any kind {hm(c['tc']['asked_at'])}: `{short(c['command'], 44)}` · exit {c['result_exit']}")
+        oc.append(f"{len(inside)} files changed in {self.t(r['computer'], cwd)} · {len(outside)} outside it, not counting the program's own files ◇")
+        if left:
+            oc.append(f"◌ {len(left)} process{'es' if len(left) > 1 else ''} it started still running")
+        oc.append("no gap in the record for this run" if not v.facts("gap", r["computer"]) else "incomplete: the record has a gap")
+        o += self.section("Outcome", oc)
+        if cv and cv["asked"]:
+            o += self.section("You asked", [f"{hm(cv['calls'][0]['started'])}  {words(cv['asked'], 200)}"])
+        w, m = v.last_words(r)
+        if w:
+            lines = [f"{hm(m['at'])}  {r['name']}'s model said {words(w, 200)}"]
+            for cl in v.claims(r):
+                lines.append(f"◇ {cl['says']}: {words(cl['claim'], 60)} · {cl['rests_on']}  ({C.CLAIMS})")
+            o += self.section("Its words", lines)
+        else:
+            o += self.section("Its words", ["the run has no last words yet: it is not finished"])
+        fl = []
+        groups = collections.OrderedDict()
+        for f in files:
+            k = self.group(r["computer"], f["path"])
+            groups.setdefault(k, []).append(f)
+        for k, fs in groups.items():
+            ch = collections.Counter(f["change"] for f in fs)
+            d = sum(f["size_change"] for f in fs)
+            top = os.path.commonpath([f["path"] for f in fs]) if len(fs) > 1 else fs[0]["path"]
+            warn = (" ⚠ read by every later run of the program" if k == "agent program settings" else
+                    "" if k == "agent program's own files" or fs[0]["path"].startswith(cwd + "/") else " ⚠ outside the repository")
+            if k == "agent program's own files":
+                top = os.path.join(self.v.home(r["computer"]), ".claude" if "/.claude" in fs[0]["path"] else ".codex")
+            fl.append(f"{k:<26} {self.t(r['computer'], top):<38} {', '.join(f'{n} {c}' for c, n in ch.items())} · {'+' if d >= 0 else '−'}{size(d)}{warn}")
+        unattributed = [f for f in v.file_facts if f["computer"] == r["computer"] and not f["_by"]["run"] and r["id"] in [x["id"] for x in f["_by"].get("named", [])]]
+        if unattributed:
+            fl.append(f"also reported by this run and another, so unattributed: {len(unattributed)} files")
+        o += self.section("Files ◇", fl or ["no file change is this run's"])
+        cl = []
+        for c in cmds:
+            res = c["result_exit"]
+            pe = c["probe_exit"]
+            flag = "" if res in (0, None) else "  ✗"
+            if c["still_running"]:
+                tail = "◌ still running"
+            elif pe is None:
+                tail = "◌ no exit seen"
+            else:
+                tail = f"◌ exit {pe}"
+            cl.append(f"{hm(c['tc']['asked_at'])}  {short(c['command'], 56):<56} exit {res if res is not None else '?'} · {tail}{flag}")
+        o += self.section("Commands", cl or ["none"])
+        if left:
+            o += self.section("Left running", [f"◌ pid {p['pid']} {short(p['command'], 60)} · since {hm(p['start'])}" for p in left])
+        nl = []
+        hosts = collections.OrderedDict()
+        for f in v.facts("connection", r["computer"]):
+            if self.conn_run(f) is r:
+                hosts.setdefault(f["host"], []).append(f)
+        provider = {}
+        for m in v.run_calls(r):
+            provider.setdefault((m["provider"], m["login"]), []).append(m)
+        for (p, login), ms in provider.items():
+            sp = sum(x.get("cost_usd") or 0 for x in ms)
+            nl.append(f"{('api.anthropic.com' if p == 'anthropic' else 'api.openai.com'):<22} {len(ms)} model calls · {usd(sp) if all(x.get('price_known') for x in ms) else 'spend not known'} · {login}")
+        for h, fs in hosts.items():
+            dec = collections.Counter(f["decision"] for f in fs)
+            nl.append(f"{h:<22} {len(fs)} connection{'s' if len(fs) > 1 else ''} · {size(sum(f.get('bytes_in', 0) for f in fs))} in · {size(sum(f.get('bytes_out', 0) for f in fs))} out · {', '.join(f'{n} {d}' for d, n in dec.items())}")
+        o += self.section("Network ◇", nl)
+        mods = ", ".join(f"{k} ×{n}" for k, n in s["models"].items())
+        cached = (s["cached"] / s["tokens_in"] * 100) if s["tokens_in"] else 0
+        side = s["calls"] - turns
+        o += self.section("Model calls", [f"{s['calls']} calls · {turns} turns of its conversation{f', {side} side calls of the program itself' if side else ''} · {mods}",
+                                          f"{s['tokens_in']:,} tokens in, {cached:.0f}% read from the cache · {self.spend_text(s)}"])
+        model_wait = sum(R.ts_of(m["at"]) - R.ts_of(m["started"]) for m in v.run_calls(r))
+        cmd_wait = sum(((R.ts_of(c["tc"]["result_at"]) if c["tc"]["result_at"] else time.time()) - R.ts_of(c["tc"]["asked_at"])) for c in cmds)
+        o += self.section("Time", [f"{dur(took)} · waiting on the model {dur(model_wait)} · waiting on commands {dur(cmd_wait)} · the program itself {dur(max(0, took - model_wait - cmd_wait))}"])
+        asks = []
+        for a in v.control("ask raised", r["computer"]):
+            f = next((f for f in v.facts("connection") if f.get("ask") == a["id"]), None)
+            if f and self.conn_run(f) is r:
+                e = next((e for e in v.control("ask ended") if e["about"][0] == a["id"]), None)
+                asks.append(f"{hm(a['at'])} {a['host']} · {'nobody answered: refused after ' + str(a['hold_limit_s']) + ' s' if e and e.get('answer') is None else 'answered'}")
+        o += self.section("Asks", asks or ["none"])
+        backs = v.control("put back", r["computer"])
+        un = [f for f in v.file_facts if f["computer"] == r["computer"] and not f["_by"]["run"]
+              and not any(v.ck_at[f["between"][0]] < b["at"] <= v.ck_at[f["between"][1]] for b in backs)]
+        o += self.section("Unattributed", [f"{len(un)} file changes in {r['computer']} are no run's (the agent programs' own files written outside a traced process, and changes the probe did not report)  [silo diff {r['computer']}]"])
+        o += self.section("Gaps", ["none"] if not v.facts("gap", r["computer"]) else [f"{hm(g['at'])} {g.get('what')}" for g in v.facts("gap", r["computer"])])
+        o.append(rule)
+        o.append(" " + LEGEND)
+        return "\n".join(o)
+
+    def section(self, name, lines):
+        out = []
+        for i, l in enumerate(lines):
+            out.append(f" {name if i == 0 else '':<16}{l}")
+        return out
+
+    def group(self, computer, p):
+        home = self.v.home(computer)
+        rel = p[len(home) + 1:] if p.startswith(home + "/") else p
+        if rel.startswith(("work/app/",)):
+            return "code: ~/work/app"
+        if rel.startswith((".claude/CLAUDE.md", ".codex/AGENTS.md")):
+            return "agent program settings"
+        if rel.startswith((".claude/", ".claude.json", ".codex/")):
+            return "agent program's own files"
+        if rel.startswith((".bashrc", ".zshrc", ".gitconfig", ".profile")):
+            return "home settings"
+        if rel.startswith((".bun/", ".npm/", ".cargo/", ".local/")):
+            return "installed tools"
+        if rel.startswith("work/"):
+            return "other work folders"
+        return "other"
+
+    # ------------------------------------------------------------ the timeline
+    def timeline(self, computer, around=None, everything=False):
+        v = self.v
+        items = []
+        lo, hi = 0, 1e18
+        sel = None
+        if around:
+            a = v.by_id.get(around)
+            if not a:
+                return f"silo: no alert {around}"
+            sel = a
+            computer = a["computer"]
+            t = R.ts_of(a["at"])
+            lo, hi = t - 45, t + 15
+        runs = {r["id"]: r for r in v.runs_of(computer)}
+        for m in v.calls:
+            if m["computer"] != computer or m.get("side"):
+                continue
+            r = v.convs[m["conversation"]]["run"]
+            txt = v.text(m.get("reply_text_ref"))
+            tcs = m.get("tool_calls") or []
+            items.append((m["at"], "turn", r, m, txt, tcs))
+        for l in v.control(computer=computer):
+            if l["what"] in ("checkpoint taken",):
+                items.append((l["at"], "ck", None, l, None, None))
+            elif l["what"] in ("alert raised", "ask raised", "ask ended", "fork made", "made as a fork", "put back", "alert merged"):
+                items.append((l["at"], "control", None, l, None, None))
+        for f in v.facts("connection", computer):
+            items.append((f["at"], "conn", self.conn_run(f), f, None, None))
+        # file changes, grouped per checkpoint window and per run
+        byw = collections.OrderedDict()
+        hidden = 0
+        for f in v.file_facts:
+            if f["computer"] != computer:
+                continue
+            g = self.group(computer, f["path"])
+            if g == "agent program's own files" and not everything:
+                hidden += 1
+                continue
+            k = (f["between"][1], f["_by"]["run"]["id"] if f["_by"]["run"] else None, g)
+            byw.setdefault(k, []).append(f)
+        for (ck, rid, g), fs in byw.items():
+            items.append((fs[0]["at"], "files", runs.get(rid), fs, None, None))
+        items.sort(key=lambda x: (x[0], {"ck": 0, "files": 1, "turn": 2, "conn": 3, "control": 4}[x[1]]))
+        items = [x for x in items if lo <= R.ts_of(x[0]) <= hi]
+        out = [f" {computer} · {hm(items[0][0]) if items else ''} → {hm(items[-1][0]) if items else ''} · ● checkpoint  ○ turn  ◆ selected"]
+        # routine stretches collapse: consecutive turns of one run, between the moments that matter
+        buf = []
+
+        def flush():
+            if not buf:
+                return
+            if len(buf) <= 2 or everything or around:
+                for x in buf:
+                    out.extend(self.tl_turn(x))
+            else:
+                r = buf[0][2]
+                ncmd = sum(len(x[5]) for x in buf)
+                out.append(f" {hm(buf[0][0])} → {hm(buf[-1][0])}  {(r['name'] if r else '?'):<10} ◇ {len(buf)} turns, {ncmd} tool calls  [silo timeline {computer} --all]")
+            buf.clear()
+
+        for x in items:
+            at, kind = x[0], x[1]
+            if kind == "turn":
+                if buf and buf[-1][2] is not x[2]:
+                    flush()
+                buf.append(x)
+                continue
+            if kind == "ck":
+                l = x[3]
+                if around or l["why"] not in ("interval", "turn"):
+                    if around:
+                        pinned = any(a.get("pins") == l["checkpoint"] for a in v.control("alert raised"))
+                        out.append(f" {hm(at)}  ● {l['checkpoint']} ({l['why']}){' · kept for an alert' if pinned else ''}")
+                    else:
+                        flush(); out.append(f" {hm(at)}  ● {l['checkpoint']} ({l['why']})")
+                continue
+            flush()
+            if kind == "files":
+                fs = x[3]; r = x[2]
+                ch = collections.Counter(f["change"] for f in fs)
+                top = os.path.commonpath([f["path"] for f in fs]) if len(fs) > 1 else fs[0]["path"]
+                mark = "◆" if sel and any(f["id"] in (sel.get("about") or []) for f in fs) else " "
+                out.append(f" {hm(at)} {mark}file     {self.run_label(r):<12} {', '.join(f'{n} {c}' for c, n in ch.items())} · {self.t(computer, top)} · between {fs[0]['between'][0].split('@')[1]} and {fs[0]['between'][1].split('@')[1]}")
+            elif kind == "conn":
+                f = x[3]
+                out.append(f" {hm(at)}  network  {self.run_label(x[2]):<12} {f['host']} · {f['decision']}{' by ' + f['decided_by'] if f.get('decided_by') else ''}")
+            elif kind == "control":
+                l = x[3]
+                mark = "◆" if sel and l["id"] == sel["id"] else " "
+                if l["what"] == "alert raised":
+                    out.append(f" {hm(at)} {mark}alert    {l['by']} · {short(l['text'], 70)} · {l['id']}")
+                elif l["what"] == "alert merged":
+                    out.append(f" {hm(at)}  alert    (merged into {l['into']}) {short(l['text'], 70)}")
+                elif l["what"] == "ask raised":
+                    out.append(f" {hm(at)}  ask      {l['by']} · {l['text']}")
+                elif l["what"] == "ask ended":
+                    out.append(f" {hm(at)}  ask      ended: {l['reason']}")
+                elif l["what"] == "put back":
+                    out.append(f" {hm(at)}  put back by you · {l['files']} files from {l['from_checkpoint']}")
+                else:
+                    out.append(f" {hm(at)}  {l['what']} {l.get('fork') or l.get('parent') or ''}")
+        flush()
+        if hidden:
+            out.append(f" (not shown: {hidden} changes to the agent programs' own files, such as their session logs · --all shows them)")
+        out.append(" " + LEGEND)
+        return "\n".join(out)
+
+    def tl_turn(self, x):
+        at, _, r, m, txt, tcs = x
+        out = [f" {hm(at)}  ○ {(r['name'] if r else '?'):<10} turn {m['turn']:<3}" + (f" {words(txt, 70)}" if txt else "")]
+        for tc in tcs:
+            out.append(f" {'':<22}tool call {tc['tool']} {words(self.v.tilde_text(m['computer'], tc['summary']), 64)}")
+        return out
+
+    # ------------------------------------------------------------ the chain
+    def chain(self, aid, as_json=False):
+        v = self.v
+        a = v.by_id.get(aid)
+        if not a:
+            return f"silo: no line {aid}"
+        lines = [("fact", a)]
+        about = [v.by_id[i] for i in a.get("about") or [] if i in v.by_id]
+        out = []
+        if not as_json:
+            out.append(f" {a['id']} · {a['by']} · {a['text']} · {hm(a['at'])}")
+            out.append(" ── what led to it " + "─" * 70)
+        fs = [x for x in about if x["line"] == "file"]
+        if fs:
+            f0 = fs[0]
+            out.append(f" file       {f0['change']} {self.t(a['computer'], os.path.commonpath([f['path'] for f in fs]) if len(fs) > 1 else f0['path'])} · {len(fs)} file{'s' if len(fs) > 1 else ''} · between {f0['between'][0]} and {f0['between'][1]}")
+            by = f0["_by"]
+            if by["run"]:
+                p, rep, tc = by["process"], by["report"], by["tool_call"]
+                same = [f for f in fs if f["_by"]["run"] is by["run"]]
+                out.append(f" ◌ file     the probe reported pid {rep['pid']} {rep['op']} {len(same)} of these paths between the two checkpoints")
+                out.append(f" ◌ process  {short(p['command'], 60)} · pid {p['pid']} · exit {p['exit']} · {hm(p['start'])} → {hm(p['end']) if p['end'] else 'running'}")
+                chainp = []
+                q = p
+                while q and q["parent"]:
+                    q = v.procs.get((q["computer"], q["parent"]))
+                    if q:
+                        chainp.append(f"{os.path.basename((q['command'] or '?').split(' ')[0])} {q['pid']}")
+                    if q and q["launch"]:
+                        break
+                out.append(f" ◌ parents  {' ← '.join(chainp)}")
+                out.append(f" ◇ process → run      the walk up its parents reaches the launch of {by['run']['name']}   {C.WHICH}")
+                if tc:
+                    out.append(f" ◇ tool call → process   its shell's command line holds the tool call's text, started while the call was open   {C.WHICH}")
+                    out.append(f" tool call  {tc['tool']} {words(tc['summary'], 60)} · id {tc['id'][:14]}… · asked {hm(tc['asked_at'])}")
+                    m = tc["call"]
+                    out.append(f" turn       {m['turn']} of conversation {m['conversation']} · {m['model_answered']} · {m['tokens']['out']} tokens out · {usd(m['cost_usd'] or 0) if m.get('price_known') else 'spend not known'}")
+                    t = v.text(m.get("reply_text_ref"))
+                    if t:
+                        out.append(f"            its model said {words(t, 80)}")
+                    cv = v.convs[m["conversation"]]
+                    out.append(f" ◇ conversation → run   {cv['run_rests_on']}   {C.WHICH}")
+                    out.append(f" you asked  {hm(cv['calls'][0]['started'])}  {words(cv['asked'], 120)}")
+            else:
+                out.append(f" ◇ unattributed: {by['rests_on']}")
+            others = self.who_else(a["computer"], f0)
+            if others:
+                out.append(" ── who else used it " + "─" * 68)
+                out += others
+        for x in about:
+            if x["line"] == "connection":
+                r = self.conn_run(x)
+                out.append(f" connection {x['host']}:{x['port']} · {x['decision']} · {x.get('decided_by') or 'no rule'}")
+                pid = v.owner.get(x["id"])
+                p = v.procs.get((x["computer"], pid)) if pid else None
+                if p:
+                    out.append(f" ◌ process  {short(p['command'], 60)} · pid {pid}")
+                    if p.get("tool_call"):
+                        tc = p["tool_call"]
+                        out.append(f" ◇ tool call → process   {C.WHICH}")
+                        out.append(f" tool call  {tc['tool']} {words(tc['summary'], 70)} · turn {tc['turn']} of {tc['conversation']}")
+                out.append(f" ◇ run      {r['name'] if r else 'unattributed'}   {C.WHICH}")
+            if x["kind"] == "opinion":
+                out.append(f" ◇ {x['by']} says {x['says']} · rests on: {x['rests_on']}")
+        if as_json:
+            ids = [a["id"]] + [x["id"] for x in about[:3]]
+            if fs and fs[0]["_by"]["run"]:
+                by = fs[0]["_by"]
+                ids += [by["report"]["id"]] + by["process"]["ids"]
+                if by["tool_call"]:
+                    ids.append(by["tool_call"]["call"]["id"])
+            res = []
+            for i in ids:
+                l = {k: val for k, val in v.by_id[i].items() if not k.startswith("_")}
+                res.append(json.dumps(l, ensure_ascii=False))
+            if fs and fs[0]["_by"]["run"]:
+                by = fs[0]["_by"]
+                res.append(json.dumps({"kind": "opinion", "by": C.WHICH, "about": [fs[0]["id"], by["report"]["id"]], "says": {"run": by["run"]["name"], "tool_call": by["tool_call"]["id"] if by["tool_call"] else None}, "rests_on": by["rests_on"]}, ensure_ascii=False))
+            return "\n".join(res)
+        out.append(" " + LEGEND)
+        return "\n".join(out)
+
+    def who_else(self, computer, f):
+        """Other folders of the computer that name the path. The text is a fact; that it is a use
+        is a judgement, so the line is an opinion."""
+        home = self.v.home(computer)
+        target = f["path"]
+        rel = os.path.relpath(os.path.commonpath([target]), home)
+        name = rel.split("/")[1] if rel.startswith("work/") else os.path.basename(target)
+        top = "/".join(rel.split("/")[:2])
+        hits = []
+        ck = f["between"][1]
+        n = ck.split("@ck")[1]
+        m = json.load(open(os.path.join(ROOT, computer, "checkpoints", f"ck{n}.json")))
+        for p, meta in m.items():
+            if meta.get("t") != "f" or meta["size"] > 200000 or "/.git/" in p or "/.claude/" in p or "/.codex/" in p:
+                continue
+            try:
+                body = open(os.path.join(ROOT, "cas", meta["sha"]), errors="replace").read()
+            except FileNotFoundError:
+                continue
+            if top.split("/")[-1] in body and not p.startswith(os.path.join(home, top)):
+                hits.append(f" ◇ {self.t(computer, p)} names {top.split('/')[-1]} · {words(body.strip().splitlines()[0], 60)}")
+        return hits[:5]
+
+    # ------------------------------------------------------------ network
+    def network(self):
+        v = self.v
+        out = []
+        for c in v.computers:
+            out.append(f" {c}")
+            hosts = collections.OrderedDict()
+            for f in v.facts("connection", c):
+                hosts.setdefault(f["host"], []).append(f)
+            for h, fs in hosts.items():
+                runs = sorted({(self.conn_run(f) or {}).get("name", "unattributed") for f in fs})
+                dec = collections.Counter(f["decision"] for f in fs)
+                first = " · first time seen" if any(a["about"] == [fs[0]["id"]] for a in v.control("alert raised", c)) else ""
+                sent = ""
+                for f in fs:
+                    if f.get("method"):
+                        sent = f" · {f['method']} {f['path']} → {f.get('status')}"
+                out.append(f"   {h:<24} {len(fs)} · {size(sum(f.get('bytes_in', 0) for f in fs))} in · {size(sum(f.get('bytes_out', 0) for f in fs))} out · {', '.join(f'{n} {d}' for d, n in dec.items())}{sent} · ◇{', '.join(runs)}{first}")
+            prov = collections.OrderedDict()
+            for m in v.calls:
+                if m["computer"] == c:
+                    prov.setdefault((m["provider"], m["login"]), []).append(m)
+            for (p, login), ms in prov.items():
+                known = all(m.get("price_known") for m in ms)
+                out.append(f"   {('api.anthropic.com' if p == 'anthropic' else 'api.openai.com'):<24} {len(ms)} model calls · {usd(sum(m.get('cost_usd') or 0 for m in ms)) if known else 'spend not known: no price for ' + ', '.join(sorted({m['model_answered'] or m['model_asked'] for m in ms}))} · {login}")
+        out.append(" " + LEGEND)
+        return "\n".join(out)
+
+    # ------------------------------------------------------------ diff
+    def diff(self, computer, a=None, b=None):
+        v = self.v
+        cks = [l for l in v.control("checkpoint taken", computer)]
+        first = a or cks[0]["checkpoint"]
+        last = b or cks[-1]["checkpoint"]
+        ma = json.load(open(os.path.join(ROOT, computer, "checkpoints", first.split("@")[1] + ".json")))
+        mb = json.load(open(os.path.join(ROOT, computer, "checkpoints", last.split("@")[1] + ".json")))
+        # who: the run of the last file fact on each path in that window
+        last_fact = {}
+        ta, tb = v.ck_at[first], v.ck_at[last]
+        for f in v.file_facts:
+            if f["computer"] == computer and ta < f["at"] <= tb:
+                last_fact[f["path"]] = f
+        changed = []
+        for p in sorted(set(ma) | set(mb)):
+            x, y = ma.get(p), mb.get(p)
+            if x == y:
+                continue
+            ch = "created" if x is None else "deleted" if y is None else "changed"
+            d = (y or {}).get("size", 0) - (x or {}).get("size", 0)
+            changed.append((p, ch, d, last_fact.get(p)))
+        out = [f" $ silo diff {computer} {first} {last}", f" {computer} · {first} {hm(ta)} → {last} {hm(tb)}", ""]
+        groups = collections.OrderedDict((g, []) for g in ("deleted outside work folders", "agent program settings", "home settings", "installed tools", "code: ~/work/app", "other work folders", "agent program's own files", "other"))
+        for p, ch, d, f in changed:
+            g = self.group(computer, p)
+            if ch == "deleted" and g == "other work folders":
+                g = "deleted outside work folders"
+            groups.setdefault(g, []).append((p, ch, d, f))
+        total = 0
+        for g, xs in groups.items():
+            if not xs:
+                if g in ("agent program settings", "home settings"):
+                    out.append(f" {g:<30} unchanged")
+                continue
+            total += len(xs)
+            who = collections.Counter((f["_by"]["run"]["name"] if f and f["_by"]["run"] else "unattributed") for _, _, _, f in xs)
+            ch = collections.Counter(c for _, c, _, _ in xs)
+            d = sum(x[2] for x in xs)
+            out.append(f" {g:<30} {len(xs)} paths · {', '.join(f'{n} {c}' for c, n in ch.items())} · {'+' if d >= 0 else '−'}{size(d)} · ◇{', '.join(f'{k} {n}' for k, n in who.items())}")
+            if len(xs) <= 4 or g in ("agent program settings", "home settings", "installed tools"):
+                for p, c, dd, f in xs[:6]:
+                    ln = f"   {c:<8} {self.t(computer, p)}"
+                    if c == "changed" and f and f.get("sha_before") and f.get("sha_after"):
+                        add = self.added_lines(f)
+                        if add:
+                            ln += f"  +{words(add, 60)}"
+                    out.append(ln)
+            else:
+                top = os.path.commonpath([x[0] for x in xs])
+                out.append(f"   under {self.t(computer, top)}/")
+        out.append("")
+        out.append(f" Totals: {len(changed)} paths changed = {total} in the groups above. No group hides a path.")
+        out.append(" " + LEGEND)
+        return "\n".join(out)
+
+    def added_lines(self, f):
+        try:
+            a = open(os.path.join(ROOT, "cas", f["sha_before"]), errors="replace").read().splitlines()
+            b = open(os.path.join(ROOT, "cas", f["sha_after"]), errors="replace").read().splitlines()
+        except FileNotFoundError:
+            return None
+        add = [l for l in b if l not in a and l.strip()]
+        return " / ".join(add) if add and len(add) <= 3 else None
+
+    # ------------------------------------------------------------ why, putback
+    def why(self, path):
+        v = self.v
+        hits = [f for f in v.file_facts if f["path"].endswith(path.lstrip("~"))]
+        if not hits:
+            return f"silo: the record has no change to {path}"
+        out = [f" {self.t(hits[-1]['computer'], hits[-1]['path'])}: every change in the record"]
+        backs = v.control("put back")
+        last_by_run = None
+        for f in hits:
+            who = self.run_label(f["_by"]["run"])
+            a, b = v.ck_at[f["between"][0]], v.ck_at[f["between"][1]]
+            pb = [x for x in backs if a < x["at"] <= b]
+            if pb and not f["_by"]["run"]:
+                who = f"◇ put back by you ({pb[0]['id']}, in the same window)"
+            elif f["_by"]["run"]:
+                last_by_run = f
+            out.append(f"   {hm(f['at'])}  {f['change']:<8} {who} · between {f['between'][0]} and {f['between'][1]}")
+        if last_by_run:
+            out.append("")
+            out.append(self.chain_for_fact(last_by_run))
+        return "\n".join(out)
+
+    def chain_for_fact(self, f):
+        fake = {"id": f["id"], "by": "silo why", "text": f"{f['change']} {self.t(f['computer'], f['path'])}", "at": f["at"], "computer": f["computer"], "about": [f["id"]]}
+        self.v.by_id["why"] = fake
+        return self.chain("why")
+
+    def putback(self, aid):
+        v = self.v
+        a = v.by_id.get(aid)
+        fs = [v.by_id[i] for i in a.get("about") or [] if i in v.by_id and v.by_id[i]["line"] == "file"]
+        if not fs:
+            return "silo: this alert is about no file"
+        c = a["computer"]
+        ck = fs[0]["between"][0]
+        later = [f for f in v.file_facts if f["computer"] == c and f["path"] in {x["path"] for x in fs} and f["at"] > fs[0]["at"]]
+        if later:
+            return f"silo: {len(later)} of these paths changed again since; put back refuses to write over them"
+        n = 0
+        for f in fs:
+            if f["change"] != "deleted" or not f.get("sha_before"):
+                continue
+            os.makedirs(os.path.dirname(f["path"]), exist_ok=True)
+            shutil.copyfile(os.path.join(ROOT, "cas", f["sha_before"]), f["path"])
+            n += 1
+        w = R.Writer(ROOT, c)
+        w.fact("control", "silo", what="put back", by="you", about=[aid], files=n, from_checkpoint=ck)
+        try:
+            req = urllib.request.Request(f"http://127.0.0.1:{self.cfg['control_port']}/", data=json.dumps({"op": "checkpoint", "computer": c, "why": "after a put back", "by": "you"}).encode(), method="POST")
+            ckn = json.loads(urllib.request.urlopen(req, timeout=60).read())["checkpoint"]
+        except Exception:
+            ckn = "(the engine is not running: no checkpoint taken)"
+        return f" put back {n} files from {ck} into {c}, the paths nobody touched since · recorded as yours · new checkpoint {ckn}"
+
+    def records(self, as_json):
+        if as_json:
+            return "\n".join(json.dumps({k: v for k, v in l.items() if not k.startswith("_")}, ensure_ascii=False) for l in self.v.lines)
+        out = []
+        for l in self.v.lines:
+            mark = "◌" if l["kind"] == "report" else "◇" if l["kind"] == "opinion" else " "
+            body = {k: v for k, v in l.items() if k not in ("id", "kind", "line", "at", "computer", "source", "prev", "unverified") and not k.startswith("_")}
+            out.append(f"{hm(l['at'])} {mark} {l['id']:<16} {l['line']:<10} {short(json.dumps(body, ensure_ascii=False), 120)}")
+        return "\n".join(out)
+
+
+def how_going(st):
+    return st["rests_on"]
+
+
+def tidy(s):
+    """Paths under a computer's home print from ~."""
+    cfg = json.load(open(os.path.join(NIGHT, "night.json")))
+    for c in cfg["computers"].values():
+        s = s.replace(c["home"], "~")
+    return s
+
+
+def main(argv):
+    out = []
+    global print
+    real = print
+    print = lambda s="": out.append(s)
+    try:
+        run(argv)
+    finally:
+        print = real
+        if out:
+            real(tidy("\n".join(out)))
+
+
+def run(argv):
+    if not argv:
+        print(Morning().first()); return
+    cmd, rest = argv[0], argv[1:]
+    if cmd == "verify":
+        bad = R.verify(ROOT)
+        n = sum(1 for c in os.listdir(ROOT) if c not in ("blobs", "cas") for k in ("facts", "reports", "opinions") if os.path.exists(os.path.join(ROOT, c, k + ".jsonl")) for _ in open(os.path.join(ROOT, c, k + ".jsonl")))
+        print(f" {n} lines checked · " + ("every chain holds" if not bad else f"{len(bad)} broken: " + "; ".join(f"{f} line {i}: {p}" for f, i, p in bad[:5])))
+        return
+    m = Morning()
+    if cmd == "receipt":
+        print(m.receipt(" ".join(rest)))
+    elif cmd == "timeline":
+        around = rest[rest.index("--around") + 1] if "--around" in rest else None
+        print(m.timeline(rest[0] if rest and not rest[0].startswith("--") else "main", around, "--all" in rest))
+    elif cmd == "chain":
+        print(m.chain(rest[0], "--json" in rest))
+    elif cmd == "network":
+        print(m.network())
+    elif cmd == "diff":
+        print(m.diff(rest[0] if rest else "main", *(rest[1:3] if len(rest) >= 3 else [])))
+    elif cmd == "why":
+        print(m.why(rest[0]))
+    elif cmd == "putback":
+        print(m.putback(rest[0]))
+    elif cmd == "record":
+        print(m.records("--json" in rest))
+    else:
+        print(__doc__)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

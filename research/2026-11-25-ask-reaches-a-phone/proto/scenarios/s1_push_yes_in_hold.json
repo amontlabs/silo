@@ -1,0 +1,2 @@
+{"holds": {"git": 600}, "policy": {"delay": 8, "verdict": "yes"},
+ "commands": [{"at": 0, "run": "git push http://{B}/repo.git main"}]}

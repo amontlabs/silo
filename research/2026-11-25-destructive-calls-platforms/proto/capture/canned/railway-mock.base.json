@@ -1,0 +1,40 @@
+{
+"Project.name": "prod-app",
+"Project.id": "project-1",
+"Environment.name": "production",
+"Service.name": "api",
+"Volume.name": "pg-data",
+"Bucket.name": "assets",
+"CustomDomain.domain": "api.example.com",
+"ServiceDomain.domain": "api-prod.up.railway.app",
+"User.email": "alice@example.com",
+"Project.isPublic": false,
+"canAccess": true,
+"Environment.canAccess": true,
+"serviceId": "service-1",
+"environmentId": "environment-1",
+"projectId": "project-1",
+"volumeId": "volume-1",
+"serviceName": "api",
+"Deployment.status": "SUCCESS",
+"canRedeploy": true,
+"Environment.config": {
+"services": {
+"service-1": {}
+},
+"buckets": {
+"bucket-1": {}
+},
+"volumes": {
+"volume-1": {}
+}
+},
+"Query.variables": {
+"DATABASE_URL": "postgres://u:p@db/x",
+"FOO": "old"
+},
+"TCPProxy.id": "tcpproxy-1",
+"Query.variablesForServiceDeployment": {
+"DATABASE_URL": "postgres://u:p@db/x"
+}
+}

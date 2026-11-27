@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Silo Mac notification</title>
+<style>
+:root {
+  --glass: rgba(246, 246, 246, .82); --glass-ink: #1c1c1e; --glass-muted: #5a5a60; --glass-line: rgba(0, 0, 0, .12);
+  --accent: #ff9f0a; --accent-ink: #995700; --menubar: rgba(240, 240, 240, .7); --menubar-ink: #1c1c1e;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --glass: rgba(44, 44, 46, .82); --glass-ink: #f2f2f3; --glass-muted: #b0b0b6; --glass-line: rgba(255, 255, 255, .14);
+    --accent-ink: #e8b66e; --menubar: rgba(30, 30, 30, .6); --menubar-ink: #f2f2f3;
+  }
+}
+:root[data-theme="dark"] {
+  --glass: rgba(44, 44, 46, .82); --glass-ink: #f2f2f3; --glass-muted: #b0b0b6; --glass-line: rgba(255, 255, 255, .14);
+  --accent-ink: #e8b66e; --menubar: rgba(30, 30, 30, .6); --menubar-ink: #f2f2f3;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font: 13px/18px -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, system-ui, sans-serif;
+  overflow: hidden; position: relative;
+  background: radial-gradient(80% 70% at 15% 20%, #6d8db0 0%, transparent 60%),
+              radial-gradient(70% 60% at 85% 85%, #c98a5a 0%, transparent 60%),
+              linear-gradient(150deg, #3b5470, #6e4f3e);
+}
+.menubar { height: 24px; background: var(--menubar); color: var(--menubar-ink); display: flex; align-items: center; gap: 18px; padding: 0 14px; font-size: 13px; backdrop-filter: blur(20px); }
+.menubar b { font-weight: 700; }
+.menubar .grow { flex: 1; }
+.menubar .silo { width: 14px; height: 14px; border: 2px solid currentColor; border-radius: 4px; }
+
+/* the terminal behind: the agent waits on the push */
+.term { position: absolute; left: 120px; top: 90px; width: 760px; height: 470px; border-radius: 10px; overflow: hidden; background: #1e1f22; color: #d6d6d6; box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+.term .bar { height: 28px; background: #2b2c30; display: flex; align-items: center; gap: 8px; padding: 0 12px; color: #9a9aa0; font-size: 12px; }
+.term .bar i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+.term pre { margin: 0; padding: 12px 16px; font: 12px/18px ui-monospace, "SF Mono", Menlo, "JetBrains Mono", monospace; white-space: pre; }
+.term .dim { color: #7d7d84; }
+.term .g { color: #8ac48a; }
+
+.banner {
+  position: absolute; top: 34px; right: 10px; width: 420px;
+  background: var(--glass); color: var(--glass-ink); border-radius: 16px;
+  backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
+  box-shadow: 0 10px 30px rgba(0,0,0,.25), 0 0 0 .5px rgba(0,0,0,.15);
+  display: grid; grid-template-columns: 1fr 96px; overflow: hidden;
+}
+.content { display: grid; grid-template-columns: 32px 1fr; column-gap: 10px; padding: 12px 12px 12px 12px; min-width: 0; }
+.icon { width: 32px; height: 32px; border-radius: 8px; background: var(--accent); display: grid; place-items: center; }
+.icon i { width: 13px; height: 13px; border: 2.5px solid #282016; border-radius: 3px; display: block; }
+.head { display: flex; justify-content: space-between; color: var(--glass-muted); font-size: 12px; }
+.head b { color: var(--glass-ink); font-weight: 600; }
+.title { font-weight: 600; }
+.d { color: var(--glass-muted); }
+.m { font-family: "DejaVu Sans", -apple-system, sans-serif; font-size: 11px; color: var(--accent-ink); }
+.q, .nw { white-space: nowrap; }
+.q::before { content: "«"; color: var(--glass-muted); } .q::after { content: "»"; color: var(--glass-muted); }
+.actions { display: grid; grid-template-rows: 1fr 1fr; border-left: 1px solid var(--glass-line); }
+.actions button { all: unset; display: grid; place-items: center; font-weight: 500; cursor: pointer; color: var(--glass-ink); }
+.actions button + button { border-top: 1px solid var(--glass-line); }
+.actions button:hover { background: var(--glass-line); }
+</style>
+</head>
+<body>
+<div class="menubar"><b>Terminal</b><span>Shell</span><span>Edit</span><span>View</span><span>Window</span><span>Help</span><span class="grow"></span><span class="silo" aria-label="Silo"></span><span>Tue 24 Nov 10:40</span></div>
+
+<div class="term" aria-hidden="true">
+  <div class="bar"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i><span style="flex:1;text-align:center">ana@main: ~/work/app — ssh main.keep</span></div>
+<pre><span class="dim">ana@main app %</span> claude --dangerously-skip-permissions
+
+<span class="g">⏺</span> All 412 tests pass. Committing the fix.
+
+<span class="g">⏺</span> Bash(git commit -am "Fix session expiry in Postgres store")
+  ⎿  [main 4f2a91c] Fix session expiry in Postgres store
+      3 files changed, 41 insertions(+), 12 deletions(-)
+
+<span class="g">⏺</span> Bash(git push origin main)
+  ⎿  <span class="dim">Running…</span>
+</pre>
+</div>
+
+<div class="banner" role="group" aria-label="Silo ask">
+  <div class="content">
+    <div class="icon"><i></i></div>
+    <div style="min-width:0">
+      <div class="head"><span><b>Silo</b> · main</span><span>now</span></div>
+      <div class="title">Push to github.com/ana/app, <span class="nw">branch main</span></div>
+      <div class="d">3 commits · held, 74 s left</div>
+      <div><span class="m" role="img" aria-label="Opinion of which-run-did-it">◇</span> claude #2</div>
+      <div><span class="q" aria-label="Words claude #2 wrote">tests pass, pushing the fix</span></div>
+    </div>
+  </div>
+  <div class="actions">
+    <button>Allow once</button>
+    <button>Deny</button>
+  </div>
+</div>
+</body>
+</html>

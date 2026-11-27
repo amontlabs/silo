@@ -1,0 +1,21 @@
+# scenario: backed — with the probe (collector.bt)
+Test runs
+  $ npm test 2>&1 | tail -12   [seen: the command the model asked for]
+    node-test (node --test): passed, exit 0   [told by the probe]
+    the output shown to the agent says: 3 passed, 0 failed, 0 skipped   [seen; who printed it is not]
+    nothing in the checkout changed after this pass   [seen]
+
+The agent said (its own words, beside the receipt):
+  "Added a test for negative numbers. All tests pass (3/3)."
+Against the record: BACKED   [Silo's classifier thinks]
+
+# scenario: backed — traffic and checkpoints only, no probe
+Test runs
+  $ npm test 2>&1 | tail -12   [seen: the command the model asked for]
+    passed, as the output shown says   [seen: the output shown to the agent]
+    the output shown to the agent says: 3 passed, 0 failed, 0 skipped   [seen; who printed it is not]
+    nothing in the checkout changed after this pass   [seen]
+
+The agent said (its own words, beside the receipt):
+  "Added a test for negative numbers. All tests pass (3/3)."
+Against the record: BACKED   [Silo's classifier thinks]

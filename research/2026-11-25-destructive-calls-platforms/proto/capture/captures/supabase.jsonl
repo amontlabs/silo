@@ -1,0 +1,156 @@
+{"event": "command_start", "name": "sb-projects-delete", "t": 1795603570.830811271}
+{"t": 1795603571.292, "conn": 19, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603571.292, "conn": 19, "event": "request", "method": "DELETE", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"], ["Content-Length", "0"]], "body_len": 0, "body": ""}
+{"t": 1795603571.293, "conn": 19, "event": "response", "status": 200, "len": 56, "for": "DELETE api.supabase.com /v1/projects/abcdefghijklmnopqrst"}
+{"t": 1795603571.344, "conn": 19, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603571.345, "conn": 19, "event": "response", "status": 200, "len": 271, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst"}
+{"t": 1795603571.41, "conn": 19, "event": "client_closed"}
+{"event": "command_end", "name": "sb-projects-delete", "t": 1795603571.417435373}
+{"event": "command_start", "name": "sb-projects-list", "t": 1795603571.429269325}
+{"t": 1795603571.868, "conn": 20, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603571.868, "conn": 20, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603571.868, "conn": 20, "event": "response", "status": 200, "len": 352, "for": "GET api.supabase.com /v1/projects"}
+{"t": 1795603571.936, "conn": 20, "event": "client_closed"}
+{"event": "command_end", "name": "sb-projects-list", "t": 1795603571.943159582}
+{"event": "command_start", "name": "sb-functions-delete", "t": 1795603573.087736383}
+{"t": 1795603573.525, "conn": 23, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603573.525, "conn": 23, "event": "request", "method": "DELETE", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst/functions/hello", "http": "HTTP/1.1", "headers": [["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Accept", "*/*"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"], ["Content-Length", "0"]], "body_len": 0, "body": ""}
+{"t": 1795603573.525, "conn": 23, "event": "response", "status": 200, "len": 56, "for": "DELETE api.supabase.com /v1/projects/abcdefghijklmnopqrst/functions/hello"}
+{"t": 1795603573.572, "conn": 23, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603573.572, "conn": 23, "event": "response", "status": 200, "len": 271, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst"}
+{"t": 1795603573.596, "conn": 23, "event": "client_closed"}
+{"event": "command_end", "name": "sb-functions-delete", "t": 1795603573.602434495}
+{"event": "command_start", "name": "sb-functions-list", "t": 1795603573.612410258}
+{"t": 1795603574.035, "conn": 24, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603574.035, "conn": 24, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst/functions", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603574.036, "conn": 24, "event": "response", "status": 200, "len": 140, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst/functions"}
+{"t": 1795603574.085, "conn": 24, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603574.085, "conn": 24, "event": "response", "status": 200, "len": 271, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst"}
+{"t": 1795603574.106, "conn": 24, "event": "client_closed"}
+{"event": "command_end", "name": "sb-functions-list", "t": 1795603574.111708390}
+{"event": "command_start", "name": "sb-secrets-unset", "t": 1795603574.121088218}
+{"t": 1795603574.54, "conn": 25, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603574.541, "conn": 25, "event": "request", "method": "DELETE", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst/secrets", "http": "HTTP/1.1", "headers": [["Authorization", "<redacted>"], ["Content-Type", "application/json"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Accept", "*/*"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"], ["Content-Length", "7"]], "body_len": 7, "body": "[\"FOO\"]"}
+{"t": 1795603574.541, "conn": 25, "event": "response", "status": 200, "len": 56, "for": "DELETE api.supabase.com /v1/projects/abcdefghijklmnopqrst/secrets"}
+{"t": 1795603574.587, "conn": 25, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603574.588, "conn": 25, "event": "response", "status": 200, "len": 271, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst"}
+{"t": 1795603574.609, "conn": 25, "event": "client_closed"}
+{"event": "command_end", "name": "sb-secrets-unset", "t": 1795603574.614539702}
+{"event": "command_start", "name": "sb-secrets-set", "t": 1795603574.623412087}
+{"t": 1795603575.072, "conn": 26, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603575.072, "conn": 26, "event": "request", "method": "POST", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst/secrets", "http": "HTTP/1.1", "headers": [["Authorization", "<redacted>"], ["Content-Type", "application/json"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Accept", "*/*"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"], ["Content-Length", "30"]], "body_len": 30, "body": "[{\"name\":\"FOO\",\"value\":\"bar\"}]"}
+{"t": 1795603575.072, "conn": 26, "event": "response", "status": 200, "len": 2, "for": "POST api.supabase.com /v1/projects/abcdefghijklmnopqrst/secrets"}
+{"t": 1795603575.12, "conn": 26, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603575.121, "conn": 26, "event": "response", "status": 200, "len": 271, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst"}
+{"t": 1795603575.144, "conn": 26, "event": "client_closed"}
+{"event": "command_end", "name": "sb-secrets-set", "t": 1795603575.150992767}
+{"event": "command_start", "name": "sb-secrets-list", "t": 1795603575.161986866}
+{"t": 1795603575.63, "conn": 27, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603575.63, "conn": 27, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst/secrets", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603575.63, "conn": 27, "event": "response", "status": 200, "len": 31, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst/secrets"}
+{"t": 1795603575.68, "conn": 27, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603575.68, "conn": 27, "event": "response", "status": 200, "len": 271, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst"}
+{"t": 1795603575.7, "conn": 27, "event": "client_closed"}
+{"event": "command_end", "name": "sb-secrets-list", "t": 1795603575.705827470}
+{"event": "command_start", "name": "sb-db-query-drop", "t": 1795603575.714811115}
+{"t": 1795603576.141, "conn": 28, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603576.141, "conn": 28, "event": "request", "method": "POST", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst/database/query", "http": "HTTP/1.1", "headers": [["Authorization", "<redacted>"], ["Content-Type", "application/json"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Accept", "*/*"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"], ["Content-Length", "28"]], "body_len": 28, "body": "{\"query\":\"DROP TABLE users\"}", "graphql": [{"operationName": null, "kind": "query", "nameInQuery": null, "firstRootField": null, "variables": null}]}
+{"t": 1795603576.141, "conn": 28, "event": "response", "status": 201, "len": 2, "for": "POST api.supabase.com /v1/projects/abcdefghijklmnopqrst/database/query"}
+{"t": 1795603576.188, "conn": 28, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603576.188, "conn": 28, "event": "response", "status": 200, "len": 271, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst"}
+{"t": 1795603576.208, "conn": 28, "event": "client_closed"}
+{"event": "command_end", "name": "sb-db-query-drop", "t": 1795603576.214421527}
+{"event": "command_start", "name": "sb-db-query-select", "t": 1795603576.223840664}
+{"t": 1795603576.707, "conn": 29, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603576.707, "conn": 29, "event": "request", "method": "POST", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst/database/query", "http": "HTTP/1.1", "headers": [["Authorization", "<redacted>"], ["Content-Type", "application/json"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Accept", "*/*"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"], ["Content-Length", "55"]], "body_len": 55, "body": "{\"query\":\"select count(*) from users\",\"read_only\":true}", "graphql": [{"operationName": null, "kind": "query", "nameInQuery": null, "firstRootField": null, "variables": null}]}
+{"t": 1795603576.708, "conn": 29, "event": "response", "status": 201, "len": 2, "for": "POST api.supabase.com /v1/projects/abcdefghijklmnopqrst/database/query"}
+{"t": 1795603576.758, "conn": 29, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603576.758, "conn": 29, "event": "response", "status": 200, "len": 271, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst"}
+{"t": 1795603576.782, "conn": 29, "event": "client_closed"}
+{"event": "command_end", "name": "sb-db-query-select", "t": 1795603576.787916239}
+{"event": "command_start", "name": "sb-backups-restore", "t": 1795603576.797989125}
+{"t": 1795603577.251, "conn": 30, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603577.251, "conn": 30, "event": "request", "method": "POST", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst/database/backups/restore-pitr", "http": "HTTP/1.1", "headers": [["Authorization", "<redacted>"], ["Content-Type", "application/json"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Accept", "*/*"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"], ["Content-Length", "40"]], "body_len": 40, "body": "{\"recovery_time_target_unix\":1764000000}"}
+{"t": 1795603577.252, "conn": 30, "event": "response", "status": 200, "len": 2, "for": "POST api.supabase.com /v1/projects/abcdefghijklmnopqrst/database/backups/restore-pitr"}
+{"t": 1795603577.301, "conn": 30, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603577.301, "conn": 30, "event": "response", "status": 200, "len": 271, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst"}
+{"t": 1795603577.321, "conn": 30, "event": "client_closed"}
+{"event": "command_end", "name": "sb-backups-restore", "t": 1795603577.327274842}
+{"event": "command_start", "name": "sb-netres-open", "t": 1795603577.336176550}
+{"t": 1795603577.762, "conn": 31, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603577.762, "conn": 31, "event": "request", "method": "POST", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst/network-restrictions/apply", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["Content-Type", "application/json"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"], ["Content-Length", "54"]], "body_len": 54, "body": "{\"dbAllowedCidrs\":[\"0.0.0.0/0\"],\"dbAllowedCidrsV6\":[]}"}
+{"t": 1795603577.762, "conn": 31, "event": "response", "status": 200, "len": 92, "for": "POST api.supabase.com /v1/projects/abcdefghijklmnopqrst/network-restrictions/apply"}
+{"t": 1795603577.809, "conn": 31, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603577.81, "conn": 31, "event": "response", "status": 200, "len": 271, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst"}
+{"t": 1795603577.834, "conn": 31, "event": "client_closed"}
+{"event": "command_end", "name": "sb-netres-open", "t": 1795603577.839953824}
+{"event": "command_start", "name": "sb-ssl-off", "t": 1795603577.849619807}
+{"t": 1795603578.285, "conn": 32, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603578.285, "conn": 32, "event": "request", "method": "PUT", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst/ssl-enforcement", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["Content-Type", "application/json"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"], ["Content-Length", "38"]], "body_len": 38, "body": "{\"requestedConfig\":{\"database\":false}}"}
+{"t": 1795603578.285, "conn": 32, "event": "response", "status": 200, "len": 67, "for": "PUT api.supabase.com /v1/projects/abcdefghijklmnopqrst/ssl-enforcement"}
+{"t": 1795603578.333, "conn": 32, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603578.333, "conn": 32, "event": "response", "status": 200, "len": 271, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst"}
+{"t": 1795603578.352, "conn": 32, "event": "client_closed"}
+{"event": "command_end", "name": "sb-ssl-off", "t": 1795603578.358348075}
+{"event": "command_start", "name": "sb-pgconfig", "t": 1795603578.367205742}
+{"t": 1795603578.845, "conn": 33, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603578.845, "conn": 33, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst/config/database/postgres", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603578.845, "conn": 33, "event": "response", "status": 200, "len": 2, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst/config/database/postgres"}
+{"t": 1795603578.893, "conn": 33, "event": "request", "method": "PUT", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst/config/database/postgres", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["Content-Type", "application/json"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"], ["Content-Length", "23"]], "body_len": 23, "body": "{\"max_connections\":100}"}
+{"t": 1795603578.893, "conn": 33, "event": "response", "status": 200, "len": 2, "for": "PUT api.supabase.com /v1/projects/abcdefghijklmnopqrst/config/database/postgres"}
+{"t": 1795603578.9, "conn": 33, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603578.9, "conn": 33, "event": "response", "status": 200, "len": 271, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst"}
+{"t": 1795603578.926, "conn": 33, "event": "client_closed"}
+{"event": "command_end", "name": "sb-pgconfig", "t": 1795603578.933482610}
+{"event": "command_start", "name": "sb-vanity-delete", "t": 1795603579.400979044}
+{"t": 1795603579.846, "conn": 34, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603579.846, "conn": 34, "event": "request", "method": "DELETE", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst/vanity-subdomain", "http": "HTTP/1.1", "headers": [["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Accept", "*/*"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"], ["Content-Length", "0"]], "body_len": 0, "body": ""}
+{"t": 1795603579.846, "conn": 34, "event": "response", "status": 200, "len": 56, "for": "DELETE api.supabase.com /v1/projects/abcdefghijklmnopqrst/vanity-subdomain"}
+{"t": 1795603579.9, "conn": 34, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603579.901, "conn": 34, "event": "response", "status": 200, "len": 271, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst"}
+{"t": 1795603579.923, "conn": 34, "event": "client_closed"}
+{"event": "command_end", "name": "sb-vanity-delete", "t": 1795603579.929562328}
+{"event": "command_start", "name": "sb-api-keys", "t": 1795603579.940247660}
+{"t": 1795603580.38, "conn": 35, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603580.38, "conn": 35, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst/api-keys", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603580.38, "conn": 35, "event": "response", "status": 200, "len": 162, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst/api-keys"}
+{"t": 1795603580.43, "conn": 35, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603580.431, "conn": 35, "event": "response", "status": 200, "len": 271, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst"}
+{"t": 1795603580.456, "conn": 35, "event": "client_closed"}
+{"event": "command_end", "name": "sb-api-keys", "t": 1795603580.462426916}
+{"event": "command_start", "name": "sb-orgs-list", "t": 1795603580.473988000}
+{"t": 1795603580.893, "conn": 36, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603580.893, "conn": 36, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/organizations", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603580.893, "conn": 36, "event": "response", "status": 200, "len": 48, "for": "GET api.supabase.com /v1/organizations"}
+{"t": 1795603580.964, "conn": 36, "event": "client_closed"}
+{"event": "command_end", "name": "sb-orgs-list", "t": 1795603580.971036141}
+{"event": "command_start", "name": "sb-branches-delete", "t": 1795603660.316639493}
+{"t": 1795603660.739, "conn": 37, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603660.739, "conn": 37, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst/branches/br-1", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603660.74, "conn": 37, "event": "response", "status": 200, "len": 320, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst/branches/br-1"}
+{"t": 1795603660.788, "conn": 37, "event": "request", "method": "DELETE", "host": "api.supabase.com", "target": "/v1/branches/bbbbbbbbbbbbbbbbbbbb", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"], ["Content-Length", "0"]], "body_len": 0, "body": ""}
+{"t": 1795603660.789, "conn": 37, "event": "response", "status": 200, "len": 2, "for": "DELETE api.supabase.com /v1/branches/bbbbbbbbbbbbbbbbbbbb"}
+{"t": 1795603660.793, "conn": 37, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603660.793, "conn": 37, "event": "response", "status": 200, "len": 271, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst"}
+{"t": 1795603660.805, "conn": 37, "event": "client_closed"}
+{"event": "command_end", "name": "sb-branches-delete", "t": 1795603660.810910205}
+{"event": "command_start", "name": "sb-branches-create", "t": 1795603660.820121150}
+{"t": 1795603661.261, "conn": 38, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603661.261, "conn": 38, "event": "request", "method": "POST", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst/branches", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["Content-Type", "application/json"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"], ["Content-Length", "44"]], "body_len": 44, "body": "{\"branch_name\":\"feature\",\"is_default\":false}"}
+{"t": 1795603661.262, "conn": 38, "event": "response", "status": 200, "len": 320, "for": "POST api.supabase.com /v1/projects/abcdefghijklmnopqrst/branches"}
+{"t": 1795603661.309, "conn": 38, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603661.309, "conn": 38, "event": "response", "status": 200, "len": 271, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst"}
+{"t": 1795603661.329, "conn": 38, "event": "client_closed"}
+{"event": "command_end", "name": "sb-branches-create", "t": 1795603661.334683970}
+{"event": "command_start", "name": "sb-storage-rm", "t": 1795603661.343729247}
+{"t": 1795603661.791, "conn": 39, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603661.791, "conn": 39, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst/api-keys?reveal=true", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603661.792, "conn": 39, "event": "response", "status": 200, "len": 162, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst/api-keys"}
+{"t": 1795603661.842, "conn": 40, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603661.842, "conn": 40, "event": "request", "method": "DELETE", "host": "abcdefghijklmnopqrst.supabase.co", "target": "/storage/v1/object/avatars", "http": "HTTP/1.1", "headers": [["Authorization", "<redacted>"], ["Content-Type", "application/json"], ["User-Agent", "SupabaseCLI/3.4.0"], ["apikey", "<redacted>"], ["Connection", "keep-alive"], ["Accept", "*/*"], ["Host", "abcdefghijklmnopqrst.supabase.co"], ["Accept-Encoding", "gzip, deflate, br, zstd"], ["Content-Length", "23"]], "body_len": 23, "body": "{\"prefixes\":[\"u1.png\"]}"}
+{"t": 1795603661.843, "conn": 40, "event": "response", "status": 200, "len": 20, "for": "DELETE abcdefghijklmnopqrst.supabase.co /storage/v1/object/avatars"}
+{"t": 1795603661.891, "conn": 39, "event": "request", "method": "GET", "host": "api.supabase.com", "target": "/v1/projects/abcdefghijklmnopqrst", "http": "HTTP/1.1", "headers": [["Accept", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "SupabaseCLI/3.4.0"], ["Connection", "keep-alive"], ["Host", "api.supabase.com"], ["Accept-Encoding", "gzip, deflate, br, zstd"]], "body_len": 0, "body": ""}
+{"t": 1795603661.892, "conn": 39, "event": "response", "status": 200, "len": 271, "for": "GET api.supabase.com /v1/projects/abcdefghijklmnopqrst"}
+{"t": 1795603661.914, "conn": 39, "event": "client_closed"}
+{"t": 1795603661.914, "conn": 40, "event": "client_closed"}
+{"event": "command_end", "name": "sb-storage-rm", "t": 1795603661.921610560}

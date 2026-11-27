@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# clienv VAR=value ... -- command args: runs a CLI with no session proxy, no inherited credentials,
+# the test CA trusted, and a fresh HOME per CLI (CAPTURE_HOME). As #383's clienv.
+HOME_DIR=${CAPTURE_HOME:-/opt/clis/home}
+mkdir -p "$HOME_DIR"
+vars=()
+while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do vars+=("$1"); shift; done
+shift
+B=/opt/clis/pki/bundle.crt
+# A dead proxy for every host the hosts map does not list, so nothing reaches a real provider.
+NOPROXY=$(grep -v '^#' "$(dirname "$0")/hostmap.txt" | cut -d' ' -f2- | tr ' ' ',' | paste -sd,)
+exec env -i HOME="$HOME_DIR" TERM=dumb LANG=C.UTF-8 \
+  PATH=/opt/google-cloud-sdk/bin:/opt/azvenv/bin:/usr/local/bin:/usr/bin:/bin \
+  SSL_CERT_FILE=$B REQUESTS_CA_BUNDLE=$B CURL_CA_BUNDLE=$B AWS_CA_BUNDLE=$B \
+  HTTPS_PROXY=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 http_proxy=http://127.0.0.1:9 \
+  NO_PROXY="$NOPROXY" no_proxy="$NOPROXY" CI=1 NO_COLOR=1 "${vars[@]}" "$@"

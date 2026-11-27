@@ -1,0 +1,20 @@
+{"t": "2026-11-24T13:58:00Z", "type": "checkpoint", "id": "cp-1358"}
+{"t": "2026-11-24T14:00:00Z", "type": "checkpoint", "id": "cp-1400"}
+{"t": "2026-11-24T14:01:10Z", "type": "http", "host": "registry.npmjs.org", "port": 443, "opened": true, "method": "GET", "path": "/left-pad", "status": 200, "bytes_out": 412, "bytes_in": 18230}
+{"t": "2026-11-24T14:02:00Z", "type": "http", "host": "api.anthropic.com", "port": 443, "opened": true, "model_traffic": true, "method": "POST", "path": "/v1/messages", "status": 200, "bytes_out": 90211, "bytes_in": 3012}
+{"t": "2026-11-24T14:03:30Z", "type": "http", "host": "github.com", "port": 443, "opened": true, "method": "POST", "path": "/acme/site.git/git-upload-pack", "status": 200, "secret": "github-read", "bytes_out": 2301, "bytes_in": 880123}
+{"t": "2026-11-24T14:05:00Z", "type": "http", "host": "github.com", "port": 443, "opened": true, "method": "POST", "path": "/acme/site.git/git-receive-pack", "status": 200, "secret": "github-push", "bytes_out": 40122, "bytes_in": 310, "push_refs": [{"ref": "refs/heads/main", "old": "9f1c2e0", "new": "4b7aa31", "force": true}]}
+{"t": "2026-11-24T14:06:12Z", "type": "http", "host": "backboard.railway.app", "port": 443, "opened": true, "method": "POST", "path": "/graphql/v2", "status": 200, "secret": "railway-token", "bytes_out": 233, "bytes_in": 120}
+{"t": "2026-11-24T14:06:40Z", "type": "http", "host": "api.stripe.com", "port": 443, "opened": true, "method": "GET", "path": "/v1/customers", "status": 200, "secret": "stripe-read", "bytes_out": 300, "bytes_in": 5100}
+{"t": "2026-11-24T14:07:00Z", "type": "http", "host": "hooks.example.com", "port": 443, "opened": true, "method": "GET", "path": "/deploy/trigger?env=prod", "status": 200, "bytes_out": 210, "bytes_in": 40}
+{"t": "2026-11-24T14:07:30Z", "type": "http", "host": "api.cloudflare.com", "port": 443, "opened": true, "method": "DELETE", "path": "/client/v4/zones/z1/dns_records/r9", "status": 403, "secret": "cf-token", "bytes_out": 180, "bytes_in": 90}
+{"t": "2026-11-24T14:08:00Z", "type": "http", "host": "api.vercel.com", "port": 443, "opened": true, "method": "POST", "path": "/v13/deployments", "status": null, "secret": "vercel-token", "bytes_out": 51200, "bytes_in": 0, "ended": "connection closed before an answer"}
+{"t": "2026-11-24T14:09:00Z", "type": "tcp", "host": "db.prod.internal", "port": 5432, "opened": false, "bytes_out": 9120, "bytes_in": 220400}
+{"t": "2026-11-24T14:10:00Z", "type": "tcp", "host": "203.0.113.7", "port": 22, "opened": false, "protocol": "ssh", "protocol_seen_from": "the server banner, sent in clear", "bytes_out": 15200, "bytes_in": 88000, "duration_s": 312}
+{"t": "2026-11-24T14:11:00Z", "type": "http", "host": "s3.amazonaws.com", "port": 443, "opened": false, "bytes_out": 2400000, "bytes_in": 1200, "note": "not opened: the program kept its own certificate store"}
+{"t": "2026-11-24T14:12:00Z", "type": "http", "host": "evil.example.net", "port": 443, "opened": true, "method": "POST", "path": "/collect", "status": null, "denied": "host not allowed", "bytes_out": 0, "bytes_in": 0}
+{"t": "2026-11-24T14:13:00Z", "type": "db", "host": "db.staging.internal", "port": 5432, "opened": true, "statement": "SELECT id FROM users LIMIT 5", "status": "ok", "bytes_out": 40, "bytes_in": 300}
+{"t": "2026-11-24T14:13:05Z", "type": "db", "host": "db.staging.internal", "port": 5432, "opened": true, "statement": "DROP TABLE sessions", "status": "ok", "bytes_out": 20, "bytes_in": 10}
+{"t": "2026-11-24T14:13:09Z", "type": "db", "host": "db.staging.internal", "port": 5432, "opened": true, "statement": "SELECT purge_old_rows()", "status": "ok", "bytes_out": 24, "bytes_in": 10}
+{"t": "2026-11-24T14:14:00Z", "type": "mac", "channel": "files", "what": "copied report.pdf to your Mac", "bytes_out": 82000}
+{"t": "2026-11-24T14:15:00Z", "type": "dns", "host": "x7f3a9.exfil.example.net", "bytes_out": 60}

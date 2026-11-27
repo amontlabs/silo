@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Silo lock-screen ask</title>
+<style>
+:root {
+  --glass: rgba(245, 245, 245, .72); --glass-ink: #1c1c1e; --glass-muted: #4a4a4f; --glass-line: rgba(60, 60, 67, .18);
+  --accent: #ff9f0a; --accent-ink: #995700; --wall-a: #1d2b3a; --wall-b: #3c2a1f;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --glass: rgba(40, 40, 42, .72); --glass-ink: #f2f2f3; --glass-muted: #b7b7bd; --glass-line: rgba(235, 235, 245, .16);
+    --accent-ink: #e8b66e;
+  }
+}
+:root[data-theme="dark"] {
+  --glass: rgba(40, 40, 42, .72); --glass-ink: #f2f2f3; --glass-muted: #b7b7bd; --glass-line: rgba(235, 235, 245, .16);
+  --accent-ink: #e8b66e;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font: 15px/20px -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, system-ui, sans-serif;
+  color: #fff; overflow: hidden; position: relative;
+  background: radial-gradient(120% 70% at 20% 10%, #3f5873 0%, transparent 60%),
+              radial-gradient(90% 60% at 90% 90%, #7a4a2a 0%, transparent 65%),
+              linear-gradient(160deg, var(--wall-a), var(--wall-b));
+}
+.status { height: 54px; display: flex; justify-content: space-between; align-items: center; padding: 14px 32px 0; font-weight: 600; font-size: 16px; }
+.status .r { display: flex; gap: 6px; align-items: center; }
+.bars { display: flex; gap: 2px; align-items: flex-end; height: 11px; }
+.bars i { width: 3px; background: #fff; border-radius: 1px; display: block; }
+.batt { width: 25px; height: 12px; border: 1px solid rgba(255,255,255,.6); border-radius: 4px; padding: 1px; }
+.batt i { display: block; height: 100%; width: 70%; background: #fff; border-radius: 2px; }
+.island { position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 124px; height: 36px; background: #000; border-radius: 20px; }
+.lock { text-align: center; margin-top: 6px; opacity: .9; }
+.date { text-align: center; font-weight: 600; font-size: 18px; margin-top: 2px; }
+.clock { text-align: center; font: 200 92px/96px -apple-system, "SF Pro Display", Inter, system-ui, sans-serif; letter-spacing: -2px; }
+
+.stack { position: absolute; left: 12px; right: 12px; bottom: 150px; }
+.note {
+  background: var(--glass); color: var(--glass-ink); border-radius: 22px; padding: 12px 14px;
+  backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
+  display: grid; grid-template-columns: 38px 1fr; column-gap: 10px;
+}
+.icon { width: 38px; height: 38px; border-radius: 9px; background: var(--accent); display: grid; place-items: center; }
+.icon i { width: 16px; height: 16px; border: 3px solid #282016; border-radius: 4px; display: block; }
+.head { display: flex; justify-content: space-between; font-size: 13px; color: var(--glass-muted); line-height: 18px; }
+.head b { color: var(--glass-ink); font-weight: 600; }
+.title { font-weight: 600; line-height: 20px; }
+.body { color: var(--glass-ink); line-height: 20px; }
+.body .d { color: var(--glass-muted); }
+.m { font-family: "DejaVu Sans", -apple-system, sans-serif; font-size: 13px; color: var(--accent-ink); }
+.q, .nw { white-space: nowrap; }
+.q::before { content: "«"; color: var(--glass-muted); } .q::after { content: "»"; color: var(--glass-muted); }
+
+.actions {
+  margin-top: 8px; background: var(--glass); color: var(--glass-ink); border-radius: 14px; overflow: hidden;
+  backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px); width: 250px; margin-left: auto;
+}
+.actions button {
+  all: unset; display: flex; justify-content: space-between; align-items: center; width: 100%;
+  box-sizing: border-box; height: 44px; padding: 0 16px; font-size: 17px; cursor: pointer;
+}
+.actions button + button { border-top: 1px solid var(--glass-line); }
+.actions svg { width: 16px; height: 16px; }
+
+/* folded */
+.folded { display: none; }
+body.is-folded .ask { display: none; }
+body.is-folded .folded { display: block; }
+.behind { height: 10px; margin: 0 10px; border-radius: 0 0 18px 18px; background: var(--glass); opacity: .7; }
+.behind.b2 { margin: 0 20px; opacity: .45; height: 9px; }
+
+.bottom { position: absolute; bottom: 44px; left: 46px; right: 46px; display: flex; justify-content: space-between; }
+.bottom span { width: 50px; height: 50px; border-radius: 50%; background: rgba(0,0,0,.28); display: grid; place-items: center; }
+.bottom svg { width: 20px; height: 20px; }
+.home { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 134px; height: 5px; border-radius: 3px; background: #fff; }
+</style>
+</head>
+<body>
+<div class="island"></div>
+<div class="status"><span>01:12</span><span class="r"><span class="bars"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:11px"></i></span><span class="batt"><i></i></span></span></div>
+<div class="lock" aria-hidden="true"><svg width="14" height="18" viewBox="0 0 14 18"><rect x="1" y="8" width="12" height="9" rx="2" fill="#fff"/><path d="M3.5 8V5.5a3.5 3.5 0 0 1 7 0V8" stroke="#fff" stroke-width="1.8" fill="none"/></svg></div>
+<div class="date">Tuesday 24 November</div>
+<div class="clock">01:12</div>
+
+<div class="stack ask">
+  <div class="note" role="group" aria-label="Silo ask">
+    <div class="icon"><i></i></div>
+    <div>
+      <div class="head"><span><b>SILO</b> · main</span><span>now</span></div>
+      <div class="title">Push to github.com/ana/app, <span class="nw">branch main</span></div>
+      <div class="body"><span class="d">3 commits · held, 74 s left</span></div>
+      <div class="body"><span class="m" role="img" aria-label="Opinion of which-run-did-it">◇</span> claude #2</div>
+      <div><span class="q" aria-label="Words claude #2 wrote">tests pass, pushing the fix</span></div>
+    </div>
+  </div>
+  <div class="actions">
+    <button>Deny</button>
+    <button aria-label="Allow once, needs Face ID">Allow once
+      <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="7" width="11" height="8" rx="2" fill="currentColor"/><path d="M5 7V5a3 3 0 0 1 6 0v2" stroke="currentColor" stroke-width="1.6" fill="none"/></svg>
+    </button>
+  </div>
+</div>
+
+<div class="stack folded">
+  <div class="note" role="group" aria-label="Silo, 7 asks">
+    <div class="icon"><i></i></div>
+    <div>
+      <div class="head"><span><b>SILO</b> · main</span><span>now</span></div>
+      <div class="title">7 asks from main</div>
+      <div class="body"><span class="d">github.com ×5 · api.stripe.com ×2 · first ends in 52 s</span></div>
+    </div>
+  </div>
+  <div class="behind"></div>
+  <div class="behind b2"></div>
+</div>
+
+<div class="bottom" aria-hidden="true">
+  <span><svg viewBox="0 0 20 20"><path d="M7 2h6l-1 6h-4zM8 9h4v9H8z" fill="#fff"/></svg></span>
+  <span><svg viewBox="0 0 20 20"><rect x="2" y="5" width="16" height="12" rx="3" fill="#fff"/><circle cx="10" cy="11" r="3.2" fill="#555"/><rect x="7" y="3" width="6" height="3" rx="1" fill="#fff"/></svg></span>
+</div>
+<div class="home"></div>
+<script>
+if (location.hash === '#folded') document.body.classList.add('is-folded');
+</script>
+</body>
+</html>

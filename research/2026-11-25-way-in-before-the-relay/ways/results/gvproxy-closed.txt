@@ -1,0 +1,20 @@
+# way: gvproxy-closed
+way-in yes
+way-in-wait-s 1.8
+copy-2MB intact 0.24s
+host-loopback-tcp blocked
+host-own-address-tcp blocked
+lan-neighbour-tcp blocked
+lan-neighbour-udp blocked
+lan-neighbour-ping blocked
+host-own-address-ping blocked
+metadata-tcp blocked
+zero-net-tcp blocked
+internet-tcp blocked
+internet-udp blocked
+internet-ping blocked
+dns-name none
+dns-exfil none
+ports-on 192.168.127.1 53
+ports-on 192.168.127.254 none
+dns-exfil-seen-by nobody

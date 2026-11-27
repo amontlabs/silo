@@ -1,0 +1,234 @@
+{
+ "server": [
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795615999.143,
+   "t_end": 1795616004.147
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795616004.187,
+   "t_end": 1795616009.19
+  },
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795616009.355,
+   "t_end": 1795616014.358
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795616014.409,
+   "t_end": 1795616019.412
+  },
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795616019.555,
+   "t_end": 1795616024.558
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795616024.619,
+   "t_end": 1795616029.627
+  },
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795616030.144,
+   "t_end": 1795616035.147
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795616035.187,
+   "t_end": 1795616040.191
+  },
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795616040.414,
+   "t_end": 1795616045.417
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795616045.453,
+   "t_end": 1795616050.454
+  },
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795616050.599,
+   "t_end": 1795616055.601
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795616055.642,
+   "t_end": 1795616060.644
+  },
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795616060.871,
+   "t_end": 1795616065.873
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795616065.928,
+   "t_end": 1795616070.93
+  },
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795616071.375,
+   "t_end": 1795616076.379
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795616076.439,
+   "t_end": 1795616081.444
+  },
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795616081.674,
+   "t_end": 1795616086.677
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795616086.725,
+   "t_end": 1795616091.726
+  },
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795616091.894,
+   "t_end": 1795616096.901
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795616096.978,
+   "t_end": 1795616101.981
+  },
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795616102.154,
+   "t_end": 1795616107.163
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795616107.22,
+   "t_end": 1795616112.222
+  },
+  {
+   "path": "/sink?s=5.0",
+   "result": "whole",
+   "t_start": 1795616112.685,
+   "t_end": 1795616117.69
+  },
+  {
+   "path": "/source?s=5.0",
+   "result": "whole",
+   "t_start": 1795616117.759,
+   "t_end": 1795616122.766
+  }
+ ],
+ "runs": [
+  {
+   "mode": "direct",
+   "mtu": 65520,
+   "up": 6.52,
+   "down": 2.774,
+   "run": 1
+  },
+  {
+   "mode": "repoint",
+   "mtu": 65520,
+   "up": 6.943,
+   "down": 2.537,
+   "run": 1
+  },
+  {
+   "mode": "fd",
+   "mtu": 65520,
+   "up": 7.507,
+   "down": 2.754,
+   "run": 1
+  },
+  {
+   "mode": "relay",
+   "mtu": 65520,
+   "up": 6.129,
+   "down": 3.021,
+   "run": 1
+  },
+  {
+   "mode": "direct",
+   "mtu": 65520,
+   "up": 7.58,
+   "down": 3.089,
+   "run": 2
+  },
+  {
+   "mode": "repoint",
+   "mtu": 65520,
+   "up": 7.248,
+   "down": 2.784,
+   "run": 2
+  },
+  {
+   "mode": "fd",
+   "mtu": 65520,
+   "up": 7.485,
+   "down": 3.026,
+   "run": 2
+  },
+  {
+   "mode": "relay",
+   "mtu": 65520,
+   "up": 6.949,
+   "down": 2.776,
+   "run": 2
+  },
+  {
+   "mode": "direct",
+   "mtu": 65520,
+   "up": 6.724,
+   "down": 2.607,
+   "run": 3
+  },
+  {
+   "mode": "repoint",
+   "mtu": 65520,
+   "up": 6.056,
+   "down": 2.565,
+   "run": 3
+  },
+  {
+   "mode": "fd",
+   "mtu": 65520,
+   "up": 5.836,
+   "down": 2.681,
+   "run": 3
+  },
+  {
+   "mode": "relay",
+   "mtu": 65520,
+   "up": 5.333,
+   "down": 2.415,
+   "run": 3
+  }
+ ]
+}

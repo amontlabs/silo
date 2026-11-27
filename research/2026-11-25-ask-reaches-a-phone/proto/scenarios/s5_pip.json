@@ -1,0 +1,3 @@
+{"holds": {"pip": 12}, "policy": {"delay": 40, "verdict": "yes"},
+ "commands": [{"at": 0, "run": "/tmp/claude-0/bv/bin/pip download --no-cache-dir -d /tmp/claude-0/pipdl --index-url http://{B}/simple/ leftpad-silo-test"},
+              {"at": 70, "run": "/tmp/claude-0/bv/bin/pip download --no-cache-dir -d /tmp/claude-0/pipdl --index-url http://{B}/simple/ leftpad-silo-test"}]}

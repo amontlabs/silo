@@ -1,0 +1,22 @@
+# way: one-connection
+way-in yes
+way-in-wait-s 3.0
+copy-2MB intact 0.26s
+
+host-loopback-tcp blocked
+host-own-address-tcp blocked
+lan-neighbour-tcp blocked
+lan-neighbour-udp blocked
+lan-neighbour-ping blocked
+host-own-address-ping blocked
+metadata-tcp blocked
+zero-net-tcp blocked
+internet-tcp blocked
+internet-udp blocked
+internet-ping blocked
+dns-name none
+dns-exfil none
+ports-on 169.254.81.16 none
+ports-on 10.254.0.1 none
+dns-exfil-seen-by nobody
+frames-dropped arp who-has 169.254.169.254 x3; arp who-has 169.254.77.7 x2; for the way in x564; tcp connect 169.254.81.16 ports 1,2,3,4,5,... x65535

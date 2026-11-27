@@ -1,0 +1,4 @@
+table, as #396 wrote it: 53974 bytes, gzip 2348
+table, compact JSON:     43818 bytes, gzip 2229
+index:                   307 bytes; signature file 99 bytes
+a year: 365 indexes (144 KiB) and at most 103 tables (0.2 MiB gzip), fewer when changes share a release

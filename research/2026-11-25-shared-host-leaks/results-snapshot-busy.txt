@@ -1,0 +1,6 @@
+mode busy: READY after 200 s
+snapshot: 262144 pages, 185107 of them zeros
+at-60s: 95197 of 262144 pages unchanged (36.3%; 223 MiB of it not zeros)
+at-180s: 43274 of 262144 pages unchanged (16.5%; 143 MiB of it not zeros)
+at-360s: 36850 of 262144 pages unchanged (14.1%; 120 MiB of it not zeros)
+at-600s: 35941 of 262144 pages unchanged (13.7%; 117 MiB of it not zeros)

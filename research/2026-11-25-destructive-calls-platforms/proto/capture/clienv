@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# clienv VAR=value ... -- command args: runs a CLI with no session proxy, no inherited credentials,
+# the test CA trusted, and a fresh HOME per CLI (CAPTURE_HOME).
+HOME_DIR=${CAPTURE_HOME:-/opt/clis/home}
+mkdir -p "$HOME_DIR"
+vars=()
+while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do vars+=("$1"); shift; done
+shift
+B=/opt/clis/pki/bundle.crt
+exec env -i HOME="$HOME_DIR" TERM=dumb LANG=C.UTF-8 \
+  PATH=/opt/clis/node_modules/.bin:/opt/clis/gobin:/opt/node22/bin:/usr/local/bin:/usr/bin:/bin \
+  SSL_CERT_FILE=$B REQUESTS_CA_BUNDLE=$B CURL_CA_BUNDLE=$B NODE_EXTRA_CA_CERTS=/opt/clis/pki/ca.crt \
+  CI=1 NO_COLOR=1 "${vars[@]}" "$@"

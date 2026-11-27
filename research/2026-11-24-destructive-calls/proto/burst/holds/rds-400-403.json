@@ -1,0 +1,1 @@
+{"rules": [{"op": "rds:DeleteDBInstance", "seconds": 400, "then": "403", "times": 1}]}

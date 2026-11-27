@@ -1,0 +1,19 @@
+{
+ "_": "The 14 price changes the providers made in #396's history (results/history.txt there), each read for what the channel would have met. direction: the provider's price went down, up, or moved an alias. factor: #396's size of the change. dated: the new price was on the provider's page with its date before it applied (promotions, introductory prices). A '?' marks this agent's guess, as in #396's labels.",
+ "events": [
+  {"day": "2024-09-09", "what": "Gemini 1.5 Flash cut", "direction": "down", "factor": 4.7, "dated": "?"},
+  {"day": "2024-11-12", "what": "gpt-4o alias moved to gpt-4o-2024-08-06", "direction": "alias", "factor": 2.0, "dated": false},
+  {"day": "2025-01-31", "what": "o1-mini cut with o3-mini's launch", "direction": "down", "factor": 2.7, "dated": false},
+  {"day": "2025-02-27", "what": "Claude 3.5 Haiku's price cut", "direction": "down?", "factor": 8.0, "dated": false},
+  {"day": "2025-06-10", "what": "o3 cut by 80%", "direction": "down", "factor": 5.0, "dated": false},
+  {"day": "2025-06-19", "what": "gemini-2.5-flash priced again at general release", "direction": "up", "factor": 4.2, "dated": false},
+  {"day": "2026-07-03", "what": "Sonnet 5 introductory price, its dated increase later withdrawn", "direction": "down", "factor": 1.5, "dated": true},
+  {"day": "2026-07-30", "what": "gpt-5.6-terra and -luna repriced", "direction": "?", "factor": 5.0, "dated": false},
+  {"day": "2026-08-18", "what": "Gemini 3.6 Flash introductory price", "direction": "down", "factor": 2.0, "dated": true},
+  {"day": "2026-08-22", "what": "GPT-5.6 Sol promotion, ends 30 November 2026", "direction": "down", "factor": 1.5, "dated": true},
+  {"day": "2026-09-16", "what": "gemini-robotics-er-2-preview repriced", "direction": "?", "factor": 2.0, "dated": false},
+  {"day": "2026-09-16", "what": "gemini-*-latest aliases moved to newer models", "direction": "alias", "factor": 6.3, "dated": false},
+  {"day": "2026-09-22", "what": "gemini-robotics-er-2-streaming-preview repriced", "direction": "?", "factor": 2.0, "dated": false},
+  {"day": "2026-11-18", "what": "GPT-6 Rosalind promotional price, at least through 31 December 2026", "direction": "down", "factor": 1.5, "dated": true}
+ ]
+}

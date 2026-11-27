@@ -1,0 +1,11 @@
+served: 12 requests, 8 model requests (0 refused with 429), 4 others
+  model requests on the wire, gemini-3-flash: 7
+  model requests on the wire, gemini-3.1-flash-lite: 1
+  other requests, listExperiments: 1
+  other requests, loadCodeAssist: 1
+  other requests, retrieveUserQuota: 2
+reported: 8 api_request, 8 api_response, 0 api_error
+  api_request as reported, gemini-3.1-flash-lite (utility_router): 1
+  api_request as reported, gemini-3.5-flash (main): 7
+output tokens reported: 970
+unread relay: 2 connections, 14 turns, 318909 bytes up, 10564 bytes down

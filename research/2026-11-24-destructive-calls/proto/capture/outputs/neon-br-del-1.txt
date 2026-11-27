@@ -1,0 +1,3 @@
+$ NEON_API_KEY=test-token-123 -- neonctl branches delete br-main --project-id proj-123 --output json
+ERROR: data.branches is not iterable (cannot read property undefined)
+--- exit=1 seconds=.991607767

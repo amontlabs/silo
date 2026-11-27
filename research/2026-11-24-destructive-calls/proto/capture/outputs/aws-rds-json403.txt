@@ -1,0 +1,5 @@
+$ AWS_ACCESS_KEY_ID=AKIAFAKEFAKEFAKE0000 AWS_SECRET_ACCESS_KEY=fakesecret AWS_DEFAULT_REGION=us-east-1 AWS_PAGER= -- aws rds delete-db-instance --db-instance-identifier prod-db --skip-final-snapshot
+
+aws: [ERROR]: Unable to parse response (not well-formed (invalid token): line 1, column 0), invalid XML received. Further retries may succeed:
+b'{"error": "Held by Silo and not answered: deleting volume X needs your yes."}'
+--- exit=255 seconds=2.743623903

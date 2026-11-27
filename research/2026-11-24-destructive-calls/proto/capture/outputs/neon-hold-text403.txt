@@ -1,0 +1,4 @@
+$ NEON_API_KEY=test-token-123 -- neonctl projects delete proj-123 --output json
+ERROR: HTTP 403 Forbidden | /api/v2/projects/proj-123
+--- exit=1 seconds=2.816908490
+--- matching requests held: 1

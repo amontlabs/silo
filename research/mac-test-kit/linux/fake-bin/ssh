@@ -1,0 +1,30 @@
+#!/bin/bash
+# Stands in for ssh on Linux, for linux/fake-silovm's computers. Put linux/fake-bin first on PATH.
+# It answers (exit 0, no output) when the address belongs to a running fake computer whose
+# provisioned user is the one asked for; otherwise it fails as ssh does when nobody answers
+# (exit 255). The command itself is not run.
+set -u
+dest=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -F|-o|-i|-p|-l|-J|-E|-c|-m|-b|-L|-R|-D|-S|-W) shift 2 ;;
+    -*) shift ;;
+    *) dest="$1"; shift; break ;;
+  esac
+done
+[ -n "$dest" ] || { echo "ssh(fake): no destination" >&2; exit 255; }
+user="${dest%@*}"; host="${dest#*@}"
+reg="${KIT_WORK_ROOT:-$HOME/SiloKit}/fake-net/$host"
+[ -f "$reg" ] || { echo "ssh(fake): connect to host $host port 22: No route to host" >&2; exit 255; }
+bundle="$(cat "$reg")"
+pid="$(cat "$bundle/run.pid" 2>/dev/null)"
+if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+  echo "ssh(fake): connect to host $host port 22: Operation timed out" >&2; exit 255
+fi
+python3 - "$bundle/fake-state.json" "$user" <<'EOF' || { echo "ssh(fake): connect to host $host port 22: Connection refused" >&2; exit 255; }
+import json, sys
+try: st = json.load(open(sys.argv[1]))
+except (OSError, ValueError): sys.exit(1)
+sys.exit(0 if st.get("network_up") and st.get("provisioned_user") == sys.argv[2] else 1)
+EOF
+exit 0

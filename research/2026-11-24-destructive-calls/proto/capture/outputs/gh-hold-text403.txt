@@ -1,0 +1,4 @@
+$ GH_TOKEN=test-token-123 -- gh repo delete o/r --yes
+HTTP 403: 403 Forbidden (https://api.github.com/repos/o/r)
+--- exit=1 seconds=2.055479468
+--- matching requests held: 1

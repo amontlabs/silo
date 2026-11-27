@@ -1,0 +1,24 @@
+# case                  stock          sealed363      sealed         closed         boundary  boundary-down
+gateway-ports           *              53             53             53             53             53
+host-loopback-ports     *              none           none           none           none           none
+api-list                reached        blocked        blocked        blocked        blocked        blocked
+api-expose              reached        blocked        blocked        blocked        blocked        blocked
+host-loopback-tcp       reached        blocked        blocked        blocked        blocked        blocked
+host-own-address-tcp    reached        blocked        blocked        blocked        blocked        blocked
+lan-neighbour-tcp       reached        blocked        blocked        blocked        blocked        blocked
+lan-neighbour-udp       reached        blocked        blocked        blocked        blocked        blocked
+lan-neighbour-ping      reached        blocked        blocked        blocked        blocked        blocked
+host-own-address-ping   reached        blocked        blocked        blocked        blocked        blocked
+public-lan-neighbour-tcp reached        blocked        blocked        blocked        blocked        blocked
+public-lan-neighbour-ping reached       blocked        blocked        blocked        blocked        blocked
+metadata-tcp            blocked        blocked        blocked        blocked        blocked        blocked
+zero-net-tcp            blocked        blocked        blocked        blocked        blocked        blocked
+internet-tcp            reached        reached        reached        blocked        reached        blocked
+internet-udp            reached        reached        reached        blocked        blocked        blocked
+internet-ping           reached        reached        reached        blocked        blocked        blocked
+dns-name                203.0.113.10   203.0.113.10   203.0.113.10   none           203.0.113.10   none
+dns-exfil               *              *              *              none           none           none
+host-listeners          *              127.0.0.1:2222 127.0.0.1:2222 127.0.0.1:2222 127.0.0.1:2222 127.0.0.1:2222
+host-port-opened-from-inside yes       no             no             no             no             no
+way-in                  works          works          works          works          works          works
+dns-exfil-seen-by       host-resolver  host-resolver  host-resolver  no             boundary       no

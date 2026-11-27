@@ -1,0 +1,11 @@
+{"t": 0.0, "host": "pypi.org", "port": 443, "proc": {"cmd": "<dir>/hosts/venv/bin/python3 <dir>", "parent": "bash -c <dir>/hosts/venv/bin/pip install --no-cache-dir -r requirements.txt; echo pip-exit=$?"}}
+{"t": 0.22, "host": "pypi.org", "port": 443, "proc": {"cmd": "<dir>/hosts/venv/bin/python3 <dir>", "parent": "bash -c <dir>/hosts/venv/bin/pip install --no-cache-dir -r requirements.txt; echo pip-exit=$?"}}
+{"t": 0.45, "host": "files.pythonhosted.org", "port": 443, "proc": {"cmd": "<dir>/hosts/venv/bin/python3 <dir>", "parent": "bash -c <dir>/hosts/venv/bin/pip install --no-cache-dir -r requirements.txt; echo pip-exit=$?"}}
+{"t": 61.95, "host": "raw.githubusercontent.com", "port": 443, "proc": {"cmd": "<dir>/hosts/venv/bin/python -m spacy", "parent": "bash -c <dir>/hosts/venv/bin/pip install --no-cache-dir -r requirements.txt; echo pip-exit=$?"}}
+{"t": 62.73, "host": "pypi.org", "port": 443, "proc": {"cmd": "<dir>/hosts/venv/bin/python -m pip", "parent": "<dir>/hosts/venv/bin/python -m spacy"}}
+{"t": 63.84, "host": "github.com", "port": 443, "proc": {"cmd": "<dir>/hosts/venv/bin/python -m pip", "parent": "<dir>/hosts/venv/bin/python -m spacy"}}
+{"t": 64.29, "host": "release-assets.githubusercontent.com", "port": 443, "proc": {"cmd": "<dir>/hosts/venv/bin/python -m pip", "parent": "<dir>/hosts/venv/bin/python -m spacy"}}
+{"t": 73.29, "host": "raw.githubusercontent.com", "port": 443, "proc": {"cmd": "<dir>/hosts/venv/bin/python -c import nltk; nltk.download(\"punkt\")", "parent": "bash -c <dir>/hosts/venv/bin/pip install --no-cache-dir -r requirements.txt; echo pip-exit=$?"}}
+{"t": 73.52, "host": "raw.githubusercontent.com", "port": 443, "proc": {"cmd": "<dir>/hosts/venv/bin/python -c import nltk; nltk.download(\"punkt\")", "parent": "bash -c <dir>/hosts/venv/bin/pip install --no-cache-dir -r requirements.txt; echo pip-exit=$?"}}
+{"t": 75.66, "host": "cdn.playwright.dev", "port": 443, "proc": {"cmd": "<dir>/hosts/venv/lib/python3.13/site-packages/playwright/driver/node <dir>", "parent": "<dir>/hosts/venv/lib/python3.13/site-packages/playwright/driver/node <dir>"}}
+{"t": 76.2, "host": "playwright.download.prss.microsoft.com", "port": 443, "proc": {"cmd": "<dir>/hosts/venv/lib/python3.13/site-packages/playwright/driver/node <dir>", "parent": "<dir>/hosts/venv/lib/python3.13/site-packages/playwright/driver/node <dir>"}}

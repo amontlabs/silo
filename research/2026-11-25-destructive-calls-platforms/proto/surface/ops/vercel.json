@@ -1,0 +1,2558 @@
+[
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/ai-gateway/budgets",
+"name": "upsertAiGatewayBudget",
+"summary": "Upsert AI Gateway budget"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/ai-gateway/budgets",
+"name": "archiveAiGatewayBudget",
+"summary": "Archive AI Gateway budget"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/ai-gateway/budgets/defaults",
+"name": "upsertAiGatewayBudgetDefault",
+"summary": "Upsert AI Gateway budget default"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/ai-gateway/budgets/defaults",
+"name": "archiveAiGatewayBudgetDefault",
+"summary": "Archive AI Gateway budget default"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/ai-gateway/byok-credentials",
+"name": "createAiGatewayByokCredential",
+"summary": "Create a BYOK credential"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/ai-gateway/byok-credentials/{credentialId}",
+"name": "updateAiGatewayByokCredential",
+"summary": "Update a BYOK credential"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/ai-gateway/byok-credentials/{credentialId}",
+"name": "deleteAiGatewayByokCredential",
+"summary": "Delete a BYOK credential"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/ai-gateway/rules",
+"name": "createAiGatewayRule",
+"summary": "Create rule"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/ai-gateway/rules",
+"name": "updateAiGatewayRule",
+"summary": "Update rule"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/ai-gateway/rules",
+"name": "deleteAiGatewayRule",
+"summary": "Delete rule"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/ai-gateway/virtual-model-configs",
+"name": "createAiGatewayVirtualModelConfig",
+"summary": "Create virtual model config"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/ai-gateway/virtual-model-configs",
+"name": "updateAiGatewayVirtualModelConfig",
+"summary": "Update virtual model config"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/ai-gateway/virtual-model-configs",
+"name": "deleteAiGatewayVirtualModelConfig",
+"summary": "Delete virtual model config"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/ai-gateway/virtual-model-configs/{vmcSlug}",
+"name": "updateAiGatewayVirtualModelConfigBySlug",
+"summary": "Update virtual model config"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/ai-gateway/virtual-model-configs/{vmcSlug}",
+"name": "deleteAiGatewayVirtualModelConfigBySlug",
+"summary": "Delete virtual model config"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/aliases/{id}/protection-bypass",
+"name": "patchUrlProtectionBypass",
+"summary": "Update the protection bypass for a URL"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/api-keys",
+"name": "createApiKeys",
+"summary": ""
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/api-keys/{apiKeyID}/quota",
+"name": "updateApiKeyQuota",
+"summary": "Update an AI Gateway API key budget"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/domains/{domain}/records",
+"name": "replaceDomainsByDomainRecords",
+"summary": ""
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/projects/transfer-request/{code}",
+"name": "acceptProjectTransferRequest",
+"summary": "Accept project transfer request"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/projects/{idOrName}/transfer-request",
+"name": "createProjectTransferRequest",
+"summary": "Create project transfer request"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/speed-insights/toggle",
+"name": "createSpeedInsightsToggle",
+"summary": ""
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/storage/stores/blob",
+"name": "createStorageStoresBlob",
+"summary": "Create a Blob store"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/storage/stores/blob/{id}",
+"name": "deleteStorageStoresBlobById",
+"summary": "Delete a Blob store"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/access-groups",
+"name": "createAccessGroup",
+"summary": "Creates an access group"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/access-groups/{accessGroupIdOrName}/projects",
+"name": "createAccessGroupProject",
+"summary": "Create an access group project"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/access-groups/{accessGroupIdOrName}/projects/{projectId}",
+"name": "updateAccessGroupProject",
+"summary": "Update an access group project"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/access-groups/{accessGroupIdOrName}/projects/{projectId}",
+"name": "deleteAccessGroupProject",
+"summary": "Delete an access group project"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/access-groups/{idOrName}",
+"name": "updateAccessGroup",
+"summary": "Update an access group"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/access-groups/{idOrName}",
+"name": "deleteAccessGroup",
+"summary": "Deletes an access group"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/billing/buy",
+"name": "buyCredits",
+"summary": "Purchase credits"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/v1/bulk-redirects",
+"name": "stageRedirects",
+"summary": "Stages new redirects for a project."
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/bulk-redirects",
+"name": "deleteRedirects",
+"summary": "Delete project-level redirects."
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/bulk-redirects",
+"name": "editRedirect",
+"summary": "Edit a project-level redirect."
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/bulk-redirects/restore",
+"name": "restoreRedirects",
+"summary": "Restore staged project-level redirects to their production version."
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/bulk-redirects/versions",
+"name": "updateVersion",
+"summary": "Promote a staging version to production or restore a previous production version."
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/connect/authorize/{connector}",
+"name": "createConnectorAuthorizationRequest",
+"summary": "Create a Connect authorization request"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/connect/connectors",
+"name": "createConnector",
+"summary": "Create a connector"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/connect/connectors/{connector}",
+"name": "deleteConnector",
+"summary": "Delete a connector"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/connect/connectors/{connector}/managed/eject",
+"name": "ejectManagedConnector",
+"summary": "Eject a managed connector"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/connect/connectors/{connector}/projects/{projectId}",
+"name": "upsertConnectorProjectConnection",
+"summary": "Create or update a connector project connection"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/connect/connectors/{connector}/projects/{projectId}",
+"name": "deleteConnectorProjectConnection",
+"summary": "Disconnect a connector from a project"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/connect/connectors/{connector}/projects/{projectId}/environments/{environment}",
+"name": "disconnectConnectorProjectEnvironment",
+"summary": "Disconnect a connector from a project environment"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/connect/connectors/{connector}/trigger-destinations",
+"name": "replaceConnectorTriggerDestinations",
+"summary": "Update connector trigger destinations"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/connect/networks",
+"name": "createNetwork",
+"summary": "Create a Secure Compute network"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/connect/networks/{networkId}",
+"name": "deleteNetwork",
+"summary": "Delete a Secure Compute network"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/connect/networks/{networkId}",
+"name": "updateNetwork",
+"summary": "Update a Secure Compute network"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/connect/token/{connector}",
+"name": "getConnectorToken",
+"summary": "Get a Connect token"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/deployments/{deploymentId}/checks",
+"name": "createCheck",
+"summary": "Creates a new Check"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/deployments/{deploymentId}/checks/{checkId}",
+"name": "updateCheck",
+"summary": "Update a check"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/deployments/{deploymentId}/checks/{checkId}/rerequest",
+"name": "rerequestCheck",
+"summary": "Rerequest a check"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/deployments/{deploymentId}/integrations/{integrationConfigurationId}/resources/{resourceId}/actions/{action}",
+"name": "update-integration-deployment-action",
+"summary": "Update deployment integration action"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/domains/records/{recordId}",
+"name": "updateRecord",
+"summary": "Update an existing DNS record"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/drains",
+"name": "createDrain",
+"summary": "Create a new Drain"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/drains/test",
+"name": "testDrain",
+"summary": "Validate Drain delivery configuration"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/drains/{id}",
+"name": "deleteDrain",
+"summary": "Delete a drain"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/drains/{id}",
+"name": "updateDrain",
+"summary": "Update an existing Drain"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/drives/{nameOrId}",
+"name": "deleteDriveV1",
+"summary": "Delete a drive"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/drives/{name}",
+"name": "getOrCreateDriveV1",
+"summary": "Get or create a drive"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/drives/{name}/fork",
+"name": "forkDriveV1",
+"summary": "Fork a drive"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/edge-cache/dangerously-delete-by-src-images",
+"name": "dangerouslyDeleteBySrcImages",
+"summary": "Dangerously delete by source image"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/edge-cache/dangerously-delete-by-tags",
+"name": "dangerouslyDeleteByTags",
+"summary": "Dangerously delete by tag"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/edge-cache/invalidate-by-src-images",
+"name": "invalidateBySrcImages",
+"summary": "Invalidate by source image"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/edge-cache/invalidate-by-tags",
+"name": "invalidateByTags",
+"summary": "Invalidate by tag"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/env",
+"name": "createSharedEnvVariable",
+"summary": "Create one or more shared environment variables"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/env",
+"name": "updateSharedEnvVariable",
+"summary": "Updates one or more shared environment variables"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/env",
+"name": "deleteSharedEnvVariable",
+"summary": "Delete one or more Env Var"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/env/{id}/unlink/{projectId}",
+"name": "unlinkSharedEnvVariable",
+"summary": "Disconnects a shared environment variable for a given project"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/global-config",
+"name": "createEdgeConfig",
+"summary": "Create a Global Config"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/v1/global-config/{edgeConfigId}",
+"name": "updateEdgeConfig",
+"summary": "Update a Global Config"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/global-config/{edgeConfigId}",
+"name": "deleteEdgeConfig",
+"summary": "Delete a Global Config"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/global-config/{edgeConfigId}/backups/{edgeConfigBackupVersionId}/restore",
+"name": "restoreEdgeConfigBackup",
+"summary": "Restore Global Config backup"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/global-config/{edgeConfigId}/items",
+"name": "patchEdgeConfigItems",
+"summary": "Update Global Config items in batch"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/global-config/{edgeConfigId}/schema",
+"name": "patchEdgeConfigSchema",
+"summary": "Update Global Config schema"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/global-config/{edgeConfigId}/schema",
+"name": "deleteEdgeConfigSchema",
+"summary": "Delete a Global Config's schema"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/global-config/{edgeConfigId}/token",
+"name": "createEdgeConfigToken",
+"summary": "Create a Global Config token"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/global-config/{edgeConfigId}/tokens",
+"name": "deleteEdgeConfigTokens",
+"summary": "Delete one or more Global Config tokens"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/installations/{integrationConfigurationId}",
+"name": "update-installation",
+"summary": "Update Installation"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/installations/{integrationConfigurationId}/billing",
+"name": "submit-billing-data",
+"summary": "Submit Billing Data"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/installations/{integrationConfigurationId}/billing/balance",
+"name": "submit-prepayment-balances",
+"summary": "Submit Prepayment Balances"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/installations/{integrationConfigurationId}/billing/finalize",
+"name": "finalize-installation",
+"summary": "Finalize Installation"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/installations/{integrationConfigurationId}/billing/invoices",
+"name": "submit-invoice",
+"summary": "Submit Invoice"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/installations/{integrationConfigurationId}/billing/invoices/{invoiceId}/actions",
+"name": "update-invoice",
+"summary": "Invoice Actions"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/installations/{integrationConfigurationId}/credentials/revoke",
+"name": "revoke-installation-credential",
+"summary": "Revoke Installation Credential"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/installations/{integrationConfigurationId}/credentials/rotate",
+"name": "rotate-installation-credential",
+"summary": "Rotate Installation Credential"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/installations/{integrationConfigurationId}/events",
+"name": "create-event",
+"summary": "Create Event"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/v1/installations/{integrationConfigurationId}/products/{integrationProductIdOrSlug}/resources/{resourceId}/secrets",
+"name": "update-resource-secrets",
+"summary": "Deprecated: true. Update Resource Secrets (Deprecated)"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/installations/{integrationConfigurationId}/resources/{resourceId}",
+"name": "delete-integration-resource",
+"summary": "Delete Integration Resource"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/v1/installations/{integrationConfigurationId}/resources/{resourceId}",
+"name": "import-resource",
+"summary": "Import Resource"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/installations/{integrationConfigurationId}/resources/{resourceId}",
+"name": "update-resource",
+"summary": "Update Resource"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/v1/installations/{integrationConfigurationId}/resources/{resourceId}/experimentation/global-config",
+"name": "replaceInstallationsByIntegrationConfigurationIdResourcesByResourceIdExperimentationGlobalConfig",
+"summary": "Push data into a user-provided Global Config"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/installations/{integrationConfigurationId}/resources/{resourceId}/experimentation/items",
+"name": "createInstallationsByIntegrationConfigurationIdResourcesByResourceIdExperimentationItems",
+"summary": "Create one or multiple experimentation items"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/installations/{integrationConfigurationId}/resources/{resourceId}/experimentation/items/{itemId}",
+"name": "updateInstallationsByIntegrationConfigurationIdResourcesByResourceIdExperimentationItemsByItemId",
+"summary": "Patch an existing experimentation item"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/installations/{integrationConfigurationId}/resources/{resourceId}/experimentation/items/{itemId}",
+"name": "deleteInstallationsByIntegrationConfigurationIdResourcesByResourceIdExperimentationItemsByItemId",
+"summary": "Delete an existing experimentation item"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/v1/installations/{integrationConfigurationId}/resources/{resourceId}/secrets",
+"name": "update-resource-secrets-by-id",
+"summary": "Update Resource Secrets"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/integrations/configuration/{id}",
+"name": "deleteConfiguration",
+"summary": "Delete an integration configuration"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/integrations/installations/{integrationConfigurationId}/resources/{resourceId}/connections",
+"name": "connectIntegrationResourceToProject",
+"summary": "Connect integration resource to project"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/integrations/log-drains/{id}",
+"name": "deleteIntegrationLogDrain",
+"summary": "Deletes the Integration log drain with the provided `id` (deprecated)"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/integrations/sso/token",
+"name": "exchange-sso-token",
+"summary": "SSO Token Exchange"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/kms/issuers",
+"name": "createKmsIssuer",
+"summary": "Create an issuer"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/kms/issuers/{issuerId}",
+"name": "updateKmsIssuer",
+"summary": "Update an issuer"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/kms/issuers/{issuerId}",
+"name": "deleteKmsIssuer",
+"summary": "Delete an issuer"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/kms/issuers/{issuerId}/keys",
+"name": "createKmsSigningKey",
+"summary": "Create a signing key"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/kms/issuers/{issuerId}/keys/{keyId}/activate",
+"name": "activateKmsSigningKey",
+"summary": "Activate a signing key"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/kms/issuers/{issuerId}/keys/{keyId}/revoke",
+"name": "revokeKmsSigningKey",
+"summary": "Revoke a signing key"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/kms/issuers/{issuerId}/policies",
+"name": "createKmsIssuerPolicy",
+"summary": "Create an issuer policy"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/kms/issuers/{issuerId}/policies/{kind}/{policyKey}",
+"name": "updateKmsIssuerPolicy",
+"summary": "Update an issuer policy"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/kms/issuers/{issuerId}/policies/{kind}/{policyKey}",
+"name": "deleteKmsIssuerPolicy",
+"summary": "Delete an issuer policy"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/kms/issuers/{issuerId}/sign/message",
+"name": "signKmsMessage",
+"summary": "Sign a message"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/kms/issuers/{issuerId}/sign/token",
+"name": "signKmsToken",
+"summary": "Sign a token"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/log-drains",
+"name": "createConfigurableLogDrain",
+"summary": "Creates a Configurable Log Drain (deprecated)"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/log-drains/{id}",
+"name": "deleteConfigurableLogDrain",
+"summary": "Deletes a Configurable Log Drain (deprecated)"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/microfrontends/group",
+"name": "createMicrofrontendsGroupWithApplications",
+"summary": "Create a microfrontends group with applications"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/networking/privatelink/endpoints",
+"name": "createPrivateLinkEndpoint",
+"summary": "Create a PrivateLink endpoint"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/networking/privatelink/endpoints/{endpointId}",
+"name": "deletePrivateLinkEndpoint",
+"summary": "Delete a PrivateLink endpoint"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/networking/privatelink/endpoints/{endpointId}",
+"name": "updatePrivateLinkEndpoint",
+"summary": "Update a PrivateLink endpoint"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/v1/observability/manage/configuration/projects/{projectIdOrName}",
+"name": "updateObservabilityConfigurationProject",
+"summary": "Updates a disabled Observability Plus project setting"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/organizations",
+"name": "createOrganization",
+"summary": "Create an Organization"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/organizations/{organizationId}",
+"name": "updateOrganization",
+"summary": "Update an Organization"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/v1/organizations/{organizationId}/dsync/groups/{groupId}",
+"name": "putOrganizationDsyncGroup",
+"summary": "Create or Replace Organization Directory Sync Group Configuration"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/organizations/{organizationId}/dsync/groups/{groupId}",
+"name": "deleteOrganizationDsyncGroup",
+"summary": "Delete Organization Directory Sync Group Configuration"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/organizations/{organizationId}/teams",
+"name": "addOrganizationTeam",
+"summary": "Create or Add Team to Organization"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/organizations/{organizationId}/teams/{targetTeamId}",
+"name": "removeOrganizationTeam",
+"summary": "Delete Team from Organization"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/v1/organizations/{organizationId}/teams/{targetTeamId}/dsync",
+"name": "putOrganizationTeamDsync",
+"summary": "Update Organization Team Directory Sync Mode"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/projects/traces/session",
+"name": "createTraceSession",
+"summary": "Create a trace session token for a deployment"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/projects/{idOrName}/avatar",
+"name": "uploadProjectAvatar",
+"summary": "Upload a project avatar"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/projects/{idOrName}/avatar",
+"name": "deleteProjectAvatar",
+"summary": "Delete a project avatar"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/v1/projects/{idOrName}/daemons/{daemonName}/instances",
+"name": "putProjectDaemonInstances",
+"summary": "Override a project daemon's instance counts"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/projects/{idOrName}/daemons/{daemonName}/instances/{instanceId}/restart",
+"name": "restartProjectDaemonInstance",
+"summary": "Force restart a project daemon instance"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/projects/{idOrName}/domains/{domain}/move",
+"name": "moveProjectDomain",
+"summary": "Move a project domain"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/projects/{idOrName}/env",
+"name": "batchRemoveProjectEnv",
+"summary": "Batch remove environment variables"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/projects/{idOrName}/members",
+"name": "addProjectMember",
+"summary": "Adds a new member to a project."
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/projects/{idOrName}/members/{uid}",
+"name": "removeProjectMember",
+"summary": "Remove a Project Member"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/projects/{idOrName}/protection-bypass",
+"name": "updateProjectProtectionBypass",
+"summary": "Update Protection Bypass for Automation"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/projects/{idOrName}/rolling-release/approve-stage",
+"name": "approveRollingReleaseStage",
+"summary": "Update the active rolling release to the next stage for a project"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/projects/{idOrName}/rolling-release/complete",
+"name": "completeRollingRelease",
+"summary": "Complete the rolling release for the project"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/projects/{idOrName}/rolling-release/config",
+"name": "deleteRollingReleaseConfig",
+"summary": "Delete rolling release configuration"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/projects/{idOrName}/rolling-release/config",
+"name": "updateRollingReleaseConfig",
+"summary": "Update the rolling release settings for the project"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/projects/{idOrName}/rolling-release/start",
+"name": "startRollingRelease",
+"summary": "Start a rolling release for the project"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/projects/{idOrName}/shared-connect-links",
+"name": "updateStaticIps",
+"summary": "Configures Static IPs for a project"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/projects/{idOrName}/token",
+"name": "getProjectToken",
+"summary": "Generate a project OIDC token"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/v1/projects/{projectIdOrName}/feature-flags/connections",
+"name": "createFlagsProjectConnection",
+"summary": "Connect a project to the flags of this project"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/projects/{projectIdOrName}/feature-flags/connections/{consumerProjectId}",
+"name": "deleteFlagsProjectConnection",
+"summary": "Disconnect a project from the flags of this project"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/v1/projects/{projectIdOrName}/feature-flags/flags",
+"name": "createFlag",
+"summary": "Create a flag"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/projects/{projectIdOrName}/feature-flags/flags/{flagIdOrSlug}",
+"name": "updateFlag",
+"summary": "Update a flag"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/projects/{projectIdOrName}/feature-flags/flags/{flagIdOrSlug}",
+"name": "deleteFlag",
+"summary": "Delete a flag"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/projects/{projectIdOrName}/feature-flags/labels/lookup",
+"name": "lookupFlagLabels",
+"summary": "Look up attribute labels"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/projects/{projectIdOrName}/feature-flags/overrides/sign",
+"name": "signFlagOverrides",
+"summary": "Sign flag overrides"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/v1/projects/{projectIdOrName}/feature-flags/sdk-keys",
+"name": "createSdkKey",
+"summary": "Create an SDK key"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/projects/{projectIdOrName}/feature-flags/sdk-keys/{hashKey}",
+"name": "deleteSdkKey",
+"summary": "Delete an SDK key"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/v1/projects/{projectIdOrName}/feature-flags/segments",
+"name": "createFlagSegment",
+"summary": "Create a segment"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/projects/{projectIdOrName}/feature-flags/segments/{segmentIdOrSlug}",
+"name": "deleteFlagSegment",
+"summary": "Delete a segment"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/projects/{projectIdOrName}/feature-flags/segments/{segmentIdOrSlug}",
+"name": "updateFlagSegment",
+"summary": "Update a segment"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/projects/{projectIdOrName}/feature-flags/settings",
+"name": "updateFlagSettings",
+"summary": "Update project flag settings"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/projects/{projectId}/microfrontends",
+"name": "updateMicrofrontends",
+"summary": "Update the microfrontends settings"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/projects/{projectId}/pause",
+"name": "pauseProject",
+"summary": "Pause a project"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/projects/{projectId}/rollback/{deploymentId}",
+"name": "requestRollback",
+"summary": "Point production traffic to a previous production deployment by ID"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/projects/{projectId}/rollback/{deploymentId}/update-description",
+"name": "updateProjectsByProjectIdRollbackByDeploymentIdUpdateDescription",
+"summary": "Updates the description for a rollback"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/v1/projects/{projectId}/routes",
+"name": "stageRoutes",
+"summary": "Stage routing rules"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/projects/{projectId}/routes",
+"name": "addRoute",
+"summary": "Add a routing rule"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/projects/{projectId}/routes",
+"name": "deleteRoutes",
+"summary": "Delete routing rules"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/projects/{projectId}/routes/generate",
+"name": "generateRoute",
+"summary": "Generate a routing rule from natural language"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/projects/{projectId}/routes/versions",
+"name": "updateRouteVersions",
+"summary": "Promote, restore, or discard a routing rule version"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/projects/{projectId}/routes/{routeId}",
+"name": "editRoute",
+"summary": "Edit a routing rule"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/projects/{projectId}/unpause",
+"name": "unpauseProject",
+"summary": "Unpause a project"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/registrar/domains/availability",
+"name": "getBulkAvailability",
+"summary": "Get availability for multiple domains"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/registrar/domains/buy",
+"name": "buyDomains",
+"summary": "Buy multiple domains"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/registrar/domains/price",
+"name": "getBulkPrice",
+"summary": "Get price data for multiple domains"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/registrar/domains/search",
+"name": "searchDomains",
+"summary": "Get Domain Availability and Pricing"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/registrar/domains/{domain}/auto-renew",
+"name": "updateDomainAutoRenew",
+"summary": "Update auto-renew for a domain"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/registrar/domains/{domain}/buy",
+"name": "buySingleDomain",
+"summary": "Buy a domain"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/registrar/domains/{domain}/nameservers",
+"name": "updateDomainNameservers",
+"summary": "Update nameservers for a domain"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/registrar/domains/{domain}/renew",
+"name": "renewDomain",
+"summary": "Renew a domain"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/registrar/domains/{domain}/transfer",
+"name": "transferInDomain",
+"summary": "Transfer-in a domain"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/security/attack-mode",
+"name": "updateAttackChallengeMode",
+"summary": "Update Attack Challenge mode"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/security/firewall/bypass",
+"name": "addBypassIp",
+"summary": "Create System Bypass Rule"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/security/firewall/bypass",
+"name": "removeBypassIp",
+"summary": "Remove System Bypass Rule"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/security/firewall/bypass/rules",
+"name": "createConditionalBypass",
+"summary": "Create conditional firewall bypass"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/v1/security/firewall/bypass/rules",
+"name": "updateConditionalBypass",
+"summary": "Update conditional firewall bypass"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/security/firewall/bypass/rules",
+"name": "deleteConditionalBypass",
+"summary": "Delete conditional firewall bypass"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/v1/security/firewall/config",
+"name": "putFirewallConfig",
+"summary": "Put Firewall Configuration"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/security/firewall/config",
+"name": "updateFirewallConfig",
+"summary": "Update Firewall Configuration"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/security/firewall/config/generate-rule",
+"name": "generateFirewallRule",
+"summary": "Generate a firewall rule from natural language"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/security/firewall/config/{configVersion}",
+"name": "deleteSecurityFirewallConfigByConfigVersion",
+"summary": "Returns activated WAF config"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/security/firewall/config/{configVersion}/activate",
+"name": "createSecurityFirewallConfigByConfigVersionActivate",
+"summary": "Returns activated WAF config"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/storage/stores/integration/direct",
+"name": "createIntegrationStoreDirect",
+"summary": "Create integration store (free and paid plans)"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/teams",
+"name": "createTeam",
+"summary": "Create a Team"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/teams/{teamId}",
+"name": "deleteTeam",
+"summary": "Delete a Team"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/teams/{teamId}/dsync-roles",
+"name": "postTeamDsyncRoles",
+"summary": "Update Team Directory Sync Role Mappings"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/teams/{teamId}/invites/{inviteId}",
+"name": "deleteTeamInviteCode",
+"summary": "Delete a Team invite code"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/teams/{teamId}/members/teams/join",
+"name": "joinTeam",
+"summary": "Join a team"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/teams/{teamId}/members/{uid}",
+"name": "updateTeamMember",
+"summary": "Update a Team Member"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/teams/{teamId}/members/{uid}",
+"name": "removeTeamMember",
+"summary": "Remove a Team Member"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/teams/{teamId}/microfrontends/{groupId}",
+"name": "updateMicrofrontendsGroup",
+"summary": "Update a microfrontends group"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/teams/{teamId}/microfrontends/{groupId}",
+"name": "deleteMicrofrontendsGroup",
+"summary": "Delete a microfrontends group"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/teams/{teamId}/request",
+"name": "requestAccessToTeam",
+"summary": "Request access to a team"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/user",
+"name": "requestDelete",
+"summary": "Delete User Account"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/vcr/repository",
+"name": "createRepository",
+"summary": "Create a repository"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/vcr/repository/{idOrName}",
+"name": "deleteRepository",
+"summary": "Delete a repository"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/vcr/repository/{idOrName}/images/{imageId}",
+"name": "deleteRepositoryImage",
+"summary": "Delete a repository image"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/vcr/repository/{idOrName}/permissions",
+"name": "addRepositoryPermission",
+"summary": "Add a repository permission"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/vcr/repository/{idOrName}/permissions",
+"name": "removeRepositoryPermission",
+"summary": "Remove a repository permission"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/vcr/repository/{idOrName}/permissions/all",
+"name": "clearRepositoryPermissions",
+"summary": "Clear all repository permissions"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/vercel-ci/invocations/{invocationId}/attempts/{attempt}/retry",
+"name": "retryVercelCiInvocation",
+"summary": "Retry a terminal Vercel CI invocation attempt"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v1/vercel-ci/repository-settings",
+"name": "updateVercelCiRepositorySettings",
+"summary": "Enable or disable Vercel CI for a connected repository"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/vercel-ci/task-analyses",
+"name": "createVercelCiTaskAnalysis",
+"summary": "Start an asynchronous Vercel CI task analysis"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/vercel-ci/task-analyses/{analysisId}/pull-request",
+"name": "createVercelCiTaskConfigurationPullRequest",
+"summary": "Create a GitHub pull request that adds Vercel CI tags for the completed analysis"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v1/webhooks",
+"name": "createWebhook",
+"summary": "Creates a webhook"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v1/webhooks/{id}",
+"name": "deleteWebhook",
+"summary": "Deletes a webhook"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v10/projects/{idOrName}/domains",
+"name": "addProjectDomain",
+"summary": "Add a domain to a project"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v10/projects/{idOrName}/env",
+"name": "createProjectEnv",
+"summary": "Create one or more environment variables"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v10/projects/{projectId}/promote/{deploymentId}",
+"name": "requestPromote",
+"summary": "Point production traffic to a given deployment"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v11/projects",
+"name": "createProject",
+"summary": "Create a new project"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v12/deployments/{id}/cancel",
+"name": "cancelDeployment",
+"summary": "Cancel a deployment"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v13/deployments",
+"name": "createDeployment",
+"summary": "Create a new deployment"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v13/deployments/{id}",
+"name": "deleteDeployment",
+"summary": "Delete a Deployment"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v2/aliases/{aliasId}",
+"name": "deleteAlias",
+"summary": "Delete an Alias"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v2/connect/connectors/{connector}",
+"name": "updateConnector",
+"summary": "Update a connector"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/deployments/{deploymentId}/check-runs",
+"name": "createDeploymentCheckRun",
+"summary": "Create a check run"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v2/deployments/{deploymentId}/check-runs/{checkRunId}",
+"name": "updateDeploymentCheckRun",
+"summary": "Update a check run"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/deployments/{id}/aliases",
+"name": "assignAlias",
+"summary": "Assign an Alias"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/domains/{domain}/records",
+"name": "createRecord",
+"summary": "Create a DNS record"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v2/domains/{domain}/records/{recordId}",
+"name": "removeRecord",
+"summary": "Delete a DNS record"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/files",
+"name": "uploadFile",
+"summary": "Upload Deployment Files"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/integrations/log-drains",
+"name": "createLogDrain",
+"summary": "Creates a new Integration Log Drain (deprecated)"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/observability/query",
+"name": "createObservabilityQuery",
+"summary": ""
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/projects/{projectIdOrName}/checks",
+"name": "createProjectCheck",
+"summary": "Create a check"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v2/projects/{projectIdOrName}/checks/{checkId}",
+"name": "updateProjectCheck",
+"summary": "Update a check"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v2/projects/{projectIdOrName}/checks/{checkId}",
+"name": "deleteProjectCheck",
+"summary": "Delete a check"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/sandboxes",
+"name": "createSandboxesV2",
+"summary": "Create a named sandbox"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v2/sandboxes/drives/{nameOrId}",
+"name": "deleteDrive",
+"summary": "Deprecated: Use DELETE /v1/drives/:nameOrId. Requires the read-write:drive app scope instead of read-write:sandbox, and drive:delete instead of vercelRun:delete"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/sandboxes/drives/{name}",
+"name": "getOrCreateDrive",
+"summary": "Deprecated: Use POST /v1/drives/:name. Requires the read-write:drive app scope instead of read-write:sandbox, and drive:create instead of vercelRun:create."
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/sandboxes/drives/{name}/fork",
+"name": "forkDrive",
+"summary": "Deprecated: Use POST /v1/drives/:name/fork. Requires the read-write:drive app scope instead of read-write:sandbox, and drive:read and drive:create instead of ve"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/sandboxes/sessions/{sessionId}/cmd",
+"name": "runSessionCommand",
+"summary": "Execute a command"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/sandboxes/sessions/{sessionId}/cmd/{cmdId}/kill",
+"name": "killSessionCommand",
+"summary": "Kill a command"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/sandboxes/sessions/{sessionId}/cmd/{cmdId}/stdin",
+"name": "writeSessionCommandStdin",
+"summary": "Write to command stdin"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/sandboxes/sessions/{sessionId}/extend-timeout",
+"name": "extendSessionTimeout",
+"summary": "Extend session timeout"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/sandboxes/sessions/{sessionId}/fs/mkdir",
+"name": "createSessionDirectory",
+"summary": "Create a directory"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/sandboxes/sessions/{sessionId}/fs/read",
+"name": "readSessionFile",
+"summary": "Read a file"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/sandboxes/sessions/{sessionId}/fs/write",
+"name": "writeSessionFiles",
+"summary": "Write files"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/sandboxes/sessions/{sessionId}/network-policy",
+"name": "updateSessionNetworkPolicy",
+"summary": "Update network policy"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/sandboxes/sessions/{sessionId}/snapshot",
+"name": "createSandboxesSessionsBySessionIdSnapshotV2",
+"summary": "Create a snapshot"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/sandboxes/sessions/{sessionId}/stop",
+"name": "stopSession",
+"summary": "Stop a session"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v2/sandboxes/snapshots/{snapshotId}",
+"name": "deleteSessionSnapshot",
+"summary": "Delete a snapshot"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v2/sandboxes/{name}",
+"name": "updateSandbox",
+"summary": "Update a sandbox"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v2/sandboxes/{name}",
+"name": "deleteSandbox",
+"summary": "Delete a sandbox"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/sandboxes/{name}/fork",
+"name": "createSandboxesByNameForkV2",
+"summary": "Fork a named sandbox"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v2/teams/{teamId}",
+"name": "patchTeam",
+"summary": "Update a Team"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/teams/{teamId}/members",
+"name": "inviteUserToTeam",
+"summary": "Invite a user"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v2/{teamSlug}/{projectSlug}/{repositoryName}/blobs/uploads/",
+"name": "createByTeamSlugByProjectSlugByRepositoryNameBlobsUploads",
+"summary": "Start a blob upload"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v2/{teamSlug}/{projectSlug}/{repositoryName}/blobs/uploads/{uuid}",
+"name": "deleteByTeamSlugByProjectSlugByRepositoryNameBlobsUploadsByUuid",
+"summary": "Cancel a blob upload"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v2/{teamSlug}/{projectSlug}/{repositoryName}/blobs/uploads/{uuid}",
+"name": "updateByTeamSlugByProjectSlugByRepositoryNameBlobsUploadsByUuid",
+"summary": "Upload a blob chunk"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/v2/{teamSlug}/{projectSlug}/{repositoryName}/blobs/uploads/{uuid}",
+"name": "replaceByTeamSlugByProjectSlugByRepositoryNameBlobsUploadsByUuid",
+"summary": "Complete a blob upload"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v2/{teamSlug}/{projectSlug}/{repositoryName}/blobs/{digest}",
+"name": "deleteByTeamSlugByProjectSlugByRepositoryNameBlobsByDigest",
+"summary": "Delete a blob"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/v2/{teamSlug}/{projectSlug}/{repositoryName}/manifests/{reference}",
+"name": "replaceByTeamSlugByProjectSlugByRepositoryNameManifestsByReference",
+"summary": "Push an image manifest"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v2/{teamSlug}/{projectSlug}/{repositoryName}/manifests/{reference}",
+"name": "deleteByTeamSlugByProjectSlugByRepositoryNameManifestsByReference",
+"summary": "Delete an image manifest"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v3/domains/{domain}",
+"name": "patchDomain",
+"summary": "Update or move apex domain"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v3/sandboxes",
+"name": "createSandboxesV3",
+"summary": "Create a named sandbox"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v3/sandboxes/sessions/{sessionId}/snapshot",
+"name": "createSandboxesSessionsBySessionIdSnapshotV3",
+"summary": "Create a snapshot"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v3/sandboxes/{name}/fork",
+"name": "createSandboxesByNameForkV3",
+"summary": "Fork a named sandbox"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v3/user/tokens",
+"name": "createAuthToken",
+"summary": "Create an Auth Token"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v3/user/tokens/{tokenId}",
+"name": "deleteAuthToken",
+"summary": "Delete an authentication token"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v4/sandboxes",
+"name": "createSandboxesV4",
+"summary": "Create a named sandbox"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v6/domains/{domain}",
+"name": "deleteDomain",
+"summary": "Remove a domain by name"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v7/domains",
+"name": "createOrTransferDomain",
+"summary": "Add an existing domain to the Vercel platform"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v8/artifacts",
+"name": "artifactQuery",
+"summary": "Query information about an artifact"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v8/artifacts",
+"name": "deleteAllArtifacts",
+"summary": "Delete all cache artifacts"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v8/artifacts/events",
+"name": "recordEvents",
+"summary": "Record an artifacts cache usage event"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/v8/artifacts/{hash}",
+"name": "uploadArtifact",
+"summary": "Upload a cache artifact"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v8/certs",
+"name": "issueCert",
+"summary": "Issue a new cert"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PUT",
+"path": "/v8/certs",
+"name": "uploadCert",
+"summary": "Upload a cert"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v8/certs/{id}",
+"name": "removeCert",
+"summary": "Remove cert"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v9/domains/{domain}/claim",
+"name": "claimDomainOwnership",
+"summary": "Claim Domain Ownership"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v9/projects/{idOrName}",
+"name": "updateProject",
+"summary": "Update an existing project"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v9/projects/{idOrName}",
+"name": "deleteProject",
+"summary": "Delete a Project"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v9/projects/{idOrName}/custom-environments",
+"name": "createCustomEnvironment",
+"summary": "Create a custom environment for the current project."
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}",
+"name": "updateCustomEnvironment",
+"summary": "Update a custom environment"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}",
+"name": "removeCustomEnvironment",
+"summary": "Remove a custom environment"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v9/projects/{idOrName}/domains/{domain}",
+"name": "updateProjectDomain",
+"summary": "Update a project domain"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v9/projects/{idOrName}/domains/{domain}",
+"name": "removeProjectDomain",
+"summary": "Remove a domain from a project"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/v9/projects/{idOrName}/domains/{domain}/verify",
+"name": "verifyProjectDomain",
+"summary": "Verify project domain"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "DELETE",
+"path": "/v9/projects/{idOrName}/env/{id}",
+"name": "removeProjectEnv",
+"summary": "Remove an environment variable"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "PATCH",
+"path": "/v9/projects/{idOrName}/env/{id}",
+"name": "editProjectEnv",
+"summary": "Edit an environment variable"
+},
+{
+"provider": "vercel",
+"kind": "rest",
+"host": "api.vercel.com",
+"method": "POST",
+"path": "/web/insights/toggle",
+"name": "createWebInsightsToggle",
+"summary": ""
+}
+]

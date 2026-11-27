@@ -1,0 +1,6 @@
+$ SUPABASE_ACCESS_TOKEN=<redacted> SUPABASE_YES=1 DO_NOT_TRACK=1 -- supabase storage rm ss:///avatars/u1.png --linked --experimental --yes
+Warning: --linked is deprecated and will be removed in v4. Use --remote instead
+Target: project abcdefghijklmnopqrst
+Confirmed by --yes: Delete objects in 1 bucket on project abcdefghijklmnopqrst
+Deleting objects: [u1.png]
+--- exit=0 seconds=.574892572

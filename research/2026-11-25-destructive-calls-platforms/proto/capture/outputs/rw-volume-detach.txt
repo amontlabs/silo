@@ -1,0 +1,4 @@
+$ RAILWAY_TOKEN=test-token-123 -- railway volume detach --volume pg-data --yes
+> Select a volume pg-data
+Volume "pg-data" detached from service "api"
+--- exit=0 seconds=.237851915

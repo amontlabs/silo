@@ -1,0 +1,8 @@
+{"holds": {"default": 90}, "policy": {"delay": 10, "verdict": "yes", "only": ["ask_1"]},
+ "commands": [{"at": 0, "run": "curl -s -X DELETE http://{B}/v1/webhooks/1"},
+              {"at": 0.3, "run": "curl -s -X DELETE http://{B}/v1/webhooks/2"},
+              {"at": 0.6, "run": "curl -s -X DELETE http://{B}/v1/webhooks/3"},
+              {"at": 1.0, "run": "curl -s -X DELETE http://{B}/v1/webhooks/4"},
+              {"at": 6.0, "run": "curl -s -X DELETE http://{B}/v1/webhooks/5"},
+              {"at": 11.0, "run": "curl -s -X DELETE http://{B}/v1/webhooks/6"}],
+ "after": 3}

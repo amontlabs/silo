@@ -1,0 +1,132 @@
+From f61d7b7e7cc3dc1e6fbc9e92c06a402a056465da Mon Sep 17 00:00:00 2001
+From: silo-research <noreply@anthropic.com>
+Date: Wed, 25 Nov 2026 14:01:32 +0000
+Subject: [PATCH 03/10] gvproxy: add -no-gateway-api
+
+gvproxy serves its HTTP API inside the virtual network, on port 80 of
+the gateway. Without a token, any process in the guest can use it to
+expose a port of the host on all of its interfaces. With
+--api-token-file, the guest must hold the token, which means placing it
+in the guest and keeping it from the guest's own untrusted processes.
+
+Many users never call the API from the guest: they drive gvproxy from
+the host, through --listen or --services. For them the simplest safe
+setting is not to serve it inside the network at all.
+
+-no-gateway-api, or `no-gateway-api: true` in the configuration file,
+skips the listener on the gateway's port 80. -listen and -services are
+unchanged, and so are the DNS server and every forward.
+---
+ README.md                  |   3 +++
+ cmd/gvproxy/config.go      |   6 ++++++
+ cmd/gvproxy/config_test.go |  23 +++++++++++++++++++++++
+ cmd/gvproxy/main.go        |  12 ++++++++----
+ 4 files changed, 40 insertions(+), 4 deletions(-)
+
+diff --git a/README.md b/README.md
+index 6b6f1d26..72d3ec8e 100644
+--- a/README.md
++++ b/README.md
+@@ -138,6 +138,9 @@ The gateway API endpoint (accessible from the VM at http://192.168.127.1:80) can
+ authentication. When enabled, all requests from within the VM require an `Authorization` header
+ with the token.
+ 
++When nothing in the VM needs the API, `--no-gateway-api` stops serving it on the gateway
++address altogether. The API stays available on the host through `--listen` and `--services`.
++
+ **Note:** Authentication only applies to the gateway endpoint accessible from the VM. Host-side endpoints
+ (`--listen` or `--services`) remain unauthenticated. If they are backed by unix socket, they will be protected by
+ the socket file permissions. If you use these with a `tcp` endpoint, they will be unauthenticated even if they would benefit from Bearer token authentication.
+diff --git a/cmd/gvproxy/config.go b/cmd/gvproxy/config.go
+index 5523fcb3..b9ca10eb 100644
+--- a/cmd/gvproxy/config.go
++++ b/cmd/gvproxy/config.go
+@@ -50,6 +50,7 @@ type GvproxyArgs struct {
+ 	servicesEndpoint   string
+ 	ec2MetadataAccess  bool
+ 	apiTokenFile       string
++	noGatewayAPI       bool
+ }
+ 
+ type GvproxyConfig struct {
+@@ -70,6 +71,7 @@ type GvproxyConfig struct {
+ 	Ec2MetadataAccess  bool                   `yaml:"ec2-metadata-access,omitempty"`
+ 	NotificationSocket string                 `yaml:"notification,omitempty"`
+ 	APITokenFile       string                 `yaml:"api-token-file,omitempty"`
++	NoGatewayAPI       bool                   `yaml:"no-gateway-api,omitempty"`
+ }
+ 
+ type GvproxyConfigForward struct {
+@@ -144,6 +146,7 @@ func GvproxyArgParse(flagSet *flag.FlagSet, args *GvproxyArgs, argv []string) (*
+ 	flagSet.BoolVar(&args.ec2MetadataAccess, "ec2-metadata-access", false, "Permits access to EC2 Metadata Service and Amazon Time Sync Service")
+ 	flagSet.StringVar(&args.notificationSocket, "notification", "", "Socket to be used to send network-ready notifications")
+ 	flagSet.StringVar(&args.apiTokenFile, "api-token-file", "", "Path to file where API token will be read from (needs 0600 permissions on macOS and Linux)")
++	flagSet.BoolVar(&args.noGatewayAPI, "no-gateway-api", false, "Do not serve the HTTP API on the gateway's port 80 inside the virtual network; -listen and -services are not affected")
+ 	if err := flagSet.Parse(argv); err != nil {
+ 		return nil, err
+ 	}
+@@ -318,6 +321,9 @@ func GvproxyConfigure(config *GvproxyConfig, args *GvproxyArgs, version string)
+ 	if args.apiTokenFile != "" {
+ 		config.APITokenFile = args.apiTokenFile
+ 	}
++	if args.noGatewayAPI {
++		config.NoGatewayAPI = true
++	}
+ 	if args.bootFileName != "" {
+ 		config.Stack.BootFileName = args.bootFileName
+ 	}
+diff --git a/cmd/gvproxy/config_test.go b/cmd/gvproxy/config_test.go
+index 9076539d..7ace7645 100644
+--- a/cmd/gvproxy/config_test.go
++++ b/cmd/gvproxy/config_test.go
+@@ -769,3 +769,26 @@ func TestEc2MetadataAccessReachesTheStack(t *testing.T) {
+ 		assert.Equal(t, v.want, cnf.Stack.Ec2MetadataAccess, v.name)
+ 	}
+ }
++
++func TestNoGatewayAPI(t *testing.T) {
++	t.Parallel()
++	for _, v := range []struct {
++		name   string
++		argv   []string
++		config string
++		want   bool
++	}{
++		{"default", nil, "", false},
++		{"flag", []string{"-no-gateway-api"}, "", true},
++		{"config file", nil, "no-gateway-api: true\n", true},
++	} {
++		var cnf GvproxyConfig
++		var args GvproxyArgs
++		_, err := GvproxyArgParse(flag.NewFlagSet(os.Args[0], flag.ContinueOnError), &args, v.argv)
++		require.NoError(t, err, v.name)
++		require.NoError(t, yaml.Unmarshal([]byte(v.config), &cnf), v.name)
++		_, err = GvproxyConfigure(&cnf, &args, "testing")
++		require.NoError(t, err, v.name)
++		assert.Equal(t, v.want, cnf.NoGatewayAPI, v.name)
++	}
++}
+diff --git a/cmd/gvproxy/main.go b/cmd/gvproxy/main.go
+index c9041a82..78a059ae 100644
+--- a/cmd/gvproxy/main.go
++++ b/cmd/gvproxy/main.go
+@@ -174,11 +174,15 @@ func run(ctx context.Context, g *errgroup.Group, config *GvproxyConfig) error {
+ 		httpServe(ctx, g, ln, vn.ServicesMux())
+ 	}
+ 
+-	ln, err := vn.Listen("tcp", fmt.Sprintf("%s:80", config.Stack.GatewayIP))
+-	if err != nil {
+-		return err
++	if config.NoGatewayAPI {
++		log.Info("gateway API disabled")
++	} else {
++		ln, err := vn.Listen("tcp", fmt.Sprintf("%s:80", config.Stack.GatewayIP))
++		if err != nil {
++			return err
++		}
++		httpServe(ctx, g, ln, vn.GatewayMux())
+ 	}
+-	httpServe(ctx, g, ln, vn.GatewayMux())
+ 
+ 	if InDebugMode() {
+ 		g.Go(func() error {

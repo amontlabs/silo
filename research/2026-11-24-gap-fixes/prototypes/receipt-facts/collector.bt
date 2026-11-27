@@ -1,0 +1,50 @@
+// Process and file events for the receipt facts. Every line starts with the event and a
+// monotonic time in ns (CLOCK_MONOTONIC, the same clock Python's time.monotonic_ns reads).
+// Run: bpftrace collector.bt > trace.txt   (root, tracefs mounted)
+
+tracepoint:sched:sched_process_fork {
+  printf("FORK %llu %d %d\n", nsecs, args->parent_pid, args->child_pid);
+}
+tracepoint:sched:sched_process_exec {
+  // fds 0, 1, 2 as inode and mode: two processes joined by a pipe share a FIFO inode
+  printf("EXEC %llu %d %d %d %lu %o %lu %o %lu %o %s\n", nsecs, pid,
+    curtask->real_parent->tgid,
+    ((struct upid *)((uint64)curtask->signal->pids[2] + sizeof(struct pid)))->nr,
+    (*(curtask->files->fdt->fd + 0))->f_inode->i_ino, (*(curtask->files->fdt->fd + 0))->f_inode->i_mode,
+    (*(curtask->files->fdt->fd + 1))->f_inode->i_ino, (*(curtask->files->fdt->fd + 1))->f_inode->i_mode,
+    (*(curtask->files->fdt->fd + 2))->f_inode->i_ino, (*(curtask->files->fdt->fd + 2))->f_inode->i_mode,
+    str(curtask->fs->pwd.dentry->d_name.name, 48));
+  printf("EXECF %llu %d %s\n", nsecs, pid, str(args->filename));
+  // the whole argv, NUL-separated, from the new program's memory, in chunks of 128 bytes with
+  // their offset, so that lines of two CPUs cannot mix and long `bash -c` strings are kept whole
+  $s = curtask->mm->arg_start; $e = curtask->mm->arg_end; $o = (uint64)0;
+  unroll(40) {
+    if ($s + $o < $e) {
+      $n = $e - ($s + $o); if ($n > 128) { $n = 128; }
+      printf("ARGS %llu %d %d %rx\n", nsecs, pid, $o, buf(uptr($s + $o), $n));
+    }
+    $o += 128;
+  }
+}
+tracepoint:sched:sched_process_exit /pid == tid/ {
+  // exit_code is what wait() gives the parent: (status << 8) | signal
+  printf("EXIT %llu %d %d %lu %o %lu %o\n", nsecs, pid, curtask->exit_code,
+    (*(curtask->files->fdt->fd + 0))->f_inode->i_ino, (*(curtask->files->fdt->fd + 0))->f_inode->i_mode, (*(curtask->files->fdt->fd + 1))->f_inode->i_ino, (*(curtask->files->fdt->fd + 1))->f_inode->i_mode);
+}
+tracepoint:syscalls:sys_enter_openat /comm != "bpftrace"/ {
+  @fn[tid] = args->filename; @fl[tid] = args->flags;
+}
+tracepoint:syscalls:sys_exit_openat /@fn[tid] != 0/ {
+  if (args->ret >= 0) { printf("OPEN %llu %d %d %s\n", nsecs, pid, @fl[tid], str(@fn[tid])); }
+  delete(@fn[tid]); delete(@fl[tid]);
+}
+tracepoint:syscalls:sys_enter_unlinkat /comm != "bpftrace"/ {
+  printf("UNLINK %llu %d %s\n", nsecs, pid, str(args->pathname));
+}
+tracepoint:syscalls:sys_enter_renameat2 /comm != "bpftrace"/ {
+  printf("RENAME %llu %d %s %s\n", nsecs, pid, str(args->oldname), str(args->newname));
+}
+tracepoint:syscalls:sys_enter_rename /comm != "bpftrace"/ {
+  printf("RENAME %llu %d %s %s\n", nsecs, pid, str(args->oldname), str(args->newname));
+}
+END { clear(@fn); clear(@fl); }

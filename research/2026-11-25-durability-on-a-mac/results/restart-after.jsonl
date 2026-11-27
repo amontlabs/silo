@@ -1,0 +1,2 @@
+{"case": "settled", "calls_before": 23, "after_restart": {"status": 400, "silo": "Silo: this computer's budget of $1.00 is reached ($1.01 spent). Raise it in the Silo app to go on."}, "verdict": "refused: the budget held"}
+{"case": "inflight", "calls_before": 1, "after_restart": {"status": 400, "silo": "Silo: this computer's budget of $1.00 is reached ($1.29 spent). Raise it in the Silo app to go on."}, "verdict": "refused: the budget held"}

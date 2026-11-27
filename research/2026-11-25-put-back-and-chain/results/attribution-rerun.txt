@@ -1,0 +1,11 @@
+$ python3 attribute.py one-main --wrong   # a second run of #399 one-main night, 25 Nov 2026
+night one-main · 20 tool calls · checkpoints: one in 1 · tool calls open in a window with a file fact: 2.1 on average
+facts                                              nunattr. (probe)        scored         right   named/under    right call         wrong          none
+file, agent program's own                        176            38           138           120             0             0             2            16
+file, the work                                   461             0           461           455           453           454             0             6
+connection, the work                               4             0             4             3             3             3             0             1
+connection, agent program's own                    3             0             3             1             0             0             1             1
+how, the work: {('file', 'none'): 6, ('file', 'result'): 1, ('file', 'content'): 1, ('file', 'named'): 32, ('file', 'only one'): 1, ('file', 'implied'): 20, ('file', 'under'): 400, ('connection', 'none'): 1, ('connection', 'named'): 3}
+WRONG {'kind': 'file', 'id': 'main:f15', 'path': '~/.claude/sessions/651.ae199fa35b56945dd622b17979f371e2efe875634e9546f0fc11a056c33cc5ab.key', 'change': 'created', 'how': 'own files', 'by': 'main:c1', 'tool_call': None, 'ref': 'main:c2', 'ref_tool_call': None, 'own': True, 'program_named': 'claude'}
+WRONG {'kind': 'file', 'id': 'main:f16', 'path': '~/.claude/sessions/651.json', 'change': 'created', 'how': 'own files', 'by': 'main:c1', 'tool_call': None, 'ref': 'main:c2', 'ref_tool_call': None, 'own': True, 'program_named': 'claude'}
+WRONG {'kind': 'connection', 'id': 'main:f668', 'path': 'ab.chatgpt.com', 'change': 'allowed', 'how': 'only one', 'by': 'main:c4', 'tool_call': None, 'ref': 'main:c3', 'ref_tool_call': None, 'own': True, 'program_named': None}

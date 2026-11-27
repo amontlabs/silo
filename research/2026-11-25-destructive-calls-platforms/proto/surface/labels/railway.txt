@@ -1,0 +1,264 @@
+# Railway GraphQL mutations (backboard.railway.com/graphql/v2), labelled by hand on 2026-11-25.
+# Format: name label [why]. Labels: hold:<outcome>, allow, either, deploy. See ../label.md.
+accessGroupCreate allow
+accessGroupDelete hold:outage members lose the access the group gave
+accessGroupMemberAdd hold:exposed
+accessGroupMemberRemove either
+accessGroupProjectAttach hold:exposed
+accessGroupProjectDetach either
+accessGroupUpdate hold:exposed can raise the group's role
+agentUsageLimitSet hold:money
+apiTokenCreate hold:exposed mints a credential
+apiTokenDelete hold:outage whatever uses the token stops
+baseEnvironmentOverride deploy
+botScopeBindingRemove either
+bucketCreate allow
+bucketCredentialsReset hold:outage
+bucketUpdate allow
+cancelPitrHaWorkflow either
+canvasViewMerge allow
+clearPitrHaWorkflowProgress allow clears a progress display
+clearanceTokenCreate hold:exposed
+clearanceTokenRevoke hold:outage
+cliAuthEventTrack allow
+cliEventTrack allow
+cloudAgentArchive allow hides from lists
+cloudAgentCheckpointCreate allow
+cloudAgentCheckpointDelete hold:gone
+cloudAgentCreate allow
+cloudAgentDelete hold:gone
+cloudAgentDeploy deploy
+cloudAgentFeedbackCreate allow
+cloudAgentFork allow
+cloudAgentHarnessToken either short-lived token for the agent's own harness
+cloudAgentMarkSeen allow
+cloudAgentSessionRename allow
+cloudAgentSleep either keeps the volume
+cloudAgentStateReport allow
+cloudAgentTaskCancel either
+cloudAgentTaskDispatch allow
+cloudAgentTaskRecover allow
+cloudAgentTaskRespond allow
+cloudAgentUnarchive allow
+cloudAgentWake allow
+customDomainCreate allow
+customDomainDelete hold:outage
+customDomainIssueCertificate allow
+customDomainUpdate either
+customerCreateFreePlanSubscription allow
+customerTogglePayoutsToCredits hold:money
+databasePasswordReset hold:outage
+deploymentApprove deploy
+deploymentCancel deploy
+deploymentInstanceExecutionCreate deploy
+deploymentRedeploy deploy
+deploymentRemove hold:outage
+deploymentRestart either
+deploymentRollback deploy
+deploymentStop hold:outage
+deploymentTriggerCreate deploy
+deploymentTriggerDelete either
+deploymentTriggerUpdate deploy
+devNewLandingTargetClear allow
+devNewLandingTargetSet allow
+disablePitrForHaCluster hold:gone drops point-in-time recovery
+disableServiceCdn either
+dockerComposeImport allow
+egressGatewayAssociationCreate allow
+egressGatewayAssociationsClear hold:outage static IPs on allowlists change
+egressGatewayHAMigrationPreview allow
+egressGatewayRollbackFromHA hold:outage static IPs change
+egressGatewayUpgradeToHA either
+emailChangeConfirm hold:exposed account email
+emailChangeInitiate hold:exposed account email
+enablePitrForHaCluster allow
+enableServiceCdn allow
+environmentApplyChangeSet either
+environmentClearanceDefaultUpdate hold:exposed can switch off Railway Authentication
+environmentConfigPlanCommentUpsert allow
+environmentCreate allow
+environmentDelete hold:gone
+environmentIacPartialRelease allow "without deleting, redeploying, or changing them"
+environmentIacPartialTransfer allow same
+environmentPatchCommit cond
+environmentPatchCommitStaged either the request does not say what was staged
+environmentPatchDismissFailure allow
+environmentPatchRestage allow
+environmentPreviewChangeSet allow
+environmentRename allow
+environmentStageChanges cond
+environmentTriggersDeploy deploy
+environmentUnskipService deploy
+fairUseAgree allow
+featureFlagAdd allow
+featureFlagRemove allow
+generateShellToken either a shell in a running service
+githubRepoDeploy deploy
+githubRepoUpdate either
+inviteCodeUse allow
+jobApplicationCreate allow
+loginSessionAuth allow
+loginSessionCancel allow
+loginSessionConsume allow
+loginSessionCreate allow
+loginSessionVerify allow
+notificationDeliveriesMarkAsRead allow
+notificationRuleCreate allow
+notificationRuleDelete either
+notificationRuleUpdate allow
+observabilityDashboardCreate allow
+observabilityDashboardReset either
+observabilityDashboardUpdate allow
+passkeyDelete hold:exposed account security
+preferencesUpdate allow
+privateNetworkEndpointRename either private DNS name other services use
+projectClaim allow
+projectClearanceDefaultUpdate hold:exposed
+projectCreate allow
+projectDelete hold:gone
+projectFavoriteSet allow
+projectFeatureFlagAdd allow
+projectFeatureFlagRemove allow
+projectInvitationAccept allow
+projectInvitationCreate hold:exposed
+projectInvitationDelete allow
+projectInvitationResend either
+projectInviteCodeCreate hold:exposed
+projectLeave hold:outage the user loses the project
+projectMemberAdd hold:exposed
+projectMemberRemove hold:outage
+projectMemberUpdate hold:exposed
+projectScheduleDelete hold:recoverable 48 h grace
+projectScheduleDeleteCancel allow the undo of a deletion
+projectScheduleDeleteForce hold:gone
+projectTokenCreate hold:exposed
+projectTokenDelete hold:outage
+projectTransfer hold:exposed ownership moves
+projectTransferConfirm hold:exposed
+projectTransferInitiate hold:exposed
+projectTransferToTeam hold:exposed
+projectUpdate cond
+providerAuthRemove either
+purgeServiceCache either
+railwayDomainDnsRecordCreate either
+railwayDomainDnsRecordDelete hold:outage
+railwayDomainDnsRecordUpdate hold:outage
+railwayDomainEmailForwardingRemoveAll hold:outage
+railwayDomainEmailForwardingRuleCreate either mail to an outside inbox
+railwayDomainEmailForwardingRuleDelete either
+railwayDomainEmailForwardingRuleSendTest allow
+railwayDomainEmailForwardingRuleUpdate hold:exposed redirects mail
+railwayDomainNameserversSet hold:outage
+railwayDomainUpdate either
+recoveryCodeGenerate either
+recoveryCodeValidate allow
+referralInfoUpdate allow
+sandboxCheckpointCreate allow
+sandboxCheckpointDelete either
+sandboxCheckpointRename allow
+sandboxCreate allow
+sandboxDestroy either sandboxes are short-lived by design
+sandboxExec allow
+sandboxHeartbeat allow
+sandboxTemplateBuild allow
+serviceConnect deploy changes what the service runs
+serviceCreate allow
+serviceDelete hold:gone
+serviceDisconnect either
+serviceDomainCreate allow
+serviceDomainDelete hold:outage
+serviceDomainUpdate either
+serviceDuplicate allow
+serviceFeatureFlagAdd allow
+serviceFeatureFlagRemove allow
+serviceInstanceAutoDeployUpdate deploy
+serviceInstanceAutoUpdateScheduleUpdate deploy
+serviceInstanceAutoUpdateSnooze deploy
+serviceInstanceAutoUpdateSnoozeClear deploy
+serviceInstanceClearanceUpdate hold:exposed
+serviceInstanceDeploy deploy
+serviceInstanceDeployV2 deploy
+serviceInstanceLimitsUpdate either
+serviceInstanceRedeploy deploy
+serviceInstanceUpdate cond
+serviceInstanceVulnRemediationDismiss either
+serviceInstanceVulnRemediationPatchNow deploy
+serviceRemoveUpstreamUrl either
+serviceTakedownAcknowledge either
+serviceUpdate allow
+sessionDelete allow
+setServiceUnderAttackMode allow
+setupAgentEventTrack allow
+sharedVariableConfigure either
+signalCreate allow
+signalDefaultSet either
+signalDelete hold:gone with its audit log
+signalReplace hold:gone "Destructive", clears all rules
+signalRollback either
+signalRuleSet either
+signalRuleUnset either
+sshPublicKeyCreate hold:exposed
+sshPublicKeyDelete either
+sshSignupApprove hold:exposed
+tcpProxyCreate either opens a service to the internet
+tcpProxyDelete hold:outage
+templateClone allow
+templateDelete hold:gone
+templateDeploy deploy
+templateDeployV2 deploy
+templateGenerate allow
+templatePublish either
+templateRevert hold:outage removes variables
+templateServiceSourceEject allow
+templateUnpublish either
+templateVolumeUpdate allow
+trustedDomainCreate hold:exposed anyone with the email domain may join
+trustedDomainDelete either
+trustedDomainRetriggerVerification allow
+trustedDomainUpdate hold:exposed
+twoFactorInfoCreate allow
+twoFactorInfoDelete hold:exposed
+twoFactorInfoSecret allow
+twoFactorInfoValidate allow
+updateServiceEdgeConfig either
+updateServiceEdgeRules hold:gone replaces the whole section
+upsertSlackChannel allow
+usageLimitRemove hold:money
+usageLimitSet hold:money
+userBetaLeave allow
+userDelete hold:gone
+userDiscordDisconnect allow
+userFlagsRemove allow
+userFlagsSet allow
+userProfileUpdate allow
+userTermsUpdate allow
+variableCollectionUpsert cond
+variableDelete hold:gone
+variableUpsert either overwrites one value
+volumeCreate allow
+volumeDelete hold:recoverable 48 h, restorable from an email link
+volumeInstanceBackupCreate allow
+volumeInstanceBackupDelete hold:gone
+volumeInstanceBackupLock allow keeps a backup longer
+volumeInstanceBackupRestore hold:gone replaces the volume's data
+volumeInstanceBackupScheduleUpdate either can switch backups off
+volumeInstancePITRRestore allow creates a new service
+volumeInstanceUpdate either mount path or detach
+volumeUpdate allow
+webhookTest allow
+workspaceApiTokenDelete hold:outage
+workspaceDelete hold:gone
+workspaceInviteCodeCreate hold:exposed
+workspaceInviteCodeUse allow
+workspaceLeave hold:outage
+workspacePermissionChange hold:exposed
+workspacePolicyDeploySourceAllowlistAdd either
+workspacePolicyDeploySourceAllowlistRemove either
+workspacePolicyItemUpdate either
+workspaceSetRestrictProjectVisibilityToGroups either
+workspaceTwoFactorEnforcementUpdate either
+workspaceUpdate allow
+workspaceUpsertSlackChannel allow
+workspaceUserInvite hold:exposed
+workspaceUserRemove hold:outage
+xAgentProjectClaim allow

@@ -1,0 +1,8 @@
+== git (CLI)
+10:29:56.749846 git.c:463               trace: built-in: git ls-remote git@github.com:octocat/Hello-World.git HEAD
+10:29:56.749962 run-command.c:659       trace: run_command: GIT_DIR=.git git remote-https git@github.com:octocat/Hello-World.git https://github.com/octocat/Hello-World.git
+== go-git v5.16.2
+err: error creating SSH agent: "SSH agent requested but SSH_AUTH_SOCK not-specified"
+== cargo (libgit2)
+Caused by:
+  could not find `Cargo.toml` in `/tmp/insteadof/cargohome/git/checkouts/hello-world-c4382ee7b1ebea96/7fd1a60`

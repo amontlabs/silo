@@ -1,0 +1,21 @@
+gvproxy built from containers/gvisor-tap-vsock at 197eea0 (13 November 2026), started with its
+defaults: gvproxy -listen unix://.../net.sock -mtu 1500. The guest is a Linux network namespace
+running gvforwarder (cmd/vm) on a tap device, so it sees exactly what a virtual machine behind
+gvproxy sees. The "Mac" is the host of the test: a server on its 127.0.0.1:7777. Run as root:
+unshare -n -m bash guest.sh, with gvproxy already listening. 24 November 2026.
+
+guest address: 192.168.127.2/24
+-- 1. the Mac's 127.0.0.1:7777 through 192.168.127.254:
+secret page served on the Mac's 127.0.0.1
+-- 2. gvproxy's API from inside, no token:
+[{"local":"127.0.0.1:2222","remote":"192.168.127.2:22","protocol":"tcp"}]
+-- 3. the guest asks gvproxy to open a port on every interface of the Mac:
+[200]
+[{"local":"0.0.0.0:2299","remote":"192.168.127.2:8000","protocol":"tcp"},{"local":"127.0.0.1:2222","remote":"192.168.127.2:22","protocol":"tcp"}]
+
+== from the host, outside the computer:
+LISTEN 0      4096         0.0.0.0:2299       0.0.0.0:*    users:(("gvproxy",pid=5486,fd=10))
+$ curl http://127.0.0.1:2299/
+served from inside the computer
+$ curl http://<the host's network address>:2299/
+served from inside the computer

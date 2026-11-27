@@ -1,0 +1,1 @@
+{"seed": 7, "main_steps": 25, "subagents": 6, "spawn_at": 3, "sub_steps": 6, "big_read_at": 8, "big_bytes": 400000, "think": [1000, 6000], "tps": 3000, "fallback_rate": 0.1, "fallback_model": "claude-sonnet-5-5"}

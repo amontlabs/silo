@@ -1,0 +1,13 @@
+$ VERCEL_TOKEN=testtoken123 VERCEL_TELEMETRY_DISABLED=1 -- vercel webhooks create https://hooks.example.net/x --event deployment.created
+Vercel CLI 66.6.0
+Creating webhook under alice
+> Success! Webhook created: hook_1 [48ms]
+
+  Webhook Details
+
+    ID        hook_1
+    URL       https://hooks.example.net/x
+    Events    deployment.created
+
+WARNING! Save this secret - it will not be shown again: x
+--- exit=0 seconds=.365881357

@@ -1,0 +1,15 @@
+--- a/research/2026-11-24-spend-budgets/boundary/src/ws.zig	2026-11-25 11:14:36.576141392 +0000
++++ b/research/2026-11-24-spend-budgets/boundary/src/ws.zig	2026-11-25 11:14:36.595925025 +0000
+@@ -104,6 +104,12 @@
+                 try self.inflated.appendSlice(self.gpa, tmp[0 .. tmp.len - self.strm.avail_out]);
+                 if (self.inflated.items.len > self.max_message) return error.MessageTooLarge;
+                 if (r == z.Z_BUF_ERROR) break;
++                // A final block ends the stream: what follows it (the tail) is not read. The next
++                // message starts a new stream.
++                if (r == z.Z_STREAM_END) {
++                    _ = z.inflateReset(&self.strm);
++                    break;
++                }
+             }
+         }
+         if (self.no_context_takeover) _ = z.inflateReset(&self.strm);

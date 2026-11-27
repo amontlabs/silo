@@ -1,0 +1,12 @@
+{"t": 1795632868.7923, "kind": "listening", "port": 26241, "holds": {"git": 60, "aws": 50, "pip": 12, "default": 90}, "gather": 2.0}
+{"t": 1795632871.5085, "kind": "ask.opened", "ask": "ask_1", "computer": "main", "ends": 1795634671.5085213}
+{"t": 1795632871.5086, "kind": "request.held", "ask": "ask_1", "line": 1, "desc": "push main to 127.0.0.1:26241/repo.git (467b7a6)"}
+{"t": 1795632871.5087, "kind": "ask.version", "ask": "ask_1", "version": 1, "lines": ["push main to 127.0.0.1:26241/repo.git (467b7a6)"], "list_hash": "841af7d6e1c3f46f0d4516df0d5126ba", "ends": 1795634671.5085213}
+{"t": 1795632873.5796, "kind": "ask.forwarded", "ask": "ask_1", "version": 1, "size": 341}
+{"t": 1795632931.5874, "kind": "hold.ended", "ask": "ask_1", "line": 1, "how": "limit"}
+{"t": 1795632931.5879, "kind": "request.refused", "ask": "ask_1", "line": 1, "why": "held, not answered"}
+{"t": 1795632931.6652, "kind": "request.joined", "ask": "ask_1", "line": 1, "desc": "push main to 127.0.0.1:26241/repo.git (467b7a6)"}
+{"t": 1795632961.5875, "kind": "answer.received", "ask": "ask_1", "version": 1, "verdict": "yes"}
+{"t": 1795632961.5875, "kind": "ask.answered", "ask": "ask_1", "version": 1, "verdict": "yes", "lines": 1, "issued": 1795632961.5847466, "via": "phone"}
+{"t": 1795632961.5876, "kind": "ask.closed", "ask": "ask_1", "why": "answered and done"}
+{"t": 1795632961.6072, "kind": "request.forwarded", "ask": "ask_1", "line": 1, "status": 200}

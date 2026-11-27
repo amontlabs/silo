@@ -1,0 +1,10 @@
+gpt-deny-accounts-check	1	13.8	(none)	{"type":"turn.failed","error":{"message":"workspace routing discovery failed"}}
+gpt-deny-codex-models	0	1.0	made.txt 	{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":12,"reasoning_output_tokens":0}}
+gpt-deny-ps-plugins	0	1.0	made.txt 	{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":12,"reasoning_output_tokens":0}}
+gpt-deny-ps-mcp	0	1.0	made.txt 	{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":12,"reasoning_output_tokens":0}}
+gpt-deny-analytics-events	0	1.0	made.txt 	{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":12,"reasoning_output_tokens":0}}
+gpt-deny-wham-settings	0	1.0	made.txt 	{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":12,"reasoning_output_tokens":0}}
+gpt-deny-otlp	0	1.2	made.txt 	{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":12,"reasoning_output_tokens":0}}
+gpt-deny-all-but-model	1	14.0	(none)	{"type":"turn.failed","error":{"message":"workspace routing discovery failed"}}
+gpt-deny-all-but-model-and-check	0	0.9	made.txt 	{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":12,"reasoning_output_tokens":
+key-deny-all-but-model	0	0.6	made.txt 	{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":12,"reasoning_output_tokens":0}}

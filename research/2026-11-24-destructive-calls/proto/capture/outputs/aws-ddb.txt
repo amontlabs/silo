@@ -1,0 +1,9 @@
+$ AWS_ACCESS_KEY_ID=AKIAFAKEFAKEFAKE0000 AWS_SECRET_ACCESS_KEY=fakesecret AWS_DEFAULT_REGION=us-east-1 AWS_PAGER= -- aws dynamodb delete-table --table-name orders
+{
+    "TableDescription": {
+        "TableName": "orders",
+        "TableStatus": "DELETING",
+        "TableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/orders"
+    }
+}
+--- exit=0 seconds=.643893265

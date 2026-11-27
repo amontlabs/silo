@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Runs a CLI with a clean environment: no session proxy, no inherited credentials,
+# every CA variable pointed at the bundle that holds the test CA, and a fresh HOME.
+# Usage: clienv VAR=value ... -- command args
+HOME_DIR=${CAPTURE_HOME:-/opt/clis/home}
+mkdir -p "$HOME_DIR"
+vars=()
+while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do vars+=("$1"); shift; done
+shift
+B=/opt/clis/pki/bundle.crt
+exec env -i HOME="$HOME_DIR" TERM=dumb LANG=C.UTF-8 \
+  PATH=/opt/clis/npm/node_modules/.bin:/opt/clis/npm2/node_modules/.bin:/opt/clis/bin:/opt/clis/awsv2bin:/opt/node22/bin:/usr/local/bin:/usr/bin:/bin \
+  SSL_CERT_FILE=$B REQUESTS_CA_BUNDLE=$B AWS_CA_BUNDLE=$B CURL_CA_BUNDLE=$B GIT_SSL_CAINFO=$B \
+  NODE_EXTRA_CA_CERTS=/opt/clis/pki/ca.crt CI=1 NO_COLOR=1 \
+  "${vars[@]}" "$@"

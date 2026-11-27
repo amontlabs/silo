@@ -1,0 +1,14 @@
+#!/bin/sh
+# A fake of macOS's vm_stat for the Linux run of test 25: 3000 MB used, and 3400 MB more for each
+# simulator the fake xcrun has booted under $HOME/.fake-sim.
+n=$(ls "$HOME"/.fake-sim/*/booted 2>/dev/null | wc -l)
+active=$((100000 + n * 217600))
+cat <<OUT
+Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                               50000.
+Pages active:                             $active.
+Pages inactive:                           40000.
+Pages speculative:                        1000.
+Pages wired down:                         72000.
+Pages occupied by compressor:             20000.
+OUT

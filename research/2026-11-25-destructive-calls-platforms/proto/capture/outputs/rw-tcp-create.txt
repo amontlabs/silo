@@ -1,0 +1,3 @@
+$ RAILWAY_TOKEN=test-token-123 -- railway tcp-proxy create --port 5432 --service api
+The TCP proxy is configured but is not readable yet. Run railway tcp-proxy list --service api shortly; if it does not become active, redeploy the service.
+--- exit=0 seconds=.189487587

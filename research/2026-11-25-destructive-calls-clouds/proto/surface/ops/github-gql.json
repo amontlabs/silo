@@ -1,0 +1,1696 @@
+[
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "abortQueuedMigrations",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "abortRepositoryMigration",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "acceptEnterpriseAdministratorInvitation",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "acceptEnterpriseMemberInvitation",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "acceptTopicSuggestion",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "addAssigneesToAssignable",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "addComment",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "addDiscussionComment",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "addDiscussionPollVote",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "addEnterpriseOrganizationMember",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "addEnterpriseSupportEntitlement",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "addLabelsToLabelable",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "addProjectCard",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "addProjectColumn",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "addProjectV2DraftIssue",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "addProjectV2ItemById",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "addPullRequestReview",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "addPullRequestReviewComment",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "addPullRequestReviewThread",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "addPullRequestReviewThreadReply",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "addReaction",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "addStar",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "addUpvote",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "addVerifiableDomain",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "approveDeployments",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "approveVerifiableDomain",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "archiveProjectV2Item",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "archiveRepository",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "cancelEnterpriseAdminInvitation",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "cancelEnterpriseMemberInvitation",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "cancelSponsorship",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "changeUserStatus",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "clearLabelsFromLabelable",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "clearProjectV2ItemFieldValue",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "cloneProject",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "cloneTemplateRepository",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "closeDiscussion",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "closeIssue",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "closePullRequest",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "convertProjectCardNoteToIssue",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "convertProjectV2DraftIssueItemToIssue",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "convertPullRequestToDraft",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "copyProjectV2",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createAttributionInvitation",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createBranchProtectionRule",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createCheckRun",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createCheckSuite",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createCommitOnBranch",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createDeployment",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createDeploymentStatus",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createDiscussion",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createEnterpriseOrganization",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createEnvironment",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createIpAllowListEntry",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createIssue",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createLabel",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createLinkedBranch",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createMigrationSource",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createProject",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createProjectV2",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createProjectV2Field",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createProjectV2StatusUpdate",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createPullRequest",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createRef",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createRepository",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createRepositoryRuleset",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createSponsorsListing",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createSponsorsTier",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createSponsorship",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createSponsorships",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createTeamDiscussion",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createTeamDiscussionComment",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "createUserList",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "declineTopicSuggestion",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteBranchProtectionRule",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteDeployment",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteDiscussion",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteDiscussionComment",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteEnvironment",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteIpAllowListEntry",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteIssue",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteIssueComment",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteLabel",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteLinkedBranch",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deletePackageVersion",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteProject",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteProjectCard",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteProjectColumn",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteProjectV2",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteProjectV2Field",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteProjectV2Item",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteProjectV2StatusUpdate",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteProjectV2Workflow",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deletePullRequestReview",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deletePullRequestReviewComment",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteRef",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteRepositoryRuleset",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteTeamDiscussion",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteTeamDiscussionComment",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteUserList",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "deleteVerifiableDomain",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "dequeuePullRequest",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "disablePullRequestAutoMerge",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "dismissPullRequestReview",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "dismissRepositoryVulnerabilityAlert",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "enablePullRequestAutoMerge",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "enqueuePullRequest",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "followOrganization",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "followUser",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "grantEnterpriseOrganizationsMigratorRole",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "grantMigratorRole",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "importProject",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "inviteEnterpriseAdmin",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "inviteEnterpriseMember",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "linkProjectV2ToRepository",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "linkProjectV2ToTeam",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "linkRepositoryToProject",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "lockLockable",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "markDiscussionCommentAsAnswer",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "markFileAsViewed",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "markNotificationAsDone",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "markProjectV2AsTemplate",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "markPullRequestReadyForReview",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "mergeBranch",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "mergePullRequest",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "minimizeComment",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "moveProjectCard",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "moveProjectColumn",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "pinEnvironment",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "pinIssue",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "publishSponsorsTier",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "regenerateEnterpriseIdentityProviderRecoveryCodes",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "regenerateVerifiableDomainToken",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "rejectDeployments",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "removeAssigneesFromAssignable",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "removeEnterpriseAdmin",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "removeEnterpriseIdentityProvider",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "removeEnterpriseMember",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "removeEnterpriseOrganization",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "removeEnterpriseSupportEntitlement",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "removeLabelsFromLabelable",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "removeOutsideCollaborator",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "removeReaction",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "removeStar",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "removeUpvote",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "reopenDiscussion",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "reopenIssue",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "reopenPullRequest",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "reorderEnvironment",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "requestReviews",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "rerequestCheckSuite",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "resolveReviewThread",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "retireSponsorsTier",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "revertPullRequest",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "revokeEnterpriseOrganizationsMigratorRole",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "revokeMigratorRole",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "setEnterpriseIdentityProvider",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "setOrganizationInteractionLimit",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "setRepositoryInteractionLimit",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "setUserInteractionLimit",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "startOrganizationMigration",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "startRepositoryMigration",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "submitPullRequestReview",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "transferEnterpriseOrganization",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "transferIssue",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "unarchiveProjectV2Item",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "unarchiveRepository",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "unfollowOrganization",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "unfollowUser",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "unlinkProjectV2FromRepository",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "unlinkProjectV2FromTeam",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "unlinkRepositoryFromProject",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "unlockLockable",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "unmarkDiscussionCommentAsAnswer",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "unmarkFileAsViewed",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "unmarkIssueAsDuplicate",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "unmarkProjectV2AsTemplate",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "unminimizeComment",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "unpinIssue",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "unresolveReviewThread",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "unsubscribeFromNotifications",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateBranchProtectionRule",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateCheckRun",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateCheckSuitePreferences",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateDiscussion",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateDiscussionComment",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateEnterpriseAdministratorRole",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateEnterpriseAllowPrivateRepositoryForkingSetting",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateEnterpriseDefaultRepositoryPermissionSetting",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateEnterpriseMembersCanChangeRepositoryVisibilitySetting",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateEnterpriseMembersCanCreateRepositoriesSetting",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateEnterpriseMembersCanDeleteIssuesSetting",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateEnterpriseMembersCanDeleteRepositoriesSetting",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateEnterpriseMembersCanInviteCollaboratorsSetting",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateEnterpriseMembersCanMakePurchasesSetting",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateEnterpriseMembersCanUpdateProtectedBranchesSetting",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateEnterpriseMembersCanViewDependencyInsightsSetting",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateEnterpriseOrganizationProjectsSetting",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateEnterpriseOwnerOrganizationRole",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateEnterpriseProfile",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateEnterpriseRepositoryProjectsSetting",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateEnterpriseTeamDiscussionsSetting",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateEnterpriseTwoFactorAuthenticationRequiredSetting",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateEnvironment",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateIpAllowListEnabledSetting",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateIpAllowListEntry",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateIpAllowListForInstalledAppsEnabledSetting",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateIssue",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateIssueComment",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateLabel",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateNotificationRestrictionSetting",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateOrganizationAllowPrivateRepositoryForkingSetting",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateOrganizationWebCommitSignoffSetting",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updatePatreonSponsorability",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateProject",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateProjectCard",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateProjectColumn",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateProjectV2",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateProjectV2Collaborators",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateProjectV2DraftIssue",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateProjectV2ItemFieldValue",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateProjectV2ItemPosition",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateProjectV2StatusUpdate",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updatePullRequest",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updatePullRequestBranch",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updatePullRequestReview",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updatePullRequestReviewComment",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateRef",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateRefs",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateRepository",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateRepositoryRuleset",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateRepositoryWebCommitSignoffSetting",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateSponsorshipPreferences",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateSubscription",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateTeamDiscussion",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateTeamDiscussionComment",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateTeamReviewAssignment",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateTeamsRepository",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateTopics",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateUserList",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "updateUserListsForItem",
+"host": "api.github.com",
+"path": "/graphql"
+},
+{
+"provider": "github-gql",
+"kind": "graphql",
+"name": "verifyVerifiableDomain",
+"host": "api.github.com",
+"path": "/graphql"
+}
+]

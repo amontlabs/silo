@@ -1,0 +1,208 @@
+{"event": "command_start", "name": "wr-d1-delete", "t": 1795603516.114799137}
+{"t": 1795603516.836, "conn": 43, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603516.837, "conn": 43, "event": "request", "method": "GET", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/d1/database/mydb?fields=uuid%2Cname", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603516.837, "conn": 43, "event": "response", "status": 200, "len": 123, "for": "GET api.cloudflare.com /client/v4/accounts/acc123/d1/database/mydb"}
+{"t": 1795603516.886, "conn": 44, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603516.886, "conn": 44, "event": "request", "method": "DELETE", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/d1/database/11111111-2222-3333-4444-555555555555", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603516.886, "conn": 44, "event": "response", "status": 200, "len": 63, "for": "DELETE api.cloudflare.com /client/v4/accounts/acc123/d1/database/11111111-2222-3333-4444-555555555555"}
+{"t": 1795603516.935, "conn": 44, "event": "client_closed"}
+{"t": 1795603516.935, "conn": 43, "event": "client_closed"}
+{"event": "command_end", "name": "wr-d1-delete", "t": 1795603516.955127109}
+{"event": "command_start", "name": "wr-d1-drop", "t": 1795603516.963738061}
+{"t": 1795603517.634, "conn": 45, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603517.635, "conn": 45, "event": "request", "method": "GET", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/d1/database/mydb?fields=uuid%2Cname", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603517.635, "conn": 45, "event": "response", "status": 200, "len": 123, "for": "GET api.cloudflare.com /client/v4/accounts/acc123/d1/database/mydb"}
+{"t": 1795603517.689, "conn": 46, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603517.689, "conn": 46, "event": "request", "method": "POST", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/d1/database/11111111-2222-3333-4444-555555555555/query", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Content-Type", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"], ["content-length", "26"]], "body_len": 26, "body": "{\"sql\":\"DROP TABLE users\"}"}
+{"t": 1795603517.689, "conn": 46, "event": "response", "status": 200, "len": 61, "for": "POST api.cloudflare.com /client/v4/accounts/acc123/d1/database/11111111-2222-3333-4444-555555555555/query"}
+{"t": 1795603517.736, "conn": 46, "event": "client_closed"}
+{"t": 1795603517.736, "conn": 45, "event": "client_closed"}
+{"event": "command_end", "name": "wr-d1-drop", "t": 1795603517.754275830}
+{"event": "command_start", "name": "wr-d1-select", "t": 1795603517.764099150}
+{"t": 1795603518.441, "conn": 47, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603518.442, "conn": 47, "event": "request", "method": "GET", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/d1/database/mydb?fields=uuid%2Cname", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603518.442, "conn": 47, "event": "response", "status": 200, "len": 123, "for": "GET api.cloudflare.com /client/v4/accounts/acc123/d1/database/mydb"}
+{"t": 1795603518.495, "conn": 48, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603518.496, "conn": 48, "event": "request", "method": "POST", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/d1/database/11111111-2222-3333-4444-555555555555/query", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Content-Type", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"], ["content-length", "37"]], "body_len": 37, "body": "{\"sql\":\"SELECT * FROM users LIMIT 5\"}"}
+{"t": 1795603518.496, "conn": 48, "event": "response", "status": 200, "len": 61, "for": "POST api.cloudflare.com /client/v4/accounts/acc123/d1/database/11111111-2222-3333-4444-555555555555/query"}
+{"t": 1795603518.543, "conn": 48, "event": "client_closed"}
+{"t": 1795603518.543, "conn": 47, "event": "client_closed"}
+{"event": "command_end", "name": "wr-d1-select", "t": 1795603518.559627752}
+{"event": "command_start", "name": "wr-d1-timetravel", "t": 1795603518.568622246}
+{"t": 1795603519.295, "conn": 49, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603519.296, "conn": 49, "event": "request", "method": "GET", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/d1/database/mydb?fields=uuid%2Cname", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603519.296, "conn": 49, "event": "response", "status": 200, "len": 123, "for": "GET api.cloudflare.com /client/v4/accounts/acc123/d1/database/mydb"}
+{"t": 1795603519.346, "conn": 50, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603519.346, "conn": 50, "event": "request", "method": "GET", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/d1/database/11111111-2222-3333-4444-555555555555", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Content-Type", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603519.347, "conn": 50, "event": "response", "status": 200, "len": 136, "for": "GET api.cloudflare.com /client/v4/accounts/acc123/d1/database/11111111-2222-3333-4444-555555555555"}
+{"t": 1795603519.393, "conn": 49, "event": "request", "method": "GET", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/d1/database/11111111-2222-3333-4444-555555555555/time_travel/bookmark?timestamp=2026-11-24T12%3A00%3A00.000Z", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Content-Type", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603519.393, "conn": 49, "event": "response", "status": 200, "len": 136, "for": "GET api.cloudflare.com /client/v4/accounts/acc123/d1/database/11111111-2222-3333-4444-555555555555/time_travel/bookmark"}
+{"t": 1795603519.396, "conn": 50, "event": "request", "method": "POST", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/d1/database/11111111-2222-3333-4444-555555555555/time_travel/restore?bookmark=undefined", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Content-Type", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"], ["content-length", "0"]], "body_len": 0, "body": ""}
+{"t": 1795603519.397, "conn": 50, "event": "response", "status": 200, "len": 61, "for": "POST api.cloudflare.com /client/v4/accounts/acc123/d1/database/11111111-2222-3333-4444-555555555555/time_travel/restore"}
+{"t": 1795603519.408, "conn": 49, "event": "client_closed"}
+{"t": 1795603519.408, "conn": 50, "event": "client_closed"}
+{"event": "command_end", "name": "wr-d1-timetravel", "t": 1795603519.429730109}
+{"event": "command_start", "name": "wr-d1-create", "t": 1795603519.440010015}
+{"t": 1795603520.204, "conn": 51, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603520.204, "conn": 51, "event": "request", "method": "POST", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/d1/database", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Content-Type", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"], ["content-length", "16"]], "body_len": 16, "body": "{\"name\":\"newdb\"}"}
+{"t": 1795603520.205, "conn": 51, "event": "response", "status": 200, "len": 187, "for": "POST api.cloudflare.com /client/v4/accounts/acc123/d1/database"}
+{"t": 1795603520.255, "conn": 51, "event": "client_closed"}
+{"event": "command_end", "name": "wr-d1-create", "t": 1795603520.273012310}
+{"event": "command_start", "name": "wr-kv-ns-delete", "t": 1795603520.282342755}
+{"t": 1795603520.996, "conn": 52, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603520.996, "conn": 52, "event": "request", "method": "DELETE", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/storage/kv/namespaces/ns123", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603520.996, "conn": 52, "event": "response", "status": 200, "len": 63, "for": "DELETE api.cloudflare.com /client/v4/accounts/acc123/storage/kv/namespaces/ns123"}
+{"t": 1795603521.048, "conn": 52, "event": "client_closed"}
+{"event": "command_end", "name": "wr-kv-ns-delete", "t": 1795603521.066365784}
+{"event": "command_start", "name": "wr-kv-key-delete", "t": 1795603521.075984373}
+{"t": 1795603521.835, "conn": 53, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603521.836, "conn": 53, "event": "request", "method": "DELETE", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/storage/kv/namespaces/ns123/values/session%3A1", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603521.836, "conn": 53, "event": "response", "status": 200, "len": 63, "for": "DELETE api.cloudflare.com /client/v4/accounts/acc123/storage/kv/namespaces/ns123/values/session%3A1"}
+{"t": 1795603521.889, "conn": 53, "event": "client_closed"}
+{"event": "command_end", "name": "wr-kv-key-delete", "t": 1795603521.908860665}
+{"event": "command_start", "name": "wr-kv-bulk-delete", "t": 1795603521.919011145}
+{"t": 1795603522.616, "conn": 54, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603522.617, "conn": 54, "event": "request", "method": "DELETE", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/storage/kv/namespaces/ns123/bulk", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Content-Type", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"], ["content-length", "25"]], "body_len": 25, "body": "[\"session:1\",\"session:2\"]"}
+{"t": 1795603522.617, "conn": 54, "event": "response", "status": 200, "len": 63, "for": "DELETE api.cloudflare.com /client/v4/accounts/acc123/storage/kv/namespaces/ns123/bulk"}
+{"t": 1795603522.661, "conn": 54, "event": "client_closed"}
+{"event": "command_end", "name": "wr-kv-bulk-delete", "t": 1795603522.685521642}
+{"event": "command_start", "name": "wr-kv-key-put", "t": 1795603522.695343681}
+{"t": 1795603523.462, "conn": 55, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603523.462, "conn": 55, "event": "request", "method": "PUT", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/storage/kv/namespaces/ns123/values/session%3A1", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["content-type", "text/plain;charset=UTF-8"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"], ["content-length", "5"]], "body_len": 5, "body": "value"}
+{"t": 1795603523.463, "conn": 55, "event": "response", "status": 200, "len": 61, "for": "PUT api.cloudflare.com /client/v4/accounts/acc123/storage/kv/namespaces/ns123/values/session%3A1"}
+{"t": 1795603523.516, "conn": 55, "event": "client_closed"}
+{"event": "command_end", "name": "wr-kv-key-put", "t": 1795603523.536740488}
+{"event": "command_start", "name": "wr-kv-ns-create", "t": 1795603523.546321378}
+{"t": 1795603524.246, "conn": 56, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603524.246, "conn": 56, "event": "request", "method": "POST", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/storage/kv/namespaces", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["accept", "application/json"], ["content-type", "application/json"], ["User-Agent", "wrangler/4.168.0"], ["api-version", "2026-11-25"], ["x-stainless-lang", "js"], ["x-stainless-package-version", "5.2.0"], ["x-stainless-os", "Linux"], ["x-stainless-arch", "x64"], ["x-stainless-runtime", "node"], ["x-stainless-runtime-version", "v22.23.5"], ["Authorization", "<redacted>"], ["x-stainless-retry-count", "0"], ["x-stainless-timeout", "60000"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"], ["content-length", "22"]], "body_len": 22, "body": "{\n  \"title\": \"CACHE\"\n}"}
+{"t": 1795603524.247, "conn": 56, "event": "response", "status": 200, "len": 61, "for": "POST api.cloudflare.com /client/v4/accounts/acc123/storage/kv/namespaces"}
+{"t": 1795603524.3, "conn": 56, "event": "client_closed"}
+{"event": "command_end", "name": "wr-kv-ns-create", "t": 1795603524.316716231}
+{"event": "command_start", "name": "wr-r2-bucket-delete", "t": 1795603524.326836427}
+{"t": 1795603525.123, "conn": 57, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603525.123, "conn": 57, "event": "request", "method": "DELETE", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/r2/buckets/mybucket", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603525.123, "conn": 57, "event": "response", "status": 200, "len": 63, "for": "DELETE api.cloudflare.com /client/v4/accounts/acc123/r2/buckets/mybucket"}
+{"t": 1795603525.175, "conn": 57, "event": "client_closed"}
+{"event": "command_end", "name": "wr-r2-bucket-delete", "t": 1795603525.191441860}
+{"event": "command_start", "name": "wr-r2-object-delete", "t": 1795603525.200497058}
+{"t": 1795603525.942, "conn": 58, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603525.943, "conn": 58, "event": "request", "method": "DELETE", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/r2/buckets/mybucket/objects/backups/db.dump", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["cf-r2-data-catalog-check", "true"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603525.943, "conn": 58, "event": "response", "status": 200, "len": 63, "for": "DELETE api.cloudflare.com /client/v4/accounts/acc123/r2/buckets/mybucket/objects/backups/db.dump"}
+{"t": 1795603525.995, "conn": 58, "event": "client_closed"}
+{"event": "command_end", "name": "wr-r2-object-delete", "t": 1795603526.015169121}
+{"event": "command_start", "name": "wr-r2-dev-url", "t": 1795603526.025350118}
+{"t": 1795603526.71, "conn": 59, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603526.71, "conn": 59, "event": "request", "method": "PUT", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/r2/buckets/mybucket/domains/managed", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Content-Type", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"], ["content-length", "16"]], "body_len": 16, "body": "{\"enabled\":true}"}
+{"t": 1795603526.71, "conn": 59, "event": "response", "status": 200, "len": 61, "for": "PUT api.cloudflare.com /client/v4/accounts/acc123/r2/buckets/mybucket/domains/managed"}
+{"t": 1795603526.762, "conn": 59, "event": "client_closed"}
+{"event": "command_end", "name": "wr-r2-dev-url", "t": 1795603526.779054720}
+{"event": "command_start", "name": "wr-r2-lifecycle", "t": 1795603526.787833210}
+{"t": 1795603527.467, "conn": 60, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603527.467, "conn": 60, "event": "request", "method": "GET", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/r2/buckets/mybucket/lifecycle", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603527.467, "conn": 60, "event": "response", "status": 200, "len": 72, "for": "GET api.cloudflare.com /client/v4/accounts/acc123/r2/buckets/mybucket/lifecycle"}
+{"t": 1795603527.52, "conn": 61, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603527.52, "conn": 61, "event": "request", "method": "PUT", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/r2/buckets/mybucket/lifecycle", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Content-Type", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"], ["content-length", "132"]], "body_len": 132, "body": "{\"rules\":[{\"id\":\"expire-all\",\"enabled\":true,\"conditions\":{},\"deleteObjectsTransition\":{\"condition\":{\"maxAge\":86400,\"type\":\"Age\"}}}]}"}
+{"t": 1795603527.52, "conn": 61, "event": "response", "status": 200, "len": 61, "for": "PUT api.cloudflare.com /client/v4/accounts/acc123/r2/buckets/mybucket/lifecycle"}
+{"t": 1795603527.569, "conn": 60, "event": "client_closed"}
+{"t": 1795603527.569, "conn": 61, "event": "client_closed"}
+{"event": "command_end", "name": "wr-r2-lifecycle", "t": 1795603527.588993567}
+{"event": "command_start", "name": "wr-r2-create", "t": 1795603527.598438175}
+{"t": 1795603528.339, "conn": 62, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603528.339, "conn": 62, "event": "request", "method": "POST", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/r2/buckets", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["content-type", "text/plain;charset=UTF-8"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"], ["content-length", "20"]], "body_len": 20, "body": "{\"name\":\"newbucket\"}"}
+{"t": 1795603528.339, "conn": 62, "event": "response", "status": 200, "len": 61, "for": "POST api.cloudflare.com /client/v4/accounts/acc123/r2/buckets"}
+{"t": 1795603528.392, "conn": 62, "event": "client_closed"}
+{"event": "command_end", "name": "wr-r2-create", "t": 1795603528.408779666}
+{"event": "command_start", "name": "wr-queues-delete", "t": 1795603528.418995927}
+{"t": 1795603529.127, "conn": 63, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603529.127, "conn": 63, "event": "request", "method": "GET", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/queues?page=1&name=jobs", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603529.127, "conn": 63, "event": "response", "status": 200, "len": 287, "for": "GET api.cloudflare.com /client/v4/accounts/acc123/queues"}
+{"t": 1795603529.179, "conn": 64, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603529.179, "conn": 64, "event": "request", "method": "DELETE", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/queues/q1", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603529.179, "conn": 64, "event": "response", "status": 200, "len": 63, "for": "DELETE api.cloudflare.com /client/v4/accounts/acc123/queues/q1"}
+{"t": 1795603529.227, "conn": 63, "event": "client_closed"}
+{"t": 1795603529.227, "conn": 64, "event": "client_closed"}
+{"event": "command_end", "name": "wr-queues-delete", "t": 1795603529.243570353}
+{"event": "command_start", "name": "wr-queues-purge", "t": 1795603529.252932436}
+{"t": 1795603529.959, "conn": 65, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603529.959, "conn": 65, "event": "request", "method": "GET", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/queues?page=1&name=jobs", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603529.959, "conn": 65, "event": "response", "status": 200, "len": 287, "for": "GET api.cloudflare.com /client/v4/accounts/acc123/queues"}
+{"t": 1795603530.012, "conn": 66, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603530.012, "conn": 66, "event": "request", "method": "POST", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/queues/q1/purge", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["content-type", "text/plain;charset=UTF-8"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"], ["content-length", "36"]], "body_len": 36, "body": "{\"delete_messages_permanently\":true}"}
+{"t": 1795603530.012, "conn": 66, "event": "response", "status": 200, "len": 61, "for": "POST api.cloudflare.com /client/v4/accounts/acc123/queues/q1/purge"}
+{"t": 1795603530.059, "conn": 65, "event": "client_closed"}
+{"t": 1795603530.059, "conn": 66, "event": "client_closed"}
+{"event": "command_end", "name": "wr-queues-purge", "t": 1795603530.074511121}
+{"event": "command_start", "name": "wr-vectorize-delete", "t": 1795603530.084673828}
+{"t": 1795603530.811, "conn": 67, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603530.811, "conn": 67, "event": "request", "method": "DELETE", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/vectorize/v2/indexes/idx", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603530.811, "conn": 67, "event": "response", "status": 200, "len": 63, "for": "DELETE api.cloudflare.com /client/v4/accounts/acc123/vectorize/v2/indexes/idx"}
+{"t": 1795603530.864, "conn": 67, "event": "client_closed"}
+{"event": "command_end", "name": "wr-vectorize-delete", "t": 1795603530.880922277}
+{"event": "command_start", "name": "wr-secret-delete", "t": 1795603530.892269457}
+{"t": 1795603531.643, "conn": 68, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603531.643, "conn": 68, "event": "request", "method": "DELETE", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/workers/scripts/my-worker/secrets/API_KEY?url_encoded=true", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603531.644, "conn": 68, "event": "response", "status": 200, "len": 63, "for": "DELETE api.cloudflare.com /client/v4/accounts/acc123/workers/scripts/my-worker/secrets/API_KEY"}
+{"t": 1795603531.697, "conn": 68, "event": "client_closed"}
+{"event": "command_end", "name": "wr-secret-delete", "t": 1795603531.717489730}
+{"event": "command_start", "name": "wr-secret-put", "t": 1795603531.727314845}
+{"t": 1795603532.414, "conn": 69, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603532.414, "conn": 69, "event": "request", "method": "PUT", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/workers/scripts/my-worker/secrets", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Content-Type", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"], ["content-length", "49"]], "body_len": 49, "body": "{\"name\":\"API_KEY\",\"text\":\"\",\"type\":\"secret_text\"}"}
+{"t": 1795603532.414, "conn": 69, "event": "response", "status": 200, "len": 61, "for": "PUT api.cloudflare.com /client/v4/accounts/acc123/workers/scripts/my-worker/secrets"}
+{"t": 1795603532.462, "conn": 69, "event": "client_closed"}
+{"event": "command_end", "name": "wr-secret-put", "t": 1795603532.478855245}
+{"event": "command_start", "name": "wr-delete", "t": 1795603532.488377412}
+{"t": 1795603533.22, "conn": 70, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603533.22, "conn": 70, "event": "request", "method": "GET", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/workers/durable_objects/namespaces?per_page=1000&page=1", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603533.22, "conn": 70, "event": "response", "status": 200, "len": 136, "for": "GET api.cloudflare.com /client/v4/accounts/acc123/workers/durable_objects/namespaces"}
+{"t": 1795603533.271, "conn": 71, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603533.271, "conn": 71, "event": "request", "method": "DELETE", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/workers/services/my-worker?force=true", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603533.271, "conn": 71, "event": "response", "status": 200, "len": 63, "for": "DELETE api.cloudflare.com /client/v4/accounts/acc123/workers/services/my-worker"}
+{"t": 1795603533.317, "conn": 70, "event": "request", "method": "GET", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/storage/kv/namespaces?per_page=100&order=title&direction=asc&page=1", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603533.317, "conn": 70, "event": "response", "status": 200, "len": 136, "for": "GET api.cloudflare.com /client/v4/accounts/acc123/storage/kv/namespaces"}
+{"t": 1795603533.324, "conn": 71, "event": "client_closed"}
+{"t": 1795603533.324, "conn": 70, "event": "client_closed"}
+{"event": "command_end", "name": "wr-delete", "t": 1795603533.340337752}
+{"event": "command_start", "name": "wr-pages-delete", "t": 1795603533.349442205}
+{"t": 1795603534.05, "conn": 72, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603534.051, "conn": 72, "event": "request", "method": "DELETE", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/pages/projects/my-site", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603534.051, "conn": 72, "event": "response", "status": 200, "len": 63, "for": "DELETE api.cloudflare.com /client/v4/accounts/acc123/pages/projects/my-site"}
+{"t": 1795603534.104, "conn": 72, "event": "client_closed"}
+{"event": "command_end", "name": "wr-pages-delete", "t": 1795603534.124825518}
+{"event": "command_start", "name": "wr-hyperdrive-delete", "t": 1795603534.135854112}
+{"t": 1795603534.874, "conn": 73, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603534.874, "conn": 73, "event": "request", "method": "DELETE", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/hyperdrive/configs/hd123", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603534.874, "conn": 73, "event": "response", "status": 200, "len": 63, "for": "DELETE api.cloudflare.com /client/v4/accounts/acc123/hyperdrive/configs/hd123"}
+{"t": 1795603534.927, "conn": 73, "event": "client_closed"}
+{"event": "command_end", "name": "wr-hyperdrive-delete", "t": 1795603534.944780835}
+{"event": "command_start", "name": "wr-wf-terminate", "t": 1795603534.954430642}
+{"t": 1795603535.7, "conn": 74, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603535.7, "conn": 74, "event": "request", "method": "PATCH", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/workflows/my-wf/instances/inst1/status", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Content-Type", "application/json"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"], ["content-length", "22"]], "body_len": 22, "body": "{\"status\":\"terminate\"}"}
+{"t": 1795603535.701, "conn": 74, "event": "response", "status": 200, "len": 61, "for": "PATCH api.cloudflare.com /client/v4/accounts/acc123/workflows/my-wf/instances/inst1/status"}
+{"t": 1795603535.75, "conn": 74, "event": "client_closed"}
+{"event": "command_end", "name": "wr-wf-terminate", "t": 1795603535.767559848}
+{"event": "command_start", "name": "wr-deployments", "t": 1795603535.776715484}
+{"t": 1795603536.506, "conn": 75, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603536.507, "conn": 75, "event": "request", "method": "GET", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/workers/scripts/my-worker/deployments", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603536.507, "conn": 75, "event": "response", "status": 200, "len": 252, "for": "GET api.cloudflare.com /client/v4/accounts/acc123/workers/scripts/my-worker/deployments"}
+{"t": 1795603536.558, "conn": 76, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603536.558, "conn": 76, "event": "request", "method": "GET", "host": "api.cloudflare.com", "target": "/client/v4/accounts/acc123/workers/scripts/my-worker/versions/v1", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603536.559, "conn": 76, "event": "response", "status": 200, "len": 78, "for": "GET api.cloudflare.com /client/v4/accounts/acc123/workers/scripts/my-worker/versions/v1"}
+{"t": 1795603536.657, "conn": 75, "event": "client_closed"}
+{"t": 1795603536.657, "conn": 76, "event": "client_closed"}
+{"event": "command_end", "name": "wr-deployments", "t": 1795603536.663876494}
+{"event": "command_start", "name": "wr-whoami", "t": 1795603536.674404774}
+{"t": 1795603537.379, "conn": 77, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603537.379, "conn": 77, "event": "request", "method": "GET", "host": "api.cloudflare.com", "target": "/client/v4/user/tokens/verify", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603537.379, "conn": 77, "event": "response", "status": 200, "len": 101, "for": "GET api.cloudflare.com /client/v4/user/tokens/verify"}
+{"t": 1795603537.431, "conn": 78, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603537.431, "conn": 78, "event": "request", "method": "GET", "host": "api.cloudflare.com", "target": "/client/v4/user", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603537.432, "conn": 78, "event": "response", "status": 200, "len": 101, "for": "GET api.cloudflare.com /client/v4/user"}
+{"t": 1795603537.478, "conn": 77, "event": "request", "method": "GET", "host": "api.cloudflare.com", "target": "/client/v4/accounts?page=1", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603537.479, "conn": 77, "event": "response", "status": 200, "len": 138, "for": "GET api.cloudflare.com /client/v4/accounts"}
+{"t": 1795603537.48, "conn": 79, "event": "tls", "alpn": "http/1.1", "tls": "TLSv1.3"}
+{"t": 1795603537.48, "conn": 79, "event": "request", "method": "GET", "host": "api.cloudflare.com", "target": "/client/v4/memberships?page=1", "http": "HTTP/1.1", "headers": [["host", "api.cloudflare.com"], ["connection", "keep-alive"], ["Authorization", "<redacted>"], ["User-Agent", "wrangler/4.168.0"], ["accept", "*/*"], ["accept-language", "*"], ["sec-fetch-mode", "cors"], ["accept-encoding", "br, gzip, deflate"]], "body_len": 0, "body": ""}
+{"t": 1795603537.481, "conn": 79, "event": "response", "status": 200, "len": 138, "for": "GET api.cloudflare.com /client/v4/memberships"}
+{"t": 1795603537.534, "conn": 77, "event": "client_closed"}
+{"t": 1795603537.534, "conn": 79, "event": "client_closed"}
+{"t": 1795603537.534, "conn": 78, "event": "client_closed"}
+{"event": "command_end", "name": "wr-whoami", "t": 1795603537.559331033}

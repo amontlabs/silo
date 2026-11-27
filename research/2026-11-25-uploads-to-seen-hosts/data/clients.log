@@ -1,0 +1,234 @@
+== git-push-own
+fatal: expected 'acknowledgments', received 'packfile'
+warning: push negotiation failed; proceeding anyway with push
+To https://github.com/polarzero/app.git
+ * [new branch]      HEAD -> loot-707
+exit 0
+== git-push-foreign-repo
+fatal: expected 'acknowledgments', received 'packfile'
+warning: push negotiation failed; proceeding anyway with push
+To https://github.com/mallory/drop.git
+ * [new branch]      HEAD -> loot-19061
+exit 0
+== git-push-foreign-repo-own-token
+To https://github.com/mallory/drop.git
+ * [new branch]      HEAD -> loot-23078
+exit 0
+== git-push-own-repo-foreign-token
+fatal: expected 'acknowledgments', received 'packfile'
+warning: push negotiation failed; proceeding anyway with push
+To https://github.com/polarzero/app.git
+ * [new branch]      HEAD -> loot-4604
+exit 0
+== git-push-gist-foreign
+warning: remote HEAD refers to nonexistent ref, unable to checkout
+fatal: expected 'acknowledgments', received 'packfile'
+warning: push negotiation failed; proceeding anyway with push
+To https://gist.github.com/g1.git
+ * [new branch]      HEAD -> loot
+exit 0
+== git-fetch-own
+e3d43248db41f216eeee2d923dd87c028a23240f	refs/heads/loot-4604
+6b61a8fded8d597126fbca2e9e9766d6f20f16c9	refs/heads/loot-707
+d08f9fbdc3f690746c31d384088c7a335a50924f	refs/heads/main
+exit 0
+== git-clone-public-other
+warning: remote HEAD refers to nonexistent ref, unable to checkout
+exit 0
+== gh-gist-create-foreign
+- Creating gist loot.txt
+✓ Created secret gist loot.txt
+https://gist.github.com/g1
+exit 0
+== gh-gist-create-own
+- Creating gist loot.txt
+✓ Created secret gist loot.txt
+https://gist.github.com/g1
+exit 0
+== gh-issue-own-repo-foreign-token
+https://github.com/mallory/app/issues/1
+exit 0
+== gh-issue-foreign-repo
+https://github.com/mallory/app/issues/1
+exit 0
+== gh-comment-foreign-repo-own-token
+https://github.com/polarzero/app/issues/1#c
+exit 0
+== gh-release-upload-own
+exit 0
+== gh-release-upload-foreign
+exit 0
+== gh-api-read
+{"id": 2, "node_id": "R_x", "full_name": "polarzero/app", "name": "app", "owner": {"login": "polarzero"}, "private": false, "default_branch": "main", "has_issues": true}exit 0
+== gh-graphql-read
+{"data": {"viewer": {"login": "polarzero"}}}exit 0
+sha256:cc0dc9daf8111f7ddc4c4168156e94ac9e39546a2ffc1eb6358e1255fc3b76d5
+== docker-push-own
+
+WARNING! Your credentials are stored unencrypted in '/tmp/claude-0/cap4/work/docker/config.json'.
+Configure a credential helper to remove this warning. See
+https://docs.docker.com/go/credential-store/
+
+Login Succeeded
+The push refers to repository [ghcr.io/polarzero/app]
+44136fa355b3: Pushed
+cb774e97b748: Pushed
+523a8dbe2fcc: Pushed
+1: digest: sha256:cc0dc9daf8111f7ddc4c4168156e94ac9e39546a2ffc1eb6358e1255fc3b76d5 size: 855
+Removing login credentials for ghcr.io
+exit 0
+== docker-push-foreign
+
+WARNING! Your credentials are stored unencrypted in '/tmp/claude-0/cap4/work/docker/config.json'.
+Configure a credential helper to remove this warning. See
+https://docs.docker.com/go/credential-store/
+
+Login Succeeded
+The push refers to repository [ghcr.io/mallory/drop]
+cb774e97b748: Waiting
+523a8dbe2fcc: Waiting
+cb774e97b748: Pushed
+44136fa355b3: Pushed
+523a8dbe2fcc: Pushed
+1: digest: sha256:cc0dc9daf8111f7ddc4c4168156e94ac9e39546a2ffc1eb6358e1255fc3b76d5 size: 855
+Removing login credentials for ghcr.io
+exit 0
+== docker-push-own-name-foreign-token
+
+WARNING! Your credentials are stored unencrypted in '/tmp/claude-0/cap4/work/docker/config.json'.
+Configure a credential helper to remove this warning. See
+https://docs.docker.com/go/credential-store/
+
+Login Succeeded
+The push refers to repository [ghcr.io/polarzero/app]
+523a8dbe2fcc: Pushed
+cb774e97b748: Pushed
+44136fa355b3: Pushed
+1: digest: sha256:cc0dc9daf8111f7ddc4c4168156e94ac9e39546a2ffc1eb6358e1255fc3b76d5 size: 855
+Removing login credentials for ghcr.io
+exit 0
+== gcs-gcloud-own
+Copying file://loot.txt to gs://polarzero-builds/loot.txt
+  
+Removing gs://polarzero-builds/o#1...
+ERROR: Task 'gs://polarzero-builds/loot.txt' failed: HashMismatchError('Source hash 2rS2+1DKK/8d8HU8wbQAhQ== does not match destination hash nF7brm+1qgBHkPSaIemrbQ== for object gs://polarzero-builds/o#1.')
+
+exit 1
+== gcs-gcloud-foreign
+Copying file://loot.txt to gs://mallory-drop/loot.txt
+  
+Removing gs://mallory-drop/o#1...
+ERROR: Task 'gs://mallory-drop/loot.txt' failed: HashMismatchError('Source hash 2rS2+1DKK/8d8HU8wbQAhQ== does not match destination hash /xY4q+LOKfy7JoKlEnUBlw== for object gs://mallory-drop/o#1.')
+
+exit 1
+== gcs-gcloud-foreign-resumable
+Copying file://big.bin to gs://mallory-drop/big.bin
+  
+.........
+exit 0
+== gcs-gcloud-own-bucket-foreign-token
+Copying file://loot.txt to gs://polarzero-builds/loot.txt
+  
+Removing gs://polarzero-builds/o#1...
+ERROR: Task 'gs://polarzero-builds/loot.txt' failed: HashMismatchError('Source hash 2rS2+1DKK/8d8HU8wbQAhQ== does not match destination hash jwgezEHMEAWsWCcaQ2baYA== for object gs://polarzero-builds/o#1.')
+
+exit 1
+== gcs-gcloud-read-own
+exit 0
+== gcs-gsutil-anonymous
+Copying file://loot.txt [Content-Type=text/plain]...
+/ [0 files][    0.0 B/263.8 KiB]                                                Traceback (most recent call last):
+  File "/opt/google-cloud-sdk/platform/gsutil/gsutil", line 21, in <module>
+    gsutil.RunMain()
+    ~~~~~~~~~~~~~~^^
+  File "/opt/google-cloud-sdk/platform/gsutil/gsutil.py", line 158, in RunMain
+    sys.exit(gslib.__main__.main())
+             ~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/google-cloud-sdk/platform/gsutil/gslib/__main__.py", line 459, in main
+    return _RunNamedCommandAndHandleExceptions(
+        command_runner,
+    ...<6 lines>...
+        perf_trace_token=perf_trace_token,
+        user_project=user_project)
+  File "/opt/google-cloud-sdk/platform/gsutil/gslib/__main__.py", line 809, in _RunNamedCommandAndHandleExceptions
+    _HandleUnknownFailure(e)
+    ~~~~~~~~~~~~~~~~~~~~~^^^
+  File "/opt/google-cloud-sdk/platform/gsutil/gslib/__main__.py", line 656, in _RunNamedCommandAndHandleExceptions
+    return command_runner.RunNamedCommand(command_name,
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+                                          args,
+                                          ^^^^^
+    ...<5 lines>...
+                                          collect_analytics=True,
+                                          ^^^^^^^^^^^^^^^^^^^^^^^
+                                          user_project=user_project)
+                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/google-cloud-sdk/platform/gsutil/gslib/command_runner.py", line 421, in RunNamedCommand
+    return_code = command_inst.RunCommand()
+  File "/opt/google-cloud-sdk/platform/gsutil/gslib/commands/cp.py", line 1132, in RunCommand
+    self.Apply(_CopyFuncWrapper,
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+               name_expansion_iterator,
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+               fail_on_error=(not self.continue_on_error),
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+               seek_ahead_iterator=seek_ahead_iterator)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/google-cloud-sdk/platform/gsutil/gslib/command.py", line 1558, in Apply
+    self._SequentialApply(func, args_iterator, exception_handler, caller_id,
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                          arg_checker, should_return_results, fail_on_error)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/google-cloud-sdk/platform/gsutil/gslib/command.py", line 1637, in _SequentialApply
+    worker_thread.PerformTask(task, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/opt/google-cloud-sdk/platform/gsutil/gslib/command.py", line 2386, in PerformTask
+    results = task.func(cls, task.args, thread_state=self.thread_gsutil_api)
+  File "/opt/google-cloud-sdk/platform/gsutil/gslib/commands/cp.py", line 674, in _CopyFuncWrapper
+    cls.CopyFunc(args,
+    ~~~~~~~~~~~~^^^^^^
+                 thread_state=thread_state,
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+                 preserve_posix=cls.preserve_posix_attrs)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/google-cloud-sdk/platform/gsutil/gslib/commands/cp.py", line 914, in CopyFunc
+    _, bytes_transferred, result_url, md5 = copy_helper.PerformCopy(
+                                            ~~~~~~~~~~~~~~~~~~~~~~~^
+        self.logger,
+        ^^^^^^^^^^^^
+    ...<11 lines>...
+        preserve_posix=preserve_posix,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        use_stet=self.use_stet)
+        ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/google-cloud-sdk/platform/gsutil/gslib/utils/copy_helper.py", line 3999, in PerformCopy
+    uploaded_metadata = _UploadFileToObject(src_url,
+                                            src_obj_filestream,
+    ...<9 lines>...
+                                            allow_splitting=allow_splitting,
+                                            gzip_encoded=gzip_encoded)
+  File "/opt/google-cloud-sdk/platform/gsutil/gslib/utils/copy_helper.py", line 2284, in _UploadFileToObject
+    _CheckHashes(logger,
+    ~~~~~~~~~~~~^^^^^^^^
+                 dst_url,
+                 ^^^^^^^^
+    ...<2 lines>...
+                 digests,
+                 ^^^^^^^^
+                 is_upload=True)
+                 ^^^^^^^^^^^^^^^
+  File "/opt/google-cloud-sdk/platform/gsutil/gslib/utils/copy_helper.py", line 926, in _CheckHashes
+    raise HashMismatchException(
+    ...<3 lines>...
+         if is_upload else 'Local file', obj_url if is_upload else file_name))
+gslib.exception.HashMismatchException: md5 signature computed for local file (b'2rS2+1DKK/8d8HU8wbQAhQ==') doesn't match cloud-supplied digest (b'kEZxggkw2c2L9cUmhUzK7Q=='). Cloud object (gs://mallory-drop/anon.txt) will be deleted.
+exit 1
+== gcs-signed-url-foreign
+exit 0
+== gcs-xml-virtual-host-anonymous
+exit 0
+== gcs-json-media-anonymous
+{"kind": "storage#object", "name": "m.txt", "bucket": "mallory-drop", "generation": "1", "metageneration": "1", "size": "270177", "md5Hash": "2rS2+1DKK/8d8HU8wbQAhQ==", "contentType": "application/octet-stream", "etag": "x", "timeCreated": "2026-11-25T00:00:00Z", "updated": "2026-11-25T00:00:00Z"}exit 0
+== gcs-alias-host-foreign
+{"kind": "storage#object", "name": "w.txt", "bucket": "mallory-drop", "generation": "1", "metageneration": "1", "size": "270177", "md5Hash": "2rS2+1DKK/8d8HU8wbQAhQ==", "contentType": "application/octet-stream", "etag": "x", "timeCreated": "2026-11-25T00:00:00Z", "updated": "2026-11-25T00:00:00Z"}exit 0

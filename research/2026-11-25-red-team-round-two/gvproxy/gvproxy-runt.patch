@@ -1,0 +1,27 @@
+--- a/pkg/tap/switch.go
++++ b/pkg/tap/switch.go
+@@ -37,6 +37,7 @@
+ type Switch struct {
+ 	Sent     uint64
+ 	Received uint64
++	Runts    uint64
+ 
+ 	debug bool
+ 
+@@ -291,6 +292,16 @@
+ }
+ 
+ func (e *Switch) rxBuf(_ context.Context, id int, buf []byte) {
++	// A frame shorter than an Ethernet header is dropped and counted. Without this, a frame of
++	// fewer than 6 bytes panics below while camLock is held, the deferred disconnect waits for that
++	// lock for ever, and the computer's link is dead with nothing logged; 6 to 13 bytes addressed to
++	// the gateway or to everyone end the process.
++	if len(buf) < header.EthernetMinimumSize {
++		if atomic.AddUint64(&e.Runts, 1) == 1 { // the first one only: a computer can send millions
++			log.Warnf("dropped a frame of %d bytes from connection %d, shorter than an Ethernet header", len(buf), id)
++		}
++		return
++	}
+ 	if e.debug {
+ 		packet := gopacket.NewPacket(buf, layers.LayerTypeEthernet, gopacket.Default)
+ 		log.Info(packet.String())

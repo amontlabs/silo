@@ -1,0 +1,10 @@
+Alerts, as they would have come:
+  18:53:56  Codex on c1 does not trust Silo's certificate for api.openai.com: nothing it sends there gets through.
+  18:54:01  Claude Code on c1 does not trust Silo's certificate for api.anthropic.com: nothing it sends there gets through.
+  18:54:12  a program (TLS client t13d5212h1_b262b3658495_8e6e362c5eac) on c1 does not trust Silo's certificate for api.anthropic.com: nothing it sends there gets through.
+  18:54:16  git on c1 does not trust Silo's certificate for api.anthropic.com: nothing it sends there gets through.
+The morning:
+  Codex on c1 did not trust Silo's certificate for api.openai.com: 47 refusals from 18:53 to 18:58, still refusing at the end. Give it Silo's authority (SSL_CERT_FILE or the system's store).
+  Claude Code on c1 did not trust Silo's certificate for api.anthropic.com: 18 refusals at 18:54, still refusing at the end. Give it Silo's authority (NODE_EXTRA_CA_CERTS).
+  a program (TLS client t13d5212h1_b262b3658495_8e6e362c5eac) on c1 did not trust Silo's certificate for api.anthropic.com: 1 refusal at 18:54, still refusing at the end. If it pins the host's own key, it cannot work through a host Silo reads.
+  git on c1 did not trust Silo's certificate for api.anthropic.com: 3 connections closed before any request at 18:54, still refusing at the end. Give it Silo's authority (GIT_SSL_CAINFO).

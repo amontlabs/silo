@@ -1,0 +1,549 @@
+#!/usr/bin/env python3
+"""A stand-in for silovm on Linux, with the CLI and events of swift/README.md, so the VM tests and
+lib/vm.sh run here (linux/test-vm-helpers.sh). No computer starts: a "computer" is a bundle folder
+whose state lives in fake-state.json, and linux/fake-bin/ssh answers for it once it is
+"provisioned". Nothing outside the bundles and $KIT_WORK_ROOT/fake-net is written.
+
+Scenarios, chosen by environment variables:
+  FAKE_SILOVM_REFUSE        validate | set | start | silent | none (default none): what happens when
+                            the provisioned user name is FAKE_SILOVM_HOST_USER (default: id -un).
+                            silent: no error, but SSH never answers (Setup Assistant shows).
+  FAKE_SILOVM_REFUSE_ALL    1: the refusal above applies to every user name.
+  FAKE_SILOVM_BOOT_SECONDS  seconds from start to SSH answering (default 2).
+  FAKE_SILOVM_CUTOFF        keeps | loses (default keeps): after a first start stopped before
+                            provisioning finished, does the next start still provision?
+  FAKE_SILOVM_NEW_IDENTITY  works | fails (default works): a clone made with --new-identity.
+  FAKE_SILOVM_FAIL_EVERY    N: every Nth start never provisions (SSH stays silent).
+  FAKE_SILOVM_IPSW_URL      the url ipsw-url prints (default a file:// url that does not exist).
+  FAKE_SILOVM_NO_API        1: host-check says provisioning_api false and provisioning is refused.
+  FAKE_SILOVM_REFUSE_RESTART 1: a start with provisioning after a cut-off first start is refused
+                            at the "start" stage.
+  FAKE_SILOVM_GUEST_IGNORES_STOP 1: request-stop and the first SIGTERM are ignored by the guest.
+"""
+import json
+import os
+import signal
+import socket
+import subprocess
+import sys
+import threading
+import time
+import uuid
+
+VERSION = "0.1.0-fake"
+RUN_FILES = {"ctl.sock", "net.sock", "run.jsonl", "run.log", "run.pid"}
+
+
+def work_root():
+    return os.environ.get("KIT_WORK_ROOT") or os.path.expanduser("~/SiloKit")
+
+
+def net_dir():
+    d = os.path.join(work_root(), "fake-net")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def out(obj):
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+
+def err(msg):
+    sys.stderr.write("silovm(fake): %s\n" % msg)
+    sys.stderr.flush()
+
+
+def fail(msg, code=1):
+    err(msg)
+    out({"ok": False, "domain": "silovm", "code": 0, "name": None, "message": msg})
+    sys.exit(code)
+
+
+def parse(argv, valued, flags):
+    opts, pos = {}, []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a.startswith("--") and len(a) > 2:
+            name, eq, val = a[2:].partition("=")
+            if name in valued:
+                if not eq:
+                    if i + 1 >= len(argv):
+                        fail("--%s needs a value" % name, 2)
+                    i += 1
+                    val = argv[i]
+                opts.setdefault(name, []).append(val)
+            elif name in flags:
+                opts[name] = [True]
+            else:
+                fail("unknown option --%s" % name, 2)
+        else:
+            pos.append(a)
+        i += 1
+    return opts, pos
+
+
+def one(opts, name, default=None):
+    v = opts.get(name)
+    return v[-1] if v else default
+
+
+def need(opts, name):
+    v = one(opts, name)
+    if v is None:
+        fail("--%s is required" % name, 2)
+    return os.path.abspath(os.path.expanduser(v))
+
+
+def rand_mac():
+    b = bytearray(os.urandom(6))
+    b[0] = (b[0] | 0x02) & 0xFE
+    return ":".join("%02x" % x for x in b)
+
+
+def load_state(bundle):
+    try:
+        with open(os.path.join(bundle, "fake-state.json")) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {"first_boot_started": False, "provisioned_user": None, "identity": "original"}
+
+
+def save_state(bundle, st):
+    tmp = os.path.join(bundle, "fake-state.json.tmp")
+    with open(tmp, "w") as f:
+        json.dump(st, f)
+    os.replace(tmp, os.path.join(bundle, "fake-state.json"))
+
+
+def load_config(bundle):
+    try:
+        with open(os.path.join(bundle, "config.json")) as f:
+            return json.load(f)
+    except (OSError, ValueError) as e:
+        fail("cannot read %s/config.json: %s" % (bundle, e))
+
+
+def fake_ip(mac):
+    return "192.168.64.%d" % (2 + int(mac.replace(":", ""), 16) % 250)
+
+
+def host_user():
+    u = os.environ.get("FAKE_SILOVM_HOST_USER")
+    if u:
+        return u
+    return subprocess.run(["id", "-un"], capture_output=True, text=True).stdout.strip()
+
+
+# ---------------------------------------------------------------- commands
+
+def cmd_host_check(argv):
+    api = os.environ.get("FAKE_SILOVM_NO_API") != "1"
+    out({"macos": "27.2.0", "build": "27C100", "chip": "Apple M4 (fake)", "virtualization_supported": True,
+         "provisioning_api": api, "provisioning_in_sdk": api, "max_cpus": 10, "max_memory_gb": 32,
+         "silovm": VERSION, "arch": "arm64"})
+
+
+def cmd_ipsw_url(argv):
+    url = os.environ.get("FAKE_SILOVM_IPSW_URL", "file:///nonexistent/UniversalMac_27.2_27C100_Restore.ipsw")
+    out({"url": url, "build": "27C100", "os_version": "27.2.0"})
+
+
+def cmd_install(argv):
+    opts, _ = parse(argv, {"ipsw", "out", "disk-gb", "cpus", "memory-gb", "disk-format"}, set())
+    ipsw, dst = need(opts, "ipsw"), need(opts, "out")
+    fmt = one(opts, "disk-format", "raw")
+    if fmt not in ("raw", "asif"):
+        fail("--disk-format must be raw or asif", 2)
+    if not os.path.isfile(ipsw):
+        fail("no restore image at %s" % ipsw)
+    if os.path.exists(dst):
+        fail("%s exists; delete it first" % dst)
+    t0 = time.time()
+    part = dst + ".partial"
+    os.makedirs(part, exist_ok=True)
+    for pct in (0, 25, 50, 75, 100):
+        err("install %d%%" % pct)
+        time.sleep(0.1)
+    with open(os.path.join(part, "disk.img"), "wb") as f:
+        f.truncate(int(one(opts, "disk-gb", "80")) << 20)  # MiB here: a fake
+    for name in ("aux.img", "hardware-model.bin", "machine-id.bin"):
+        with open(os.path.join(part, name), "wb") as f:
+            f.write(uuid.uuid4().bytes)
+    with open(os.path.join(part, "config.json"), "w") as f:
+        json.dump({"mac": rand_mac(), "cpus": int(one(opts, "cpus", "4")), "memory_gb": int(one(opts, "memory-gb", "8")),
+                   "disk_format": fmt}, f)
+    os.rename(part, dst)
+    out({"ok": True, "bundle": dst, "os_version": "27.2.0", "build": "27C100", "disk_format": fmt,
+         "disk_gb": int(one(opts, "disk-gb", "80")), "install_seconds": time.time() - t0, "total_seconds": time.time() - t0})
+
+
+def cmd_clone(argv):
+    opts, _ = parse(argv, {"from", "to"}, {"new-identity"})
+    src, dst = need(opts, "from"), need(opts, "to")
+    if not os.path.isdir(src):
+        fail("no bundle at %s" % src)
+    if os.path.exists(dst):
+        fail("%s exists; delete it first" % dst)
+    t0 = time.time()
+    os.makedirs(dst)
+    for name in sorted(os.listdir(src)):
+        if name in RUN_FILES or name == "fake-state.json":
+            continue
+        r = subprocess.run(["cp", "--reflink=auto", os.path.join(src, name), os.path.join(dst, name)])
+        if r.returncode != 0:
+            fail("copy of %s failed" % name)
+    st = load_state(src)
+    st["identity"] = "original"
+    if "new-identity" in opts:
+        cfg = load_config(dst)
+        cfg["mac"] = rand_mac()
+        with open(os.path.join(dst, "config.json"), "w") as f:
+            json.dump(cfg, f)
+        with open(os.path.join(dst, "machine-id.bin"), "wb") as f:
+            f.write(uuid.uuid4().bytes)
+        st["identity"] = "new"
+    save_state(dst, st)
+    out({"ok": True, "to": dst, "new_identity": "new-identity" in opts, "mac": load_config(dst)["mac"],
+         "seconds": time.time() - t0})
+
+
+def cmd_ip(argv):
+    opts, _ = parse(argv, {"bundle", "wait"}, set())
+    b = need(opts, "bundle")
+    cfg = load_config(b)
+    deadline = time.time() + float(one(opts, "wait", "0"))
+    while True:
+        st = load_state(b)
+        if st.get("network_up"):
+            ip = fake_ip(cfg["mac"])
+            with open(os.path.join(net_dir(), ip), "w") as f:
+                f.write(b)
+            print(ip)
+            return 0
+        if time.time() >= deadline:
+            break
+        time.sleep(0.5)
+    err("no lease for %s after %s s" % (cfg["mac"], one(opts, "wait", "0")))
+    return 1
+
+
+def cmd_ctl(argv):
+    opts, pos = parse(argv, {"bundle", "timeout"}, set())
+    b = need(opts, "bundle")
+    if not pos:
+        fail("ctl needs a command", 2)
+    req = {"cmd": pos[0]}
+    if pos[0] == "screenshot":
+        if len(pos) < 2:
+            fail("ctl screenshot needs a PATH", 2)
+        req["path"] = os.path.abspath(pos[1])
+    path = os.path.join(b, "ctl.sock")
+    if not os.path.exists(path):
+        out({"ok": False, "error": "not running: no %s" % path})
+        return 1
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(float(one(opts, "timeout", "60")))
+    s.connect(path)
+    s.sendall((json.dumps(req) + "\n").encode())
+    data = b""
+    while not data.endswith(b"\n"):
+        chunk = s.recv(4096)
+        if not chunk:
+            break
+        data += chunk
+    line = data.decode().strip()
+    print(line)
+    try:
+        return 0 if json.loads(line).get("ok") else 1
+    except ValueError:
+        return 1
+
+
+class Run:
+    def __init__(self, bundle, opts):
+        self.bundle = bundle
+        self.opts = opts
+        self.done = threading.Event()
+        self.lock = threading.Lock()
+        self.how = None
+        self.error = None
+        self.code = 0
+        self.stop_requested = False
+        self.state = "stopped"
+        self.started_t = None
+        self.provisioned = False
+
+    def emit(self, event, **fields):
+        d = {"event": event}
+        d.update(fields)
+        out(d)
+
+    def finish(self, how, error=None, code=0):
+        with self.lock:
+            if self.how is not None:
+                return
+            self.how, self.error, self.code = how, error, code
+        st = load_state(self.bundle)
+        st["network_up"] = False
+        save_state(self.bundle, st)
+        self.done.set()
+
+    def set_state(self, v):
+        self.state = v
+        self.emit("state", value=v, t=time.time())
+
+    def request_stop(self, delay=0.5):
+        self.stop_requested = True
+        t = threading.Timer(delay, lambda: self.finish("requested"))
+        t.daemon = True
+        t.start()
+
+    def serve_ctl(self):
+        path = os.path.join(self.bundle, "ctl.sock")
+        if os.path.exists(path):
+            os.unlink(path)
+        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        srv.bind(path)
+        srv.listen(8)
+        self.ctl_path = path
+
+        def loop():
+            while not self.done.is_set():
+                try:
+                    c, _ = srv.accept()
+                except OSError:
+                    return
+                threading.Thread(target=self.handle, args=(c,), daemon=True).start()
+        threading.Thread(target=loop, daemon=True).start()
+        self.srv = srv
+
+    def handle(self, c):
+        data = b""
+        while not data.endswith(b"\n"):
+            chunk = c.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        try:
+            req = json.loads(data.decode())
+        except ValueError:
+            req = {}
+        cmd = req.get("cmd")
+        stop_after = None
+        if cmd == "state":
+            resp = {"ok": True, "state": self.state, "provisioned": self.provisioned, "started_t": self.started_t,
+                    "can_request_stop": self.state == "running"}
+        elif cmd == "request-stop":
+            if self.state != "running":
+                resp = {"ok": False, "domain": "VZErrorDomain", "code": 3, "name": "invalidVirtualMachineState",
+                        "message": "cannot request a stop in state %s" % self.state}
+            elif os.environ.get("FAKE_SILOVM_GUEST_IGNORES_STOP") == "1":
+                self.stop_requested = True
+                resp = {"ok": True}
+            else:
+                self.request_stop()
+                resp = {"ok": True}
+        elif cmd == "stop":
+            resp = {"ok": True}
+            stop_after = "forced"
+        elif cmd in ("pause", "resume"):
+            self.set_state("paused" if cmd == "pause" else "running")
+            resp = {"ok": True}
+        elif cmd == "screenshot":
+            if "gui" not in self.opts:
+                resp = {"ok": False, "domain": "silovm", "code": 0, "name": None, "message": "screenshot needs silovm run --gui"}
+            else:
+                with open(req["path"], "wb") as f:
+                    f.write(b"\x89PNG\r\n\x1a\n")
+                resp = {"ok": True, "path": req["path"], "width": 1920, "height": 1200, "uniform": False}
+        else:
+            resp = {"ok": False, "error": "unknown command %s" % cmd}
+        c.sendall((json.dumps(resp) + "\n").encode())
+        c.close()
+        if stop_after:
+            self.finish(stop_after)
+
+    def provisioning_fail(self, stage, name, code, message):
+        self.emit("provisioning", stage=stage, ok=False, domain="VZErrorDomain", code=code, name=name, message=message)
+        err("provisioning refused at %s: %s" % (stage, message))
+        if "continue-on-provisioning-error" in self.opts:
+            return True
+        self.emit("stopped", how="error", error="provisioning refused at %s: VZErrorDomain %d %s: %s" % (stage, code, name, message),
+                  t=time.time())
+        self.cleanup()
+        sys.exit(3)
+
+    def cleanup(self):
+        p = os.path.join(self.bundle, "ctl.sock")
+        if os.path.exists(p):
+            os.unlink(p)
+
+    def main(self):
+        cfg = load_config(self.bundle)
+        st = load_state(self.bundle)
+        net = one(self.opts, "net", "nat")
+        user = one(self.opts, "provision-user")
+        api = os.environ.get("FAKE_SILOVM_NO_API") != "1"
+        mtu = one(self.opts, "mtu")
+        self.emit("config", mac=cfg["mac"], cpus=cfg["cpus"], memory_gb=cfg["memory_gb"], net=net,
+                  mtu=int(mtu) if mtu else None,
+                  disk_cache=one(self.opts, "disk-cache", "automatic"), disk_sync=one(self.opts, "disk-sync", "full"),
+                  disk_format=cfg.get("disk_format", "raw"), extra_disks=len(self.opts.get("extra-disk", [])),
+                  gui="gui" in self.opts, disk_nbd=one(self.opts, "disk-nbd"), provision_user=user, provisioning_api=api)
+        self.serve_ctl()
+        signal.signal(signal.SIGTERM, self.on_signal)
+        signal.signal(signal.SIGINT, self.on_signal)
+
+        if st.get("identity") == "new" and os.environ.get("FAKE_SILOVM_NEW_IDENTITY") == "fails":
+            self.emit("stopped", how="error", error="VZErrorDomain 1 internalError: The virtual machine failed to start.",
+                      error_domain="VZErrorDomain", error_code=1, error_name="internalError", t=time.time())
+            self.cleanup()
+            return 1
+
+        will_provision = False
+        silent = False
+        if user is not None:
+            refuse = os.environ.get("FAKE_SILOVM_REFUSE", "none")
+            applies = os.environ.get("FAKE_SILOVM_REFUSE_ALL") == "1" or user == host_user()
+            msg = "Provisioning was failed due to user name '%s' is not valid." % user
+            if not api:
+                self.provisioning_fail("validate", None, 0, "guest provisioning needs macOS 27 or later on this Mac")
+            elif applies and refuse == "validate":
+                self.provisioning_fail("validate", "guestProvisioningInvalidUsername", 40002, msg)
+            else:
+                self.emit("provisioning", stage="validate", ok=True)
+                if applies and refuse == "set":
+                    self.provisioning_fail("set", "guestProvisioningInvalidUsername", 40002, msg)
+                else:
+                    self.emit("provisioning", stage="set", ok=True)
+                    if applies and refuse == "start":
+                        self.provisioning_fail("start", "guestProvisioningInvalidUsername", 40002, msg)
+                    else:
+                        will_provision = True
+                        silent = applies and refuse == "silent"
+
+        # How many starts this kit's fake has seen, for FAKE_SILOVM_FAIL_EVERY.
+        counter = os.path.join(net_dir(), "starts")
+        n = 1
+        try:
+            with open(counter) as f:
+                n = int(f.read().strip() or 0) + 1
+        except (OSError, ValueError):
+            n = 1
+        with open(counter, "w") as f:
+            f.write(str(n))
+        every = int(os.environ.get("FAKE_SILOVM_FAIL_EVERY", "0") or 0)
+        if every and n % every == 0:
+            silent = True
+
+        # Apple: "macOS only evaluates these options on the first boot after restore."
+        if will_provision and st.get("first_boot_started") and not st.get("provisioned_user") \
+                and os.environ.get("FAKE_SILOVM_REFUSE_RESTART") == "1":
+            self.provisioning_fail("start", "internalError", 1, "The guest was already started once.")
+            will_provision = False
+        if will_provision and st.get("first_boot_started") and not st.get("provisioned_user"):
+            if os.environ.get("FAKE_SILOVM_CUTOFF", "keeps") == "loses":
+                silent = True
+        if will_provision and st.get("provisioned_user"):
+            will_provision = False  # already provisioned: the options are ignored
+
+        self.set_state("starting")
+        time.sleep(0.2)
+        if will_provision:
+            self.provisioned = True
+            self.emit("provisioning", stage="start", ok=True)
+        st["first_boot_started"] = True
+        st["network_up"] = net != "none"
+        save_state(self.bundle, st)
+        self.started_t = time.time()
+        self.emit("started", t=self.started_t, provisioned=will_provision)
+        nbd = one(self.opts, "disk-nbd")
+        if nbd is not None:
+            # The NBD client connects when the machine starts: one handshake and one read, through
+            # the kit's own client (py/nbdserve.py probe).
+            kit = os.environ.get("KIT_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            pr = subprocess.run([sys.executable, "-I", os.path.join(kit, "py", "nbdserve.py"), "probe", nbd],
+                                capture_output=True, text=True)
+            if pr.returncode == 0:
+                self.emit("nbd", state="connected", connections=1, t=time.time())
+            else:
+                self.emit("nbd", state="error", domain="VZErrorDomain", code=20001,
+                          name="networkBlockDeviceNegotiationFailed", message=(pr.stdout + pr.stderr).strip()[:300],
+                          t=time.time())
+        self.set_state("running")
+
+        boot = float(os.environ.get("FAKE_SILOVM_BOOT_SECONDS", "2"))
+
+        def provision_done():
+            if self.done.is_set() or not will_provision or silent:
+                return
+            s2 = load_state(self.bundle)
+            s2["provisioned_user"] = user
+            save_state(self.bundle, s2)
+        t = threading.Timer(boot, provision_done)
+        t.daemon = True
+        t.start()
+
+        ms = one(self.opts, "max-seconds")
+        if ms is not None:
+            t = threading.Timer(float(ms), lambda: self.finish("max-seconds"))
+            t.daemon = True
+            t.start()
+
+        self.done.wait()
+        self.emit("stopped", how=self.how, t=time.time(), **({"error": self.error} if self.error else {}))
+        self.srv.close()
+        self.cleanup()
+        return self.code
+
+    def on_signal(self, signum, frame):
+        if self.stop_requested:
+            self.finish("forced")
+        elif os.environ.get("FAKE_SILOVM_GUEST_IGNORES_STOP") == "1":
+            self.stop_requested = True
+        else:
+            self.request_stop()
+
+
+def cmd_run(argv):
+    opts, _ = parse(argv, {"bundle", "provision-user", "provision-password", "provision-full-name", "net", "disk-cache",
+                           "disk-sync", "extra-disk", "max-seconds", "mtu", "disk-nbd", "nbd-timeout"},
+                    {"no-autologin", "no-ssh", "gui", "continue-on-provisioning-error"})
+    b = need(opts, "bundle")
+    if not os.path.isdir(b):
+        fail("no bundle at %s" % b)
+    mtu = one(opts, "mtu")
+    if mtu is not None:
+        if not mtu.isdigit() or not 1500 <= int(mtu) <= 65535:
+            fail("--mtu must be between 1500 and 65535, got %s" % mtu)
+        if not one(opts, "net", "nat").startswith("vfkit:"):
+            fail("--mtu applies only to --net vfkit:SOCKETPATH")
+    nbd = one(opts, "disk-nbd")
+    if nbd is not None and not nbd.startswith("nbd"):
+        fail("--disk-nbd needs an NBD URL (nbd://host:port/export or nbd+unix:///export?socket=PATH), got %s" % nbd)
+    if one(opts, "nbd-timeout") is not None and nbd is None:
+        fail("--nbd-timeout applies only to --disk-nbd URL")
+    if one(opts, "provision-user") is not None and one(opts, "provision-password") is None:
+        fail("--provision-password is required", 2)
+    return Run(b, opts).main()
+
+
+def main():
+    if len(sys.argv) < 2:
+        err("usage: silovm COMMAND ...")
+        return 2
+    cmd, rest = sys.argv[1], sys.argv[2:]
+    if cmd == "version":
+        out({"silovm": VERSION})
+        return 0
+    table = {"host-check": cmd_host_check, "ipsw-url": cmd_ipsw_url, "install": cmd_install, "clone": cmd_clone,
+             "run": cmd_run, "ctl": cmd_ctl, "ip": cmd_ip}
+    if cmd not in table:
+        fail("unknown command %s" % cmd, 2)
+    return table[cmd](rest) or 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

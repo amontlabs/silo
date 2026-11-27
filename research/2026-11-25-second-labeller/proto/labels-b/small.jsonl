@@ -1,0 +1,217 @@
+{"id": "supabase PATCH /v1/branches/{branch_id_or_ref}", "label": "either", "named": false, "why": "branch settings; effect depends on fields"}
+{"id": "supabase DELETE /v1/branches/{branch_id_or_ref}", "label": "hold:recoverable", "named": false, "why": "deletion scheduled; restore endpoint exists"}
+{"id": "supabase POST /v1/branches/{branch_id_or_ref}/merge", "label": "deploy", "named": false, "why": "ships branch migrations to production"}
+{"id": "supabase POST /v1/branches/{branch_id_or_ref}/push", "label": "deploy", "named": false, "why": "applies migrations to branch"}
+{"id": "supabase POST /v1/branches/{branch_id_or_ref}/reset", "label": "hold:gone", "named": false, "why": "wipes branch database data"}
+{"id": "supabase POST /v1/branches/{branch_id_or_ref}/restore", "label": "allow", "named": false, "why": "undoes scheduled deletion"}
+{"id": "supabase POST /v1/oauth/revoke", "label": "hold:outage", "named": false, "why": "integration loses tokens until reauthorized"}
+{"id": "supabase POST /v1/oauth/token", "label": "allow", "named": true, "why": "issues access and refresh tokens"}
+{"id": "supabase POST /v1/organizations", "label": "allow", "named": false, "why": ""}
+{"id": "supabase POST /v1/organizations/{slug}/project-claim/{token}", "label": "allow", "named": false, "why": "brings a project into owner org"}
+{"id": "supabase POST /v1/projects", "label": "allow", "named": false, "why": "new project"}
+{"id": "supabase DELETE /v1/projects/{ref}", "label": "hold:gone", "named": false, "why": "project and database deleted"}
+{"id": "supabase PATCH /v1/projects/{ref}", "label": "allow", "named": false, "why": "name change"}
+{"id": "supabase PATCH /v1/projects/{ref}/actions/{run_id}/status", "label": "allow", "named": false, "why": ""}
+{"id": "supabase POST /v1/projects/{ref}/analytics/endpoints/logs", "label": "allow", "named": false, "why": "reads logs"}
+{"id": "supabase POST /v1/projects/{ref}/api-keys", "label": "allow", "named": true, "why": "new API key"}
+{"id": "supabase PUT /v1/projects/{ref}/api-keys/legacy", "label": "either", "named": false, "why": "disabling breaks clients; re-enable harmless"}
+{"id": "supabase PATCH /v1/projects/{ref}/api-keys/{id}", "label": "allow", "named": false, "why": "key metadata"}
+{"id": "supabase DELETE /v1/projects/{ref}/api-keys/{id}", "label": "hold:outage", "named": false, "why": "clients using key fail"}
+{"id": "supabase PATCH /v1/projects/{ref}/billing/addons", "label": "hold:money", "named": false, "why": "paid addons or bigger compute"}
+{"id": "supabase DELETE /v1/projects/{ref}/billing/addons/{addon_variant}", "label": "hold:outage", "named": false, "why": "removes IPv4, PITR, domain or compute"}
+{"id": "supabase POST /v1/projects/{ref}/branches", "label": "allow", "named": false, "why": "new preview branch"}
+{"id": "supabase DELETE /v1/projects/{ref}/branches", "label": "hold:gone", "named": false, "why": "deletes all preview branches"}
+{"id": "supabase POST /v1/projects/{ref}/claim-token", "label": "allow", "named": true, "why": "token lets another org take project"}
+{"id": "supabase DELETE /v1/projects/{ref}/claim-token", "label": "allow", "named": false, "why": ""}
+{"id": "supabase POST /v1/projects/{ref}/cli/login-role", "label": "allow", "named": true, "why": "database credential issued"}
+{"id": "supabase DELETE /v1/projects/{ref}/cli/login-role", "label": "allow", "named": false, "why": "CLI recreates them"}
+{"id": "supabase PATCH /v1/projects/{ref}/config/auth", "label": "either", "named": false, "why": "auth settings; can break sign-in"}
+{"id": "supabase POST /v1/projects/{ref}/config/auth/signing-keys", "label": "allow", "named": false, "why": "standby key, not used"}
+{"id": "supabase POST /v1/projects/{ref}/config/auth/signing-keys/legacy", "label": "allow", "named": false, "why": "same secret, no behaviour change"}
+{"id": "supabase DELETE /v1/projects/{ref}/config/auth/signing-keys/{id}", "label": "allow", "named": false, "why": "only already revoked keys"}
+{"id": "supabase PATCH /v1/projects/{ref}/config/auth/signing-keys/{id}", "label": "either", "named": false, "why": "revoking in-use key logs everyone out"}
+{"id": "supabase POST /v1/projects/{ref}/config/auth/sso/providers", "label": "allow", "named": true, "why": "outside identity provider can log in"}
+{"id": "supabase PUT /v1/projects/{ref}/config/auth/sso/providers/{provider_id}", "label": "either", "named": false, "why": "can repoint or break SSO"}
+{"id": "supabase DELETE /v1/projects/{ref}/config/auth/sso/providers/{provider_id}", "label": "hold:outage", "named": false, "why": "SSO users cannot sign in"}
+{"id": "supabase POST /v1/projects/{ref}/config/auth/third-party-auth", "label": "allow", "named": true, "why": "outside issuer's tokens accepted"}
+{"id": "supabase DELETE /v1/projects/{ref}/config/auth/third-party-auth/{tpa_id}", "label": "hold:outage", "named": false, "why": "third-party sign-ins rejected"}
+{"id": "supabase PATCH /v1/projects/{ref}/config/database/pooler", "label": "either", "named": false, "why": "pooler settings may break connections"}
+{"id": "supabase PUT /v1/projects/{ref}/config/database/postgres", "label": "either", "named": false, "why": "Postgres settings may break database"}
+{"id": "supabase PATCH /v1/projects/{ref}/config/database/postgres", "label": "either", "named": false, "why": "Postgres settings may break database"}
+{"id": "supabase POST /v1/projects/{ref}/config/disk", "label": "hold:money", "named": false, "why": "bigger disk, cannot shrink"}
+{"id": "supabase PATCH /v1/projects/{ref}/config/realtime", "label": "either", "named": false, "why": ""}
+{"id": "supabase POST /v1/projects/{ref}/config/realtime/shutdown", "label": "allow", "named": false, "why": "clients reconnect on their own"}
+{"id": "supabase PATCH /v1/projects/{ref}/config/storage", "label": "either", "named": false, "why": "storage limits and features"}
+{"id": "supabase DELETE /v1/projects/{ref}/custom-hostname", "label": "hold:outage", "named": false, "why": "custom domain stops serving"}
+{"id": "supabase POST /v1/projects/{ref}/custom-hostname/activate", "label": "allow", "named": false, "why": "switches to configured domain"}
+{"id": "supabase POST /v1/projects/{ref}/custom-hostname/initialize", "label": "allow", "named": false, "why": ""}
+{"id": "supabase POST /v1/projects/{ref}/custom-hostname/reverify", "label": "allow", "named": false, "why": ""}
+{"id": "supabase POST /v1/projects/{ref}/database/backups/restore", "label": "hold:gone", "named": false, "why": "overwrites data since backup"}
+{"id": "supabase POST /v1/projects/{ref}/database/backups/restore-pitr", "label": "hold:gone", "named": false, "why": "overwrites data since that point"}
+{"id": "supabase POST /v1/projects/{ref}/database/backups/restore-point", "label": "allow", "named": false, "why": ""}
+{"id": "supabase PATCH /v1/projects/{ref}/database/backups/schedule", "label": "allow", "named": false, "why": ""}
+{"id": "supabase POST /v1/projects/{ref}/database/backups/undo", "label": "hold:gone", "named": false, "why": "data after restore point lost"}
+{"id": "supabase POST /v1/projects/{ref}/database/jit", "label": "allow", "named": true, "why": "grants user database role"}
+{"id": "supabase PUT /v1/projects/{ref}/database/jit", "label": "either", "named": true, "why": "can widen a user's roles"}
+{"id": "supabase POST /v1/projects/{ref}/database/jit/invite", "label": "allow", "named": true, "why": "external user invited"}
+{"id": "supabase POST /v1/projects/{ref}/database/jit/invite/accept", "label": "allow", "named": false, "why": "accepts access for caller"}
+{"id": "supabase DELETE /v1/projects/{ref}/database/jit/invite/{invite_id}", "label": "allow", "named": false, "why": ""}
+{"id": "supabase DELETE /v1/projects/{ref}/database/jit/{user_id}", "label": "allow", "named": false, "why": "revokes access; can re-grant"}
+{"id": "supabase POST /v1/projects/{ref}/database/migrations #1", "label": "hold:gone", "named": false, "why": "drops column data"}
+{"id": "supabase POST /v1/projects/{ref}/database/migrations #2", "label": "allow", "named": false, "why": "creates table"}
+{"id": "supabase PUT /v1/projects/{ref}/database/migrations", "label": "allow", "named": false, "why": "history entry only"}
+{"id": "supabase DELETE /v1/projects/{ref}/database/migrations", "label": "hold:gone", "named": false, "why": "reverts schema, drops objects"}
+{"id": "supabase PATCH /v1/projects/{ref}/database/migrations/{version}", "label": "allow", "named": false, "why": "history metadata"}
+{"id": "supabase PATCH /v1/projects/{ref}/database/password", "label": "hold:outage", "named": false, "why": "apps with old password fail"}
+{"id": "supabase POST /v1/projects/{ref}/database/query #1", "label": "hold:gone", "named": false, "why": "drops table"}
+{"id": "supabase POST /v1/projects/{ref}/database/query #2", "label": "allow", "named": false, "why": "read query"}
+{"id": "supabase POST /v1/projects/{ref}/database/query/read-only", "label": "allow", "named": false, "why": "read only"}
+{"id": "supabase POST /v1/projects/{ref}/database/webhooks/enable", "label": "allow", "named": false, "why": "feature enabled, no destination"}
+{"id": "supabase POST /v1/projects/{ref}/functions", "label": "deploy", "named": false, "why": "uploads and runs new code"}
+{"id": "supabase PUT /v1/projects/{ref}/functions", "label": "deploy", "named": false, "why": "changes running functions"}
+{"id": "supabase DELETE /v1/projects/{ref}/functions", "label": "hold:outage", "named": false, "why": "all functions stop; source elsewhere"}
+{"id": "supabase POST /v1/projects/{ref}/functions/deploy", "label": "deploy", "named": false, "why": ""}
+{"id": "supabase PATCH /v1/projects/{ref}/functions/{function_slug}", "label": "deploy", "named": false, "why": "new code or settings"}
+{"id": "supabase DELETE /v1/projects/{ref}/functions/{function_slug}", "label": "hold:outage", "named": false, "why": "endpoint stops; source elsewhere"}
+{"id": "supabase PUT /v1/projects/{ref}/jit-access", "label": "either", "named": false, "why": "temporary access settings"}
+{"id": "supabase DELETE /v1/projects/{ref}/network-bans", "label": "allow", "named": false, "why": "lifts automatic IP bans"}
+{"id": "supabase POST /v1/projects/{ref}/network-bans/retrieve", "label": "allow", "named": false, "why": "read"}
+{"id": "supabase POST /v1/projects/{ref}/network-bans/retrieve/enriched", "label": "allow", "named": false, "why": "read"}
+{"id": "supabase PATCH /v1/projects/{ref}/network-restrictions", "label": "either", "named": true, "why": "can widen or block allow-list"}
+{"id": "supabase POST /v1/projects/{ref}/network-restrictions/apply", "label": "either", "named": true, "why": "replaces allow-list"}
+{"id": "supabase POST /v1/projects/{ref}/network-restrictions/review", "label": "either", "named": true, "why": "approves pending allow-list change"}
+{"id": "supabase POST /v1/projects/{ref}/pause", "label": "hold:outage", "named": false, "why": "project stops serving"}
+{"id": "supabase PUT /v1/projects/{ref}/pgsodium", "label": "hold:gone", "named": false, "why": "old encrypted data unreadable"}
+{"id": "supabase PATCH /v1/projects/{ref}/postgrest", "label": "either", "named": false, "why": "can expose schemas or break API"}
+{"id": "supabase POST /v1/projects/{ref}/read-replicas/remove", "label": "hold:outage", "named": false, "why": "replica traffic fails"}
+{"id": "supabase POST /v1/projects/{ref}/read-replicas/setup", "label": "hold:money", "named": false, "why": "paid replica"}
+{"id": "supabase POST /v1/projects/{ref}/readonly/temporary-disable", "label": "allow", "named": false, "why": "temporary, restores writes"}
+{"id": "supabase POST /v1/projects/{ref}/restart", "label": "allow", "named": false, "why": "comes back by itself"}
+{"id": "supabase POST /v1/projects/{ref}/restore", "label": "allow", "named": false, "why": "unpauses"}
+{"id": "supabase POST /v1/projects/{ref}/restore/cancel", "label": "allow", "named": false, "why": ""}
+{"id": "supabase POST /v1/projects/{ref}/secrets", "label": "either", "named": false, "why": "overwrites same-name secrets"}
+{"id": "supabase DELETE /v1/projects/{ref}/secrets", "label": "hold:gone", "named": false, "why": "secret values deleted"}
+{"id": "supabase PUT /v1/projects/{ref}/ssl-enforcement", "label": "either", "named": false, "why": "turning off removes SSL protection"}
+{"id": "supabase POST /v1/projects/{ref}/upgrade", "label": "hold:outage", "named": false, "why": "downtime, irreversible major upgrade"}
+{"id": "supabase DELETE /v1/projects/{ref}/vanity-subdomain", "label": "hold:outage", "named": false, "why": "vanity domain stops serving"}
+{"id": "supabase POST /v1/projects/{ref}/vanity-subdomain/activate", "label": "allow", "named": false, "why": ""}
+{"id": "supabase POST /v1/projects/{ref}/vanity-subdomain/check-availability", "label": "allow", "named": false, "why": "check only"}
+{"id": "fly POST /v1/apps", "label": "allow", "named": false, "why": "new app"}
+{"id": "fly DELETE /v1/apps/{app}", "label": "hold:gone", "named": false, "why": "machines, volumes, config deleted"}
+{"id": "fly POST /v1/apps/{app}/machines", "label": "deploy", "named": false, "why": "runs an image"}
+{"id": "fly POST /v1/apps/{app}/machines/{id}", "label": "deploy", "named": false, "why": "new image or config"}
+{"id": "fly POST /v1/apps/{app}/machines/{id}/start", "label": "allow", "named": false, "why": ""}
+{"id": "fly POST /v1/apps/{app}/machines/{id}/stop", "label": "hold:outage", "named": false, "why": "machine stops serving"}
+{"id": "fly POST /v1/apps/{app}/machines/{id}/restart", "label": "allow", "named": false, "why": "comes back by itself"}
+{"id": "fly DELETE /v1/apps/{app}/machines/{id}", "label": "hold:outage", "named": false, "why": "service gone; image remains"}
+{"id": "fly POST /v1/apps/{app}/machines/{id}/signal", "label": "either", "named": false, "why": "signal may kill process"}
+{"id": "fly POST /v1/apps/{app}/machines/{id}/lease", "label": "allow", "named": false, "why": ""}
+{"id": "fly DELETE /v1/apps/{app}/machines/{id}/lease", "label": "allow", "named": false, "why": ""}
+{"id": "fly POST /v1/apps/{app}/machines/{id}/exec", "label": "either", "named": false, "why": "arbitrary command in machine"}
+{"id": "fly POST /v1/apps/{app}/machines/{id}/cordon", "label": "hold:outage", "named": false, "why": "stops routing traffic to machine"}
+{"id": "fly POST /v1/apps/{app}/machines/{id}/uncordon", "label": "allow", "named": false, "why": ""}
+{"id": "fly POST /v1/apps/{app}/machines/{id}/metadata/{key}", "label": "allow", "named": false, "why": "metadata"}
+{"id": "fly DELETE /v1/apps/{app}/machines/{id}/metadata/{key}", "label": "allow", "named": false, "why": "metadata"}
+{"id": "fly POST /v1/apps/{app}/machines/{id}/suspend", "label": "hold:outage", "named": false, "why": "machine suspended"}
+{"id": "fly POST /v1/apps/{app}/volumes", "label": "allow", "named": false, "why": "new volume"}
+{"id": "fly PUT /v1/apps/{app}/volumes/{id}", "label": "either", "named": false, "why": "can disable backups or change retention"}
+{"id": "fly POST /v1/apps/{app}/volumes/{id}/snapshots", "label": "allow", "named": false, "why": ""}
+{"id": "fly PUT /v1/apps/{app}/volumes/{id}/extend", "label": "hold:money", "named": false, "why": "bigger volume, cannot shrink"}
+{"id": "fly DELETE /v1/apps/{app}/volumes/{id}", "label": "hold:gone", "named": false, "why": "volume data deleted"}
+{"id": "fly POST /v1/apps/{app}/secrets/{name}", "label": "either", "named": false, "why": "overwrites existing secret value"}
+{"id": "fly DELETE /v1/apps/{app}/secrets/{name}", "label": "hold:gone", "named": false, "why": "secret value deleted"}
+{"id": "fly POST /v1/apps/{app}/secrets #1", "label": "hold:gone", "named": false, "why": "null deletes DATABASE_URL"}
+{"id": "fly POST /v1/apps/{app}/secrets #2", "label": "allow", "named": false, "why": "sets a new secret"}
+{"id": "fly POST /v1/apps/{app}/secretkeys/{name}", "label": "either", "named": false, "why": "may replace existing key"}
+{"id": "fly POST /v1/apps/{app}/secretkeys/{name}/generate", "label": "either", "named": false, "why": "may replace existing key"}
+{"id": "fly DELETE /v1/apps/{app}/secretkeys/{name}", "label": "hold:gone", "named": false, "why": "data encrypted with key lost"}
+{"id": "fly POST /v1/apps/{app}/secretkeys/{name}/encrypt", "label": "allow", "named": false, "why": "uses key, changes nothing"}
+{"id": "fly POST /v1/apps/{app}/secretkeys/{name}/decrypt", "label": "allow", "named": false, "why": "uses key, changes nothing"}
+{"id": "fly POST /v1/apps/{app}/secretkeys/{name}/sign", "label": "allow", "named": false, "why": "uses key, changes nothing"}
+{"id": "fly POST /v1/apps/{app}/secretkeys/{name}/verify", "label": "allow", "named": false, "why": "uses key, changes nothing"}
+{"id": "fly POST /v1/apps/{app}/certificates/acme", "label": "allow", "named": false, "why": ""}
+{"id": "fly POST /v1/apps/{app}/certificates/custom", "label": "allow", "named": false, "why": ""}
+{"id": "fly POST /v1/apps/{app}/certificates/{host}/check", "label": "allow", "named": false, "why": ""}
+{"id": "fly DELETE /v1/apps/{app}/certificates/{host}", "label": "hold:outage", "named": false, "why": "HTTPS for domain breaks"}
+{"id": "fly DELETE /v1/apps/{app}/certificates/{host}/acme", "label": "hold:outage", "named": false, "why": "HTTPS for domain breaks"}
+{"id": "fly DELETE /v1/apps/{app}/certificates/{host}/custom", "label": "hold:outage", "named": false, "why": "HTTPS for domain breaks"}
+{"id": "fly POST /v1/apps/{app}/ip_assignments", "label": "either", "named": false, "why": "public IP exposes; dedicated costs"}
+{"id": "fly DELETE /v1/apps/{app}/ip_assignments/{ip}", "label": "hold:outage", "named": false, "why": "app unreachable on that IP"}
+{"id": "fly POST /v1/postgres", "label": "hold:money", "named": false, "why": "paid managed Postgres cluster"}
+{"id": "fly DELETE /v1/postgres/{id}", "label": "hold:gone", "named": false, "why": "cluster and data deleted"}
+{"id": "fly POST /v1/postgres/{id}/users", "label": "allow", "named": true, "why": "new database credential"}
+{"id": "fly PATCH /v1/postgres/{id}/users/{user}", "label": "either", "named": true, "why": "role change can widen access"}
+{"id": "fly POST /v1/postgres/{id}/users/{user}/rotate_password", "label": "hold:outage", "named": false, "why": "clients with old password fail"}
+{"id": "fly DELETE /v1/postgres/{id}/users/{user}", "label": "hold:outage", "named": false, "why": "apps using user fail"}
+{"id": "fly POST /v1/postgres/{id}/databases", "label": "allow", "named": false, "why": ""}
+{"id": "fly POST /v1/postgres/{id}/backups", "label": "allow", "named": false, "why": ""}
+{"id": "fly POST /v1/postgres/{id}/restore", "label": "hold:money", "named": false, "why": "restores into new paid cluster"}
+{"id": "fly POST /v1/postgres/{id}/fork", "label": "hold:money", "named": false, "why": "new paid cluster"}
+{"id": "fly POST /v1/postgres/{id}/databases/{db}/extensions", "label": "allow", "named": false, "why": ""}
+{"id": "fly DELETE /v1/postgres/{id}/databases/{db}/extensions/{name}", "label": "hold:gone", "named": false, "why": "dropping extension drops its objects"}
+{"id": "fly POST /v1/postgres/{id}/attachments", "label": "allow", "named": false, "why": "wires own app to database"}
+{"id": "fly DELETE /v1/postgres/{id}/attachments/{app}", "label": "hold:outage", "named": false, "why": "app loses DATABASE_URL"}
+{"id": "fly PATCH /v1/postgres/{id}/maintenance_window", "label": "allow", "named": false, "why": ""}
+{"id": "fly-gql addAllowedReplaySourceOrgs", "label": "allow", "named": true, "why": "another org may replay into apps"}
+{"id": "fly-gql addCertificate", "label": "allow", "named": false, "why": ""}
+{"id": "fly-gql addWireGuardPeer", "label": "allow", "named": true, "why": "network access to private network"}
+{"id": "fly-gql allocateEgressIpAddress", "label": "hold:money", "named": false, "why": "static egress IP is billed"}
+{"id": "fly-gql allocateIpAddress", "label": "either", "named": false, "why": "public or dedicated IP depends on type"}
+{"id": "fly-gql attachPostgresCluster", "label": "allow", "named": false, "why": "wires own app to cluster"}
+{"id": "fly-gql cancelBuild", "label": "allow", "named": false, "why": ""}
+{"id": "fly-gql checkCertificate", "label": "allow", "named": false, "why": ""}
+{"id": "fly-gql createAddOn", "label": "hold:money", "named": false, "why": "provisions paid extension"}
+{"id": "fly-gql createApp", "label": "allow", "named": false, "why": ""}
+{"id": "fly-gql createBuild", "label": "allow", "named": false, "why": "build record"}
+{"id": "fly-gql createCheckJob", "label": "allow", "named": false, "why": ""}
+{"id": "fly-gql createCheckJobRun", "label": "allow", "named": false, "why": ""}
+{"id": "fly-gql createDoctorReport", "label": "allow", "named": false, "why": "diagnostics to Fly"}
+{"id": "fly-gql createDoctorUrl", "label": "allow", "named": false, "why": ""}
+{"id": "fly-gql createExtensionTosAgreement", "label": "allow", "named": false, "why": "accepts extension terms"}
+{"id": "fly-gql createLimitedAccessToken", "label": "allow", "named": true, "why": "new token"}
+{"id": "fly-gql createOrganization", "label": "allow", "named": false, "why": ""}
+{"id": "fly-gql createOrganizationInvitation", "label": "allow", "named": true, "why": "invitation"}
+{"id": "fly-gql createPostgresClusterDatabase", "label": "allow", "named": false, "why": ""}
+{"id": "fly-gql createPostgresClusterUser", "label": "allow", "named": true, "why": "new database credential"}
+{"id": "fly-gql createRelease", "label": "deploy", "named": false, "why": "release"}
+{"id": "fly-gql createTemplateDeployment", "label": "deploy", "named": false, "why": "launches template apps"}
+{"id": "fly-gql createThirdPartyConfiguration", "label": "allow", "named": true, "why": "connects outside service"}
+{"id": "fly-gql deleteAddOn", "label": "hold:gone", "named": false, "why": "extension resource and data deleted"}
+{"id": "fly-gql deleteApp", "label": "hold:gone", "named": false, "why": "app, machines, volumes deleted"}
+{"id": "fly-gql deleteCertificate", "label": "hold:outage", "named": false, "why": "HTTPS for domain breaks"}
+{"id": "fly-gql deleteDeploymentSource", "label": "allow", "named": false, "why": "unlinks repository"}
+{"id": "fly-gql deleteLimitedAccessToken", "label": "hold:outage", "named": false, "why": "whatever uses token fails"}
+{"id": "fly-gql deleteOrganization", "label": "hold:gone", "named": false, "why": "org and its apps deleted"}
+{"id": "fly-gql deleteOrganizationInvitation", "label": "allow", "named": false, "why": ""}
+{"id": "fly-gql deleteOrganizationMembership", "label": "allow", "named": false, "why": "removes a member; can re-invite"}
+{"id": "fly-gql deleteRemoteBuilder", "label": "allow", "named": false, "why": "recreated on next build"}
+{"id": "fly-gql deleteThirdPartyConfiguration", "label": "allow", "named": false, "why": "removes integration link"}
+{"id": "fly-gql detachPostgresCluster", "label": "hold:outage", "named": false, "why": "app loses database connection"}
+{"id": "fly-gql dummyWireGuardPeer", "label": "allow", "named": false, "why": "test peer"}
+{"id": "fly-gql enablePostgresConsul", "label": "allow", "named": false, "why": ""}
+{"id": "fly-gql ensureDepotRemoteBuilder", "label": "allow", "named": false, "why": ""}
+{"id": "fly-gql ensureMachineRemoteBuilder", "label": "allow", "named": false, "why": ""}
+{"id": "fly-gql establishSshKey", "label": "allow", "named": true, "why": "org SSH CA key"}
+{"id": "fly-gql finishBuild", "label": "allow", "named": false, "why": ""}
+{"id": "fly-gql grantPostgresClusterUserAccess", "label": "allow", "named": true, "why": "grants database access"}
+{"id": "fly-gql issueCertificate", "label": "allow", "named": true, "why": "issues SSH certificate"}
+{"id": "fly-gql logOut", "label": "allow", "named": false, "why": "ends own session"}
+{"id": "fly-gql moveApp", "label": "allow", "named": true, "why": "another org gains app"}
+{"id": "fly-gql releaseEgressIpAddress", "label": "hold:outage", "named": false, "why": "egress IP allow-lists break"}
+{"id": "fly-gql releaseIpAddress", "label": "hold:outage", "named": false, "why": "app unreachable on that IP"}
+{"id": "fly-gql removeAllowedReplaySourceOrgs", "label": "allow", "named": false, "why": "re-addable in a moment"}
+{"id": "fly-gql removeWireGuardPeer", "label": "allow", "named": false, "why": "revokes access"}
+{"id": "fly-gql resetAddOnPassword", "label": "hold:outage", "named": false, "why": "clients with old password fail"}
+{"id": "fly-gql revokePostgresClusterUserAccess", "label": "hold:outage", "named": false, "why": "apps using that user fail"}
+{"id": "fly-gql saveDeploymentSource", "label": "allow", "named": false, "why": "links repository"}
+{"id": "fly-gql setAllowAllCrossNetworkReplays", "label": "either", "named": false, "why": "true lets any org replay in"}
+{"id": "fly-gql setSecrets #1", "label": "hold:gone", "named": false, "why": "replaceAll deletes other secrets"}
+{"id": "fly-gql setSecrets #2", "label": "allow", "named": false, "why": "sets one secret"}
+{"id": "fly-gql startBuild", "label": "allow", "named": false, "why": ""}
+{"id": "fly-gql unsetSecrets", "label": "hold:gone", "named": false, "why": "secret values deleted"}
+{"id": "fly-gql updateAddOn", "label": "either", "named": false, "why": "plan change may cost"}
+{"id": "fly-gql updateOrganizationMembership", "label": "allow", "named": true, "why": "role change grants access"}
+{"id": "fly-gql updateRelease", "label": "allow", "named": false, "why": "release status"}
+{"id": "fly-gql updateRemoteBuilder", "label": "allow", "named": false, "why": ""}
+{"id": "fly-gql updateThirdPartyConfiguration", "label": "either", "named": true, "why": "can repoint outside service"}
+{"id": "fly-gql validateWireGuardPeers", "label": "allow", "named": false, "why": "check only"}

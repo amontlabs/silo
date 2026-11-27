@@ -1,0 +1,21 @@
+gvproxy v0.9.0 as released:
+frame                        link before  gvproxy    link after  SIGTERM   log
+a second VFKT                yes          running    LOST        HANGS     
+5 zero bytes                 yes          running    LOST        HANGS     
+6 bytes, to everyone         yes          ENDED      LOST        -         panic: runtime error: slice bounds out of range [12:6]
+12 bytes, to everyone        yes          ENDED      LOST        -         panic: runtime error: index out of range [1] with length 0
+13 bytes, to the gateway     yes          ENDED      LOST        -         panic: runtime error: index out of range [1] with length 1
+6 zero bytes                 yes          running    yes         stops     
+14 bytes, a header alone     yes          running    yes         stops     
+FAIL: 5 of 7 frames cost the link, the process, or its stop
+
+gvproxy v0.9.0 with gvproxy-runt.patch:
+frame                        link before  gvproxy    link after  SIGTERM   log
+a second VFKT                yes          running    yes         stops     dropped, counted
+5 zero bytes                 yes          running    yes         stops     dropped, counted
+6 bytes, to everyone         yes          running    yes         stops     dropped, counted
+12 bytes, to everyone        yes          running    yes         stops     dropped, counted
+13 bytes, to the gateway     yes          running    yes         stops     dropped, counted
+6 zero bytes                 yes          running    yes         stops     dropped, counted
+14 bytes, a header alone     yes          running    yes         stops     
+PASS

@@ -1,0 +1,4 @@
+$ AWS_ACCESS_KEY_ID=AKIAFAKEFAKEFAKE0000 AWS_SECRET_ACCESS_KEY=fakesecret AWS_DEFAULT_REGION=us-east-1 AWS_PAGER= -- aws dynamodb delete-table --table-name orders
+
+aws: [ERROR]: An error occurred (403) when calling the DeleteTable operation: <?xml version="1.0" encoding="UTF-8"?><Error><Code>AccessDenied</Code><Message>Held by Silo and not answered: deleting volume X needs your yes.</Message><RequestId>silo</RequestId></Error>
+--- exit=254 seconds=2.576428062

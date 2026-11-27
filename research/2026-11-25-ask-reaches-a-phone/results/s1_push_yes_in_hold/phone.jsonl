@@ -1,0 +1,2 @@
+{"t": 1795615881.6944, "kind": "shown", "ask": "ask_1", "version": 1, "lines": ["push main to 127.0.0.1:20952/repo.git (51935bb)"], "sent": 1795615881.6840084, "in_transit": 0.0104}
+{"t": 1795615889.6973, "kind": "answered", "ask": "ask_1", "version": 1, "verdict": "yes", "lines": 1}

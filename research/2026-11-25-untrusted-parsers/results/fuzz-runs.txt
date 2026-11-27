@@ -1,0 +1,22 @@
+# libFuzzer, Zig harnesses (20 min each; ws 15 min after the fix; record ~25 min)
+stream: #6068384	DONE   ft: 5055 corp: 807/324Kb lim: 4096 exec/s: 5052 rss: 32Mb
+usage: #17434567	DONE   ft: 6745 corp: 1067/477Kb lim: 4096 exec/s: 14516 rss: 36Mb
+req: #7578242	DONE   ft: 8361 corp: 1255/662Kb lim: 4096 exec/s: 6309 rss: 31Mb
+ws (as drafted): ==1480== ERROR: libFuzzer: timeout after 11 seconds after #3969 runs
+ws (patched): #14363934	DONE   ft: 6440 corp: 940/680Kb lim: 4096 exec/s: 15942 rss: 31Mb
+record: last line #1155476	REDUCE ft: 4818 corp: 598/199Kb lim: 3096 exec/s: 796 rss: 32Mb L: 46/2 (stopped with the container, no crash)
+
+# atheris, ext4read.py (10 min per image, stopped with the container at ~62k runs each)
+-- seed
+CRASH error at line 21 (def u32(b, o): return struct.unpack_from('<I', b, o)[0]) -> final-seed/crash-01.img
+CRASH IndexError at line 86 (b = self.block(self.itable[g] + off // self.bs)) -> final-seed/crash-02.img
+CRASH ZeroDivisionError at line 84 (g, i = divmod(ino - 1, self.ipg)) -> final-seed/crash-03.img
+#78906	REDUCE cov: 93 ft: 414 corp: 58/471b lim: 544 exec/s: 276 rss: 1373Mb L: 
+-- seedj
+CRASH error at line 21 (def u32(b, o): return struct.unpack_from('<I', b, o)[0]) -> final-seedj/crash-01.img
+CRASH IndexError at line 86 (b = self.block(self.itable[g] + off // self.bs)) -> final-seedj/crash-02.img
+CRASH ZeroDivisionError at line 84 (g, i = divmod(ino - 1, self.ipg)) -> final-seedj/crash-03.img
+CRASH IndexError at line 124 (ino, rec_len, name_len, ftype = u32(b, o), u16(b, o + 4), b[) -> final-seedj/crash-04.img
+CRASH error at line 20 (def u16(b, o): return struct.unpack_from('<H', b, o)[0]) -> final-seedj/crash-05.img
+CRASH ZeroDivisionError at line 51 (self.ngroups = (self.blocks_count - self.first_data + u32(sb) -> final-seedj/crash-06.img
+#62119	REDUCE cov: 100 ft: 434 corp: 66/758b lim: 357 exec/s: 213 rss: 1147Mb L:

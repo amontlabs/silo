@@ -1,0 +1,10 @@
+{
+ "body": {
+  "gone": [
+   "generationConfig.maxOutputTokens:int",
+   "generationConfig.thinkingConfig.thinkingBudget:int",
+   "generationConfig.topP:int"
+  ],
+  "new": []
+ }
+}

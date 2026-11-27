@@ -1,0 +1,4 @@
+$ FLY_API_TOKEN=FlyV1 fm2_test-token-123 FLY_NO_UPDATE_CHECK=1 FLY_METRICS_TOKEN=- -- flyctl machine stop 3d8d1 -a my-app
+Sending kill signal to machine 3d8d1...
+3d8d1 has been successfully stopped
+--- exit=0 seconds=.095626617

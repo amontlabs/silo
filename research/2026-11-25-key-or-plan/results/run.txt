@@ -1,0 +1,16 @@
+pk: exit=0 secs=2.7
+rp: exit=0 secs=3.4
+plan-signed-plan   {'connection': 14, 'open/set-for-a-plan': 14}
+key-signed-key     {'call': 12, 'ledgers': 12, 'open': 14, 'reply': 14, 'request': 14, 'tool-call': 8}
+plan-signed-key    {'connection': 14, 'open/set-for-a-plan': 14}
+key-signed-plan    {'open': 3, 'refused/plan-in-a-computer-set-for-a-key': 5}
+read-signed-plan   {'call': 12, 'ledgers': 12, 'open': 14, 'reply': 14, 'request': 14, 'tool-call': 8}
+stand-in provider served 48 calls; Silo read 24; 24 passed unread
+ok   key, signed in with a key: read, calls recorded
+ok   key, signed in with a plan: refused, nothing read
+ok   key, signed in with a plan: Claude Code prints Silo's sentence
+ok   plan, signed in with a plan: works, passed unread
+ok   plan, signed in with a key: works, passed unread
+ok   read (today): a plan is read
+ok   no sign-in value in the record
+ok   the provider served calls Silo never read

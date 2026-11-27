@@ -1,0 +1,4 @@
+$ AWS_ACCESS_KEY_ID=AKIAFAKEFAKEFAKE0000 AWS_SECRET_ACCESS_KEY=fakesecret AWS_DEFAULT_REGION=us-east-1 AWS_PAGER= -- aws rds delete-db-instance --db-instance-identifier prod-db --skip-final-snapshot
+
+aws: [ERROR]: An error occurred (AccessDenied) when calling the DeleteDBInstance operation: Held by Silo and not answered: deleting volume X needs your yes.
+--- exit=254 seconds=2.691908388

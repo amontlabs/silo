@@ -1,0 +1,7 @@
+$ RAILWAY_TOKEN=test-token-123 -- railway volume delete --volume vol-1 --yes
+Failed to fetch: error decoding response body
+
+Caused by:
+    0: error decoding response body
+    1: missing field `environment` at line 1 column 11
+--- exit=1 seconds=.193784948

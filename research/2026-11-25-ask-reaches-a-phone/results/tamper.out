@@ -1,0 +1,14 @@
+OK  answer signed by another key | refused | ['not signed by the paired side']
+OK  bytes of the relay's own making | refused | ['not sealed to this side, or changed on the way']
+OK  one bit changed on the way | refused | ['not sealed to this side, or changed on the way']
+OK  honest yes (control) | passed | []
+OK  old yes replayed for the same request | refused | ['ask already answered']
+OK  yes to a list the Mac never sent | refused | ['the list answered is not the list of that version']
+OK  answer an hour old | refused | ['answer out of date']
+OK  yes held by the relay past its expiry | refused | ['answer out of date']
+OK  answer dropped by the relay | refused | []
+OK  yes to the version seen lets its own line pass
+OK  yes to the version seen does not cover a line added after | refused | []
+OK  phone refuses an ask the relay made up | not signed by the paired side
+relay could log only: ['size', 't', 'topic']
+12 of 12 as expected

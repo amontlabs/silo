@@ -1,0 +1,26 @@
+{
+ "rw-env-delete": {
+  "Environment.name": "staging"
+ },
+ "rw-ssh-key-add": {
+  "_env": [
+   "RAILWAY_API_TOKEN=test-token-123"
+  ]
+ },
+ "rw-usage-remove": {
+  "_env": [
+   "RAILWAY_API_TOKEN=test-token-123"
+  ]
+ },
+ "rw-tcp-create": {
+  "Query.tcpProxies": []
+ },
+ "rw-scale-zero": {
+  "Region.name": "us-west2"
+ },
+ "sb-storage-rm": {
+  "_files": {
+   "/opt/clis/work-supabase/supabase/.temp/project-ref": "abcdefghijklmnopqrst"
+  }
+ }
+}

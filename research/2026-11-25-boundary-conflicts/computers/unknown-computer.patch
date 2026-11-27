@@ -1,0 +1,36 @@
+diff -ru a/boundary/src/main.zig b/boundary/src/main.zig
+--- a/boundary/src/main.zig	2026-11-25 14:05:37.301260325 +0000
++++ b/boundary/src/main.zig	2026-11-25 14:05:45.788103856 +0000
+@@ -908,6 +908,23 @@
+     try client.writeAll(r);
+ }
+ 
++/// A connection Silo cannot tie to a computer: every request is refused, since the key and budget
++/// checks are a computer's. With budgets set, Silo never lets an unknown computer's call out.
++fn refuseUnknown(client: Side, id: u32, sni: []const u8) !void {
++    var extra: std.ArrayList(u8) = .empty;
++    defer extra.deinit(gpa);
++    while (true) {
++        var req = (try readHead(client, &extra)) orelse return;
++        defer gpa.free(req.raw);
++        var rc: ReqCtx = .{};
++        defer rc.body.deinit(gpa);
++        defer rc.raw.deinit(gpa);
++        if (req.content_length != null or req.chunked) _ = try pumpBody(client, &req, &extra, &rc);
++        record("\"conn\":{d},\"kind\":\"refused\",\"why\":\"unknown-computer\",\"sni\":{f}", .{ id, j(sni) });
++        try writeRefusal(client, defaultFormat(spend.providerOf(sni)), "Silo: this connection comes from no computer Silo knows, so nothing it sends can leave.");
++    }
++}
++
+ /// A known model host Silo cannot count, while a budget covers the computer: every request is
+ /// refused, in OpenAI's shape, which most such hosts copy.
+ fn refuseAll(client: Side, id: u32, sni: []const u8) !void {
+@@ -942,6 +959,8 @@
+     defer client.close();
+     const sni_c = c.SSL_get_servername(ssl, c.TLSEXT_NAMETYPE_host_name);
+     const sni: []const u8 = if (sni_c != null) std.mem.span(sni_c) else "";
++    // A connection that names no computer gets no check of key or budget below: refuse it all.
++    if (state != null and comp == null) return refuseUnknown(client, id, sni);
+     const provider = spend.providerOf(sni);
+     if (provider == null) {
+         if (isUncountable(sni) and comp != null and state.?.budgeted[comp.?]) return refuseAll(client, id, sni);

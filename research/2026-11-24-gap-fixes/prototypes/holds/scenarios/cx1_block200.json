@@ -1,0 +1,1 @@
+{"probe": false, "steps": [{"calls": [{"name": "exec_command", "input": {"cmd": "python3 -c \"import time; time.sleep(200)\"; echo finished"}}]}, {"calls": [{"name": "write_stdin", "input": {"session_id": "$LAST", "chars": "", "yield_time_ms": 300000}}]}, {"calls": [{"name": "write_stdin", "input": {"session_id": "$LAST", "chars": "", "yield_time_ms": 300000}}]}]}

@@ -1,0 +1,3 @@
+{"t": 1795615881.6191, "kind": "shown", "ask": "ask_1", "version": 1, "lines": ["POST 127.0.0.1:37352/v1/charges (11 bytes)"], "sent": 1795615881.6096172, "in_transit": 0.0095}
+{"t": 1795615922.5933, "kind": "shown", "ask": "ask_1", "version": 2, "lines": ["POST 127.0.0.1:37352/v1/charges (11 bytes)", "POST 127.0.0.1:37352/v1/charges (13 bytes)"], "sent": 1795615922.5903301, "in_transit": 0.003}
+{"t": 1795615961.6229, "kind": "shown", "ask": "ask_2", "version": 1, "lines": ["POST 127.0.0.1:37352/v1/charges (11 bytes)"], "sent": 1795615961.6183856, "in_transit": 0.0045}

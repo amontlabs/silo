@@ -1,0 +1,6 @@
+5 guests at the login prompt after 90 s
+guest RAM resident, KSM off: 1896 MiB in all
+KSM on 30 s: resident 1640 MiB; merged into 202 MiB, saving 792 MiB, plus 0 MiB of zero pages; ksmd CPU 00:00:18
+KSM on 61 s: resident 1640 MiB; merged into 205 MiB, saving 998 MiB, plus 0 MiB of zero pages; ksmd CPU 00:00:20
+KSM on 91 s: resident 1642 MiB; merged into 205 MiB, saving 998 MiB, plus 0 MiB of zero pages; ksmd CPU 00:00:21
+KSM on 121 s: resident 1640 MiB; merged into 205 MiB, saving 998 MiB, plus 0 MiB of zero pages; ksmd CPU 00:00:22

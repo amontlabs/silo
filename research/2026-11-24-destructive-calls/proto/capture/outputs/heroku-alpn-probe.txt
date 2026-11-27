@@ -1,0 +1,3 @@
+$ HEROKU_API_KEY=test-token-123 -- heroku apps:destroy -a my-app --confirm my-app
+Destroying my-app (including all add-ons)... done
+--- exit=0 seconds=.660812490

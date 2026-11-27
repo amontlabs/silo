@@ -1,0 +1,757 @@
+aws_cloudwatch_log_group.fn: Refreshing state... [id=/aws/lambda/orders]
+aws_vpc.main: Refreshing state... [id=vpc-3a28ad8865c8be582]
+aws_dynamodb_table.orders: Refreshing state... [id=orders]
+aws_s3_bucket.backups: Refreshing state... [id=prod-backups]
+aws_iam_role.fn: Refreshing state... [id=orders-fn]
+aws_iam_policy.fn: Refreshing state... [id=arn:aws:iam::123456789012:policy/orders-fn-dynamo]
+aws_iam_role_policy_attachment.fn: Refreshing state... [id=orders-fn/arn:aws:iam::123456789012:policy/orders-fn-dynamo]
+aws_internet_gateway.main: Refreshing state... [id=igw-42ae83a401bd7a700]
+aws_security_group.db: Refreshing state... [id=sg-6a21114ef2d13f5db]
+aws_subnet.b: Refreshing state... [id=subnet-a58636fbba351948e]
+aws_subnet.a: Refreshing state... [id=subnet-6e2f086bbad9f638f]
+aws_route_table.public: Refreshing state... [id=rtb-bed55ef112797d4fc]
+aws_db_subnet_group.main: Refreshing state... [id=prod]
+aws_lambda_function.orders: Refreshing state... [id=orders]
+aws_vpc_security_group_ingress_rule.pg: Refreshing state... [id=sgr-a11615f3705e21f54]
+aws_vpc_security_group_egress_rule.all: Refreshing state... [id=sgr-76038454af1b32737]
+aws_db_instance.main: Refreshing state... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U]
+aws_s3_object.dump[3]: Refreshing state... [id=prod-backups/db/dump-3.sql]
+aws_s3_bucket_versioning.backups: Refreshing state... [id=prod-backups]
+aws_s3_object.dump[2]: Refreshing state... [id=prod-backups/db/dump-2.sql]
+aws_s3_object.dump[4]: Refreshing state... [id=prod-backups/db/dump-4.sql]
+aws_s3_object.dump[1]: Refreshing state... [id=prod-backups/db/dump-1.sql]
+aws_s3_object.dump[0]: Refreshing state... [id=prod-backups/db/dump-0.sql]
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  - destroy
+
+Terraform will perform the following actions:
+
+  # aws_cloudwatch_log_group.fn will be destroyed
+  - resource "aws_cloudwatch_log_group" "fn" {
+      - arn                         = "arn:aws:logs:us-east-1:123456789012:log-group:/aws/lambda/orders" -> null
+      - deletion_protection_enabled = false -> null
+      - id                          = "/aws/lambda/orders" -> null
+      - name                        = "/aws/lambda/orders" -> null
+      - region                      = "us-east-1" -> null
+      - retention_in_days           = 0 -> null
+      - skip_destroy                = false -> null
+      - tags                        = {} -> null
+      - tags_all                    = {} -> null
+        # (3 unchanged attributes hidden)
+    }
+
+  # aws_db_instance.main will be destroyed
+  - resource "aws_db_instance" "main" {
+      - address                               = "prod-db.aaaaaaaaaa.us-east-1.rds.amazonaws.com" -> null
+      - allocated_storage                     = 20 -> null
+      - apply_immediately                     = false -> null
+      - arn                                   = "arn:aws:rds:us-east-1:123456789012:db:prod-db" -> null
+      - auto_minor_version_upgrade            = true -> null
+      - availability_zone                     = "us-east-1a" -> null
+      - backup_retention_period               = 0 -> null
+      - backup_window                         = "13:14-13:44" -> null
+      - ca_cert_identifier                    = "rds-ca-default" -> null
+      - copy_tags_to_snapshot                 = false -> null
+      - customer_owned_ip_enabled             = false -> null
+      - db_subnet_group_name                  = "prod" -> null
+      - dedicated_log_volume                  = false -> null
+      - delete_automated_backups              = true -> null
+      - deletion_protection                   = false -> null
+      - domain_dns_ips                        = [] -> null
+      - enabled_cloudwatch_logs_exports       = [] -> null
+      - endpoint                              = "prod-db.aaaaaaaaaa.us-east-1.rds.amazonaws.com:5432" -> null
+      - engine                                = "postgres" -> null
+      - engine_version                        = "9.3.3" -> null
+      - engine_version_actual                 = "9.3.3" -> null
+      - iam_database_authentication_enabled   = false -> null
+      - id                                    = "db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U" -> null
+      - identifier                            = "prod-db" -> null
+      - instance_class                        = "db.t3.micro" -> null
+      - iops                                  = 0 -> null
+      - latest_restorable_time                = "2026-11-24T17:04:18Z" -> null
+      - license_model                         = "general-public-license" -> null
+      - listener_endpoint                     = [] -> null
+      - maintenance_window                    = "wed:06:38-wed:07:08" -> null
+      - master_user_secret                    = [] -> null
+      - max_allocated_storage                 = 0 -> null
+      - monitoring_interval                   = 0 -> null
+      - multi_az                              = false -> null
+      - multi_tenant                          = false -> null
+      - option_group_name                     = "default:postgres-9-3" -> null
+      - parameter_group_name                  = "default.postgres9.3" -> null
+      - password                              = (sensitive value) -> null
+      - password_wo                           = (write-only attribute) -> null
+      - performance_insights_enabled          = false -> null
+      - performance_insights_retention_period = 0 -> null
+      - port                                  = 5432 -> null
+      - publicly_accessible                   = false -> null
+      - region                                = "us-east-1" -> null
+      - replicas                              = [] -> null
+      - resource_id                           = "db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U" -> null
+      - skip_final_snapshot                   = true -> null
+      - status                                = "available" -> null
+      - storage_encrypted                     = false -> null
+      - storage_throughput                    = 0 -> null
+      - storage_type                          = "gp2" -> null
+      - tags                                  = {} -> null
+      - tags_all                              = {} -> null
+      - username                              = "app" -> null
+      - vpc_security_group_ids                = [
+          - "sg-6a21114ef2d13f5db",
+        ] -> null
+        # (22 unchanged attributes hidden)
+    }
+
+  # aws_db_subnet_group.main will be destroyed
+  - resource "aws_db_subnet_group" "main" {
+      - arn                     = "arn:aws:rds:us-east-1:123456789012:subgrp:prod" -> null
+      - description             = "Managed by Terraform" -> null
+      - id                      = "prod" -> null
+      - name                    = "prod" -> null
+      - region                  = "us-east-1" -> null
+      - subnet_ids              = [
+          - "subnet-6e2f086bbad9f638f",
+          - "subnet-a58636fbba351948e",
+        ] -> null
+      - supported_network_types = [] -> null
+      - tags                    = {} -> null
+      - tags_all                = {} -> null
+      - vpc_id                  = "vpc-3a28ad8865c8be582" -> null
+        # (1 unchanged attribute hidden)
+    }
+
+  # aws_dynamodb_table.orders will be destroyed
+  - resource "aws_dynamodb_table" "orders" {
+      - arn                         = "arn:aws:dynamodb:us-east-1:123456789012:table/orders" -> null
+      - billing_mode                = "PAY_PER_REQUEST" -> null
+      - deletion_protection_enabled = false -> null
+      - hash_key                    = "id" -> null
+      - id                          = "orders" -> null
+      - name                        = "orders" -> null
+      - read_capacity               = 0 -> null
+      - region                      = "us-east-1" -> null
+      - stream_enabled              = false -> null
+      - table_class                 = "STANDARD" -> null
+      - tags                        = {} -> null
+      - tags_all                    = {} -> null
+      - write_capacity              = 0 -> null
+        # (3 unchanged attributes hidden)
+
+      - attribute {
+          - name = "id" -> null
+          - type = "S" -> null
+        }
+
+      - point_in_time_recovery {
+          - enabled                 = false -> null
+          - recovery_period_in_days = 0 -> null
+        }
+
+      - ttl {
+          - enabled        = false -> null
+            # (1 unchanged attribute hidden)
+        }
+    }
+
+  # aws_iam_policy.fn will be destroyed
+  - resource "aws_iam_policy" "fn" {
+      - arn              = "arn:aws:iam::123456789012:policy/orders-fn-dynamo" -> null
+      - attachment_count = 1 -> null
+      - id               = "arn:aws:iam::123456789012:policy/orders-fn-dynamo" -> null
+      - name             = "orders-fn-dynamo" -> null
+      - path             = "/" -> null
+      - policy           = jsonencode(
+            {
+              - Statement = [
+                  - {
+                      - Action   = [
+                          - "dynamodb:GetItem",
+                          - "dynamodb:PutItem",
+                        ]
+                      - Effect   = "Allow"
+                      - Resource = "arn:aws:dynamodb:us-east-1:123456789012:table/orders"
+                    },
+                ]
+              - Version   = "2012-10-17"
+            }
+        ) -> null
+      - policy_id        = "A559WODJA3909QPNMQIU2" -> null
+      - tags             = {} -> null
+      - tags_all         = {} -> null
+        # (2 unchanged attributes hidden)
+    }
+
+  # aws_iam_role.fn will be destroyed
+  - resource "aws_iam_role" "fn" {
+      - arn                   = "arn:aws:iam::123456789012:role/orders-fn" -> null
+      - assume_role_policy    = jsonencode(
+            {
+              - Statement = [
+                  - {
+                      - Action    = "sts:AssumeRole"
+                      - Effect    = "Allow"
+                      - Principal = {
+                          - Service = "lambda.amazonaws.com"
+                        }
+                    },
+                ]
+              - Version   = "2012-10-17"
+            }
+        ) -> null
+      - create_date           = "2026-11-24T17:02:48Z" -> null
+      - force_detach_policies = false -> null
+      - id                    = "orders-fn" -> null
+      - managed_policy_arns   = [
+          - "arn:aws:iam::123456789012:policy/orders-fn-dynamo",
+        ] -> null
+      - max_session_duration  = 3600 -> null
+      - name                  = "orders-fn" -> null
+      - path                  = "/" -> null
+      - tags                  = {} -> null
+      - tags_all              = {} -> null
+      - unique_id             = "AROARZPUZDIKB7ZELG3R6" -> null
+        # (3 unchanged attributes hidden)
+    }
+
+  # aws_iam_role_policy_attachment.fn will be destroyed
+  - resource "aws_iam_role_policy_attachment" "fn" {
+      - id         = "orders-fn/arn:aws:iam::123456789012:policy/orders-fn-dynamo" -> null
+      - policy_arn = "arn:aws:iam::123456789012:policy/orders-fn-dynamo" -> null
+      - role       = "orders-fn" -> null
+    }
+
+  # aws_internet_gateway.main will be destroyed
+  - resource "aws_internet_gateway" "main" {
+      - arn      = "arn:aws:ec2:us-east-1:123456789012:internet-gateway/igw-42ae83a401bd7a700" -> null
+      - id       = "igw-42ae83a401bd7a700" -> null
+      - owner_id = "123456789012" -> null
+      - region   = "us-east-1" -> null
+      - tags     = {} -> null
+      - tags_all = {} -> null
+      - vpc_id   = "vpc-3a28ad8865c8be582" -> null
+    }
+
+  # aws_lambda_function.orders will be destroyed
+  - resource "aws_lambda_function" "orders" {
+      - architectures                  = [
+          - "x86_64",
+        ] -> null
+      - arn                            = "arn:aws:lambda:us-east-1:123456789012:function:orders" -> null
+      - code_sha256                    = "Ah2UJMH78TMD2M8Z/VobB1ekybFz84CInHC0bD2tEVg=" -> null
+      - filename                       = "./fn.zip" -> null
+      - function_name                  = "orders" -> null
+      - handler                        = "index.handler" -> null
+      - id                             = "orders" -> null
+      - invoke_arn                     = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:123456789012:function:orders/invocations" -> null
+      - last_modified                  = "2026-11-24T17:02:56.071977000Z" -> null
+      - layers                         = [] -> null
+      - memory_size                    = 128 -> null
+      - package_type                   = "Zip" -> null
+      - publish                        = false -> null
+      - qualified_arn                  = "arn:aws:lambda:us-east-1:123456789012:function:orders:$LATEST" -> null
+      - qualified_invoke_arn           = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:123456789012:function:orders:$LATEST/invocations" -> null
+      - region                         = "us-east-1" -> null
+      - reserved_concurrent_executions = -1 -> null
+      - response_streaming_invoke_arn  = "arn:aws:apigateway:us-east-1:lambda:path/2021-11-15/functions/arn:aws:lambda:us-east-1:123456789012:function:orders/response-streaming-invocations" -> null
+      - role                           = "arn:aws:iam::123456789012:role/orders-fn" -> null
+      - runtime                        = "python3.12" -> null
+      - skip_destroy                   = false -> null
+      - source_code_size               = 146 -> null
+      - tags                           = {} -> null
+      - tags_all                       = {} -> null
+      - timeout                        = 3 -> null
+      - version                        = "$LATEST" -> null
+        # (8 unchanged attributes hidden)
+
+      - ephemeral_storage {
+          - size = 512 -> null
+        }
+
+      - tracing_config {
+          - mode = "PassThrough" -> null
+        }
+    }
+
+  # aws_route_table.public will be destroyed
+  - resource "aws_route_table" "public" {
+      - arn              = "arn:aws:ec2:us-east-1:123456789012:route-table/rtb-bed55ef112797d4fc" -> null
+      - id               = "rtb-bed55ef112797d4fc" -> null
+      - owner_id         = "123456789012" -> null
+      - propagating_vgws = [] -> null
+      - region           = "us-east-1" -> null
+      - route            = [
+          - {
+              - cidr_block                 = "0.0.0.0/0"
+              - gateway_id                 = "igw-42ae83a401bd7a700"
+                # (12 unchanged attributes hidden)
+            },
+        ] -> null
+      - tags             = {} -> null
+      - tags_all         = {} -> null
+      - vpc_id           = "vpc-3a28ad8865c8be582" -> null
+    }
+
+  # aws_s3_bucket.backups will be destroyed
+  - resource "aws_s3_bucket" "backups" {
+      - arn                         = "arn:aws:s3:::prod-backups" -> null
+      - bucket                      = "prod-backups" -> null
+      - bucket_domain_name          = "prod-backups.s3.amazonaws.com" -> null
+      - bucket_namespace            = "global" -> null
+      - bucket_region               = "us-east-1" -> null
+      - bucket_regional_domain_name = "prod-backups.s3.us-east-1.amazonaws.com" -> null
+      - force_destroy               = true -> null
+      - hosted_zone_id              = "Z3AQBSTGFYJSTF" -> null
+      - id                          = "prod-backups" -> null
+      - object_lock_enabled         = false -> null
+      - region                      = "us-east-1" -> null
+      - tags                        = {} -> null
+      - tags_all                    = {} -> null
+        # (4 unchanged attributes hidden)
+
+      - grant {
+          - id          = "75aa57f09aa0c8caeab4f8c24e99d10f8e7faeebf76c078efc7c6caea54ba06a" -> null
+          - permissions = [
+              - "FULL_CONTROL",
+            ] -> null
+          - type        = "CanonicalUser" -> null
+            # (1 unchanged attribute hidden)
+        }
+
+      - versioning {
+          - enabled    = true -> null
+          - mfa_delete = false -> null
+        }
+    }
+
+  # aws_s3_bucket_versioning.backups will be destroyed
+  - resource "aws_s3_bucket_versioning" "backups" {
+      - bucket                = "prod-backups" -> null
+      - id                    = "prod-backups" -> null
+      - region                = "us-east-1" -> null
+        # (1 unchanged attribute hidden)
+
+      - versioning_configuration {
+          - mfa_delete = "Disabled" -> null
+          - status     = "Enabled" -> null
+        }
+    }
+
+  # aws_s3_object.dump[0] will be destroyed
+  - resource "aws_s3_object" "dump" {
+      - arn                                   = "arn:aws:s3:::prod-backups/db/dump-0.sql" -> null
+      - bucket                                = "prod-backups" -> null
+      - bucket_key_enabled                    = false -> null
+      - content                               = "fake dump 0" -> null
+      - content_type                          = "application/octet-stream" -> null
+      - etag                                  = "6f68610792da72f0d131ccff55bebf44" -> null
+      - force_destroy                         = false -> null
+      - id                                    = "prod-backups/db/dump-0.sql" -> null
+      - key                                   = "db/dump-0.sql" -> null
+      - metadata                              = {} -> null
+      - object_lock_event_hold_duration_days  = 0 -> null
+      - object_lock_event_hold_duration_years = 0 -> null
+      - region                                = "us-east-1" -> null
+      - storage_class                         = "STANDARD" -> null
+      - tags                                  = {} -> null
+      - tags_all                              = {} -> null
+      - version_id                            = "4f1f720b-10e8-408d-a890-3535c0434723" -> null
+        # (15 unchanged attributes hidden)
+    }
+
+  # aws_s3_object.dump[1] will be destroyed
+  - resource "aws_s3_object" "dump" {
+      - arn                                   = "arn:aws:s3:::prod-backups/db/dump-1.sql" -> null
+      - bucket                                = "prod-backups" -> null
+      - bucket_key_enabled                    = false -> null
+      - content                               = "fake dump 1" -> null
+      - content_type                          = "application/octet-stream" -> null
+      - etag                                  = "9f3536a89fb406c7ed817cb10868de05" -> null
+      - force_destroy                         = false -> null
+      - id                                    = "prod-backups/db/dump-1.sql" -> null
+      - key                                   = "db/dump-1.sql" -> null
+      - metadata                              = {} -> null
+      - object_lock_event_hold_duration_days  = 0 -> null
+      - object_lock_event_hold_duration_years = 0 -> null
+      - region                                = "us-east-1" -> null
+      - storage_class                         = "STANDARD" -> null
+      - tags                                  = {} -> null
+      - tags_all                              = {} -> null
+      - version_id                            = "22739232-f040-4f5e-b52a-3207969bde7b" -> null
+        # (15 unchanged attributes hidden)
+    }
+
+  # aws_s3_object.dump[2] will be destroyed
+  - resource "aws_s3_object" "dump" {
+      - arn                                   = "arn:aws:s3:::prod-backups/db/dump-2.sql" -> null
+      - bucket                                = "prod-backups" -> null
+      - bucket_key_enabled                    = false -> null
+      - content                               = "fake dump 2" -> null
+      - content_type                          = "application/octet-stream" -> null
+      - etag                                  = "f36e4e96fbbac39ec45c31c633a359c6" -> null
+      - force_destroy                         = false -> null
+      - id                                    = "prod-backups/db/dump-2.sql" -> null
+      - key                                   = "db/dump-2.sql" -> null
+      - metadata                              = {} -> null
+      - object_lock_event_hold_duration_days  = 0 -> null
+      - object_lock_event_hold_duration_years = 0 -> null
+      - region                                = "us-east-1" -> null
+      - storage_class                         = "STANDARD" -> null
+      - tags                                  = {} -> null
+      - tags_all                              = {} -> null
+      - version_id                            = "29f6be92-ed46-44cb-8a9c-d7c5d097fc8f" -> null
+        # (15 unchanged attributes hidden)
+    }
+
+  # aws_s3_object.dump[3] will be destroyed
+  - resource "aws_s3_object" "dump" {
+      - arn                                   = "arn:aws:s3:::prod-backups/db/dump-3.sql" -> null
+      - bucket                                = "prod-backups" -> null
+      - bucket_key_enabled                    = false -> null
+      - content                               = "fake dump 3" -> null
+      - content_type                          = "application/octet-stream" -> null
+      - etag                                  = "fca6c5f4d541e4247a76ced6712c56af" -> null
+      - force_destroy                         = false -> null
+      - id                                    = "prod-backups/db/dump-3.sql" -> null
+      - key                                   = "db/dump-3.sql" -> null
+      - metadata                              = {} -> null
+      - object_lock_event_hold_duration_days  = 0 -> null
+      - object_lock_event_hold_duration_years = 0 -> null
+      - region                                = "us-east-1" -> null
+      - storage_class                         = "STANDARD" -> null
+      - tags                                  = {} -> null
+      - tags_all                              = {} -> null
+      - version_id                            = "fe731095-7814-441e-9cc4-2cb05dc573fe" -> null
+        # (15 unchanged attributes hidden)
+    }
+
+  # aws_s3_object.dump[4] will be destroyed
+  - resource "aws_s3_object" "dump" {
+      - arn                                   = "arn:aws:s3:::prod-backups/db/dump-4.sql" -> null
+      - bucket                                = "prod-backups" -> null
+      - bucket_key_enabled                    = false -> null
+      - content                               = "fake dump 4" -> null
+      - content_type                          = "application/octet-stream" -> null
+      - etag                                  = "0f25d233a576212bd7f4e1986a1ec9f0" -> null
+      - force_destroy                         = false -> null
+      - id                                    = "prod-backups/db/dump-4.sql" -> null
+      - key                                   = "db/dump-4.sql" -> null
+      - metadata                              = {} -> null
+      - object_lock_event_hold_duration_days  = 0 -> null
+      - object_lock_event_hold_duration_years = 0 -> null
+      - region                                = "us-east-1" -> null
+      - storage_class                         = "STANDARD" -> null
+      - tags                                  = {} -> null
+      - tags_all                              = {} -> null
+      - version_id                            = "6156fb4a-0b0b-4c8e-a63d-5e4bfc8dcbe2" -> null
+        # (15 unchanged attributes hidden)
+    }
+
+  # aws_security_group.db will be destroyed
+  - resource "aws_security_group" "db" {
+      - arn                    = "arn:aws:ec2:us-east-1:123456789012:security-group/sg-6a21114ef2d13f5db" -> null
+      - description            = "Managed by Terraform" -> null
+      - egress                 = [
+          - {
+              - cidr_blocks      = [
+                  - "0.0.0.0/0",
+                ]
+              - from_port        = 0
+              - ipv6_cidr_blocks = []
+              - prefix_list_ids  = []
+              - protocol         = "-1"
+              - security_groups  = []
+              - self             = false
+              - to_port          = 0
+                # (1 unchanged attribute hidden)
+            },
+        ] -> null
+      - id                     = "sg-6a21114ef2d13f5db" -> null
+      - ingress                = [
+          - {
+              - cidr_blocks      = [
+                  - "10.0.0.0/16",
+                ]
+              - from_port        = 5432
+              - ipv6_cidr_blocks = []
+              - prefix_list_ids  = []
+              - protocol         = "tcp"
+              - security_groups  = []
+              - self             = false
+              - to_port          = 5432
+                # (1 unchanged attribute hidden)
+            },
+        ] -> null
+      - name                   = "prod-db" -> null
+      - owner_id               = "123456789012" -> null
+      - region                 = "us-east-1" -> null
+      - revoke_rules_on_delete = false -> null
+      - tags                   = {} -> null
+      - tags_all               = {} -> null
+      - vpc_id                 = "vpc-3a28ad8865c8be582" -> null
+        # (1 unchanged attribute hidden)
+    }
+
+  # aws_subnet.a will be destroyed
+  - resource "aws_subnet" "a" {
+      - arn                                            = "arn:aws:ec2:us-east-1:123456789012:subnet/subnet-6e2f086bbad9f638f" -> null
+      - assign_ipv6_address_on_creation                = false -> null
+      - availability_zone                              = "us-east-1a" -> null
+      - availability_zone_id                           = "use1-az6" -> null
+      - cidr_block                                     = "10.0.1.0/24" -> null
+      - enable_dns64                                   = false -> null
+      - enable_lni_at_device_index                     = 0 -> null
+      - enable_resource_name_dns_a_record_on_launch    = false -> null
+      - enable_resource_name_dns_aaaa_record_on_launch = false -> null
+      - id                                             = "subnet-6e2f086bbad9f638f" -> null
+      - ipv6_native                                    = false -> null
+      - map_customer_owned_ip_on_launch                = false -> null
+      - map_public_ip_on_launch                        = false -> null
+      - owner_id                                       = "123456789012" -> null
+      - private_dns_hostname_type_on_launch            = "ip-name" -> null
+      - region                                         = "us-east-1" -> null
+      - tags                                           = {} -> null
+      - tags_all                                       = {} -> null
+      - vpc_id                                         = "vpc-3a28ad8865c8be582" -> null
+        # (5 unchanged attributes hidden)
+    }
+
+  # aws_subnet.b will be destroyed
+  - resource "aws_subnet" "b" {
+      - arn                                            = "arn:aws:ec2:us-east-1:123456789012:subnet/subnet-a58636fbba351948e" -> null
+      - assign_ipv6_address_on_creation                = false -> null
+      - availability_zone                              = "us-east-1b" -> null
+      - availability_zone_id                           = "use1-az1" -> null
+      - cidr_block                                     = "10.0.2.0/24" -> null
+      - enable_dns64                                   = false -> null
+      - enable_lni_at_device_index                     = 0 -> null
+      - enable_resource_name_dns_a_record_on_launch    = false -> null
+      - enable_resource_name_dns_aaaa_record_on_launch = false -> null
+      - id                                             = "subnet-a58636fbba351948e" -> null
+      - ipv6_native                                    = false -> null
+      - map_customer_owned_ip_on_launch                = false -> null
+      - map_public_ip_on_launch                        = false -> null
+      - owner_id                                       = "123456789012" -> null
+      - private_dns_hostname_type_on_launch            = "ip-name" -> null
+      - region                                         = "us-east-1" -> null
+      - tags                                           = {} -> null
+      - tags_all                                       = {} -> null
+      - vpc_id                                         = "vpc-3a28ad8865c8be582" -> null
+        # (5 unchanged attributes hidden)
+    }
+
+  # aws_vpc.main will be destroyed
+  - resource "aws_vpc" "main" {
+      - arn                                  = "arn:aws:ec2:us-east-1:123456789012:vpc/vpc-3a28ad8865c8be582" -> null
+      - assign_generated_ipv6_cidr_block     = false -> null
+      - cidr_block                           = "10.0.0.0/16" -> null
+      - default_network_acl_id               = "acl-b008a42aff2d85162" -> null
+      - default_route_table_id               = "rtb-08aac2b85abffbbf7" -> null
+      - default_security_group_id            = "sg-7d780d5cf26cb839d" -> null
+      - dhcp_options_id                      = "default" -> null
+      - enable_dns_hostnames                 = true -> null
+      - enable_dns_support                   = true -> null
+      - enable_network_address_usage_metrics = false -> null
+      - id                                   = "vpc-3a28ad8865c8be582" -> null
+      - instance_tenancy                     = "default" -> null
+      - ipv6_netmask_length                  = 0 -> null
+      - main_route_table_id                  = "rtb-08aac2b85abffbbf7" -> null
+      - network_firewall_association         = [] -> null
+      - owner_id                             = "123456789012" -> null
+      - region                               = "us-east-1" -> null
+      - tags                                 = {
+          - "Name" = "prod"
+        } -> null
+      - tags_all                             = {
+          - "Name" = "prod"
+        } -> null
+        # (4 unchanged attributes hidden)
+    }
+
+  # aws_vpc_security_group_egress_rule.all will be destroyed
+  - resource "aws_vpc_security_group_egress_rule" "all" {
+      - arn                    = "arn:aws:ec2:us-east-1::security-group-rule/sgr-76038454af1b32737" -> null
+      - cidr_ipv4              = "0.0.0.0/0" -> null
+      - id                     = "sgr-76038454af1b32737" -> null
+      - ip_protocol            = "-1" -> null
+      - region                 = "us-east-1" -> null
+      - security_group_id      = "sg-6a21114ef2d13f5db" -> null
+      - security_group_rule_id = "sgr-76038454af1b32737" -> null
+      - tags_all               = {} -> null
+    }
+
+  # aws_vpc_security_group_ingress_rule.pg will be destroyed
+  - resource "aws_vpc_security_group_ingress_rule" "pg" {
+      - arn                    = "arn:aws:ec2:us-east-1::security-group-rule/sgr-a11615f3705e21f54" -> null
+      - cidr_ipv4              = "10.0.0.0/16" -> null
+      - from_port              = 5432 -> null
+      - id                     = "sgr-a11615f3705e21f54" -> null
+      - ip_protocol            = "tcp" -> null
+      - region                 = "us-east-1" -> null
+      - security_group_id      = "sg-6a21114ef2d13f5db" -> null
+      - security_group_rule_id = "sgr-a11615f3705e21f54" -> null
+      - tags_all               = {} -> null
+      - to_port                = 5432 -> null
+    }
+
+Plan: 0 to add, 0 to change, 23 to destroy.
+aws_s3_bucket_versioning.backups: Destroying... [id=prod-backups]
+aws_vpc_security_group_egress_rule.all: Destroying... [id=sgr-76038454af1b32737]
+aws_s3_object.dump[2]: Destroying... [id=prod-backups/db/dump-2.sql]
+aws_vpc_security_group_ingress_rule.pg: Destroying... [id=sgr-a11615f3705e21f54]
+aws_lambda_function.orders: Destroying... [id=orders]
+aws_route_table.public: Destroying... [id=rtb-bed55ef112797d4fc]
+aws_s3_object.dump[0]: Destroying... [id=prod-backups/db/dump-0.sql]
+aws_s3_object.dump[3]: Destroying... [id=prod-backups/db/dump-3.sql]
+aws_s3_object.dump[1]: Destroying... [id=prod-backups/db/dump-1.sql]
+aws_db_instance.main: Destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U]
+aws_s3_bucket_versioning.backups: Destruction complete after 8s
+aws_s3_object.dump[4]: Destroying... [id=prod-backups/db/dump-4.sql]
+aws_lambda_function.orders: Still destroying... [id=orders, 00m10s elapsed]
+aws_s3_object.dump[0]: Still destroying... [id=prod-backups/db/dump-0.sql, 00m10s elapsed]
+aws_vpc_security_group_egress_rule.all: Still destroying... [id=sgr-76038454af1b32737, 00m10s elapsed]
+aws_vpc_security_group_ingress_rule.pg: Still destroying... [id=sgr-a11615f3705e21f54, 00m10s elapsed]
+aws_route_table.public: Still destroying... [id=rtb-bed55ef112797d4fc, 00m10s elapsed]
+aws_s3_object.dump[2]: Still destroying... [id=prod-backups/db/dump-2.sql, 00m10s elapsed]
+aws_s3_object.dump[3]: Still destroying... [id=prod-backups/db/dump-3.sql, 00m10s elapsed]
+aws_s3_object.dump[1]: Still destroying... [id=prod-backups/db/dump-1.sql, 00m10s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m10s elapsed]
+aws_s3_object.dump[4]: Still destroying... [id=prod-backups/db/dump-4.sql, 00m10s elapsed]
+aws_s3_object.dump[2]: Still destroying... [id=prod-backups/db/dump-2.sql, 00m20s elapsed]
+aws_route_table.public: Still destroying... [id=rtb-bed55ef112797d4fc, 00m20s elapsed]
+aws_lambda_function.orders: Still destroying... [id=orders, 00m20s elapsed]
+aws_vpc_security_group_ingress_rule.pg: Still destroying... [id=sgr-a11615f3705e21f54, 00m20s elapsed]
+aws_s3_object.dump[1]: Still destroying... [id=prod-backups/db/dump-1.sql, 00m20s elapsed]
+aws_s3_object.dump[3]: Still destroying... [id=prod-backups/db/dump-3.sql, 00m20s elapsed]
+aws_vpc_security_group_egress_rule.all: Still destroying... [id=sgr-76038454af1b32737, 00m20s elapsed]
+aws_s3_object.dump[0]: Still destroying... [id=prod-backups/db/dump-0.sql, 00m20s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m20s elapsed]
+aws_lambda_function.orders: Destruction complete after 21s
+aws_cloudwatch_log_group.fn: Destroying... [id=/aws/lambda/orders]
+aws_s3_object.dump[4]: Still destroying... [id=prod-backups/db/dump-4.sql, 00m20s elapsed]
+aws_s3_object.dump[0]: Still destroying... [id=prod-backups/db/dump-0.sql, 00m30s elapsed]
+aws_s3_object.dump[2]: Still destroying... [id=prod-backups/db/dump-2.sql, 00m30s elapsed]
+aws_s3_object.dump[1]: Still destroying... [id=prod-backups/db/dump-1.sql, 00m30s elapsed]
+aws_s3_object.dump[3]: Still destroying... [id=prod-backups/db/dump-3.sql, 00m30s elapsed]
+aws_vpc_security_group_egress_rule.all: Still destroying... [id=sgr-76038454af1b32737, 00m30s elapsed]
+aws_route_table.public: Still destroying... [id=rtb-bed55ef112797d4fc, 00m30s elapsed]
+aws_vpc_security_group_ingress_rule.pg: Still destroying... [id=sgr-a11615f3705e21f54, 00m30s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m30s elapsed]
+aws_cloudwatch_log_group.fn: Still destroying... [id=/aws/lambda/orders, 00m10s elapsed]
+aws_vpc_security_group_ingress_rule.pg: Destruction complete after 32s
+aws_iam_role_policy_attachment.fn: Destroying... [id=orders-fn/arn:aws:iam::123456789012:policy/orders-fn-dynamo]
+aws_s3_object.dump[4]: Still destroying... [id=prod-backups/db/dump-4.sql, 00m30s elapsed]
+aws_s3_object.dump[3]: Still destroying... [id=prod-backups/db/dump-3.sql, 00m40s elapsed]
+aws_s3_object.dump[0]: Still destroying... [id=prod-backups/db/dump-0.sql, 00m40s elapsed]
+aws_s3_object.dump[2]: Still destroying... [id=prod-backups/db/dump-2.sql, 00m40s elapsed]
+aws_s3_object.dump[1]: Still destroying... [id=prod-backups/db/dump-1.sql, 00m40s elapsed]
+aws_route_table.public: Still destroying... [id=rtb-bed55ef112797d4fc, 00m40s elapsed]
+aws_vpc_security_group_egress_rule.all: Still destroying... [id=sgr-76038454af1b32737, 00m40s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m40s elapsed]
+aws_vpc_security_group_egress_rule.all: Destruction complete after 40s
+aws_cloudwatch_log_group.fn: Still destroying... [id=/aws/lambda/orders, 00m20s elapsed]
+aws_iam_role_policy_attachment.fn: Still destroying... [id=orders-fn/arn:aws:iam::123456789012:policy/orders-fn-dynamo, 00m10s elapsed]
+aws_s3_object.dump[4]: Still destroying... [id=prod-backups/db/dump-4.sql, 00m40s elapsed]
+aws_s3_object.dump[1]: Destruction complete after 48s
+aws_s3_object.dump[2]: Still destroying... [id=prod-backups/db/dump-2.sql, 00m50s elapsed]
+aws_s3_object.dump[3]: Still destroying... [id=prod-backups/db/dump-3.sql, 00m50s elapsed]
+aws_s3_object.dump[0]: Still destroying... [id=prod-backups/db/dump-0.sql, 00m50s elapsed]
+aws_route_table.public: Still destroying... [id=rtb-bed55ef112797d4fc, 00m50s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 00m50s elapsed]
+aws_cloudwatch_log_group.fn: Still destroying... [id=/aws/lambda/orders, 00m30s elapsed]
+aws_iam_role_policy_attachment.fn: Still destroying... [id=orders-fn/arn:aws:iam::123456789012:policy/orders-fn-dynamo, 00m20s elapsed]
+aws_s3_object.dump[2]: Destruction complete after 56s
+aws_s3_object.dump[4]: Still destroying... [id=prod-backups/db/dump-4.sql, 00m50s elapsed]
+aws_route_table.public: Still destroying... [id=rtb-bed55ef112797d4fc, 01m00s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 01m00s elapsed]
+aws_s3_object.dump[0]: Still destroying... [id=prod-backups/db/dump-0.sql, 01m00s elapsed]
+aws_s3_object.dump[3]: Still destroying... [id=prod-backups/db/dump-3.sql, 01m00s elapsed]
+aws_cloudwatch_log_group.fn: Still destroying... [id=/aws/lambda/orders, 00m40s elapsed]
+aws_iam_role_policy_attachment.fn: Still destroying... [id=orders-fn/arn:aws:iam::123456789012:policy/orders-fn-dynamo, 00m30s elapsed]
+aws_route_table.public: Destruction complete after 1m5s
+aws_internet_gateway.main: Destroying... [id=igw-42ae83a401bd7a700]
+aws_s3_object.dump[4]: Still destroying... [id=prod-backups/db/dump-4.sql, 01m00s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 01m10s elapsed]
+aws_s3_object.dump[3]: Still destroying... [id=prod-backups/db/dump-3.sql, 01m10s elapsed]
+aws_s3_object.dump[0]: Still destroying... [id=prod-backups/db/dump-0.sql, 01m10s elapsed]
+aws_cloudwatch_log_group.fn: Still destroying... [id=/aws/lambda/orders, 00m50s elapsed]
+aws_iam_role_policy_attachment.fn: Still destroying... [id=orders-fn/arn:aws:iam::123456789012:policy/orders-fn-dynamo, 00m40s elapsed]
+aws_s3_object.dump[0]: Destruction complete after 1m13s
+aws_internet_gateway.main: Still destroying... [id=igw-42ae83a401bd7a700, 00m10s elapsed]
+aws_s3_object.dump[4]: Still destroying... [id=prod-backups/db/dump-4.sql, 01m10s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 01m20s elapsed]
+aws_s3_object.dump[3]: Still destroying... [id=prod-backups/db/dump-3.sql, 01m20s elapsed]
+aws_s3_object.dump[3]: Destruction complete after 1m21s
+aws_cloudwatch_log_group.fn: Still destroying... [id=/aws/lambda/orders, 01m00s elapsed]
+aws_iam_role_policy_attachment.fn: Still destroying... [id=orders-fn/arn:aws:iam::123456789012:policy/orders-fn-dynamo, 00m50s elapsed]
+aws_internet_gateway.main: Still destroying... [id=igw-42ae83a401bd7a700, 00m20s elapsed]
+aws_s3_object.dump[4]: Still destroying... [id=prod-backups/db/dump-4.sql, 01m20s elapsed]
+aws_s3_object.dump[4]: Destruction complete after 1m21s
+aws_s3_bucket.backups: Destroying... [id=prod-backups]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 01m30s elapsed]
+aws_cloudwatch_log_group.fn: Still destroying... [id=/aws/lambda/orders, 01m10s elapsed]
+aws_iam_role_policy_attachment.fn: Still destroying... [id=orders-fn/arn:aws:iam::123456789012:policy/orders-fn-dynamo, 01m00s elapsed]
+aws_internet_gateway.main: Still destroying... [id=igw-42ae83a401bd7a700, 00m30s elapsed]
+aws_cloudwatch_log_group.fn: Destruction complete after 1m16s
+aws_s3_bucket.backups: Still destroying... [id=prod-backups, 00m10s elapsed]
+aws_db_instance.main: Still destroying... [id=db-M5ENSHXFPU6XHZ4G4ZEI5QIO2U, 01m40s elapsed]
+aws_iam_role_policy_attachment.fn: Still destroying... [id=orders-fn/arn:aws:iam::123456789012:policy/orders-fn-dynamo, 01m10s elapsed]
+aws_db_instance.main: Destruction complete after 1m44s
+aws_db_subnet_group.main: Destroying... [id=prod]
+aws_security_group.db: Destroying... [id=sg-6a21114ef2d13f5db]
+aws_internet_gateway.main: Still destroying... [id=igw-42ae83a401bd7a700, 00m40s elapsed]
+aws_iam_role_policy_attachment.fn: Destruction complete after 1m13s
+aws_iam_policy.fn: Destroying... [id=arn:aws:iam::123456789012:policy/orders-fn-dynamo]
+aws_iam_role.fn: Destroying... [id=orders-fn]
+aws_s3_bucket.backups: Still destroying... [id=prod-backups, 00m20s elapsed]
+aws_db_subnet_group.main: Still destroying... [id=prod, 00m10s elapsed]
+aws_security_group.db: Still destroying... [id=sg-6a21114ef2d13f5db, 00m10s elapsed]
+aws_internet_gateway.main: Still destroying... [id=igw-42ae83a401bd7a700, 00m50s elapsed]
+aws_iam_policy.fn: Still destroying... [id=arn:aws:iam::123456789012:policy/orders-fn-dynamo, 00m10s elapsed]
+aws_iam_role.fn: Still destroying... [id=orders-fn, 00m10s elapsed]
+aws_s3_bucket.backups: Still destroying... [id=prod-backups, 00m30s elapsed]
+aws_s3_bucket.backups: Destruction complete after 32s
+aws_db_subnet_group.main: Still destroying... [id=prod, 00m20s elapsed]
+aws_security_group.db: Still destroying... [id=sg-6a21114ef2d13f5db, 00m20s elapsed]
+aws_internet_gateway.main: Still destroying... [id=igw-42ae83a401bd7a700, 01m00s elapsed]
+aws_iam_policy.fn: Still destroying... [id=arn:aws:iam::123456789012:policy/orders-fn-dynamo, 00m20s elapsed]
+aws_iam_role.fn: Still destroying... [id=orders-fn, 00m20s elapsed]
+aws_db_subnet_group.main: Destruction complete after 25s
+aws_subnet.b: Destroying... [id=subnet-a58636fbba351948e]
+aws_subnet.a: Destroying... [id=subnet-6e2f086bbad9f638f]
+aws_security_group.db: Still destroying... [id=sg-6a21114ef2d13f5db, 00m30s elapsed]
+aws_internet_gateway.main: Still destroying... [id=igw-42ae83a401bd7a700, 01m10s elapsed]
+aws_iam_policy.fn: Still destroying... [id=arn:aws:iam::123456789012:policy/orders-fn-dynamo, 00m30s elapsed]
+aws_iam_role.fn: Still destroying... [id=orders-fn, 00m30s elapsed]
+aws_security_group.db: Destruction complete after 33s
+aws_subnet.a: Still destroying... [id=subnet-6e2f086bbad9f638f, 00m10s elapsed]
+aws_subnet.b: Still destroying... [id=subnet-a58636fbba351948e, 00m10s elapsed]
+aws_internet_gateway.main: Still destroying... [id=igw-42ae83a401bd7a700, 01m20s elapsed]
+aws_iam_policy.fn: Still destroying... [id=arn:aws:iam::123456789012:policy/orders-fn-dynamo, 00m40s elapsed]
+aws_iam_role.fn: Still destroying... [id=orders-fn, 00m40s elapsed]
+aws_iam_policy.fn: Destruction complete after 40s
+aws_dynamodb_table.orders: Destroying... [id=orders]
+aws_subnet.a: Still destroying... [id=subnet-6e2f086bbad9f638f, 00m20s elapsed]
+aws_subnet.b: Still destroying... [id=subnet-a58636fbba351948e, 00m20s elapsed]
+aws_iam_role.fn: Destruction complete after 48s
+aws_internet_gateway.main: Still destroying... [id=igw-42ae83a401bd7a700, 01m30s elapsed]
+aws_dynamodb_table.orders: Still destroying... [id=orders, 00m10s elapsed]
+aws_subnet.b: Still destroying... [id=subnet-a58636fbba351948e, 00m30s elapsed]
+aws_subnet.a: Still destroying... [id=subnet-6e2f086bbad9f638f, 00m30s elapsed]
+aws_internet_gateway.main: Destruction complete after 1m37s
+aws_dynamodb_table.orders: Still destroying... [id=orders, 00m20s elapsed]
+aws_subnet.b: Still destroying... [id=subnet-a58636fbba351948e, 00m40s elapsed]
+aws_subnet.a: Still destroying... [id=subnet-6e2f086bbad9f638f, 00m40s elapsed]
+aws_subnet.a: Destruction complete after 41s
+aws_dynamodb_table.orders: Still destroying... [id=orders, 00m30s elapsed]
+aws_subnet.b: Destruction complete after 49s
+aws_vpc.main: Destroying... [id=vpc-3a28ad8865c8be582]
+aws_dynamodb_table.orders: Still destroying... [id=orders, 00m40s elapsed]
+aws_dynamodb_table.orders: Destruction complete after 41s
+aws_vpc.main: Still destroying... [id=vpc-3a28ad8865c8be582, 00m10s elapsed]
+aws_vpc.main: Destruction complete after 16s
+
+Destroy complete! Resources: 23 destroyed.
+
+[exit 0 after 205.9 s]

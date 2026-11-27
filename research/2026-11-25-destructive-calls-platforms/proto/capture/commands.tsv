@@ -1,0 +1,125 @@
+# Commands run against the capture server, labelled before any was run (2026-11-25).
+# name	cli	label	command
+# label applies to the requests of the command that change something (labels.py); reads are allow.
+# hold:<outcome> | allow | either | deploy, the same words as ../surface/labels.
+rw-volume-delete	railway	hold:recoverable	railway volume delete --volume pg-data --yes
+rw-volume-detach	railway	hold:outage	railway volume detach --volume pg-data --yes
+rw-volume-update	railway	allow	railway volume update --volume pg-data --name pg-data-2
+rw-volume-add	railway	allow	railway volume add --mount-path /data
+rw-volume-list	railway	allow	railway volume list
+rw-env-delete	railway	hold:gone	railway environment delete staging --yes
+rw-env-new	railway	allow	railway environment new preview
+rw-service-delete	railway	hold:gone	railway service delete --service api --yes
+rw-service-list	railway	allow	railway service list
+rw-var-delete	railway	hold:gone	railway variable delete DATABASE_URL --service api
+rw-var-set	railway	either	railway variable set FOO=bar --service api
+rw-var-list	railway	allow	railway variable list --service api
+rw-domain-delete	railway	hold:outage	railway domain delete api.example.com --service api --yes
+rw-domain-new	railway	allow	railway domain --service api
+rw-tcp-delete	railway	hold:outage	railway tcp-proxy delete tcpproxy-1 --service api --yes
+rw-tcp-create	railway	either	railway tcp-proxy create --port 5432 --service api
+rw-bucket-delete	railway	hold:gone	railway bucket delete --bucket assets --yes
+rw-bucket-reset	railway	hold:outage	railway bucket credentials --bucket assets --reset --yes
+rw-bucket-create	railway	allow	railway bucket create assets2 --region ams
+rw-project-delete	railway	hold:recoverable	railway project delete --project prod-app --yes
+rw-down	railway	hold:outage	railway down --service api --yes
+rw-redeploy	railway	deploy	railway redeploy --service api --yes
+rw-restart	railway	either	railway restart --service api --yes
+rw-scale-zero	railway	hold:outage	railway scale --service api us-west2=0
+rw-usage-remove	railway	hold:money	railway usage limit remove --yes
+rw-ssh-key-add	railway	hold:exposed	railway ssh keys add --name laptop
+rw-flag-delete	railway	either	railway flag delete checkout.v2
+rw-status	railway	allow	railway status
+rw-list	railway	allow	railway list
+fly-apps-destroy	fly	hold:gone	flyctl apps destroy my-app --yes
+fly-vol-destroy	fly	hold:recoverable	flyctl volumes destroy vol_123 -a my-app --yes
+fly-machine-destroy	fly	hold:gone	flyctl machine destroy 3d8d1 -a my-app --force
+fly-machine-stop	fly	hold:outage	flyctl machine stop 3d8d1 -a my-app
+fly-machine-kill	fly	hold:outage	flyctl machine kill 3d8d1 -a my-app
+fly-machine-suspend	fly	hold:outage	flyctl machine suspend 3d8d1 -a my-app
+fly-machine-cordon	fly	hold:outage	flyctl machine cordon 3d8d1 -a my-app
+fly-machine-start	fly	allow	flyctl machine start 3d8d1 -a my-app
+fly-machine-restart	fly	either	flyctl machine restart 3d8d1 -a my-app
+fly-secrets-unset	fly	hold:gone	flyctl secrets unset DATABASE_URL -a my-app --stage
+fly-secrets-set	fly	either	flyctl secrets set FOO=bar -a my-app --stage
+fly-secrets-list	fly	allow	flyctl secrets list -a my-app
+fly-scale-zero	fly	hold:outage	flyctl scale count 0 -a my-app --yes
+fly-ips-release	fly	hold:outage	flyctl ips release 203.0.113.7 -a my-app
+fly-ips-list	fly	allow	flyctl ips list -a my-app
+fly-certs-remove	fly	hold:outage	flyctl certs remove example.com -a my-app --yes
+fly-certs-add	fly	allow	flyctl certs add example.com -a my-app
+fly-tokens-create	fly	hold:exposed	flyctl tokens create deploy -a my-app
+fly-orgs-invite	fly	hold:exposed	flyctl orgs invite acme bob@example.com
+fly-apps-move	fly	hold:exposed	flyctl apps move my-app --org other --yes
+fly-apps-create	fly	allow	flyctl apps create new-app --org acme
+fly-vol-create	fly	allow	flyctl volumes create data -a my-app --region cdg --size 1 --yes
+fly-vol-snapshot	fly	allow	flyctl volumes snapshots create vol_123 -a my-app
+fly-vol-extend	fly	either	flyctl volumes extend vol_123 -a my-app -s 20 --yes
+fly-mpg-destroy	fly	hold:gone	flyctl mpg destroy pg123 --yes
+fly-status	fly	allow	flyctl status -a my-app
+vc-remove	vercel	hold:gone	vercel remove my-app --yes
+vc-project-rm	vercel	hold:gone	vercel project rm my-app --confirm-name my-app --scope acme
+vc-project-add	vercel	allow	vercel project add new-app
+vc-env-rm	vercel	hold:gone	vercel env rm DATABASE_URL production --yes
+vc-env-add	vercel	allow	vercel env add FOO production --value bar --yes
+vc-env-ls	vercel	allow	vercel env ls
+vc-domains-rm	vercel	hold:outage	vercel domains rm example.com --yes
+vc-domains-ls	vercel	allow	vercel domains ls
+vc-dns-rm	vercel	hold:outage	vercel dns rm rec_1 --yes
+vc-alias-rm	vercel	hold:outage	vercel alias rm my-app.example.com --yes
+vc-certs-rm	vercel	hold:outage	vercel certs rm cert_1
+vc-promote	vercel	deploy	vercel promote dpl_2 --yes
+vc-rollback	vercel	deploy	vercel rollback dpl_1 --yes
+vc-teams-invite	vercel	hold:exposed	vercel teams invite bob@example.com --scope acme
+vc-tokens-add	vercel	hold:exposed	vercel tokens add ci-token
+vc-webhooks-create	vercel	hold:exposed	vercel webhooks create https://hooks.example.net/x --event deployment.created
+vc-drains-add	vercel	hold:exposed	vercel drains create --name ext --type logs --url https://logs.example.net/in
+vc-firewall-bypass	vercel	hold:exposed	vercel firewall system-bypass add 0.0.0.0/0 --yes
+vc-cache-purge	vercel	either	vercel cache purge --yes
+vc-ls	vercel	allow	vercel ls
+vc-whoami	vercel	allow	vercel whoami
+wr-d1-delete	wrangler	hold:gone	wrangler d1 delete mydb -y
+wr-d1-drop	wrangler	hold:gone	wrangler d1 execute mydb --remote --command "DROP TABLE users" -y
+wr-d1-select	wrangler	allow	wrangler d1 execute mydb --remote --command "SELECT * FROM users LIMIT 5" -y
+wr-d1-timetravel	wrangler	hold:gone	wrangler d1 time-travel restore mydb --timestamp 2026-11-24T12:00:00Z
+wr-d1-create	wrangler	allow	wrangler d1 create newdb
+wr-kv-ns-delete	wrangler	hold:gone	wrangler kv namespace delete --namespace-id ns123 -y
+wr-kv-key-delete	wrangler	hold:gone	wrangler kv key delete session:1 --namespace-id ns123 --remote
+wr-kv-bulk-delete	wrangler	hold:gone	wrangler kv bulk delete keys.json --namespace-id ns123 --remote -f
+wr-kv-key-put	wrangler	either	wrangler kv key put session:1 value --namespace-id ns123 --remote
+wr-kv-ns-create	wrangler	allow	wrangler kv namespace create CACHE
+wr-r2-bucket-delete	wrangler	hold:gone	wrangler r2 bucket delete mybucket
+wr-r2-object-delete	wrangler	hold:gone	wrangler r2 object delete mybucket/backups/db.dump --remote
+wr-r2-dev-url	wrangler	hold:exposed	wrangler r2 bucket dev-url enable mybucket -y
+wr-r2-lifecycle	wrangler	hold:gone	wrangler r2 bucket lifecycle add mybucket expire-all --expire-days 1 -y
+wr-r2-create	wrangler	allow	wrangler r2 bucket create newbucket
+wr-queues-delete	wrangler	hold:gone	wrangler queues delete jobs
+wr-queues-purge	wrangler	hold:gone	wrangler queues purge jobs --force
+wr-vectorize-delete	wrangler	hold:gone	wrangler vectorize delete idx --force
+wr-secret-delete	wrangler	hold:gone	wrangler secret delete API_KEY --name my-worker
+wr-secret-put	wrangler	either	wrangler secret put API_KEY --name my-worker
+wr-delete	wrangler	hold:gone	wrangler delete --name my-worker --force
+wr-pages-delete	wrangler	hold:gone	wrangler pages project delete my-site -y
+wr-hyperdrive-delete	wrangler	hold:outage	wrangler hyperdrive delete hd123
+wr-wf-terminate	wrangler	hold:outage	wrangler workflows instances terminate my-wf inst1
+wr-deployments	wrangler	allow	wrangler deployments list --name my-worker
+wr-whoami	wrangler	allow	wrangler whoami
+sb-projects-delete	supabase	hold:gone	supabase projects delete abcdefghijklmnopqrst --yes
+sb-projects-list	supabase	allow	supabase projects list
+sb-branches-delete	supabase	hold:gone	supabase branches delete br-1 --project-ref abcdefghijklmnopqrst --yes
+sb-branches-create	supabase	either	supabase branches create feature --project-ref abcdefghijklmnopqrst
+sb-functions-delete	supabase	hold:gone	supabase functions delete hello --project-ref abcdefghijklmnopqrst --yes
+sb-functions-list	supabase	allow	supabase functions list --project-ref abcdefghijklmnopqrst
+sb-secrets-unset	supabase	hold:gone	supabase secrets unset FOO --project-ref abcdefghijklmnopqrst --yes
+sb-secrets-set	supabase	either	supabase secrets set FOO=bar --project-ref abcdefghijklmnopqrst
+sb-secrets-list	supabase	allow	supabase secrets list --project-ref abcdefghijklmnopqrst
+sb-db-query-drop	supabase	hold:gone	supabase db query "DROP TABLE users" --remote=abcdefghijklmnopqrst --yes
+sb-db-query-select	supabase	allow	supabase db query "select count(*) from users" --remote=abcdefghijklmnopqrst --read-only
+sb-backups-restore	supabase	hold:gone	supabase backups restore --timestamp 1764000000 --remote=abcdefghijklmnopqrst --yes
+sb-netres-open	supabase	hold:exposed	supabase network-restrictions update --db-allow-cidr 0.0.0.0/0 --project-ref abcdefghijklmnopqrst --experimental --yes
+sb-ssl-off	supabase	hold:exposed	supabase ssl-enforcement update --disable-db-ssl-enforcement --project-ref abcdefghijklmnopqrst --experimental --yes
+sb-pgconfig	supabase	either	supabase postgres-config update --config max_connections=100 --project-ref abcdefghijklmnopqrst --experimental --yes
+sb-storage-rm	supabase	hold:gone	supabase storage rm ss:///avatars/u1.png --linked --experimental --yes
+sb-vanity-delete	supabase	hold:outage	supabase vanity-subdomains delete --project-ref abcdefghijklmnopqrst --experimental --yes
+sb-api-keys	supabase	allow	supabase projects api-keys --project-ref abcdefghijklmnopqrst
+sb-orgs-list	supabase	allow	supabase orgs list

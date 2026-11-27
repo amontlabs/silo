@@ -1,0 +1,14 @@
+{
+ "betas": {
+  "gone": [],
+  "new": [
+   "fallback-credit-2026-06-01"
+  ]
+ },
+ "tools": {
+  "gone": [],
+  "new": [
+   "tool:DeferredToolPlaceholder"
+  ]
+ }
+}
