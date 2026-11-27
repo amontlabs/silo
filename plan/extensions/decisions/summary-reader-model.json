@@ -1,0 +1,9 @@
+{
+  "asks": "Whose model does the summary reader ask?",
+  "answer": "A model the user names when installing the reader: through an API key the user gives it as a secret, billed to the user, by default a provider's small model. The reader sends that provider the ask, the agent's summary and the facts of the receipt, and the install screen says so. A model that runs in the reader's own computer is the other choice the install offers; it needs no key and sends nothing out, and the reader then shows no opinion that the summary speaks to a checker. Without either, the reader gives no opinion and says why.",
+  "needs": [
+    "agent-summary-checked",
+    "silos-own-model-calls",
+    "extension-secrets"
+  ]
+}

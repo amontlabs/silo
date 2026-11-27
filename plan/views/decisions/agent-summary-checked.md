@@ -75,3 +75,10 @@ $0.0009 a summary with the small model and $0.017 with the mid-size one. Fencing
 a random tag and marking its spaces made the small model miss 21 more false claims with no attack,
 so it is not in the answer. The first call said the words speak to a checker on 156 of 171
 attacks written by another model, and on at most 1 of 75 honest summaries.
+
+An agent's part, 25 November 2026, from `research/2026-11-25-reader-model`. The signal "the words
+speak to the checker" depends on the model. A 4B model run locally (Qwen3 4B) set it on all 75
+summaries, honest ones included, where the small hosted model set it on 1. With such a model the
+rule that keeps a "matched" off those summaries would hold every run under What needs you, so the
+reader shows the signal only with a model measured to keep it rare on honest summaries. Which model
+the reader asks is `summary-reader-model`.

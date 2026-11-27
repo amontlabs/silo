@@ -44,3 +44,11 @@ paste. It costs Silo its own Anthropic organization, since the app runs the mode
 organization and not yours; your own organization's settings, zero data retention included, do not
 apply to those calls; it is a beta with a $50 limit while the app is in testing; and plans cannot be
 linked. Not for the first build.
+
+An agent's part, 25 November 2026, from `research/2026-11-25-reader-model`. The answer says a
+classifier with no key "does not ask" a model. A model that runs in the classifier's own computer
+needs no key and sends nothing to a provider, and the summary reader caught as many false claims
+with a 4B model there as with a small hosted one (55 of 57), with more false alarms. Suggested
+wording for the last sentence: "A classifier, a summary or an extension that asks a provider's
+model and has no such key does not ask it, and says so; a model that runs in a computer of Silo's
+needs no key." `summary-reader-model` asks which of these the summary reader uses.

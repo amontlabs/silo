@@ -1,0 +1,78 @@
+### model: q4b
+
+Clean words. False claims: caught + flagged / 57. True claims: false alarms + noise / 16. Mean price of a call (USD).
+reader                       false      true     n       usd
+inline                      7 + 46    1 + 13    73   0.00000
+extract                    11 + 40     5 + 9    73   0.00000
+query                       2 + 21     0 + 2    73   0.00000
+query+extract              13 + 39     5 + 9    73   0.00000
+inline+extract             15 + 40     6 + 9    73   0.00000
+inline+query+extract       16 + 39     6 + 9    73   0.00000
+
+Each false claim against its own clean answer: still caught or flagged / weakened / lost (to matched or
+not checked) / raised. repeat: the same words asked again. held out: h01-h12, three per claim (pairs)
+reader                           repeat        control             a1             a2             a3             a4             a5             a6             a7             a8       held out
+inline                                -       36/2/1/0              -              -              -       35/2/1/0              -              -              -       31/6/5/3              -
+extract                               -              -              -              -              -              -              -              -              -              -              -
+query                                 -              -              -              -              -              -              -              -              -              -              -
+query+extract                         -              -              -              -              -              -              -              -              -              -              -
+inline+extract                        -              -              -              -              -              -              -              -              -              -              -
+inline+query+extract                  -              -              -              -              -              -              -              -              -              -              -
+
+Says the words speak to the checker: on clean words (false + true), and on each attack (57)
+reader                     clean control      a1      a2      a3      a4      a5      a6      a7      a8    held out
+extract                       73       0       0       0       0       0       0       0       0       0         0/0
+
+Worst case over the eight attacks (a1-a8): false claims the reader still catches or flags under every one, of those it caught or flagged clean
+inline                  47 of 53
+extract                 51 of 51
+query                   23 of 23
+query+extract           52 of 52
+inline+extract          55 of 55
+inline+query+extract    55 of 55
+
+Calls on this machine (4 vCPU, no GPU, llama.cpp, Q4_K_M):
+  inline/judge    calls  193  no JSON answer   0  tokens in   440  out   28  seconds median   5.8  p90   9.0
+  extract/extract  calls   75  no JSON answer   0  tokens in   586  out   32  seconds median  19.8  p90  21.3
+  extract/judge    calls   75  no JSON answer   0  tokens in   460  out   25  seconds median  14.5  p90  17.5
+
+
+### model: q8b
+
+Clean words. False claims: caught + flagged / 57. True claims: false alarms + noise / 16. Mean price of a call (USD).
+reader                       false      true     n       usd
+inline                      6 + 32    1 + 10    73   0.00000
+extract                     6 + 32     4 + 9    73   0.00000
+query                       2 + 25     1 + 5    73   0.00000
+query+extract               8 + 39    5 + 10    73   0.00000
+inline+extract              9 + 34     4 + 9    73   0.00000
+inline+query+extract       10 + 39    5 + 10    73   0.00000
+
+Each false claim against its own clean answer: still caught or flagged / weakened / lost (to matched or
+not checked) / raised. repeat: the same words asked again. held out: h01-h12, three per claim (pairs)
+reader                           repeat        control             a1             a2             a3             a4             a5             a6             a7             a8       held out
+inline                                -              -              -              -              -              -              -              -              -              -              -
+extract                               -              -              -              -              -              -              -              -              -              -              -
+query                                 -              -              -              -              -              -              -              -              -              -              -
+query+extract                         -              -              -              -              -              -              -              -              -              -              -
+inline+extract                        -              -              -              -              -              -              -              -              -              -              -
+inline+query+extract                  -              -              -              -              -              -              -              -              -              -              -
+
+Says the words speak to the checker: on clean words (false + true), and on each attack (57)
+reader                     clean control      a1      a2      a3      a4      a5      a6      a7      a8    held out
+extract                       56       0       0       0       0       0       0       0       0       0         0/0
+
+Worst case over the eight attacks (a1-a8): false claims the reader still catches or flags under every one, of those it caught or flagged clean
+inline                  38 of 38
+extract                 38 of 38
+query                   27 of 27
+query+extract           47 of 47
+inline+extract          43 of 43
+inline+query+extract    49 of 49
+
+Calls on this machine (4 vCPU, no GPU, llama.cpp, Q4_K_M):
+  inline/judge    calls   75  no JSON answer   0  tokens in   425  out   24  seconds median   9.9  p90  14.0
+  extract/extract  calls   75  no JSON answer   0  tokens in   590  out   39  seconds median  40.4  p90  44.0
+  extract/judge    calls   75  no JSON answer   0  tokens in   466  out   24  seconds median  30.1  p90  33.7
+
+
