@@ -579,3 +579,12 @@ How much memory does main need for an iOS developer?
 - Tests: 25 (How many booted simulators fit in one computer)
 
 Measured, not chosen: the verdict is the measures of the tests above.
+
+## `record-file-format`
+
+How does Silo flush what it keeps on a Mac (the record, the spend journal, the team ledger) before it says a thing is kept, and what does that cost?
+
+- Source: plan, taken by agents; #394 found Zig's fsync is not F_FULLFSYNC on macOS, and research 2026-11-25-durability-on-a-mac measures the flushes and a power cut through a disk that loses its cache
+- Tests: 40 (What Silo's own writers wait for on APFS: an acknowledgement with F_FULLFSYNC, F_BARRIERFSYNC or fsync), 41 (A power cut under the record's writer: a macOS computer on a disk that loses its cache)
+
+Measured, not chosen: the verdict is the measures of the tests above.

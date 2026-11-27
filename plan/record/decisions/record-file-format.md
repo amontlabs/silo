@@ -36,3 +36,13 @@ in 394 states and the record could not start again in 3,376. The writer calls `F
 and `fsync` on a volume that refuses it. `F_FULLFSYNC` before each acknowledgement and
 `F_BARRIERFSYNC` for the writes before it lost nothing either; what each costs on a Mac is #359's
 test 06.
+
+## The flush on a Mac, measured
+
+An agent's part, 25 November 2026, from [durability on a Mac](../../../research/2026-11-25-durability-on-a-mac/README.md). The writer takes
+`SILOREC_FLUSH=full|barrier|fsync` and `silorec bench` times an acknowledgement. The Mac kit's
+test 40 runs it on APFS, quiet and while another program writes, and test 41 cuts the power under
+it: a macOS computer on a stand-in drive that keeps writes in a cache until a flush and loses part
+of the cache in the cut. Each new blob costs three flushes (the file and two folders) before its
+line is acknowledged; on Linux, while another program wrote, that was 117 ms at the 99th
+percentile against 0.6 ms for a line, so the barrier rule may matter more for blobs than for lines.

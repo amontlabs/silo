@@ -14,7 +14,7 @@ Two ways in, both over HTTP and JSON:
             GET /state?budget=...
 
 What the ledger holds is dollars per Mac and per call id. No prompt, model name or file name
-reaches it. Every change is committed to SQLite (WAL, synchronous=FULL) before the answer goes
+reaches it. Every change is committed to SQLite (WAL, synchronous=FULL, and F_FULLFSYNC on a Mac) before the answer goes
 out, so a grant a Mac was told about survives a crash of the ledger.
 
 Run: python3 server.py --db ledger.db --port 8730 --budget team=15 [--policy reserve_typical]
@@ -46,6 +46,10 @@ class Ledger:
         self.db = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
+        # On a Mac, FULL is a plain fsync(2), which leaves the commit in the drive's cache; these
+        # make each commit and each checkpoint F_FULLFSYNC (research/2026-11-25-durability-on-a-mac).
+        self.db.execute("PRAGMA fullfsync=ON")
+        self.db.execute("PRAGMA checkpoint_fullfsync=ON")
         self.db.executescript(SCHEMA)
         self.mu = threading.Lock()
         self.policy, self.chunk = policy, chunk

@@ -8,6 +8,7 @@
 //! fails either keeps the last good table. A local file of the user's own rows, unsigned, is read
 //! beside it and wins over it.
 const std = @import("std");
+const journal = @import("journal.zig");
 const usage = @import("usage.zig");
 const Allocator = std.mem.Allocator;
 const Ed25519 = std.crypto.sign.Ed25519;
@@ -187,7 +188,22 @@ pub const Table = struct {
         const sp = std.fmt.bufPrint(&pbuf, "{s}.seen", .{self.path}) catch return;
         var buf: [128]u8 = undefined;
         const line = std.fmt.bufPrint(&buf, "{d} {x}\n", .{ v, digest }) catch return;
-        std.fs.cwd().writeFile(.{ .sub_path = sp, .data = line }) catch {};
+        // Written aside, flushed, then renamed over the old one and the folder flushed: a reader,
+        // or a start after a power cut, finds the old line or the new one, never an empty file
+        // that would let an older release in (research/2026-11-25-durability-on-a-mac).
+        var tbuf: [520]u8 = undefined;
+        const tp = std.fmt.bufPrint(&tbuf, "{s}.tmp", .{sp}) catch return;
+        const tf = std.fs.cwd().createFile(tp, .{}) catch return;
+        tf.writeAll(line) catch {
+            tf.close();
+            return;
+        };
+        journal.durable(tf.handle, .full) catch {};
+        tf.close();
+        std.fs.cwd().rename(tp, sp) catch return;
+        var dir = std.fs.cwd().openDir(std.fs.path.dirname(sp) orelse ".", .{ .iterate = true }) catch return;
+        defer dir.close();
+        journal.durable(dir.fd, .full) catch {};
     }
 
     /// The version of the release in use, 0 for an unsigned file.
@@ -564,4 +580,34 @@ test "a bound for a model with no row" {
     try std.testing.expectEqual(@as(f64, 16), b.input);
     try std.testing.expectEqual(@as(f64, 80), b.output);
     try std.testing.expectEqual(@as(f64, 32), b.cache_write_long);
+}
+
+test "the version last taken is never seen half written (research/2026-11-25-durability-on-a-mac)" {
+    // The rollback check reads `<file>.seen`. If a reader, or a start after a power cut, finds it
+    // empty or cut, readSeen gives null and an older signed release is taken. Written in place
+    // (truncate, then write), it is empty for a moment; written to a temporary file, flushed and
+    // renamed, it is the old line or the new one.
+    var t = try TestRelease.init();
+    defer t.deinit();
+    var tab = t.table(&.{});
+    const Reader = struct {
+        fn run(tb: *Table, stop: *std.atomic.Value(bool), torn: *std.atomic.Value(u32)) void {
+            while (!stop.load(.acquire)) {
+                var pbuf: [512]u8 = undefined;
+                const sp = std.fmt.bufPrint(&pbuf, "{s}.seen", .{tb.path}) catch return;
+                var buf: [128]u8 = undefined;
+                const got = std.fs.cwd().readFile(sp, &buf) catch continue; // not there yet
+                if (got.len == 0 or got[got.len - 1] != '\n') _ = torn.fetchAdd(1, .monotonic);
+            }
+        }
+    };
+    tab.writeSeen(1, [_]u8{1} ** 32);
+    var stop = std.atomic.Value(bool).init(false);
+    var torn = std.atomic.Value(u32).init(0);
+    const th = try std.Thread.spawn(.{}, Reader.run, .{ &tab, &stop, &torn });
+    for (0..3000) |i| tab.writeSeen(i + 2, [_]u8{@truncate(i)} ** 32);
+    stop.store(true, .release);
+    th.join();
+    try std.testing.expectEqual(@as(u32, 0), torn.load(.monotonic));
+    try std.testing.expectEqual(@as(u64, 3001), tab.readSeen().?.version);
 }

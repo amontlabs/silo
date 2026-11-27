@@ -81,6 +81,14 @@ exact bytes.
 - OpenAI charges 10% more on regional endpoints for models released on or after 5 March 2026. The
   boundary would need the day each model was released; it was not built.
 
+## The version last taken, written whole
+
+An agent's part, 25 November 2026, from [durability on a Mac](../../../research/2026-11-25-durability-on-a-mac/README.md). The boundary refuses a signed
+table older than the one it last took, which it notes in `<table>.seen`. That file was written in
+place: for a moment it is empty, and a reader found it empty or cut 9,668 times in 3,000 writes. A
+start after a power cut at that moment finds no version, and an older signed table, with lower
+prices, is taken. It is now written aside, flushed and renamed over the old one.
+
 ## How the table reaches the app, and who can change it
 
 An agent's part, 25 November 2026, from `research/2026-11-25-price-channel`. The answer above now

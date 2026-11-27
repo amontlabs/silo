@@ -19,13 +19,26 @@ Two anchors are prototyped:
                 head whose signature is not the computer's key, and refuses a head older than the
                 last one it holds.
 """
-import base64, hashlib, http.server, json, os, subprocess, threading, urllib.request
+import base64, fcntl, hashlib, http.server, json, os, subprocess, threading, urllib.request
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.exceptions import InvalidSignature
 
 import recfmt
+
+
+def durable(fd):
+    """The data on disk before the head is answered as kept. On a Mac, os.fsync is a plain
+    fsync(2), which leaves it in the drive's cache; F_FULLFSYNC flushes that cache. A volume that
+    refuses it falls back to fsync (research/2026-11-25-durability-on-a-mac)."""
+    if hasattr(fcntl, 'F_FULLFSYNC'):
+        try:
+            fcntl.fcntl(fd, fcntl.F_FULLFSYNC)
+            return
+        except OSError:
+            pass
+    os.fsync(fd)
 
 
 def canon(head):
@@ -132,7 +145,7 @@ class LedgerHandler(http.server.BaseHTTPRequestHandler):
                 with open(srv.path, 'a') as f:
                     f.write(json.dumps(head, separators=(',', ':')) + '\n')
                     f.flush()
-                    os.fsync(f.fileno())
+                    durable(f.fileno())
                 code, why = 201, 'kept'
         self.send_response(code)
         self.end_headers()

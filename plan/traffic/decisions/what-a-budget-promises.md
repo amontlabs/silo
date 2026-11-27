@@ -205,6 +205,19 @@ An agent's part, 25 November 2026, written while merging #390 and #392 to #396 o
 
 The answer says a call to a model Silo has no price for does not leave while a budget covers it (from #373 and #374). #396 measured a third option: count it at twice the dearest price of the same provider and tier. A budget still held, and a new model did not stop every budgeted computer on the day it was released. Recommended: #396's option, with `where-prices-come-from` deciding where the table comes from.
 
+## A budget across a restart
+
+An agent's part, 25 November 2026, from [durability on a Mac](../../../research/2026-11-25-durability-on-a-mac/README.md). In #374's boundary the ledgers
+live in memory. Main reaches its budget of 1 dollar after 23 calls; the boundary is killed, as a
+crash or a power cut kills it, and starts again: the next call is admitted, since every budget
+starts again at zero. The same happens when the boundary stops while a call streams. So
+`budget-stops-what-it-meters` holds only until the boundary restarts.
+
+A spend journal fixes it: each call that leaves, and each settlement, is written and flushed
+(`F_FULLFSYNC` on a Mac) before the call goes on, and a start puts every ledger back. A call that
+left and never settled counts at its reserve, the most it can cost. With it, both cases refuse the
+call after the restart. It costs two flushes per model call; the Mac kit's test 40 measures them.
+
 ## A hostile test of `budget-stops-what-it-meters`
 
 Agent, 25 November 2026, from `research/2026-11-25-untrusted-parsers/` (#401). On #385's boundary,
