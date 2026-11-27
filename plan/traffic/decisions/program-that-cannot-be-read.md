@@ -166,3 +166,12 @@ OpenTelemetry, one event per model call with its tokens, model and price, and ma
 provider's bill call for call on a plan sign-in. That is not reading the program's files: the
 program sends it, in one format other programs share. Whether Silo may count it for traffic it
 passes unread is asked in `program-reports-its-own-spend`.
+
+An agent's part, 25 November 2026, from `research/2026-11-25-morning-screen`. Recorded and shown
+on #371's night with a fifth run: the real Codex 0.172.0, the proxy set, Silo's authority not
+given. The boundary ended TLS for api.openai.com and wrote a fact per refused handshake (host,
+the client's alert). Codex sent `unknown_ca` 42 times in four minutes and printed "waiting for
+network"; #371's receipt for it read "idle, 0 turns, 42 connections allowed". On the morning screen
+the facts are one line under What needs you, "Refuses Silo's certificate · api.openai.com · 42×",
+above everything else, and a line of the run's receipt. Without the probe (option A) the line
+names the computer, not the run: a program that never reaches its model has no conversation.

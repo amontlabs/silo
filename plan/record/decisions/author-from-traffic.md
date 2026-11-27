@@ -51,3 +51,14 @@ Weaker signs were measured and left out of the answer. The tool result names the
 installer prints "bun was installed to ~/.bun/bin/bun"): right once, but whatever runs in the
 computer writes that text. One conversation had a tool call open: right on a fork, where only one
 agent runs, and the same as "while it ran" in main.
+
+An agent's part, 25 November 2026, from `research/2026-11-25-morning-screen`. The same rules,
+applied to connections as #399's prototype does, named the wrong run for 31 of the 55 connections
+the probe gave a run on a night with a fifth agent: Codex refusing Silo's certificate, which never
+reached its model and so had no conversation. "Only one conversation was open" gave its 29
+connections to Claude Code's daemon run, and `github.com` matched inside `api.github.com` in
+another run's `curl`. #399's score did not see it, because it scores against the probe's
+conversation and that run had none. For connections: a host is named only on a host boundary,
+"only one conversation was open" never names a connection, and a host another program reaches at
+its start names nobody. Then 0 wrong on this night and on #399's `one-main` (which had 1), at the
+cost of one right answer. `checks/connections_wrong.py` there shows it failing, then passing.

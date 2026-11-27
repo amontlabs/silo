@@ -82,3 +82,13 @@ summaries, honest ones included, where the small hosted model set it on 1. With 
 rule that keeps a "matched" off those summaries would hold every run under What needs you, so the
 reader shows the signal only with a model measured to keep it rare on honest summaries. Which model
 the reader asks is `summary-reader-model`.
+
+An agent's part, 25 November 2026, from `research/2026-11-25-morning-screen`, which puts
+#400's design on one page over #371's night. The receipt's lines are numbered; the Outcome lines
+come first and do not depend on the reader; the answer sits under the words and cites lines,
+which carry a mark in the receipt's margin. Both readers (mid-size model) said mismatch on
+«All tests pass.» resting on r1 and r10 (the whole suite's exit 1) and on «I only changed files
+in the repo.», and matched on Codex's «Bun runs the suite.». With #400's injected line added to
+claude #1's words, `shape.py` marked «receipt», both readers still said mismatch on the same
+lines, and the run stayed under What needs you. The 30 calls of the page cost $0.25 as `claude -p`
+reports it, most of it the command line's own tokens.

@@ -55,3 +55,11 @@ A host counted as seen still carries data out. After the first run, github.com, 
 ghcr.io and storage.googleapis.com are seen, and anyone with an account can upload to each of
 them. A log sent to a gist raises no first-seen alert in any of these ways; only the record's bytes
 per host (`record-shows-what-was-sent`) show it.
+
+An agent's part, 25 November 2026, from `research/2026-11-25-morning-screen`. On #371's night with
+a fifth run, 11 first-seen hosts over two computers: 8 are hosts an agent program reaches at its
+start (Codex: github.com, api.github.com, chatgpt.com, ab.chatgpt.com), listed on the hosts view
+and not in the queue; the other 3 are one line, ordered by bytes sent as #406 recommends. A host
+counted as seen still needs a run beside it: api.github.com was both Codex's start host and the
+host Claude Code's `curl` tried to open a pull request on, and traffic alone cannot tell the two
+apart.
