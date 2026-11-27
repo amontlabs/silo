@@ -56,3 +56,17 @@ fork gets around in any of the three: main's ledger held every turn of both comp
 An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
 
 #385 ran a $0.50 conversation budget across main and a fork. With this answer and `recognising-a-conversation`'s "the same conversation continued in a fork is a new conversation of the fork", that one conversation spent $1.10. When the fork's copy started at what the parent had spent, it was held to $0.83, and main's copy went on. Recommended: a fork's copy of a conversation starts at the parent's spend at the moment of the fork. `recognising-a-conversation` then needs its last sentence changed to say so.
+
+## Where a fork's copy starts, made exact (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-forked-conversations`, on the traffic of Claude Code 2.1.332 and Codex
+0.172.0 in seven kinds of fork. It refines the option recommended in #385's notes, "starts at what
+its parent's had spent", without changing the choice.
+
+"What its parent's had spent" needs a moment. #385's prototype takes it when the fork first
+calls. A fork of a checkpoint then starts with every turn main made after the checkpoint: one turn
+in the runs (/bin/bash.0166 with Claude Code, /bin/bash.0207 with Codex), and a day of work for a checkpoint
+taken a day before. Taken at the request the fork's first request continues, the copy starts at
+exactly what its own history spent, in all seven cases: a fork, a fork with a new machine id, a
+fork of a checkpoint, a fork of a fork (it carries main's turns and its parent's), and a fork that
+becomes main (main's conversation goes on from the fork's spend, not from main's old one).

@@ -32,3 +32,11 @@ the full list; the model assumed 5% of them. How often it happens on a real nigh
 An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
 
 #376 and #386 each challenge this answer, for different reasons: #376 for a keyed hash, #386 for the size of the list. One replacement that holds both is proposed in the notes of `message-identity-keyed`.
+
+## One store for every computer on the Mac (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-forked-conversations`. A fork copies its parent's conversations, and its
+programs resend them. On seven kinds of fork with Claude Code and Codex, a store kept per computer
+held 5.3 and 5.6 times the bytes of one store shared by every computer on the Mac. The store should
+be one per Mac, with each computer's record pointing into it; what a computer may read of it stays
+its own, as `computer-reads-its-record` says.

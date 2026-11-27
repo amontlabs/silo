@@ -164,3 +164,33 @@ Keeping it on each model-call fact costs one field and names the program's own f
 transcript is `~/.claude/projects/<folder>/<session_id>.jsonl` and Codex's
 `~/.codex/sessions/…/rollout-<time>-<prompt_cache_key>.jsonl`. Without processes, that is how 33 of
 those files on a night of four runs in main named their conversation (`author-from-traffic`).
+
+## A conversation forked across computers, measured (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-forked-conversations`. Claude Code 2.1.332 and Codex 0.172.0 each took
+one conversation up in a fork of main, a fork with a new machine id, a fork of a checkpoint, a fork
+of a fork, and a fork that then became main, against a stand-in provider.
+
+- **Nothing in the traffic tells the two sides apart.** Every identifier was the same on main and
+  on each fork: Claude Code's session id and `device_id` (kept in `~/.claude.json`), Codex's
+  `session-id`, `thread-id`, `prompt_cache_key` and `installation_id` (kept in
+  `~/.codex/installation_id`), also with a new machine id. So "a conversation belongs to one
+  computer" rests on the computer alone, which Silo knows without asking the program.
+- **Where a fork's conversation comes from.** In every case the fork's first request continued,
+  by content, the last request its disk's source had sent before the fork. What the answer could
+  add: a fork's request that starts a new conversation is looked up among the requests that the
+  computers its disk came from (its parent, and theirs, at any depth) sent before its disk was
+  taken; when it continues one, the fork's conversation is linked to that conversation at that
+  request. The record shows the link, and the fork reads none of what its parent sent after.
+- **The link carries the cache.** The provider's prompt cache is per account, not per computer:
+  the fork's first request was 99% cache reads of main's cache. An estimate that starts a fork's
+  conversation with no cache priced it 7 to 9 times too high.
+- **A fork that becomes main** (`fork-replacing-main`): main's next request continues main's
+  old conversation by content, at the turn before the fork, unless Silo treats main's disk as
+  the fork's from then on. It must: the conversations of main after the replacement are the
+  fork's, linked as above.
+- **The program's own fork inside one computer.** `claude --resume <id> --fork-session` and
+  `codex exec fork <id>` send a new session id, and their first request continues the original
+  by content, so the answer keeps them in the conversation. Codex also sends
+  `forked_from_thread_id` and `forked_from_ordinal_exclusive` in `client_metadata` on every
+  request of the fork: a link the program states itself, which holds after a compaction.
