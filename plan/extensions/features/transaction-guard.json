@@ -1,14 +1,13 @@
 {
   "name": "The transaction guard",
-  "what": "An extension that ships with Silo, for a computer whose network is limited to the hosts you name. It reads each transaction the computer sends to a blockchain node, simulates it on a copy of the chain's state, and holds it with its finding when value leaves your account or when the transaction is not among those you approved. When the chain's receipt comes back, it compares it with its simulation and alerts you if they differ.",
+  "what": "An extension that ships with Silo. It is asked about each request for a signature that a computer sends to the wallet computer holding your key. It simulates the transaction on a copy of the chain's state and holds the request, with its explanation in the ask, unless you approved that transaction and it simulates as declared. When the chain's receipt comes back, it compares the receipt with its simulation and alerts you if they differ.",
   "needs": [
     "extension-that-protects",
-    "open-limited-or-closed",
     "request-content-to-an-extension",
     "response-to-an-extension",
-    "finding-of-an-extension",
+    "explanation-in-an-ask",
     "declaration-is-a-report",
-    "signing-outside-the-computer",
+    "blockchain-keys",
     "first-extensions-that-ship"
   ],
   "suggest": {

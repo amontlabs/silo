@@ -1,6 +1,6 @@
 {
   "asks": "May an extension that protects run without protecting first?",
-  "answer": "Yes. Installed for a trial, it is woken with each request it would have been asked about, after the request has left. Its answer is kept as its opinion. No request waits, and nothing is denied or held. The app shows how many requests it would have held, and how many of your answers to asks it agrees with.",
+  "answer": "Yes. Installed for a trial, it is woken with each request it would have been asked about, after the request has left. Its answer is kept as its opinion. No request waits, and nothing is denied or held. The app shows the requests it would have denied or held, and you can say of each whether it should have been.",
   "needs": [
     "extension-may-protect",
     "request-content-to-an-extension",

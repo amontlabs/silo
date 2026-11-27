@@ -31,6 +31,6 @@ Recommended: the body when a rule of the manifest asks to read the host.
 ## The bad path that matters
 
 An agent's part. Reading one host does not stop the same bytes leaving by another. A signed
-transaction is valid whichever host carries it. So an extension that reads a host is exact only on
-a computer whose network is limited to the hosts you name (`network-modes`), and the manifest of
-such an extension says so.
+transaction is valid whichever host carries it. So an extension that reads a host sees every such request only on a computer whose network is
+limited to the hosts you name (`network-modes`), and its manifest says so. For a transaction,
+`blockchain-keys` moves the comparison to the request for a signature, which has one way out.

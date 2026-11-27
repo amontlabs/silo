@@ -1,4 +1,4 @@
 {
   "asks": "What does Silo's position outside the computer give?",
-  "answer": "One position gives all of it. The agent runs inside a machine whose network, disk and screen pass through parts of Silo that it cannot touch. From that one position Silo can record what happened, check what the agent says against what it saw, hold a request before it leaves, limit what the computer reaches, and save and restore it. Nothing that runs inside the computer can do any of these, because the agent can reach whatever runs there."
+  "answer": "One position gives all of it. The agent runs inside a machine whose network, disk and screen pass through parts of Silo that it cannot touch. From that one position Silo can record what happened, compare what the agent says with what it saw, hold a request before it leaves, limit what the computer reaches, and save and restore it. Nothing that runs inside the computer can do any of these, because the agent can reach whatever runs there."
 }

@@ -1,0 +1,7 @@
+{
+  "asks": "How does a computer use a blockchain key it cannot read?",
+  "answer": "The key lives in a wallet computer, which you make from a recipe and which main reaches through a channel you grant. Main sends it the transaction or the message to sign, unsigned. That request crosses main's boundary, so a rule allows it and a precaution may hold it first. The wallet computer is an ordinary computer, not an extension. Whether the boundary signs transactions itself is to find out.",
+  "needs": [
+    "secret-placeholder"
+  ]
+}

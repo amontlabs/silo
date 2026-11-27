@@ -1,6 +1,6 @@
 {
   "asks": "How does an agent say what it is about to do?",
-  "answer": "With a declaration, through the `silo` command inside its computer. A declaration names the thing exactly, such as the transactions it will send, and it is a report. Silo may ask you about it once, and your yes covers what it names. An extension then holds each request against what you approved, as a fact against your answer. A declaration by itself changes nothing that is allowed, denied or held.",
+  "answer": "With a declaration, made through the `silo` command inside its computer. A declaration names each thing exactly, such as each transaction it will ask to have signed, and it is a report. Making one is a request to Silo, so a precaution can hold it, and the ask then shows what it names. Your yes covers exactly the things named. An extension compares each later request with what you approved. A declaration you did not approve changes nothing: not what is allowed, denied or held.",
   "needs": [
     "what-wakes-an-extension",
     "what-a-report-carries"

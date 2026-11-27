@@ -30,16 +30,16 @@ lean of 18 November.
 and extensions before checkpoints. For that build a Linux main on the Mac arrives sooner, for
 reasons that did not exist on 22 November:
 
-- Every extension that executes runs in a Linux computer (`extension-ships-a-computer`), so the
-  Linux driver is built in the first build whichever system main runs.
+- An extension that executes ships a computer (`extension-ships-a-computer`), and
+  `small-computer-for-an-extension` proposes that it be a small Linux one. If so, the Linux driver
+  is built in the first build whichever system main runs.
 - The macOS main waits on macOS 27 on polarzero's Mac and on the Mac tests, none of which has run.
-- Which process did what in a macOS computer needs a permission from Apple that Silo does
-  not have (`processes-from-inside-macos`).
+- How Silo learns which process did what in a macOS computer is still to find out
+  (`processes-from-inside-macos`).
 - Nothing has booted on either system. The prototypes ran in Linux containers.
 
 What it costs is what the first choice says: a Linux machine for agents is what cloud services
-already offer, no agent builds Mac software in it, and by an agent's count the Linux main needs
-35 decisions with no verdict against 25.
+already offer, and no agent builds Mac software in it.
 
 One way to keep both: the first build runs a Linux main to show the boundary, and the macOS main
 follows as the product's main once its Mac tests pass. That would need `main-on-linux` and

@@ -14,14 +14,13 @@ only act through a precaution.
 
 The options:
 
-- Any value Silo planted is a fact when seen (recommended). It is the one check in the plan on
-  what an agent is up to that involves no model and cannot be argued with. It costs little: the
-  boundary already searches what it reads for placeholders.
+- Any value Silo planted is a fact when seen (recommended). It involves no model. It costs
+  little, since the boundary already searches what it reads for placeholders.
 - Placeholders of real secrets only. It costs the planted file, which is the cheap way to learn
   that something reads what it has no reason to read.
 
 Recommended: any value Silo planted is a fact when seen.
 
-It has two limits. Reads of files are not recorded (`file-reads`), so a planted file is seen only
-when its content leaves the computer or enters a model call. And an agent that changes the value
-before sending it is not seen.
+It has three limits. Reads of files are not recorded (`file-reads`), so a planted file is seen
+only when its content leaves the computer or enters a model call. A value sent to a host Silo
+does not read passes unseen. And an agent that changes the value before sending it is not seen.

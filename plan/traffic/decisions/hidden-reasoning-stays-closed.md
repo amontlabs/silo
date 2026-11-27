@@ -24,7 +24,7 @@ and which OpenAI's policies forbid trying to extract.
 ## Not yet seen in a capture
 
 An agent's part, 27 November 2026. The sentence above that OpenAI sends thinking sealed with a
-short summary in plain text is an agent's statement. No capture in the research holds a reasoning
-block: the run on real providers kept sizes and counts, and every later run used stand-in
+short summary in plain text is an agent's statement. An agent searched the captures of the research and found no
+reasoning block: the run on real providers kept sizes and counts, and every later run used stand-in
 providers that sent none. How much reasoning is readable at the boundary, for each agent program,
 is to find out, and `what-silo-cannot-see` depends on it.

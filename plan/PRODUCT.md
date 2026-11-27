@@ -8,7 +8,7 @@ and does not repeat them: `plan show <id>` gives each one.
 
 Silo gives your agents a computer of their own and stays outside it, where they cannot reach
 (`one-position`, still to decide). From there it keeps a record of what happens in the computer,
-holds what the agent says against what it saw, can make a request wait at the boundary, and keeps
+compares what the agent says with what it saw, can make a request wait at the boundary, and keeps
 a way back (`the-shape`, `record`, `boundary`).
 
 What Silo cannot see from there is said too: `what-silo-cannot-see`, still to decide.
@@ -28,8 +28,9 @@ The first user is polarzero, on a Mac (`who-it-is-for`). Where computers run aft
   you can grant (`grant-needs-a-fact-or-you`), and a precaution can only protect
   (`precaution-grants-nothing`).
 - **The core holds the mechanism, and a use of it is an extension** (`mechanism-or-use`, still to
-  decide). Some extensions ship with Silo (`what-ships-with-silo`,
-  `spend-and-budgets-ship-as-an-extension`, `first-extensions-that-ship`).
+  decide). Spend and budgets ship with Silo as an extension
+  (`spend-and-budgets-ship-as-an-extension`). Which others do is still to decide
+  (`what-ships-with-silo`, `first-extensions-that-ship`).
 - **Each thing is done in the most reliable way that can do it**, a rule wherever a rule can do it
   (`which-way-first`, still to decide).
 - **Every addition answers the same questions** (`questions-for-an-addition`): what kind each of
@@ -48,6 +49,6 @@ on their own (`the-shape`). If the try goes wrong, you restore one, or you drop 
 waits in the bin (`git-words`, `drop-and-bin`).
 
 You let an agent run with every approval off. It ends its turn with "All tests pass." Silo read
-the model calls at the boundary and saw the files change from outside (`fact`). The agent's
-sentence is a `report`. An extension that ships with Silo holds one against the other and gives
-its `opinion`: a test file was deleted before the last run (`said-against-done`, still to decide).
+the model calls at the boundary, and the last tool call that ran the tests came back with a
+failure (`fact`). The agent's sentence is a `report`. An extension compares the two and gives its
+`opinion`: mismatch (`said-compared-with-done`, still to decide).

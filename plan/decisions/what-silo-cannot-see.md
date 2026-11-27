@@ -13,6 +13,7 @@ is said in one place.
 | What a provider's servers do | A web search the provider runs never crosses the boundary | `tools-the-provider-runs`, `vendor-runs-the-model-calls` |
 | What an unread connection carries | Silo ends the encrypted connection only for the hosts it reads | `ending-the-encrypted-connection` |
 | Which files were read | A build reads everything, so reads are not recorded | `file-reads` |
+| A file made and deleted between two checkpoints | File changes compare the disk at one checkpoint with the one before | `file-changes-from-outside` |
 | Which process did it | The probe runs inside, where an agent with full access can reach it | `processes-from-inside-linux`, `processes-from-inside-macos` |
 
 The options:
@@ -22,8 +23,7 @@ The options:
 - Leave each limit in its own entry. It costs nothing to write. A reader finds the limits one at a
   time, after trusting the record for something it does not hold.
 
-Recommended: say it in one entry. `holes` already says Silo never fills a hole, and this is the
-list of the holes that are always there.
+Recommended: say it in one entry. `holes` already says Silo never fills a hole.
 
 ## What Silo can know of intent
 
@@ -32,7 +32,7 @@ with what happens outside, and notice when "the model's intent isn't aligned wit
 happening". What crosses the boundary in a model call, and is a fact once Silo reads it: what you
 asked, the system prompt, every tool result that entered the model's context, every tool call the
 model asked for, and the text the model wrote to you. So an extension can give an opinion on three
-things: whether what the agent said it did matches the record (`said-against-done`), whether a
+things: whether what the agent said it did matches the record (`said-compared-with-done`), whether a
 tool call follows from what you asked (`whose-instruction-a-call-follows`), and whether a value
 planted for the purpose was used (`planted-values`).
 
@@ -40,6 +40,6 @@ What stays out of reach is what the model intended and did not say. Published wo
 model's written reasoning does not always give its real reasons, so reasoning is a clue for a
 classifier and never a fact about intent.
 
-To find out: how much reasoning is readable at the boundary, for each agent program. No capture
-in the research holds a reasoning block. The run on real providers kept sizes and counts, and
+To find out: how much reasoning is readable at the boundary, for each agent program. An agent
+searched the captures of the research and found no reasoning block. The run on real providers kept sizes and counts, and
 every later run used stand-in providers that sent none.

@@ -21,7 +21,8 @@ What you would do with the build proposed here:
 2. Beside each call sits Claude Code's own account of it, a report, joined by the provider's
    request id (`own-account-as-a-check`). A model call made with `curl`, around Claude Code, has
    no account beside it and shows as a mismatch. When the agent ends a turn with "All tests pass",
-   the extension `said-against-done` gives its opinion on that sentence from the record.
+   the extension `said-compared-with-done` gives its opinion on that sentence from the record: the
+   last tool call that ran the tests came back with a failure.
 3. The extension `transaction-guard` holds one request a program in the computer sends. You answer
    the ask in `silo`, and the record keeps the ask and your answer.
 
@@ -29,10 +30,12 @@ The options:
 
 - The outside first (recommended). The build is the engine, one computer, the record, the
   boundary with its rules and holds, model traffic read, the agent program's own account, and
-  extensions. Checkpoints follow, because the record of file changes compares the disk at each
-  checkpoint with the one before (`file-changes-from-outside`), and restore follows them. It costs
-  more decisions before anything is built: by an agent's count with a script, about 130 with no
-  verdict, against 70 for the build of 24 November. It also costs going back, which arrives later.
+  extensions. Checkpoints are taken, because `precautions-you-set` needs them and the record of
+  file changes compares the disk at each checkpoint with the one before
+  (`file-changes-from-outside`). Restore follows this build. It costs more decisions before
+  anything is built. Counted with a script that follows `needs`, the 32 places of this build need
+  153 decisions with no verdict, and the 17 places of the build of 24 November need 70. It also
+  costs going back, which arrives later.
 - The build of 24 November. It needs fewer decisions and gives a Silo you can sleep on. It costs a
   first build that an agent program with a snapshot tool could match, and it shows none of the
   three steps above.
@@ -60,21 +63,14 @@ An agent's part, 27 November 2026, from reading the research. It bounds what "fa
 ## Which system main runs first
 
 An agent's part, 27 November 2026. This choice is polarzero's, in `main-on-macos-first`, where the
-lean of 18 November is a macOS main. The first build proposed here reaches its three steps sooner
-with a Linux main on the Mac, for two reasons. Every extension that executes runs in a Linux
-computer (`extension-ships-a-computer`), so the Linux driver is needed in this build anyway. And
-the macOS main waits on macOS 27, on Mac tests that have not run, and, for its processes, on a
-permission Apple has not granted. The notes of `main-on-macos-first` give the case. Nothing in this
+lean of 18 November is a macOS main. The first build proposed here may reach its three steps
+sooner with a Linux main on the Mac. If an extension's computer is a small Linux one, as
+`small-computer-for-an-extension` proposes, the Linux driver is needed in this build anyway. And
+the macOS main waits on macOS 27 and on Mac tests that have not run. The notes of
+`main-on-macos-first` give the case. Nothing in this
 entry decides it, and the order of the stage "app" keeps `computers-main-on-a-mac` where it was.
 
 ## The features, in order
 
-`access-model-checked`, `engine-program-and-clients`, `silo-command`, `engine-matches-wanted`, the
-computer, `agent-programs-run-unmodified`, `agent-programs-reach-every-computer`,
-`record-of-a-computer`, `allow-hold-or-deny`, `open-limited-or-closed`, `secrets-held-outside`,
-`model-traffic-read`, `model-calls-in-the-record`, `program-account-checked`,
-`refusals-that-say-so`, `held-requests-and-asks`, `opinions-beside-the-record`,
-`importing-an-extension`, `extension-that-reads-and-alerts`, `said-against-done`,
-`extension-that-protects`, `transaction-guard`, then `checkpoints-taken-on-their-own` and
-`file-changes-in-the-record`. The stage "app" of `order.json` follows this, with the features each
-of these needs placed before it.
+The stage "app" of `order.json` starts with them: `plan` prints the order. The first is
+`access-model-checked` and the last of this build is `transaction-guard`.

@@ -1,6 +1,6 @@
 {
   "asks": "Which extensions ship with Silo first?",
-  "answer": "Four, beside spend and budgets. Said against done gives an opinion on what the agent said it did, from the record alone. Whose instruction a call follows gives an opinion on whether a tool call follows from what you asked. The transaction guard simulates a transaction a computer sends to a blockchain and holds it when value leaves or when you did not approve it. The rules that hold destructive calls to the APIs agents reach most. Each uses the same manifest as any extension, and none is switched on until you install it.",
+  "answer": "Four, beside spend and budgets. Said compared with done gives an opinion on what the agent said it did, from the record alone. Whose instruction a call follows gives an opinion on whether a tool call follows from what you asked. The transaction guard simulates a transaction a computer asks to have signed and holds the request, unless you approved that transaction and it simulates as declared. The rules that hold destructive calls to the APIs agents reach most. Each uses the same manifest as any extension, and none is switched on until you install it.",
   "needs": [
     "what-ships-with-silo",
     "shipped-extensions-use-the-manifest",

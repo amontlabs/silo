@@ -4,9 +4,10 @@ Extensions: rules, a computer, or both, that someone made and you add to Silo.
 
 ## For
 
-Silo's core holds no view on what is good or bad (`mechanism-or-use`, still to decide). What to
-look for in the record, and which requests to hold at the boundary, is the work of extensions.
-Some ship with Silo, and people write their own. What an extension executes can never grant or
+To let people look at a lot of agent work in their own way, and hold what they choose at the
+boundary, beyond the rules they set themselves. Proposed in `mechanism-or-use`, still to decide:
+Silo's core holds no view on what is good or bad, and a use that does is an extension. Some ship
+with Silo, and people write their own. What an extension executes can never grant or
 destroy anything, and the rules it adds are shown before they are switched on.
 
 ## Why it is so
@@ -28,9 +29,9 @@ destroy anything, and the rules it adds are shown before they are switched on.
   (`budget-rule-or-precaution`). What a budget promises when it is reached, and where prices come
   from, are still to decide (`what-a-budget-promises`, `where-prices-come-from`).
 
-The next ones are proposed in `first-extensions-that-ship`:
+The next ones are proposed in `first-extensions-that-ship`, still to decide:
 
-- **Said against done** (`said-against-done`). A model gives an opinion on what the agent said it
+- **Said compared with done** (`said-compared-with-done`). A model gives an opinion on what the agent said it
   did, from the record alone.
 - **Whose instruction a tool call follows** (`whose-instruction-a-call-follows`). A model that
   never reads the tool results gives an opinion on whether a call follows from what you asked.
@@ -43,7 +44,7 @@ The next ones are proposed in `first-extensions-that-ship`:
 
 - What it receives of a request and of its response: `request-content-to-an-extension`,
   `response-to-an-extension`.
-- What it says when it holds: `finding-of-an-extension`.
+- What the ask shows when it holds: `explanation-in-an-ask`.
 - How an agent says what it is about to do: `declaration-is-a-report`.
 - A trial on live work before it protects: `extension-tried-live`.
 - How heavy its computer is: `small-computer-for-an-extension`.

@@ -10,7 +10,7 @@ an extension (`spend-and-budgets-ship-as-an-extension`).
 
 One case shows the difference. Claude Code keeps its own log of what it did, and its own rules for
 what it may do. Both are files and processes inside the computer, and an agent with `sudo` can
-change them. Silo's record and Silo's holds are outside, so the same agent cannot.
+change them. Silo's record and Silo's holds are outside the computer, out of that agent's reach.
 
 The options:
 

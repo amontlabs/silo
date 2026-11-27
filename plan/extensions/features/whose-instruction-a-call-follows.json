@@ -1,18 +1,18 @@
 {
   "name": "Whose instruction a tool call follows",
-  "what": "An extension that ships with Silo. While a model's reply waits at the boundary, a model that reads what you asked and the tool calls of the reply, and never the tool results, gives an opinion about each call: follows your ask, does not follow your ask, or unsure. With a precaution you set on that opinion, a call that does not follow is held and the ask shows the extension's finding.",
+  "what": "An extension that ships with Silo. While a model's reply waits at the boundary, a model that reads what you asked and the tool calls of the reply, and never the tool results, gives an opinion about each call: follows your ask, does not follow your ask, or unsure. With a precaution you set on that opinion, a call that does not follow is held and the ask shows the extension's explanation.",
   "needs": [
     "extension-that-protects",
     "model-traffic-read",
     "classifier-asked-synchronously",
     "silos-own-model-calls",
     "who-fixes-the-values",
-    "finding-of-an-extension",
+    "explanation-in-an-ask",
     "extension-tried-live",
     "first-extensions-that-ship"
   ],
   "suggest": {
     "verdict": "take",
-    "why": "An agent is steered by what it reads, and only something outside the agent program can compare each call with what you asked without being steered itself. It has not been measured, so it is tried on live work before it holds anything."
+    "why": "An agent is steered by what it reads, and the agent program is what gets steered, so the comparison of each call with what you asked has to be made outside it. It has not been measured, so it is tried on live work before it holds anything."
   }
 }

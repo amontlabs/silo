@@ -21,7 +21,7 @@ The options:
 
 - The principle, with where a use goes (recommended). It costs an extension interface strong
   enough to carry what moves out. Today it is not: `rule-may-count`,
-  `request-content-to-an-extension` and `finding-of-an-extension` say what is missing.
+  `request-content-to-an-extension` and `explanation-in-an-ask` propose what is missing.
 - The principle as written on 20 November. It costs the question "core or extension" for every
   feature.
 - No principle. It costs a core that grows by one use at a time.

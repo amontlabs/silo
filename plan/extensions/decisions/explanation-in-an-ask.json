@@ -1,0 +1,10 @@
+{
+  "asks": "What does an ask show when an extension holds a request?",
+  "answer": "The extension's explanation, beside what Silo wrote from facts and marked as that extension's words. The explanation is the one its opinion about the request carries: a short text, with the lines of the record it rests on. The computer sees it only if you let the precaution pass its words on.",
+  "needs": [
+    "extension-may-protect",
+    "what-wakes-an-extension",
+    "what-an-ask-shows",
+    "opinion-is-a-value"
+  ]
+}

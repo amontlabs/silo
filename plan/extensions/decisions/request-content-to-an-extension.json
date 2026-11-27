@@ -1,6 +1,6 @@
 {
   "asks": "What does an extension receive of a request it is asked about?",
-  "answer": "The request's computer, host, method, path and headers, and its body when a rule of the same manifest asks to read that host. A secret shows as its placeholder, never as its value. When the body is larger than Silo's limit, or Silo could not read it, the extension is told so and gets no body.",
+  "answer": "The request's computer, where it goes, its method, path and headers, and its body when a rule of the same manifest asks to read that host, or that channel to another computer. A secret shows as its placeholder, never as its value. When the body is larger than Silo's limit, or Silo could not read it, the extension is told so and gets no body.",
   "needs": [
     "what-wakes-an-extension",
     "extension-manifest",
