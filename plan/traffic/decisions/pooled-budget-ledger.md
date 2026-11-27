@@ -121,3 +121,28 @@ commit's signer to be the Mac, so the branch requires signed commits and refuses
 Proposed in place of the answer's recall: "A Mac gives back the room it cannot use when it asks, and
 the room beyond its calls under way and one slice when it checks in. A slice is the Mac's until the
 Mac gives it back." Nothing else in the answer changes.
+
+## Built and run for real
+
+An agent's part, 26 November 2026 (`research/2026-11-25-ledger-live/`). The ledger server got
+#385's cut and the whole bound of work out of sight, and a lease client was written for the
+boundary. Four Mac processes ran the team above against it, each streaming real calls to #385's
+stand-in provider, which billed them; the ledger was killed, Macs were cut off from it, one Mac
+was stopped as a sleeping laptop.
+
+- The simulator's numbers hold: one boundary, a ledger asked per call and leases ended 0.4% to
+  1.5% under $15 with `typical-cut`, and 0.4% to 1.3% over with `cut`. Nothing went over the
+  budget when the ledger was killed or out of reach.
+- The recall in the answer was first "the room no call under way uses". Under `cut` nothing is
+  held for a running call's output, so a Mac that gave that room back was over its slice at once
+  and cut its own agents while the team still had money: 2.7 such cuts a run, and in one run two
+  Macs' agents stopped at 60 s of 380 s. A recall that keeps each running call's typical output
+  removed every one of them and paid for cut answers what one boundary pays ($1.37 against
+  $1.41). The answer above now says so.
+- A batch whose bound ($4) was twice a Mac's slice was asked for and admitted in every run, and
+  settled at the provider's bill to the cent.
+- A branch of a hosted repository serves about one grant every 2 s, whatever the number of Macs:
+  a push costs 1.6 s whether it lands or is refused. One Mac alone waited 2.0 s an ask; twelve
+  Macs asking every 10 s on average waited 10.7 s at the median and 43.6 s at worst. It suits a
+  few Macs that ask rarely; a recall cannot reach a Mac through it unless the Mac reads the branch
+  every few seconds. The shared Linux host or a Mac that stays on remain the places to run it.
