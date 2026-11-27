@@ -1,0 +1,4 @@
+b'VFKT'      refused by the kernel: [Errno 22] Invalid argument
+b'\xff\xff\xff\xff\xff\xff' refused by the kernel: [Errno 22] Invalid argument
+b'\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff' refused by the kernel: [Errno 22] Invalid argument
+b'\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff' reached the card's back end as 14 bytes
