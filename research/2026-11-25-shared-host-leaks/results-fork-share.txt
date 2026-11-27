@@ -1,0 +1,5 @@
+KSM run = 0 (0 is off)
+Ana's secret page 173; her 3 forks of a 1 MiB snapshot: Rss 8276 KiB in all, Pss 1853 KiB in all (process code included)
+  Ben: slowest guess 1: 30419 ns; the other 255: 2613 ns on average
+Ana's secret page 42; her 3 forks of a 1 MiB snapshot: Rss 8276 KiB in all, Pss 1853 KiB in all (process code included)
+  Ben: slowest guess 0: 19958 ns; the other 255: 2006 ns on average

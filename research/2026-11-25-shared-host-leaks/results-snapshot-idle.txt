@@ -1,0 +1,6 @@
+mode idle: READY after 202 s
+snapshot: 262144 pages, 185131 of them zeros
+at-60s: 252902 of 262144 pages unchanged (96.5%; 264 MiB of it not zeros)
+at-180s: 252513 of 262144 pages unchanged (96.3%; 263 MiB of it not zeros)
+at-360s: 252489 of 262144 pages unchanged (96.3%; 263 MiB of it not zeros)
+at-600s: 252476 of 262144 pages unchanged (96.3%; 263 MiB of it not zeros)
