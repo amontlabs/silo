@@ -34,3 +34,12 @@ the real key, and the placeholder token sent straight to it, to another host, wi
 agent's own, with a lifetime of a day or for another audience was refused. It has no TLS; the
 kit's test 21 covers the computer's trust of Silo's certificate. Mac test 28 would run the real
 tools through it with a real key kept on the Mac.
+
+## Settled in the consolidation (27 November 2026)
+
+An agent's part, 27 November 2026. The answer said that a request signed with the placeholder to
+any other host is refused, as the prototype does. It now says the request is forwarded as it is and
+recorded, as `secret-placeholder` says of a placeholder value: the placeholder key is worth nothing
+anywhere else, so sending it harms nothing. The other option is to refuse it by default, which
+closes nothing more and makes Silo refuse a request by itself. A rule can still refuse it.
+

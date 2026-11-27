@@ -1,6 +1,6 @@
 {
   "asks": "How does a computer use a key that signs each request?",
-  "answer": "The computer holds a placeholder key of the same kind, made by Silo and worth nothing anywhere else. Programs sign their requests with it as usual. On the way to the hosts you allowed for that key, the boundary checks that the placeholder signed the request and that its token lives no longer than the service allows, then signs it again with the real key. A request signed with the placeholder to any other host is refused. App Store Connect tokens come first, then AWS request signatures.",
+  "answer": "The computer holds a placeholder key of the same kind, made by Silo and worth nothing anywhere else. Programs sign their requests with it as usual. On the way to the hosts you allowed for that key, the boundary checks that the placeholder signed the request and that its token lives no longer than the service allows, then signs it again with the real key. A request signed with the placeholder to any other host is forwarded as it is, since that signature is worth nothing there, and the record notes where it was seen. App Store Connect tokens come first, then AWS request signatures.",
   "needs": [
     "secret-placeholder",
     "ending-the-encrypted-connection"
