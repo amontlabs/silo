@@ -38,3 +38,40 @@ words on the list are in `what-ships-with-silo`.
   is then refused as held and not answered. The agent program may also give up first
   (`program-gives-up-first`).
 - An extension that adds rules could ship this.
+
+## What the boundary can read of a merge (24 November 2026)
+
+An agent's part, 24 November 2026. The notes leave open how Silo recognises a merge into a default
+branch. Tried with git 2.43 against a local server over git's HTTP, and read from the shipped
+`gh` 2.89; GitHub itself was not reached.
+
+- **A push over HTTPS says which branch it changes, in its first bytes.** Each push is one request
+  to `…/git-receive-pack`, and its body starts with one line per branch: old commit, new commit,
+  branch name. They came uncompressed for every push tried: a new branch, a fast-forward of main,
+  a force push, a deletion, a tag, and a 3 MB push, which git sent as an empty probe request and
+  then the real one. So Silo can hold a push to main after reading only those lines.
+- **git has its own refusal for a push, and shows Silo's words in it.** Answered with git's
+  per-branch report ("ng", with a reason), the push printed `! [remote rejected] HEAD -> main
+  (<Silo's words>)` and failed, with nothing written; a push to another branch in the same session
+  went through. That reads better than a 403 and names the branch.
+- **git waits for a held push with no limit of its own.** A push held for 200 s finished when the
+  answer came. The limit is the agent program's (`program-gives-up-first`) and the hold's.
+- **The default branch is not in the push.** The list of branches a push starts from does not say
+  which one is the default; the list a fetch starts from does (`symref=HEAD:refs/heads/main`). Silo
+  can ask for it once, or the set can name the branch.
+- **`gh pr merge` names the pull request by an opaque id.** It sends the GraphQL mutation
+  `mergePullRequest` with the pull request's node id, not its number, repository or base branch.
+  Silo learns which pull request and branch only from gh's earlier request for the pull request,
+  in the same traffic, or by asking GitHub.
+- **Auto-merge and merge queues are merged by GitHub, later.** `gh pr merge --auto` sends
+  `enablePullRequestAutoMerge`; the merge itself happens on GitHub when the checks pass, and never
+  crosses the boundary. So the set can hold only the request that turns auto-merge on, and has to
+  say so.
+- **A push over SSH cannot be read.** The branch is inside the encrypted connection. With the key
+  held outside (`secret-placeholder`, SSH), Silo sees that the key signs for github.com, not what is
+  pushed. The set can hold every SSH push to that host, or say that it does not catch them.
+
+What I would add to the answer: the set names what it catches (a push to the default branch over
+HTTPS, `mergePullRequest`, turning auto-merge on) and what it does not (a push over SSH, a click in
+the host's page, a merge GitHub makes later), and a push it holds is refused in git's own words. The script is in the project files,
+`research/2026-11-24-merges`.

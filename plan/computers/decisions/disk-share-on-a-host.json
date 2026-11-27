@@ -1,0 +1,8 @@
+{
+  "asks": "How is a host's disk shared between the people on it?",
+  "answer": "Each person has a share of the disk, counted by the engine. A checkpoint counts only the blocks it does not share with another of that person's checkpoints, which the engine knows from its record of changed blocks. When a person reaches their share, their oldest checkpoints are thinned first, then new checkpoints are refused, and other people's computers go on writing.",
+  "needs": [
+    "members-on-a-host",
+    "fork-shares-disk-blocks"
+  ]
+}

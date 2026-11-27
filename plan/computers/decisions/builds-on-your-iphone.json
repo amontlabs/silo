@@ -1,0 +1,8 @@
+{
+  "asks": "How does an agent run its build on your iPhone?",
+  "answer": "From your Mac. The agent asks to install a build. You see which computer asks, which app and which device. On your yes, the built app comes out of the computer through a channel, and Silo installs it on the device with Apple's own tool. The agent is told whether it worked. No device is attached to a computer.",
+  "needs": [
+    "files-through-a-channel",
+    "asks-are-native"
+  ]
+}

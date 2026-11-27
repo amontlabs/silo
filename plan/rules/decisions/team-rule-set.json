@@ -1,0 +1,8 @@
+{
+  "asks": "How does a team give each member's Silo the same rules?",
+  "answer": "A team keeps its rule sets as text files in a repository it owns, as it keeps any shared configuration. Each member's Silo reads a set from there, shows what it would grant, and switches it on with the member's yes. A change to the set is shown again and waits for a yes before it applies. The rules in force are kept by the engine and are never read from the repository at the time a request waits.",
+  "needs": [
+    "rule-sets",
+    "rules-are-data"
+  ]
+}

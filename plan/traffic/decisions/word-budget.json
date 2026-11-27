@@ -1,11 +1,11 @@
 {
   "asks": "What does \"budget\" mean?",
-  "answer": "A limit on what a computer, a conversation or a run may spend on models.",
+  "answer": "A limit on what a computer, a conversation or a run may spend on models, counted in dollars or in a share of a plan's window.",
   "sets": [
     {
       "in": "words",
       "word": "budget",
-      "means": "A limit on what a computer, a conversation or a run may spend on models."
+      "means": "A limit on what a computer, a conversation or a run may spend on models, counted in dollars or in a share of a plan's window."
     }
   ]
 }

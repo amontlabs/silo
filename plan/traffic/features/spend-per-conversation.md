@@ -20,3 +20,6 @@ Recommended: build it. Budgets need it, and it tells you which work your money g
 An agent's doubt, from drafting this feature on 21 November 2026.
 
 Spend per computer comes from `network-place`, a decision of What you see, not from a decision of this part. No decision says where prices come from.
+
+An agent's note, 25 November 2026: where prices come from is now asked by the open decision
+`where-prices-come-from`, with the options measured in `research/2026-11-25-model-prices`.

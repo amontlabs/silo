@@ -1,0 +1,7 @@
+{
+  "asks": "Which credential carries a model call that Silo or an extension makes itself?",
+  "answer": "An API key, or a cloud provider's credential, that you give Silo for that purpose, as a secret. Never the sign-in of a subscription that an agent program carries, and never a request added to an agent program's own traffic. A classifier, a summary or an extension that asks a model and has no such key does not ask it, and says so.",
+  "needs": [
+    "extension-manifest"
+  ]
+}

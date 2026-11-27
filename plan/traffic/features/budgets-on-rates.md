@@ -31,3 +31,26 @@ words on the list are in `what-ships-with-silo`.
   over the same traffic is seen at the same place, so it is exact too.
 - How Silo tells a request covered by a plan from one billed outside it is to find out.
 - An extension that adds rules could ship this.
+
+## Where a plan's use shows in the traffic (24 November 2026)
+
+An agent's part, 24 November 2026. Read from the two programs' code, not seen on a real
+subscription's reply: the programs read these headers, so the providers send them.
+
+- **Claude Code 2.1.331** reads, on each reply from Anthropic, `anthropic-ratelimit-unified-status`
+  (`allowed`, `allowed_warning` or `rejected`), the use of the five-hour and seven-day windows as a
+  fraction from 0 to 1 (`…-5h-utilization`, `…-7d-utilization`), when each resets
+  (`…-5h-reset`, `…-7d-reset`, in Unix seconds), and the use beyond the plan:
+  `…-overage-status`, `…-overage-in-use`, `…-overage-utilization` and `…-overage-reset`. When the
+  status is `rejected` and the overage status is allowed, it counts the request as paid "by
+  credits"; otherwise "by allowance".
+- **Codex 0.172.0** reads `x-codex-primary-used-percent`, `x-codex-primary-window-minutes` and
+  `x-codex-primary-reset-at`, the same for `secondary`, and `x-codex-credits-has-credits`,
+  `x-codex-credits-balance`, `x-codex-credits-unlimited` and `x-codex-rate-limit-reached-type`.
+  Over its WebSocket the same comes as a `rate_limits` event.
+
+So the two things this feature leaves "to find out" are in traffic Silo already reads: a plan's
+limits and how much of them is used, per window, and whether a request was paid beyond the plan.
+Silo reads them from the reply and needs no account of its own. What stays to check is on a real
+subscription: that the headers come on every reply and mean what the programs take them to mean.
+It answers the same question for `spend-split-and-forecast`.

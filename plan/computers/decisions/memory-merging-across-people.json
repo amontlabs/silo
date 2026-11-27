@@ -1,0 +1,7 @@
+{
+  "asks": "Does a shared host merge identical pages of memory between computers of different people?",
+  "answer": "No. Merging identical pages (Linux's KSM) stays off for computers on a shared host. It saved about half the memory of five idle computers, and it let one person tell which page another person's computer held.",
+  "needs": [
+    "members-on-a-host"
+  ]
+}

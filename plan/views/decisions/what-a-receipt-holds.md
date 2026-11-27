@@ -2,6 +2,31 @@
 
 ## The choice
 
+An agent's part, 25 November 2026, from the challenge of #355 (page 7) and the prototype of #371.
+
+The case: an agent runs `npm test | tail -20`, three tests fail, and the agent writes "All tests
+pass." The shell's exit code of that pipeline is 0, since it is `tail`'s. A receipt that shows "the
+commands that ran, with their exit codes", as the earlier answer says, shows a 0 beside the false
+claim. #371's first screen caught "All tests pass." when the suite had exited with 1, because it read
+the exit code of the test runner itself.
+
+The options:
+
+- Show the test runner's own exit code and the pipeline's, whether the run was narrowed, whether a
+  file changed after the pass, the changes that weaken checks, and the processes still running
+  (recommended). #371 found that two of four runs left a process running that nothing in their
+  words mentioned. It costs the probe reading the exit code of each process, which it does already
+  on Linux; on macOS it waits on `processes-from-inside-macos`.
+- The commands with their exit codes, as the earlier answer says.
+
+Recommended: the runner's own exit code and the rest. Marking each claim of the agent as backed,
+stale or contradicted is an opinion, proposed by #355 as a decision of its own
+(`claims-against-the-record`), and is not part of this answer.
+
+## The earlier choice
+
+The choice as it stood before 25 November 2026. The answer it recommended is now an option of the choice above.
+
 An agent's part, 22 November 2026. A task ran for 1 h 12 in a fork: "fix the flaky login test". You
 open its receipt.
 
@@ -22,3 +47,31 @@ and the rest is there when something looks wrong.
 The design record gives this as a list with no mark. Its first item, "the request that started
 the run", is written here "what you asked the agent": "request" names only what waits at the
 boundary.
+
+An agent's part, 24 November 2026, from the prototype in `research/2026-11-24-morning-review`. Two of four runs left a process running
+that nothing in their words mentioned (`node scripts/sessiond.js`, `bun test --watch`). The
+receipt's outcome showed it from the probe's reports: "1 process it started still running". The
+outcome also shows the last run of the whole suite apart from the last test command of any kind,
+since a run that ends on a narrower test is the case that misleads.
+
+## From option A's first-run transcript
+
+Agent, 25 November 2026, from `research/2026-11-25-first-run-option-a/` (gap 7 there). Option A has no probe, so the receipt's "processes it started that are still running" is "not known yet". That costs more than its line. #377's corpus of 49 false claims from public incidents, read again with the processes taken out (`checks/catch_rate_under_a.py`): on the 30 test cases, the receipt's outcome lines alone catch 3 instead of 7, and with `claims@0.3` they catch or flag 10 instead of 13. On all 49, 22 instead of 25. A process left running is the outcome line A loses, and it is the one `processes-in-the-record` brings back.
+
+## Still running and exit codes, without processes
+
+An agent's part, 25 November 2026, from [attribution without processes](../../../research/2026-11-25-attribution-without-processes/README.md).
+Under option A, #373 shows "still running: not known yet". The traffic says part of it. A tool call
+with no result yet is still running. A command with `nohup`, `setsid`, `disown` or a trailing `&`
+may leave a process its result does not mention. On #371's night both processes the probe found
+left running were flagged that way, as a report from the traffic, and one flag was wrong: Codex
+said `bun test --watch` was running, and `codex exec` killed it when it ended. Exit codes read
+from tool results equalled the probe's every time both existed (16 of 16), but in Codex's code
+mode they are only there when the model's script prints them (13 of 18 commands had one). The
+item "files that changed" can name the conversation as an opinion: `author-from-traffic`.
+
+An agent's part, 25 November 2026, from `research/2026-11-25-morning-screen`. A receipt with
+numbered lines (`r1`, `r2`…) lets an opinion cite the lines it rests on, and Silo checks that a
+cited line exists (#400). The page also adds two lines #371's receipt lacked: the handshakes a
+program refused (TLS), and, without the probe, "may still run" from an open or backgrounded tool
+call (#399).

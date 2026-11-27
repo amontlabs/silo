@@ -2,6 +2,24 @@
 
 ## The choice
 
+An agent's part, 25 November 2026, from the challenge of #355 (page 6).
+
+The case: you pay for a Max plan and want main to leave you 30 percent of the week. Under the
+earlier meaning a budget is counted only in dollars, and no dollar figure means that: a point of the
+week moved from $4.45 to $2.31 in a month.
+
+The options:
+
+- Dollars or a share of a plan's window (recommended). How exact each is, is settled in
+  `budgets-in-dollars-or-a-window`. It costs a second unit in every place a budget shows.
+- Dollars only, as the earlier meaning says.
+
+Recommended: dollars or a share of a window. Subscribers set their limits in the window.
+
+## The earlier choice
+
+The choice as it stood before 25 November 2026. The answer it recommended is now an option of the choice above.
+
 An agent's part, 22 November 2026. Main has a budget of 50 dollars. An agent in it calls a paid
 image service with a key you gave it, and spends 30 dollars there.
 

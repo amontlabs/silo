@@ -21,3 +21,37 @@ happens as exactly as what it costs.
 
 polarzero put budgets on rates on the roadmap on 21 November 2026: spend per hour, new conversations
 per minute. The feature is `budgets-on-rates`. polarzero did not answer this question.
+
+## What the program does when a rate refuses (24 November 2026)
+
+An agent's part, 24 November 2026, from `research/2026-11-24-spend-budgets`.
+
+Main has a rate of $0.60 in any 30 seconds, and Claude Code and Codex each work on a 30-step
+task. Refused with the 400 that `budget-denies-or-holds` proposes, both programs stopped the task
+on the first refusal, after 9 calls each, and printed "Model calls pass again in 13 s". Nothing
+started them again. A rate refused this way is a second total, not a rate.
+
+Refused with 429 in the provider's own rate-limit shape and `retry-after` set to the seconds until
+the window allows a call again, both waited and went on. Codex finished all 30 steps in 148 s.
+Claude Code waited 13 times and kept working until the run's limit. The worst 30 seconds spent
+$0.85 against $0.60, from calls under way, as with any budget.
+
+So the choice is now between:
+
+- 429 with `retry-after` for a rate (recommended). The agent slows to the rate and goes on, which is
+  what a rate is for. It costs a program that may wait in silence: Claude Code shows a retry, Codex
+  shows nothing while it waits.
+- 400, like a total. It costs the rate: the agent stops at the first refusal.
+
+A total still answers 400. Neither holds a request: each is refused at once, and the program
+decides to wait, so this does not touch "a budget never holds".
+
+## Windows on a clock that does not jump
+
+Agent, 25 November 2026, from `research/2026-11-25-techniques-from-two-tools/`. An open-source
+gateway with a spend window over the last 24 hours found that a wall clock moved forward makes all
+spend look old, so the window admits everything, and that pruning old entries by the same clock
+deletes them for good. It now measures windows on a monotonic clock. On a Mac that sleeps, the
+window is measured on `mach_continuous_time`, which counts sleep, and the record is never pruned
+by a wall-clock cutoff. The same gateway refuses a call when its ledger cannot be read at all: for
+a budget, "I don't know" means no.

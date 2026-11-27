@@ -1,0 +1,7 @@
+{
+  "asks": "On a shared host, how does the boundary know which computer a connection comes from?",
+  "answer": "By the link the connection arrived on. Each computer has a network link of its own, and the boundary listens on each link apart. The address a computer gives itself is never used to tell computers apart, and no two computers share a network. The engine writes a link's owner when it makes the link and removes it when the link goes, so a link that reuses a stopped computer's name is never taken for it.",
+  "needs": [
+    "linux-server-host"
+  ]
+}

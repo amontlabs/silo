@@ -1,0 +1,18 @@
+{
+  "asks": "Where do Silo's model prices come from, and how are they kept current?",
+  "answer": "Silo prices model calls from its own price table, which it publishes as releases. Each release is built from the providers' own price pages, compared with an independent source, and published once a person or agent has settled every price the two give differently. Each version of Silo ships with the table of its day. Once a day the app fetches the one public file `what-silo-sends-home` allows, which names the latest table, and takes that table only if Silo signed it, its version is above the last one taken and it is the exact file named; otherwise it keeps the table it has. The key of the daily release signs every table. A table that lowers any price to less than half of what the app holds must also be signed by Silo's root key, which is kept offline; until it is, the app goes on counting the higher price. A price with a date of effect is in the table before that day, and a release that drops it withdraws it. You can add your own prices beside the table, or a table signed with a key you add, such as your team's, and yours win over it. With the fetch turned off, prices come from the version of Silo you run and from yours. The app says when it has not confirmed its table since the table's check-by day.",
+  "needs": [
+    "what-silo-sends-home"
+  ],
+  "sets": [
+    {
+      "in": "traffic/properties",
+      "id": "prices-signed-or-yours",
+      "says": "Silo counts spend only from prices in a table Silo signed, or from prices you wrote yourself.",
+      "kind": "safety",
+      "check": [
+        "hostile test"
+      ]
+    }
+  ]
+}
