@@ -350,7 +350,7 @@
         "secret-shaped-values",
         "ending-the-encrypted-connection",
         "secret-placeholder",
-        "foreign-credential-refused",
+        "foreign-credential-on-a-secret-host",
         "ssh-keys",
         "exchanged-tokens",
         "cloud-credentials",

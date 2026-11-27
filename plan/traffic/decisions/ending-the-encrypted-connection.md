@@ -12,7 +12,7 @@ token, let alone refuse it.
 The options:
 
 - A rule can ask the boundary to read a host it allows, and each request must name the host of its
-  handshake (recommended). With `foreign-credential-refused`, a host read this way refuses a
+  handshake (recommended). With `foreign-credential-on-a-secret-host`, a rule on a host read this way can refuse a
   credential that is not Silo's. #363 and #356 both found that a request naming another host than
   its handshake has to get no secret; over HTTP/2 the answer is the status 421 (#355). It costs the
   encryption of the hosts such a rule names, which Silo then reads.
