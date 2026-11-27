@@ -120,6 +120,8 @@
         "record-queried-with-ordinary-tools",
         "one-run-grain",
         "putting-back-a-runs-paths",
+        "putting-back-a-new-path",
+        "restart-after-a-put-back",
         "putting-back-a-path",
         "silo-command-reads-the-app",
         "words-for-agent-work",

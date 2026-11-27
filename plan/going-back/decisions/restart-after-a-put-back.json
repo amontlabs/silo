@@ -1,0 +1,7 @@
+{
+  "asks": "After you put back something that runs later, what about what is already running?",
+  "answer": "When a put-back touches a place where things are started later, such as a shell start-up file, a scheduled job, a service or a git hook, Silo says that a program started from it may still be running, and offers to restart main. A restart ends every process in main and keeps its disk. Silo never restarts main without your yes.",
+  "needs": [
+    "putting-back-a-new-path"
+  ]
+}

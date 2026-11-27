@@ -1,0 +1,30 @@
+{
+ "facts_bad_night": 8891,
+ "facts_good_night": 8850,
+ "facts_seconds": 0.55,
+ "listed_bad_night": 41,
+ "listed_good_night": 8,
+ "listed_good_night_paths": [
+  "home/u/.bashrc",
+  "home/u/.config/systemd/user/default.target.wants/postgresql.service",
+  "home/u/.config/systemd/user/postgresql.service",
+  "home/u/.venv/lib/python3.12/site-packages/__editable__.app-0.1.pth",
+  "home/u/work/app/.git/config",
+  "home/u/work/app/.husky/pre-commit",
+  "home/u/work/app/node_modules/newdep3/package.json",
+  "home/u/work/app/node_modules/newdep77/package.json"
+ ],
+ "planted": 29,
+ "planted_in_facts": 29,
+ "planted_fully_listed": 29,
+ "undone_370": 8,
+ "undone_absent": 29,
+ "undone_absent_without_good_work_lost": 27,
+ "process": {
+  "bashrc_clean_right_after_putback": true,
+  "line_back_after_3s": true,
+  "script_removed_by_putback": true,
+  "process_alive_after_putback": true,
+  "line_back_after_restart_and_putback": false
+ }
+}
