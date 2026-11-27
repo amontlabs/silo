@@ -73,3 +73,31 @@ above now holds the measured options, and its recommendation replaces the one in
 before this: the Mac end of the card makes the one connection, so main is never on Apple's NAT and
 gvproxy is not needed for the first start either. The section before stays as the integration
 wrote it.
+
+## The Mac end of the card against a hostile main
+
+An agent's part, 25 November 2026, from `research/2026-11-25-cardend-hardened/`. The recommended
+option puts a program on the Mac that reads every frame main sends. Main is where untrusted agents
+run, so that program faces frames written to hurt it. Measured on Linux against #402's program, and
+fixed:
+
+- Its count of dropped frames kept one line per destination address. Main chooses every address,
+  so a flood of frames each to a new address grew the program's memory without end (200,000
+  frames: 200 MB, a 14 MB count file) and the count written every half second slowed it until it
+  handled a few frames a second. The SSH of the way in shares that reader: its round trip grew
+  from 1 ms to 9 s within a minute. Now the count holds at most 256 lines; past that, a new
+  address goes on its kind's "other addresses" line, and no frame is lost from the totals.
+- Its filter let through more than the one connection: a SYN from port 22 to any port, TCP from
+  any 169.254 address, IP fragments, IP options, 64 KB frames and ARP from any address. Each
+  spoofed source made the netstack send main an ARP request, one frame out per frame in. Now the
+  stack sees only ARP between main's learned address and the Mac end's, and TCP from main's port
+  22 to a port the Mac end has a connection open from, unfragmented, without options, of at most
+  1,514 bytes; it has a route to main's address only, and no SACK.
+
+After the fix, nothing main sent in any of the measured floods reached the stack or made the card
+send a frame, its memory stayed flat, and the way in still copied 2 MB intact. Fuzzed with Go's
+fuzzer: any frame against the card, and any TCP segment main can send on the open connection
+against gVisor's TCP. No crash was found in gVisor. What main can still do is keep one core of the
+Mac busy by sending frames as fast as the socket takes them, about 3 µs each; the Mac's side of the
+socket pair was not measured. This changes no option above: the recommended one stands, with the
+program grown by about 110 lines.
