@@ -32,6 +32,7 @@ const h2 = @import("h2.zig");
 const source = @import("source.zig");
 const dns = @import("dns.zig");
 const conf = @import("conf.zig");
+const ja4 = @import("ja4.zig");
 const c = mint.c;
 const posix = std.posix;
 const gpa = std.heap.c_allocator;
@@ -1213,13 +1214,154 @@ const Hello = struct {
     got_len: usize = 0,
     mint_ms: f64 = 0,
     refused: bool = false,
+    // Research of 25 November 2026, TLS refusals: how far the handshake went and what the client
+    // said, so that a refused certificate is told apart from every other failed handshake.
+    saw_hello: bool = false,
+    cert_sent: bool = false,
+    done: bool = false,
+    alert_in: i32 = -1, // the alert the program sent, level << 8 | description
+    alert_out: i32 = -1, // the alert the boundary sent
+    fp: [36]u8 = undefined,
+    fp_len: usize = 0,
+    agent: [96]u8 = undefined,
+    agent_len: usize = 0,
+
+    fn client(self: *const Hello) []const u8 {
+        return self.fp[0..self.fp_len];
+    }
+    fn agentName(self: *const Hello) []const u8 {
+        return self.agent[0..self.agent_len];
+    }
 };
+
+/// The alerts a client sends when it does not accept the certificate it was shown (RFC 8446,
+/// 6.2): bad_certificate, unsupported_certificate, certificate_revoked, certificate_expired,
+/// certificate_unknown, unknown_ca.
+fn isCertificateAlert(desc: i32) bool {
+    return switch (desc) {
+        42, 43, 44, 45, 46, 48 => true,
+        else => false,
+    };
+}
+
+fn alertName(a: i32) []const u8 {
+    if (a < 0) return "";
+    return std.mem.span(c.SSL_alert_desc_string_long(a));
+}
+
+/// Follows the handshake with the program: whether Silo's certificate went out, and the alerts
+/// either side sent, which `SSL_accept` alone does not say.
+fn onInfo(ssl: ?*const c.SSL, where: c_int, ret: c_int) callconv(.c) void {
+    const hello: *Hello = @ptrCast(@alignCast(c.SSL_get_ex_data(ssl, 0) orelse return));
+    if (where & c.SSL_CB_READ_ALERT != 0) {
+        if (hello.alert_in < 0) hello.alert_in = ret & 0xff;
+    } else if (where & c.SSL_CB_WRITE_ALERT != 0) {
+        if (hello.alert_out < 0) hello.alert_out = ret & 0xff;
+    } else if (where & c.SSL_CB_LOOP != 0) {
+        switch (c.SSL_get_state(ssl)) {
+            c.TLS_ST_SW_CERT, c.TLS_ST_SW_CERT_VRFY, c.TLS_ST_SW_SRVR_DONE, c.TLS_ST_SW_FINISHED => hello.cert_sent = true,
+            else => {},
+        }
+    } else if (where & c.SSL_CB_HANDSHAKE_DONE != 0) {
+        hello.done = true;
+    }
+}
+
+fn be16(b: []const u8) u16 {
+    return std.mem.readInt(u16, b[0..2], .big);
+}
+
+/// The ClientHello's name for `ja4.zig`, read through OpenSSL's ClientHello accessors.
+fn fingerprint(ssl: ?*c.SSL, hello: *Hello) void {
+    var cp: [*c]const u8 = null;
+    const clen = c.SSL_client_hello_get0_ciphers(ssl, &cp);
+    var ciphers: [256]u16 = undefined;
+    var nc: usize = 0;
+    var i: usize = 0;
+    while (i + 1 < clen and nc < ciphers.len) : (i += 2) {
+        ciphers[nc] = be16(cp[i .. i + 2]);
+        nc += 1;
+    }
+    var ep: [*c]c_int = null;
+    var elen: usize = 0;
+    var exts: [128]u16 = undefined;
+    var ne: usize = 0;
+    var has_sni = false;
+    if (c.SSL_client_hello_get1_extensions_present(ssl, &ep, &elen) == 1) {
+        for (ep[0..elen]) |e| {
+            if (e == 0) has_sni = true;
+            if (ne < exts.len) {
+                exts[ne] = @intCast(e);
+                ne += 1;
+            }
+        }
+        c.CRYPTO_free(ep, "ja4", 0);
+    }
+    var version: u16 = @intCast(c.SSL_client_hello_get0_legacy_version(ssl));
+    var p: [*c]const u8 = null;
+    var len: usize = 0;
+    if (c.SSL_client_hello_get0_ext(ssl, 43, &p, &len) == 1 and len >= 1) {
+        const b = p[1..@min(len, 1 + @as(usize, p[0]))];
+        var k: usize = 0;
+        var best: u16 = 0;
+        while (k + 1 < b.len) : (k += 2) {
+            const v = be16(b[k .. k + 2]);
+            if (!ja4.isGrease(v) and v > best) best = v;
+        }
+        if (best != 0) version = best;
+    }
+    var alpn: []const u8 = "";
+    if (c.SSL_client_hello_get0_ext(ssl, 16, &p, &len) == 1 and len >= 3) {
+        const l: usize = p[2];
+        if (3 + l <= len) alpn = p[3 .. 3 + l];
+    }
+    var sig: [128]u16 = undefined;
+    var ns: usize = 0;
+    if (c.SSL_client_hello_get0_ext(ssl, 13, &p, &len) == 1 and len >= 2) {
+        const total = @min(len - 2, @as(usize, be16(p[0..2])));
+        var k: usize = 0;
+        while (k + 1 < total and ns < sig.len) : (k += 2) {
+            sig[ns] = be16(p[2 + k .. 4 + k]);
+            ns += 1;
+        }
+    }
+    const name = ja4.ja4(.{ .version = version, .has_sni = has_sni, .ciphers = ciphers[0..nc], .extensions = exts[0..ne], .alpn = alpn, .sigalgs = sig[0..ns] }, &hello.fp);
+    hello.fp_len = name.len;
+}
+
+/// Why a handshake with the program failed, from how far it went. Only "certificate-refused"
+/// and "closed-after-certificate" mean the program did not accept Silo's certificate.
+fn whyFailed(h: *const Hello, timed_out: bool) []const u8 {
+    if (h.refused) return "name-differs";
+    if (!h.saw_hello) return if (timed_out) "no-hello-in-time" else "no-tls-hello";
+    if (h.alert_in >= 0 and isCertificateAlert(h.alert_in)) return "certificate-refused";
+    if (!h.cert_sent) return if (h.alert_out >= 0 or h.alert_in >= 0) "no-common-tls" else if (timed_out) "stalled-before-certificate" else "closed-before-certificate";
+    if (h.alert_in >= 0) return "tls-alert";
+    return if (timed_out) "stalled-after-certificate" else "closed-after-certificate";
+}
+
+/// The product tokens of a request's User-Agent, for naming the client of a connection.
+fn noteAgent(h: *Hello, raw: []const u8) void {
+    if (h.agent_len > 0) return;
+    var it = std.mem.splitSequence(u8, raw, "\r\n");
+    while (it.next()) |line| {
+        if (line.len > 11 and std.ascii.eqlIgnoreCase(line[0..11], "user-agent:")) {
+            const v = std.mem.trim(u8, line[11..], " \t");
+            const n = @min(v.len, h.agent.len);
+            @memcpy(h.agent[0..n], v[0..n]);
+            h.agent_len = n;
+            return;
+        }
+    }
+}
 
 /// Picks the certificate for the name the program asks for, made on first use. A name other
 /// than the one the computer connected to ends the handshake: the program would otherwise reach
 /// one host while Silo checked another.
 fn onClientHello(ssl: ?*c.SSL, alert: [*c]c_int, _: ?*anyopaque) callconv(.c) c_int {
     const hello: *Hello = @ptrCast(@alignCast(c.SSL_get_ex_data(ssl, 0) orelse return c.SSL_CLIENT_HELLO_ERROR));
+    if (!hello.saw_hello) fingerprint(ssl, hello);
+    hello.saw_hello = true;
     var p: [*c]const u8 = null;
     var len: usize = 0;
     if (c.SSL_client_hello_get0_ext(ssl, c.TLSEXT_TYPE_server_name, &p, &len) != 1) {
@@ -1299,10 +1441,14 @@ fn readHost(fd: posix.fd_t, comp: usize, way: Way, id: u32, name: []const u8, po
     var hello: Hello = .{ .want = name };
     _ = c.SSL_set_ex_data(ssl, 0, &hello);
     _ = c.SSL_set_fd(ssl, fd);
+    const t_hs = now_ms();
     if (c.SSL_accept(ssl) != 1) {
+        const err = std.posix.errno(-1);
+        const timed_out = err == .AGAIN or (now_ms() - t_hs) >= @as(f64, @floatFromInt(bcfg.head_timeout_ms)) - 50;
         const got = hello.got[0..hello.got_len];
-        observe(comp, "connection", "\"what\":\"closed\",\"host\":{f},\"port\":{d},\"why\":\"{s}\",\"sni\":{f}", .{ j(name), port, if (hello.refused) "name-differs" else "handshake-failed", j(got) });
-        record("\"conn\":{d},\"kind\":\"handshake-failed\",\"side\":\"program\",\"want\":{f},\"sni\":{f},\"way\":\"{s}\"", .{ id, j(name), j(got), @tagName(way) });
+        const why = whyFailed(&hello, timed_out);
+        observe(comp, "connection", "\"what\":\"closed\",\"host\":{f},\"port\":{d},\"why\":\"{s}\",\"sni\":{f},\"alert\":{f},\"alert_sent\":{f},\"tls_client\":{f},\"ms\":{d:.1}", .{ j(name), port, why, j(got), j(alertName(hello.alert_in)), j(alertName(hello.alert_out)), j(hello.client()), now_ms() - t0 });
+        record("\"conn\":{d},\"kind\":\"handshake-failed\",\"side\":\"program\",\"want\":{f},\"sni\":{f},\"way\":\"{s}\",\"why\":\"{s}\",\"alert\":{d},\"tls_client\":{f}", .{ id, j(name), j(got), @tagName(way), why, hello.alert_in, j(hello.client()) });
         c.SSL_free(ssl);
         return;
     }
@@ -1360,7 +1506,15 @@ fn readHost(fd: posix.fd_t, comp: usize, way: Way, id: u32, name: []const u8, po
     var sent_total: u64 = 0;
     var recv_total: u64 = 0;
     var requests: u32 = 0;
-    defer observe(comp, "connection", "\"what\":\"closed\",\"host\":{f},\"port\":{d},\"requests\":{d},\"sent\":{d},\"received\":{d},\"ms\":{d:.1}", .{ j(name), port, requests, sent_total, recv_total, now_ms() - t0 });
+    // A client that checks the certificate only after its side of the handshake (GnuTLS, as git
+    // uses it; a pinned key in curl) finishes the handshake and then sends an alert or closes
+    // before its first request: the close says so.
+    defer if (requests == 0 and hello.alert_in >= 0 and isCertificateAlert(hello.alert_in))
+        observe(comp, "connection", "\"what\":\"closed\",\"host\":{f},\"port\":{d},\"why\":\"certificate-refused\",\"after\":\"handshake\",\"alert\":{f},\"tls_client\":{f},\"ms\":{d:.1}", .{ j(name), port, j(alertName(hello.alert_in)), j(hello.client()), now_ms() - t0 })
+    else if (requests == 0)
+        observe(comp, "connection", "\"what\":\"closed\",\"host\":{f},\"port\":{d},\"why\":\"no-request\",\"alert\":{f},\"tls_client\":{f},\"sent\":{d},\"received\":{d},\"ms\":{d:.1}", .{ j(name), port, j(alertName(hello.alert_in)), j(hello.client()), sent_total, recv_total, now_ms() - t0 })
+    else
+        observe(comp, "connection", "\"what\":\"closed\",\"host\":{f},\"port\":{d},\"requests\":{d},\"sent\":{d},\"received\":{d},\"ms\":{d:.1},\"tls_client\":{f},\"agent\":{f}", .{ j(name), port, requests, sent_total, recv_total, now_ms() - t0, j(hello.client()), j(hello.agentName()) });
     var cextra: std.ArrayList(u8) = .empty;
     defer cextra.deinit(gpa);
     var uextra: std.ArrayList(u8) = .empty;
@@ -1374,6 +1528,7 @@ fn readHost(fd: posix.fd_t, comp: usize, way: Way, id: u32, name: []const u8, po
         defer rc.raw.deinit(gpa);
         if (req.content_length != null or req.chunked) _ = try pumpBody(client, &req, &cextra, &rc);
         requests += 1;
+        noteAgent(&hello, req.raw);
         var parts = std.mem.splitScalar(u8, req.first, ' ');
         const method = parts.next() orelse "";
         const path = parts.next() orelse "";
@@ -1689,6 +1844,7 @@ pub fn main() !void {
     server_ctx = c.SSL_CTX_new(c.TLS_server_method());
     _ = c.SSL_CTX_ctrl(server_ctx, c.SSL_CTRL_SET_MIN_PROTO_VERSION, c.TLS1_2_VERSION, null);
     c.SSL_CTX_set_client_hello_cb(server_ctx, onClientHello, null);
+    c.SSL_CTX_set_info_callback(server_ctx, onInfo);
     c.SSL_CTX_set_alpn_select_cb(server_ctx, alpnSelect, null);
     _ = c.SSL_CTX_set_options(server_ctx, @as(u64, 1) << 7);
 

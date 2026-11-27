@@ -37,3 +37,15 @@ night. Read as one night, they are one alert with its count, and the paste site 
 the hosts in it are ordered by the bytes sent to each. Read as minutes, they are dozens of alerts.
 Recommended: while you are away, alerts of one kind merge until you next look. Ordering inside the
 merged alert is in `new-host-alert-is-a-rule`'s notes.
+
+## A program that refuses Silo's certificate (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-tls-refusals`. A refused certificate
+is a condition that lasts, as this entry describes: it starts at a program's first refusal on a
+host, and ends when that program makes a request to that host, or after 30 minutes with no
+refusal. Codex refused 47 times in 5 minutes; under this entry it is one alert, "Codex on main does
+not trust Silo's certificate for api.openai.com: nothing it sends there gets through", and one
+line in the morning: "Codex on main did not trust Silo's certificate for api.openai.com: 47
+refusals from 18:53 to 18:58, still refusing at the end. Give it Silo's authority (SSL_CERT_FILE
+or the system's store)." The program is named from the User-Agent its TLS client sent on an
+earlier connection that worked; a client never seen working is shown by its TLS fingerprint.

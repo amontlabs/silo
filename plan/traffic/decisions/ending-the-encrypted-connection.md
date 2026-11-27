@@ -209,3 +209,10 @@ since the boundary offered only HTTP/1.1. Each request's headers go through the 
 as on HTTP/1.1. A refused gRPC call gets `PERMISSION_DENIED` with Silo's sentence, which the client
 prints. Model hosts stay on HTTP/1.1, where #374 counts calls. Not built yet: offering HTTP/2 only
 where the host offers it, which needs the boundary to reach the host before it answers the program.
+
+An agent's part, 25 November 2026 (`research/2026-11-25-tls-refusals`). Each host Silo reads is
+where a program can refuse Silo's certificate, and the boundary is the only place that sees it.
+The program's ClientHello names its TLS client well enough to tell programs apart: Claude Code,
+Codex, curl, Python, Go, git and Node each had their own, Claude Code and Codex two each. A
+fingerprint names a TLS library build, not a program, so Silo learns the name from the
+User-Agent of a connection that worked.

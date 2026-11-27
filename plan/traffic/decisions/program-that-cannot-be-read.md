@@ -175,3 +175,20 @@ network"; #371's receipt for it read "idle, 0 turns, 42 connections allowed". On
 the facts are one line under What needs you, "Refuses Silo's certificate · api.openai.com · 42×",
 above everything else, and a line of the run's receipt. Without the probe (option A) the line
 names the computer, not the run: a program that never reaches its model has no conversation.
+
+## A program that refuses Silo's certificate (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-tls-refusals`. #403 found that Codex
+without Silo's authority says "waiting for network" for ever, and that only the side that ends TLS
+can see why. #395's boundary already wrote a line for it, but the same `handshake-failed` for ten
+causes: a refused certificate, a client that sent nothing, plain HTTP, no common TLS version. The
+prototype tells them apart from how far the handshake went and the alert the client sent, and
+names the client by its ClientHello, since a program that refuses never sends a request.
+
+Seven real clients were run with and without the authority. Refusals come three ways: an alert
+(curl, Python, Go: `unknown_ca` or `bad_certificate`; Codex: `unknown_ca`), a close once the
+certificate arrived (Node, Claude Code), or a finished handshake followed by a close with no
+request (git on GnuTLS, and a pinned key in curl), which looks like any program giving up and
+counts only when it repeats. No run of a trusting program gave a line that reads as a refusal. A
+stuck Codex makes about one refusal every 6 s, about 800 bytes of record each with its
+`opened` line.
