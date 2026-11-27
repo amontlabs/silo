@@ -1,0 +1,16 @@
+{"case": "control /v1/messages", "got": "HTTP/1.1 200 OK", "ms": 5086.2}
+{"case": "path https://api.anthropic.com/v1/messages", "got": "HTTP/1.1 400 Bad Request", "ms": 5.1}
+{"case": "path //v1/messages", "got": "HTTP/1.1 400 Bad Request", "ms": 4.0}
+{"case": "path /v1//messages", "got": "HTTP/1.1 400 Bad Request", "ms": 3.2}
+{"case": "path /v1/./messages", "got": "HTTP/1.1 400 Bad Request", "ms": 2.9}
+{"case": "path /v1/x/../messages", "got": "HTTP/1.1 400 Bad Request", "ms": 2.9}
+{"case": "path /%761/messages", "got": "HTTP/1.1 400 Bad Request", "ms": 3.0}
+{"case": "path //v1/responses", "got": "HTTP/1.1 400 Bad Request", "ms": 3.0}
+{"case": "path /v1/./responses", "got": "HTTP/1.1 400 Bad Request", "ms": 3.0}
+{"case": "bare LF before transfer-encoding", "got": "HTTP/1.1 400 Bad Request", "ms": 2.8}
+{"case": "folded content-length", "got": "HTTP/1.1 400 Bad Request", "ms": 3.3}
+{"case": "space before colon", "got": "HTTP/1.1 400 Bad Request", "ms": 3.1}
+{"case": "content-length with _", "got": "HTTP/1.1 400 Bad Request", "ms": 2.9}
+{"case": "zstd body of 64 KiB unpacking to 2 GiB", "got": "(closed, nothing back)", "ms": 133.4}
+{"case": "Host header names another host than TLS", "got": "HTTP/1.1 200 OK", "ms": 5010.5}
+{"model_calls_served": 1, "counted": 2, "served_paths": ["/v1/messages"], "hosts_saw": [["api.anthropic.com", "real:anthropic"], ["collector.example", "real:anthropic"]], "boundary_peak_mb": 134.15234375, "boundary_alive": true}

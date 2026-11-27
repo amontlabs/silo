@@ -11,6 +11,11 @@ together.
 Nothing here is a decision and nothing is built for Silo. The plan changed only by agents' notes,
 listed at the end.
 
+**Since then** the boundary also takes #385's counting, #393's "key or plan" setting, #383's holds
+of destructive calls, #394's writer and #401's two fixes, and was run on a heavy night of up to
+256 agents and subagents: [`heavy-night.md`](heavy-night.md). The 39 cases below still pass
+([`results/cases-combined.txt`](results/cases-combined.txt)).
+
 ## In short
 
 - **The pieces compose.** One boundary takes both ways in, as #380 recommends: c1 comes in by
@@ -60,7 +65,8 @@ listed at the end.
 | [`boundary/`](boundary/) | #374's boundary. #374's modules are used unchanged (the build copies them in), and `main.zig` is #374's with the additions below |
 | [`recorder/`](recorder/) | A recorder: #386's writer, unchanged, behind #370's protocol for sources |
 | [`standin/hosts.py`](standin/hosts.py) | The hosts on the internet: a gate in front of #374's stand-in providers, Google Cloud Storage, Azure Resource Manager, and `github.com` on 443 and 22. Each accepts only the real value of its secret and logs which credential reached it |
-| [`run/`](run/) | The two computers, the cases, the bench and the failure tests |
+| [`run/`](run/) | The two computers, the cases, the bench and the failure tests; the heavy night (`night.sh`) and #401's requests (`hostile.sh`) |
+| [`precaution/precaution.py`](precaution/precaution.py) | #383's rules in #353's detector, as a process beside the boundary, and a stand-in person who answers holds |
 
 What the boundary adds to #374, file by file:
 
@@ -72,6 +78,8 @@ What the boundary adds to #374, file by file:
 | `source.zig` | The boundary as a source of the record: lines numbered per computer, kept until the recorder acknowledges them, sent again after a reconnect. Decisions wait for room; other lines are dropped when their buffer is full, and the recorder writes a gap |
 | `dns.zig` | Answers c2's lookups. An allowed name gets an address of its own from `198.18.0.0/15`, so a connection handed over to that address names its host before TLS, as a `CONNECT` does. Any other name gets "no such name" |
 | `conf.zig` | Which computer comes in on which socket, the hosts each may reach and whether Silo reads them, the secrets and their placeholders |
+| `keyplan.zig` | #393's "key or plan" per computer: a computer set for a plan passes api.anthropic.com through unread; one set for a key refuses a plan's sign-in ([`heavy-night.md`](heavy-night.md)) |
+| `hold.zig` | Asks the precaution about a request and holds it for a person, keeping both limits itself ([`heavy-night.md`](heavy-night.md)) |
 
 ### How a connection goes through
 

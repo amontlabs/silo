@@ -3,7 +3,7 @@
 # it, using silo-leaf.key) and the stand-in hosts' authority, which only the boundary trusts.
 set -eu
 T=$(cd $(dirname $0); pwd)/tls; mkdir -p $T; cd $T
-HOSTS="api.anthropic.com api.openai.com chatgpt.com generativelanguage.googleapis.com storage.googleapis.com oauth2.googleapis.com management.azure.com login.microsoftonline.com github.com pubsub.googleapis.com"
+HOSTS="api.anthropic.com api.openai.com chatgpt.com generativelanguage.googleapis.com storage.googleapis.com oauth2.googleapis.com management.azure.com login.microsoftonline.com github.com pubsub.googleapis.com api.github.com api.vercel.com backboard.railway.com"
 SAN=$(for h in $HOSTS; do printf "DNS:%s," $h; done | sed 's/,$//')
 for who in silo up; do
   openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout $who-ca.key -out $who-ca.crt -days 30 \

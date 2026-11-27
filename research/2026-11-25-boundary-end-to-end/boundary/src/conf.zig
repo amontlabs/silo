@@ -38,6 +38,12 @@ pub const Computer = struct {
     google_email: []const u8 = "silo@example.iam.gserviceaccount.com",
     google_project: []const u8 = "silo-test",
     azure_token: ?[]const u8 = null,
+    /// How Claude signs in here (#393, `claude-key-or-plan`): "key", "plan", or "read" (absent:
+    /// read whatever it carries). "plan" passes api.anthropic.com through unread.
+    anthropic: []const u8 = "read",
+    /// Hold a destructive call to a platform's API (#353, #383) until a person allows it.
+    /// "hold" (absent): held, and refused when no answer comes; "off": not looked at.
+    destructive: []const u8 = "hold",
 };
 
 pub const Host = struct {
@@ -79,6 +85,15 @@ pub const Config = struct {
     /// A head that has not arrived whole after this long is refused (a CONNECT, a PROXY header,
     /// a ClientHello).
     head_timeout_ms: u32 = 10000,
+    /// The precaution that holds destructive calls (#383's rules in #353's detector): its socket,
+    /// or null for none. Asked about every request to a host Silo reads that is not a model's.
+    precaution: ?[]const u8 = null,
+    /// How long the boundary waits for its opinion (`classifier-wait-limit`), and what it does
+    /// when none comes in time: "deny" or "rules" (pass, as the rules decide).
+    classify_limit_ms: u32 = 2000,
+    on_no_opinion: []const u8 = "deny",
+    /// How long a held request waits for a person (`hold-limit-length`: 90 s).
+    hold_limit_ms: u32 = 90000,
 };
 
 /// Every placeholder names one secret of one computer: no two are equal, none holds another (the
