@@ -16,7 +16,8 @@ program to say so, and to act on it at the boundary before the agent program rea
 - **Adapters follow providers** (`adapters-follow-providers`): three or four formats, not one
   adapter per agent program.
 - **Dollars and budgets are not here** (`spend-and-budgets-ship-as-an-extension`). This part records
-  each model call as facts. The part `spend` prices them and holds the budgets.
+  each model call as facts. An extension that ships with Silo prices them and holds the budgets, in
+  the part `extensions`.
 - **A change to traffic is never silent** (`denied-tool-call`,
   `no-silent-change-to-traffic`), and each denied call stands alone (`each-call-on-its-own`).
 - **A disagreement between an agent program's own account and the boundary is handled by a

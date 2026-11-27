@@ -34,8 +34,9 @@ pricing, budgets, price tables, dollars, really seems like an extension to me."
 ## What it covers
 
 An agent's part, 27 November 2026. The entries about dollars, prices and budgets were in the part
-`traffic`. They are now in the part `spend`, which holds this extension: the budgets, the prices,
-spend in dollars, and the team's budget and spend. Their answers did not change with the move.
+`traffic`. They are now in the part `extensions`, beside this entry: the budgets, the prices, spend
+in dollars, and the team's budget and spend. Their answers did not change with the move. A part of
+its own for this extension would need a place on the Workshop's map, and is left for later.
 
 To check: `extension-spend` and `classifier-spend` say an extension's spend is "metered like any
 computer". Counting its model calls stays the core's. Whether "metered" there means dollars is to

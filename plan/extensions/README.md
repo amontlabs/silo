@@ -18,6 +18,14 @@ grant or destroy anything, and the rules it adds are shown before they are switc
 - **Which tools it may use, that it may protect by itself, and what wakes it** are decided too
   (`extension-tools`, `extension-may-protect`, `what-wakes-an-extension`).
 
+## What ships with Silo
+
+- **Spend and budgets** (`spend-and-budgets-ship-as-an-extension`). Silo's core records each model
+  call as facts, in the part `traffic`. This extension prices them from its price table and adds
+  the budgets. A budget is a rule or a precaution, by what the boundary can see
+  (`budget-rule-or-precaution`). What a budget promises when it is reached, and where prices come
+  from, are still to decide (`what-a-budget-promises`, `where-prices-come-from`).
+
 ## Three examples
 
 - **Registry rules.** No computer. It adds rules that allow `crates.io` on a computer. Importing

@@ -30,11 +30,6 @@
     "line": "What someone else made, and you add."
   },
   {
-    "id": "spend",
-    "title": "Spend and budgets",
-    "line": "An extension that ships with Silo: what model calls cost in dollars, the price table, and budgets."
-  },
-  {
     "id": "traffic",
     "title": "Model traffic",
     "line": "What an agent program and its model provider say to each other, read at the boundary: model calls."
