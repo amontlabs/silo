@@ -135,3 +135,26 @@ written between them, which the write log keeps, the comparer read 13 MiB and ga
 lines as a full walk of both copies, which read 533 MiB. The journal of each copy was replayed with
 its checksums checked (24,927 of them). A file rewritten in place, with the same size and extents,
 shows only a changed mtime to a full walk; the write log names it, whatever its times say.
+
+## A disk a hostile agent wrote, read from outside
+
+An agent's part, 25 November 2026, from `research/2026-11-25-main-disk-from-outside/`. Root in
+main can write any byte of main's disk, with valid APFS checksums. Measured on Linux with
+dissect.apfs's test disks and Apple's open-source lzfse:
+
+- #390's content reader crashed, or allocated without bound, at 10 faults on crafted disks: a huge
+  extent offset, length or stream size, and keys or values too short for what is read from them.
+  One crafted file stops the listing of every file. Six rules (lengths checked before use, no size
+  from the disk decides an allocation, extents in order, the block table checked whole, decoder
+  input padded and output of the exact size, a bounded walk) made the same fuzzing find nothing.
+- Apple's lzfse reads up to 7 bytes past the end of a crafted LZFSE block. Eight zero bytes after
+  every input are enough: 36.4 million fuzzed inputs found nothing more.
+- A corrupted LZVN or LZFSE block decodes to wrong bytes of the right size in 64% to 69% of
+  single-bit flips. APFS has no checksum of file data, so macOS reads the same wrong bytes. The
+  reader's bar is the bytes macOS gives for that disk.
+- On ext4 (option B), the reader must check the journal's checksums: with them, it refuses the 4
+  disks with a planted checksum fault that the kernel refuses to mount, and matches the kernel on
+  the others. Without them, #381's trial showed those 4 disks as if they were fine.
+
+Not checked: a Mac, Apple's `libcompression`, and whether root in main can write a crafted
+compressed file with SIP on.
