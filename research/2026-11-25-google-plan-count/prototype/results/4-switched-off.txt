@@ -1,0 +1,8 @@
+served: 12 requests, 8 model requests (0 refused with 429), 4 others
+  model requests on the wire, gemini-3-flash: 7
+  model requests on the wire, gemini-3.1-flash-lite: 1
+  other requests, listExperiments: 1
+  other requests, loadCodeAssist: 1
+  other requests, retrieveUserQuota: 2
+reported: 0 api_request, 0 api_response, 0 api_error
+output tokens reported: 0

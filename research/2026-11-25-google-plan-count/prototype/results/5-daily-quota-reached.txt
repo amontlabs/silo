@@ -1,0 +1,11 @@
+served: 10 requests, 6 model requests (1 refused with 429), 4 others
+  model requests on the wire, gemini-3-flash: 5
+  model requests on the wire, gemini-3.1-flash-lite: 1
+  other requests, listExperiments: 1
+  other requests, loadCodeAssist: 1
+  other requests, retrieveUserQuota: 2
+reported: 6 api_request, 5 api_response, 1 api_error
+  api_request as reported, gemini-3.1-flash-lite (utility_router): 1
+  api_request as reported, gemini-3.5-flash (main): 5
+  api_error: model gemini-3.5-flash, status 429, {"error": {"code": 429, "status": "RESOURCE_EXHAUSTED", "message": "Quota exceeded", "deta
+output tokens reported: 640
