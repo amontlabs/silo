@@ -1,5 +1,5 @@
 #!/bin/bash
-# id: 40
+# id: 50
 # title: What Silo's own writers wait for on APFS: an acknowledgement with F_FULLFSYNC, F_BARRIERFSYNC or fsync
 # tier: long
 # time: about 15 minutes (18 runs of the record's writer and 4 of SQLite, quiet and while another program writes)
@@ -8,7 +8,7 @@
 # decides: record-file-format (the flush before an acknowledgement), record-damaged-at-start (whether the barrier rule of research 2026-11-25-record-head-off-the-mac is worth it), what-a-budget-promises (the spend journal's two flushes per model call), pooled-budget-ledger (the team ledger's commit on a Mac), research 2026-11-25-durability-on-a-mac
 # question: On this Mac's APFS, what does the record's writer wait for before it acknowledges a line, when every flush is F_FULLFSYNC, when only the flush before an acknowledgement is (the rest F_BARRIERFSYNC), and with plain fsync (which keeps nothing through a power cut), alone and while another program writes; and what does a SQLite commit cost with fullfsync?
 # outcome full-affordable: With every flush F_FULLFSYNC, an acknowledgement waits 50 ms or less at the 99th percentile even while another program writes, new blobs included: Silo's writers flush that way everywhere, the spend journal's two flushes per model call cost nothing a person sees, and no barrier rule is needed.
-# outcome barrier-for-blobs: Each acknowledgement alone is 50 ms or less, but a line with a new blob passes it with every flush F_FULLFSYNC and not with the barrier rule: the writer keeps F_FULLFSYNC before each acknowledgement and F_BARRIERFSYNC for blobs and folders, as #394's mac-barrier model, and test 41 must show the barrier holds.
+# outcome barrier-for-blobs: Each acknowledgement alone is 50 ms or less, but a line with a new blob passes it with every flush F_FULLFSYNC and not with the barrier rule: the writer keeps F_FULLFSYNC before each acknowledgement and F_BARRIERFSYNC for blobs and folders, as #394's mac-barrier model, and test 51 must show the barrier holds.
 # outcome group-lines: An acknowledgement with F_FULLFSYNC passes 50 ms while another program writes, and grouping 16 lines per flush brings the rate back over 1,000 lines a second: the writer groups what arrives while a flush runs (one flush acknowledges them all), as the recorder's batch already does.
 # outcome too-slow: Even grouped by 16, F_FULLFSYNC leaves the writer under 1,000 lines a second while another program writes: the record's flush needs another design (a longer batch, or acknowledging after the flush is only issued) before the first build relies on it.
 # outcome inconclusive: The writer did not build or a run failed; look at the attached logs.
@@ -31,7 +31,7 @@ else
   kit_need_free_gb 2
   kit_fact power "$(pmset -g batt | head -1 | sed "s/.*'\(.*\)'.*/\1/")"
   kit_fact filevault "$(fdesetup status | head -1)"
-  kit_confirm "Test 40 builds the record's writer and times its flushes on this Mac's disk, quiet and while another program writes: about 15 minutes."
+  kit_confirm "Test 50 builds the record's writer and times its flushes on this Mac's disk, quiet and while another program writes: about 15 minutes."
   silorec_build || { kit_outcome inconclusive "the writer did not build"; exit 0; }
 fi
 
@@ -90,7 +90,7 @@ for load in quiet busy; do
 done
 kit_attach "$R/bench.jsonl"
 
-python3 "$KIT_ROOT/py/40-decide.py" "$R/bench.jsonl" > "$R/record.tsv" || kit_fail "py/40-decide.py failed on the runs"
+python3 "$KIT_ROOT/py/50-decide.py" "$R/bench.jsonl" > "$R/record.tsv" || kit_fail "py/50-decide.py failed on the runs"
 res=""
 while IFS="$(printf '\t')" read -r kind a b c e; do
   case "$kind" in
@@ -99,5 +99,5 @@ while IFS="$(printf '\t')" read -r kind a b c e; do
     O) res="$a|$b" ;;
   esac
 done < "$R/record.tsv"
-[ -n "$res" ] || kit_fail "no outcome from py/40-decide.py"
+[ -n "$res" ] || kit_fail "no outcome from py/50-decide.py"
 if [ "${KIT_FAKE:-0}" = 1 ] || ! kit_is_mac; then kit_outcome "${res%%|*}" "Linux analogue: ${res#*|}"; else kit_outcome "${res%%|*}" "${res#*|}"; fi

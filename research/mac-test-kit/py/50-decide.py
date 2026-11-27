@@ -1,4 +1,4 @@
-"""Test 40's outcome from its runs (bench.jsonl): one line per measure (M), fact (F) and the
+"""Test 50's outcome from its runs (bench.jsonl): one line per measure (M), fact (F) and the
 outcome (O), tab-separated, as test 31's py/31-ckpt.py."""
 import json, sys
 

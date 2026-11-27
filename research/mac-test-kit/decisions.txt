@@ -348,4 +348,4 @@ decision sizing-target
 decision record-file-format
   asks: How does Silo flush what it keeps on a Mac (the record, the spend journal, the team ledger) before it says a thing is kept, and what does that cost?
   source: plan, taken by agents; #394 found Zig's fsync is not F_FULLFSYNC on macOS, and research 2026-11-25-durability-on-a-mac measures the flushes and a power cut through a disk that loses its cache
-  tests: 40 41
+  tests: 50 51

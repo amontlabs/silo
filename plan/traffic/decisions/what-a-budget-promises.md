@@ -216,7 +216,7 @@ starts again at zero. The same happens when the boundary stops while a call stre
 A spend journal fixes it: each call that leaves, and each settlement, is written and flushed
 (`F_FULLFSYNC` on a Mac) before the call goes on, and a start puts every ledger back. A call that
 left and never settled counts at its reserve, the most it can cost. With it, both cases refuse the
-call after the restart. It costs two flushes per model call; the Mac kit's test 40 measures them.
+call after the restart. It costs two flushes per model call; the Mac kit's test 50 measures them.
 
 ## A hostile test of `budget-stops-what-it-meters`
 

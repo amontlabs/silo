@@ -1,5 +1,5 @@
 # The record's writer (research/2026-11-25-record-format/proto, `silorec`, in Zig), built for tests
-# 40 and 41. Sourced after lib/common.sh and lib/ckpt.sh, whose Zig it uses (ckpt_zig).
+# 50 and 51. Sourced after lib/common.sh and lib/ckpt.sh, whose Zig it uses (ckpt_zig).
 #
 # Its source is looked for next to the kit, else fetched from this repository's remote. With
 # SILOREC_FLUSH=full|barrier|fsync it flushes each way on a Mac; `silorec bench` times an

@@ -26,7 +26,7 @@ const posix = std.posix;
 const Allocator = std.mem.Allocator;
 
 /// How a line is made durable. `full` is the default and the only one that keeps a line through
-/// a power cut on a Mac; the others exist to measure what it costs (the Mac kit's test 40).
+/// a power cut on a Mac; the others exist to measure what it costs (the Mac kit's test 50).
 pub const Flush = enum { full, barrier, fsync, none };
 
 pub fn flushFromEnv() Flush {

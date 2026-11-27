@@ -1,5 +1,5 @@
 #!/bin/bash
-# id: 41
+# id: 51
 # title: A power cut under the record's writer: a macOS computer on a disk that loses its cache
 # tier: vm
 # time: about 40 minutes (seven starts of a computer)
@@ -7,9 +7,9 @@
 # step: 1
 # decides: record-file-format (the flush before an acknowledgement), record-damaged-at-start (the after-head start rule), research 2026-11-25-durability-on-a-mac, research 2026-11-25-record-head-off-the-mac
 # question: When a macOS computer loses power while the record's writer runs, with its disk served by a stand-in drive that keeps writes in a cache until a flush and loses part of that cache in the cut, does every line the writer acknowledged survive and the record start again, with every flush F_FULLFSYNC, with the barrier rule, and with plain fsync?
-# outcome full-holds-fsync-loses: With F_FULLFSYNC, and with the barrier rule, every acknowledged line survived every cut and the record started; with plain fsync some did not: the writer's flushes are right on APFS, and the barrier rule may be used where test 40 says it saves time.
+# outcome full-holds-fsync-loses: With F_FULLFSYNC, and with the barrier rule, every acknowledged line survived every cut and the record started; with plain fsync some did not: the writer's flushes are right on APFS, and the barrier rule may be used where test 50 says it saves time.
 # outcome barrier-loses: F_FULLFSYNC kept every acknowledged line, the barrier rule did not: F_BARRIERFSYNC does not order the writes the rule needs through this disk; the writer uses F_FULLFSYNC for every flush.
-# outcome fsync-holds: Even plain fsync kept every acknowledged line: the computer's disk path flushed on its own (the flush counts are in the facts), so this stand-in cannot tell the flushes apart; trust #394's models and test 40 instead.
+# outcome fsync-holds: Even plain fsync kept every acknowledged line: the computer's disk path flushed on its own (the flush counts are in the facts), so this stand-in cannot tell the flushes apart; trust #394's models and test 50 instead.
 # outcome full-loses: An acknowledged line was lost even with every flush F_FULLFSYNC: F_FULLFSYNC does not reach the disk through this path, or the writer is wrong; nothing relies on the record's durability on a Mac until the cause is found (the runs are attached).
 # outcome no-start: The computer did not start again after a cut: APFS itself did not survive this stand-in's power cut, which says more about the stand-in than about the writer; look at the attached logs.
 # outcome inconclusive: The computer did not start from the served disk or the writer did not run; read the facts.
@@ -23,7 +23,7 @@ CUTS="${KIT_41_CUTS:-2}"            # power cuts per mode
 RUN_S="${KIT_41_RUN_S:-12}"         # seconds the writer runs before the cut
 KEEP="${KIT_41_KEEP:-0.5}"          # share of the cached blocks that reach the disk in the cut
 R="$KIT_WORK/runs"; rm -rf "$R"; mkdir -p "$R"
-CSV="$R/41-cuts.csv"
+CSV="$R/51-cuts.csv"
 echo "mode,cut,last_acked,started,verify_ok,lines,cached,kept,flushes,acks,note" > "$CSV"
 CD="python3 -I $KIT_ROOT/py/cutdisk.py"
 
@@ -31,12 +31,12 @@ lines_of() { sed -n 's/^\([0-9]*\) lines checked.*/\1/p' | tail -1; }
 last_ack() { sed -n 's/^\([0-9]*\) acked$/\1/p' "$1" | tail -1; }
 
 decide() {
-  python3 "$KIT_ROOT/py/41-decide.py" "$CSV" > "$R/record.tsv" || kit_fail "py/41-decide.py failed"
+  python3 "$KIT_ROOT/py/51-decide.py" "$CSV" > "$R/record.tsv" || kit_fail "py/51-decide.py failed"
   local res="" kind a b c e
   while IFS="$(printf '\t')" read -r kind a b c e; do
     case "$kind" in M) kit_measure "$a" "$b" "$c" "$e" ;; F) kit_fact "$a" "$b" ;; O) res="$a|$b" ;; esac
   done < "$R/record.tsv"
-  [ -n "$res" ] || kit_fail "no outcome from py/41-decide.py"
+  [ -n "$res" ] || kit_fail "no outcome from py/51-decide.py"
   kit_attach "$CSV"
   kit_outcome "${res%%|*}" "$1${res#*|}"
 }
@@ -66,14 +66,14 @@ kit_need_mac 14
 kit_need_silovm
 kit_need_base_vm
 kit_need_free_gb 40
-kit_confirm "Test 41 starts a macOS computer about seven times, its disk served by a stand-in drive on this Mac that loses part of its cache in each of $((CUTS * $(echo $MODES | wc -w))) power cuts: about 40 minutes."
+kit_confirm "Test 51 starts a macOS computer about seven times, its disk served by a stand-in drive on this Mac that loses part of its cache in each of $((CUTS * $(echo $MODES | wc -w))) power cuts: about 40 minutes."
 silorec_build || { kit_outcome inconclusive "the writer did not build"; exit 0; }
 
 B="$(vm_fresh t41)" || exit 1
 fmt="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("disk_format", "raw"))' "$B/config.json")"
 [ "$fmt" = raw ] || kit_skip "the base computer's disk is $fmt; the stand-in drive serves a raw image"
 SOCK="$KIT_WORK/n.sock"; CTL="$KIT_WORK/c.sock"
-[ "${#SOCK}" -lt 100 ] || { SOCK="/tmp/silokit-41-$$.sock"; CTL="/tmp/silokit-41-$$.ctl"; }
+[ "${#SOCK}" -lt 100 ] || { SOCK="/tmp/silokit-51-$$.sock"; CTL="/tmp/silokit-51-$$.ctl"; }
 SPID=""; WP=""
 trap '[ -n "$WP" ] && kill "$WP" 2>/dev/null; vm_stop "$B" 10 >/dev/null; [ -n "$SPID" ] && kill "$SPID" 2>/dev/null; vm_destroy "$B"; rm -f "$SOCK" "$CTL"' EXIT
 

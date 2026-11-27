@@ -54,7 +54,7 @@ The branch is stacked on #391 by merge (#391's second pass, which holds #390 and
    A new blob is three flushes (the file and two folders) before its line can be acknowledged. On
    this Linux container, while another program wrote, a line took 0.6 ms at the 99th percentile and
    a new blob 117 ms: the folder flushes wait for the other program's data. Whether a Mac does the
-   same is test 40's question.
+   same is test 50's question.
 
 ### What needed nothing, or only a note
 
@@ -67,13 +67,13 @@ The branch is stacked on #391 by merge (#391's second pass, which holds #390 and
 | Morning review (`record.py`, #371) | A report written aside and renamed | Not flushed; a report can be made again |
 | Mac kit (`nbdserve.py`, C probes) | Test images | Already `F_FULLFSYNC` |
 
-## The Mac kit: tests 40 and 41
+## The Mac kit: tests 50 and 51
 
-- **Test 40** (`long`, about 15 minutes): the record's writer on APFS in each flush mode, one line
+- **Test 50** (`long`, about 15 minutes): the record's writer on APFS in each flush mode, one line
   per flush and 16, with a new blob every 5 lines, quiet and while another program writes, and a
   SQLite commit with and without `fullfsync`. Outcomes: `full-affordable`, `barrier-for-blobs`,
   `group-lines`, `too-slow`, with a 50 ms limit at the 99th percentile, as test 06.
-- **Test 41** (`vm`, about 40 minutes): a power cut under the writer. The computer's disk is served
+- **Test 51** (`vm`, about 40 minutes): a power cut under the writer. The computer's disk is served
   by [`py/cutdisk.py`](../mac-test-kit/py/cutdisk.py), a stand-in drive: a write stays in its cache
   until a flush, and a cut writes a random half of the cache in a random order and loses the rest.
   The computer runs the real APFS and the writer's real flush calls; the acknowledgements stream to
@@ -82,9 +82,9 @@ The branch is stacked on #391 by merge (#391's second pass, which holds #390 and
   `fsync-holds`, `full-loses`, `no-start`. The flushes the drive saw per acknowledgement say
   whether `F_BARRIERFSYNC` reaches a virtual disk at all.
 
-Both ran on Linux only, as analogues: test 40 gave `group-lines` there (numbers that say nothing of
-a Mac), test 41 checked its parsing on a writer killed with SIGKILL. The stand-in drive has its own
-check, with a planted flush that does nothing, which it catches (`linux/test-41.sh`).
+Both ran on Linux only, as analogues: test 50 gave `group-lines` there (numbers that say nothing of
+a Mac), test 51 checked its parsing on a writer killed with SIGKILL. The stand-in drive has its own
+check, with a planted flush that does nothing, which it catches (`linux/test-51.sh`).
 
 ## What it changes in the plan
 
@@ -94,9 +94,9 @@ check, with a planted flush that does nothing, which it catches (`linux/test-41.
 | `pooled-budget-ledger` | open | The ledger's SQLite needs `fullfsync` on a Mac |
 | `where-prices-come-from` | open | The version last taken is written whole |
 | `record-head-off-the-mac` | open | The anchor answers "kept" after `F_FULLFSYNC` |
-| `record-file-format` | taken by agents | The flush modes, and what tests 40 and 41 measure |
+| `record-file-format` | taken by agents | The flush modes, and what tests 50 and 51 measure |
 
-The kit's `decisions.txt` maps tests 40 and 41 to `record-file-format`, measured.
+The kit's `decisions.txt` maps tests 50 and 51 to `record-file-format`, measured.
 
 ## For polarzero to rule
 
@@ -115,11 +115,11 @@ says so today; it belongs next to `record-file-format`.
 
 ## What was not verified
 
-- **The Mac.** Nothing ran on a Mac. Tests 40 and 41 are untested there, most likely the VM steps
+- **The Mac.** Nothing ran on a Mac. Tests 50 and 51 are untested there, most likely the VM steps
   of 41 (a cut under `--disk-nbd`, and a start from the image afterwards).
-- **Test 41's drive is a model** of a drive with a volatile cache, not a real power cut: a real
+- **Test 51's drive is a model** of a drive with a volatile cache, not a real power cut: a real
   drive may tear inside a 4 KiB block, or keep a larger share of its cache.
-- **The journal's cost** was not measured on a Mac (test 40 measures the same flush in the writer).
+- **The journal's cost** was not measured on a Mac (test 50 measures the same flush in the writer).
   It grows by two lines per call and is never compacted.
 - **The spend journal through a power cut** was tested by kills and by a torn tail in a unit test,
   not by #394's power-cut models.

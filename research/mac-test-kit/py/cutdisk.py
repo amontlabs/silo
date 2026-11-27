@@ -1,5 +1,5 @@
 """A disk with a volatile write cache, served over NBD, that can lose its cache as a drive does in a
-power cut. For test 41 (and its Linux self-check).
+power cut. For test 51 (and its Linux self-check).
 
 A Mac's drive acknowledges a write once it is in its cache, and writes the cache out later, in any
 order; only a flush (what F_FULLFSYNC asks for) makes what came before it durable. A macOS

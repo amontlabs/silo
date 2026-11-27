@@ -1,4 +1,4 @@
-"""Test 41's outcome from its cuts (41-cuts.csv): M, F and O lines, tab-separated."""
+"""Test 51's outcome from its cuts (51-cuts.csv): M, F and O lines, tab-separated."""
 import csv, sys
 
 rows = list(csv.DictReader(open(sys.argv[1])))
