@@ -33,7 +33,7 @@ the place is written in every upload's own bytes.
 
 ## Notes
 
-This rule is #376's `foreign-credential-refused` carried to hosts that get no secret, and keyed on
+This rule is the one `foreign-credential-on-a-secret-host` lets you set, carried to hosts that get no secret, and keyed on
 the place too. The place is what stops an upload that carries no credential at all: `gsutil cp`
 with no sign-in, a plain `PUT` to a bucket's host, and a signed URL made elsewhere were each
 refused by the place and carried nothing a credential rule could refuse.
