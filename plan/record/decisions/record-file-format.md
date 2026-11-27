@@ -46,3 +46,9 @@ it: a macOS computer on a stand-in drive that keeps writes in a cache until a fl
 of the cache in the cut. Each new blob costs three flushes (the file and two folders) before its
 line is acknowledged; on Linux, while another program wrote, that was 117 ms at the 99th
 percentile against 0.6 ms for a line, so the barrier rule may matter more for blobs than for lines.
+
+## More research on this (27 November 2026)
+
+An agent's part, 27 November 2026. These reports bear on this entry, and its notes did not point to them. The answer is unchanged.
+
+- `research/2026-11-26-headline-numbers/` (#439): the record format's numbers came out the same on a second run: crash-safe at 209 of 209 steps, 16 of 18 tampers found, and 49.6 MB against 5.5 MB for a heavy night's model-call lines.

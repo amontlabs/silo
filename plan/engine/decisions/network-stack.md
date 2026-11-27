@@ -291,3 +291,10 @@ anything upstream is polarzero's call.
 ## Settled in the consolidation (27 November 2026)
 
 Settled, 27 November 2026, in the consolidation: the answer stands, and each point above is in it or in another entry. #378's card that leads nowhere, with the proxy and SSH over vsock, is one way in of Silo's stack, so a closed main needs no Apple's NAT. Where gvproxy is used, it is #380's patch (`-outbound-deny`), which hands the metadata address to the boundary. Computers are told apart by one socket per computer on each way in. The first start is `way-in-before-the-relay`'s.
+
+## More research on this (27 November 2026)
+
+An agent's part, 27 November 2026. These reports bear on this entry, and its notes did not point to them. The answer is unchanged.
+
+- `research/2026-11-25-gvproxy-upstream/` (#430) holds the patches, the suite and the texts for upstream that the note of #430 above describes.
+- `research/2026-11-25-red-team-round-two/` (#435), finding 1: on gvproxy v0.9.0, a frame shorter than an Ethernet header cut a computer's link for good or ended gvproxy. Upstream's `main` drops such a frame since, as read on 27 November 2026 at commit `e161590`, so a gvproxy built from it needs no patch for this. The report also finds that the helper cannot count on SIGTERM to stop gvproxy.

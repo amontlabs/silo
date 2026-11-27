@@ -111,3 +111,9 @@ Hub" is three hosts. A group is a
 shorthand for its hosts, shown as such, and `network-rules-from-use` still finds what a project
 adds, such as binaries.prisma.sh. Not tried: Homebrew, Maven. The proxy and the runs
 are in the project files, `research/2026-11-24-install-hosts`.
+
+## More research on this (27 November 2026)
+
+An agent's part, 27 November 2026. These reports bear on this entry, and its notes did not point to them. The answer is unchanged.
+
+- `research/2026-11-25-gvproxy-upstream/` (#430): its settings `closed`, `explicit` and `boundary` give the three modes with upstream gvproxy's flags, once upstream's pull request 750 is merged. Its fix for connections to the gateway's own address is needed for "never your local network" whenever the deny list does not hold `private`.

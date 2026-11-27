@@ -72,3 +72,8 @@ swapped placeholders on the clouds' hosts. Stand-ins played Google and Microsoft
   the password of Basic auth. The token's hosts then include `*.pkg.dev` and `gcr.io`, with that
   slot. Not run.
 
+## More research on this (27 November 2026)
+
+An agent's part, 27 November 2026. These reports bear on this entry, and its notes did not point to them. The answer is unchanged.
+
+- `research/2026-11-25-red-team-round-two/` (#435), finding 3, read in the code and not run: an Azure placeholder was swapped on `*.azure.com`, which takes in names anyone with an Azure account can register, and a Google ID token was made for whatever audience main asked. The fix it calls for is the exact host of the token's audience, and ID tokens only for the audiences you listed.

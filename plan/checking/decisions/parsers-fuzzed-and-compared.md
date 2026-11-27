@@ -20,3 +20,10 @@ The options:
 
 Recommended: add the sentence. For these two readers, the dangerous bug is a different reading, not a
 crash.
+
+## More research on this (27 November 2026)
+
+An agent's part, 27 November 2026. These reports bear on this entry, and its notes did not point to them. The answer is unchanged.
+
+- `research/2026-11-25-untrusted-parsers/` (#401) is the comparison of the drafts' parsers with the programs they sit in front of, which this entry's added sentence comes from.
+- `research/2026-11-25-parser-fixes/` fixes three of its findings, each with a test that fails first: the ext4 readers, the preview forwarder and the closed network's proxy.

@@ -45,3 +45,9 @@ Agent, 25 November 2026, from `research/2026-11-25-way-in-before-the-relay/` (`c
 ## The count, bounded
 
 Agent, 25 November 2026, from `research/2026-11-25-cardend-hardened/`. Main chooses every address it sends to, so a count with one line per address grew without end under a flood of frames each to a new address: 200,000 frames left 200,000 lines, and the card slowed to a few frames a second. The count now holds at most 256 lines; past that, a new address is counted on its kind's line "other addresses" ("tcp connect, other addresses ports 443,... x150000"). The place's sentence then reads "to more than 250 addresses", which is the fact that matters.
+
+## More research on this (27 November 2026)
+
+An agent's part, 27 November 2026. These reports bear on this entry, and its notes did not point to them. The answer is unchanged.
+
+- `research/2026-11-25-red-team-round-two/` (#435), finding 2: the list of dropped destinations needs a bound. The fix keeps 256 lines and counts the rest in one line of their kind.
