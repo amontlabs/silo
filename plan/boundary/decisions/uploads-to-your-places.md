@@ -44,3 +44,7 @@ unread") for these seven hosts, as #350 did for github.com.
 Where you name your accounts is open. Silo can propose the list from the secrets you give, by
 asking each host whose credential it is and which buckets it reaches, for you to confirm in the
 first run.
+
+## Settled in the consolidation (27 November 2026)
+
+An agent's part, 27 November 2026. As #424 wrote it, the boundary read these seven hosts for every computer, which would change `ending-the-encrypted-connection`'s "every other connection passes encrypted and unread" for everyone. The answer now reads them only under a set of rules you switch on, which `ending-the-encrypted-connection` already allows ("a host a rule asks to read"). That keeps the core as it is and makes the check something you add.
