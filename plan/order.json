@@ -512,6 +512,7 @@
         "extension-secrets",
         "summary-reader-model",
         "extension-spend",
+        "spend-and-budgets-ship-as-an-extension",
         "what-wakes-an-extension",
         "what-ships-with-silo",
         "import-then-install",
