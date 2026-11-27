@@ -9,6 +9,7 @@ pub const c = @cImport({
     @cInclude("openssl/pem.h");
     @cInclude("zlib.h");
     @cInclude("zstd.h");
+    @cInclude("nghttp2/nghttp2.h");
 });
 
 pub const Mint = struct {

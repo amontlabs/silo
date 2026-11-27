@@ -1,0 +1,3 @@
+FAIL  c1 gRPC with its placeholder: Check: error: rpc error: code = Unavailable desc = connection error: desc = "transport: authentication handshake failed: credentials: cannot check peer: missing selected ALPN property. If you upgraded | host saw []
+FAIL  c2 gRPC with its placeholder: Check: error: rpc error: code = Unavailable desc = connection error: desc = "transport: authentication handshake failed: credentials: cannot check peer: missing selected ALPN property. If you upgraded | host saw []
+boundary: 0 h2 requests in the trace; 0 refused

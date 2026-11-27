@@ -1,0 +1,7 @@
+## upstream 197eea05 with only the new test
+--- FAIL: TestEc2MetadataAccessFlagReachesTheStack (0.00s)
+        	Error:      	Should be true
+        	Messages:   	-ec2-metadata-access must reach the stack's configuration
+
+## with gvproxy-ec2-flag-with-test.patch
+ok  	github.com/containers/gvisor-tap-vsock/cmd/gvproxy	0.016s

@@ -1,0 +1,9 @@
+PASS  c1 gRPC with its placeholder: Check: SERVING Watch: 3 messages, trailer x-standin=[watched]  | host saw ['Check:real:gcp', 'Watch:real:gcp']
+PASS  c2 gRPC with its placeholder: Check: SERVING Watch: 3 messages, trailer x-standin=[watched]  | host saw ['Check:real:gcp', 'Watch:real:gcp']
+PASS  c1 gRPC, a placeholder bound for another host: refused, host saw 0 calls: Check: error: rpc error: code = PermissionDenied desc = Silo: this request carries a placeholder that may not go to this host.
+PASS  c1 gRPC, the other computer's placeholder: refused, host saw 0 calls: Check: error: rpc error: code = PermissionDenied desc = Silo: this request carries a placeholder Silo gave another computer, so it cannot be used here
+PASS  c2 gRPC, a placeholder bound for another host: refused, host saw 0 calls: Check: error: rpc error: code = PermissionDenied desc = Silo: this request carries a placeholder that may not go to this host.
+PASS  c2 gRPC, the other computer's placeholder: refused, host saw 0 calls: Check: error: rpc error: code = PermissionDenied desc = Silo: this request carries a placeholder Silo gave another computer, so it cannot be used here
+record c1: 12 lines checked in 1 segments, 0 blob references · the chain holds
+record c2: 21 lines checked in 1 segments, 0 blob references · the chain holds
+boundary: 4 HTTP/2 requests sent, 8 refused

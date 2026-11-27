@@ -1,0 +1,9 @@
+## #380's patch, with only the new test (handoff_test.go)
+--- FAIL: TestHandoffReceivesEveryTCPConnection (0.00s)
+    handoff_test.go:87: 169.254.169.254: the guest's connection did not open: connect tcp 169.254.169.254:80: connection was refused
+    handoff_test.go:87: 10.0.0.7: the guest's connection did not open: connect tcp 10.0.0.7:80: connection was refused
+FAIL	github.com/containers/gvisor-tap-vsock/pkg/services/forwarder	0.010s
+
+## with gvproxy-handoff-decides.patch
+--- PASS: TestHandoffReceivesEveryTCPConnection (0.00s)
+ok  	github.com/containers/gvisor-tap-vsock/pkg/services/forwarder	0.009s

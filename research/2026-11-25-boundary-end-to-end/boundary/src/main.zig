@@ -27,6 +27,8 @@ const spend = @import("spend.zig");
 const entry = @import("entry.zig");
 const mint = @import("mint.zig");
 const swap = @import("swap.zig");
+const placeholder = @import("placeholder.zig");
+const h2 = @import("h2.zig");
 const source = @import("source.zig");
 const dns = @import("dns.zig");
 const conf = @import("conf.zig");
@@ -448,7 +450,23 @@ fn probeCommand(cmd: []const u8) !f64 {
 }
 
 // ---- TLS ----
-fn alpnSelect(_: ?*c.SSL, out: [*c][*c]const u8, outlen: [*c]u8, in: [*c]const u8, inlen: c_uint, _: ?*anyopaque) callconv(.c) c_int {
+fn alpnSelect(ssl: ?*c.SSL, out: [*c][*c]const u8, outlen: [*c]u8, in: [*c]const u8, inlen: c_uint, _: ?*anyopaque) callconv(.c) c_int {
+    // HTTP/2 where the host is marked for it and the program offers it (gRPC); HTTP/1.1 elsewhere.
+    if (c.SSL_get_ex_data(ssl, 0)) |p| {
+        const hello: *Hello = @ptrCast(@alignCast(p));
+        const want_h2 = if (hostOf(hello.want)) |h| h.h2 and spend.providerOf(hello.want) == null else false;
+        var k: usize = 0;
+        if (want_h2) while (k < inlen) {
+            const l = in[k];
+            if (k + 1 + l > inlen) break;
+            if (std.mem.eql(u8, in[k + 1 .. k + 1 + l], "h2")) {
+                out.* = in + k + 1;
+                outlen.* = l;
+                return c.SSL_TLSEXT_ERR_OK;
+            }
+            k += 1 + l;
+        };
+    }
     var i: usize = 0;
     while (i < inlen) {
         const l = in[i];
@@ -1226,6 +1244,55 @@ fn onClientHello(ssl: ?*c.SSL, alert: [*c]c_int, _: ?*anyopaque) callconv(.c) c_
     return c.SSL_CLIENT_HELLO_SUCCESS;
 }
 
+/// One request of an HTTP/2 connection (`h2.zig`): the checks and the swap of an HTTP/1.1 head, on
+/// its block of `name\x00value` lines, and the same lines in the record.
+const H2Ctx = struct { comp: usize, id: u32, name: []const u8, secrets: []const conf.Secret };
+
+fn h2Value(block: []const u8, name: []const u8) []const u8 {
+    var it = std.mem.splitScalar(u8, block, '\n');
+    while (it.next()) |line| {
+        const z = std.mem.indexOfScalar(u8, line, 0) orelse continue;
+        if (std.mem.eql(u8, line[0..z], name)) return line[z + 1 ..];
+    }
+    return "";
+}
+
+fn h2Request(p: *anyopaque, block: []const u8) h2.Verdict {
+    const x: *H2Ctx = @ptrCast(@alignCast(p));
+    const path = h2Value(block, ":path");
+    var lb: [512]u8 = undefined;
+    const line = std.fmt.bufPrint(&lb, "{s} {s}", .{ h2Value(block, ":method"), swap.lineForRecord(path) }) catch "?";
+    if (swap.fromOther(block, bcfg.computers, x.comp)) |o| {
+        const owner = bcfg.computers[o.computer];
+        decide(x.comp, "connection", "\"what\":\"refused\",\"decision\":\"refused\",\"decided_by\":\"silo\",\"host\":{f},\"line\":{f},\"protocol\":\"h2\",\"why\":\"placeholder-of-another-computer\",\"secret\":{f},\"of\":{f}", .{ j(x.name), j(line), j(owner.secrets[o.secret].name), j(owner.id) }) catch {};
+        record("\"conn\":{d},\"kind\":\"refused\",\"protocol\":\"h2\",\"why\":\"placeholder-of-another-computer\",\"host\":{f}", .{ x.id, j(x.name) });
+        return .{ .refuse = "Silo: this request carries a placeholder Silo gave another computer, so it cannot be used here." };
+    }
+    const sw = swap.swapHead(gpa, block, x.name, x.secrets) catch return .{ .refuse = "Silo: this request could not be read." };
+    switch (sw) {
+        .elsewhere => |k| {
+            decide(x.comp, "connection", "\"what\":\"refused\",\"decision\":\"refused\",\"decided_by\":\"silo\",\"host\":{f},\"line\":{f},\"protocol\":\"h2\",\"why\":\"placeholder-elsewhere\",\"secret\":{f}", .{ j(x.name), j(line), j(x.secrets[k].name) }) catch {};
+            record("\"conn\":{d},\"kind\":\"refused\",\"protocol\":\"h2\",\"why\":\"placeholder-elsewhere\",\"secret\":{f},\"host\":{f}", .{ x.id, j(x.secrets[k].name), j(x.name) });
+            return .{ .refuse = "Silo: this request carries a placeholder that may not go to this host." };
+        },
+        .send => |out| {
+            var used_buf: [512]u8 = undefined;
+            const used = usedNames(x.secrets, out.used, &used_buf);
+            const recorded = if (out.used != 0)
+                decide(x.comp, "connection", "\"what\":\"secret-used\",\"host\":{f},\"line\":{f},\"protocol\":\"h2\",\"secrets\":[{s}]", .{ j(x.name), j(line), used })
+            else {};
+            recorded catch {
+                gpa.free(out.head);
+                record("\"conn\":{d},\"kind\":\"refused\",\"protocol\":\"h2\",\"why\":\"no-room-in-record\",\"line\":{f}", .{ x.id, j(line) });
+                return .{ .refuse = "Silo: this request needs a decision Silo cannot record now, so it does not leave." };
+            };
+            if (out.used == 0) observe(x.comp, "connection", "\"what\":\"request\",\"host\":{f},\"line\":{f},\"protocol\":\"h2\"", .{ j(x.name), j(line) });
+            record("\"conn\":{d},\"kind\":\"request\",\"protocol\":\"h2\",\"line\":{f},\"swapped\":{d}", .{ x.id, j(line), out.used });
+            return .{ .send = out.head };
+        },
+    }
+}
+
 /// A host Silo reads: #374's loop, with the placeholders swapped and the record written.
 fn readHost(fd: posix.fd_t, comp: usize, way: Way, id: u32, name: []const u8, port: u16, t0: f64) !void {
     const ssl = c.SSL_new(server_ctx) orelse return sslErr("SSL_new");
@@ -1259,7 +1326,12 @@ fn readHost(fd: posix.fd_t, comp: usize, way: Way, id: u32, name: []const u8, po
     defer gpa.free(sni_z);
     _ = c.SSL_ctrl(ussl, c.SSL_CTRL_SET_TLSEXT_HOSTNAME, c.TLSEXT_NAMETYPE_host_name, @ptrCast(@constCast(sni_z.ptr)));
     _ = c.SSL_set1_host(ussl, sni_z.ptr);
-    _ = c.SSL_set_alpn_protos(ussl, "\x08http/1.1", 9);
+    // The program chose HTTP/2: Silo speaks it to the host too, or closes.
+    var alpn_p: [*c]const u8 = null;
+    var alpn_l: c_uint = 0;
+    c.SSL_get0_alpn_selected(ssl, &alpn_p, &alpn_l);
+    const is_h2 = alpn_l == 2 and std.mem.eql(u8, alpn_p[0..2], "h2");
+    if (is_h2) _ = c.SSL_set_alpn_protos(ussl, "\x02h2", 3) else _ = c.SSL_set_alpn_protos(ussl, "\x08http/1.1", 9);
     if (c.SSL_connect(ussl) != 1) {
         observe(comp, "connection", "\"what\":\"closed\",\"host\":{f},\"port\":{d},\"why\":\"host-certificate\"", .{ j(name), port });
         record("\"conn\":{d},\"kind\":\"handshake-failed\",\"side\":\"host\",\"sni\":{f},\"verify\":{d}", .{ id, j(name), c.SSL_get_verify_result(ussl) });
@@ -1272,6 +1344,19 @@ fn readHost(fd: posix.fd_t, comp: usize, way: Way, id: u32, name: []const u8, po
     const secrets = bcfg.computers[comp].secrets;
     record("\"conn\":{d},\"kind\":\"open\",\"sni\":{f},\"computer\":{f},\"tls\":{f},\"way\":\"{s}\",\"tls_ms\":{d:.3},\"mint_ms\":{d:.3},\"up_ms\":{d:.3}", .{ id, j(name), j(comp_name), j(std.mem.span(c.SSL_get_version(ssl))), @tagName(way), t_tls - t0, hello.mint_ms, now_ms() - t_tls });
 
+    if (is_h2) {
+        var up_p: [*c]const u8 = null;
+        var up_l: c_uint = 0;
+        c.SSL_get0_alpn_selected(ussl, &up_p, &up_l);
+        if (!(up_l == 2 and std.mem.eql(u8, up_p[0..2], "h2"))) {
+            observe(comp, "connection", "\"what\":\"closed\",\"host\":{f},\"port\":{d},\"why\":\"host-has-no-h2\"", .{ j(name), port });
+            return;
+        }
+        var hx: H2Ctx = .{ .comp = comp, .id = id, .name = name, .secrets = secrets };
+        const tot = try h2.relay(gpa, ssl, fd, ussl, up_stream.handle, .{ .ctx = &hx, .request = h2Request });
+        observe(comp, "connection", "\"what\":\"closed\",\"host\":{f},\"port\":{d},\"protocol\":\"h2\",\"requests\":{d},\"sent\":{d},\"received\":{d},\"ms\":{d:.1}", .{ j(name), port, tot.streams, tot.sent, tot.received, now_ms() - t0 });
+        return;
+    }
     var sent_total: u64 = 0;
     var recv_total: u64 = 0;
     var requests: u32 = 0;
@@ -1297,6 +1382,13 @@ fn readHost(fd: posix.fd_t, comp: usize, way: Way, id: u32, name: []const u8, po
         const rline = swap.lineForRecord(req.first);
 
         // ---- placeholders: out of the head, values in, only to their hosts ----
+        if (swap.fromOther(req.raw, bcfg.computers, comp)) |o| {
+            const owner = bcfg.computers[o.computer];
+            decide(comp, "connection", "\"what\":\"refused\",\"decision\":\"refused\",\"decided_by\":\"silo\",\"host\":{f},\"line\":{f},\"why\":\"placeholder-of-another-computer\",\"secret\":{f},\"of\":{f}", .{ j(name), j(rline), j(owner.secrets[o.secret].name), j(owner.id) }) catch {};
+            record("\"conn\":{d},\"kind\":\"refused\",\"why\":\"placeholder-of-another-computer\",\"secret\":{f},\"of\":{f},\"host\":{f}", .{ id, j(owner.secrets[o.secret].name), j(owner.id), j(name) });
+            try writeRefusal(client, shape, "Silo: this request carries a placeholder Silo gave another computer, so it cannot be used here.");
+            continue;
+        }
         const sw = try swap.swapHead(gpa, req.raw, name, secrets);
         const out_head = switch (sw) {
             .elsewhere => |k| {
@@ -1541,6 +1633,19 @@ fn env(name: []const u8) ?[]const u8 {
 }
 
 pub fn main() !void {
+    // `boundary placeholder`: a placeholder for the value read on stdin (never an argument, which
+    // any process could read), as Silo would make one when a secret is added to a computer.
+    var args = std.process.args();
+    _ = args.next();
+    if (args.next()) |a| if (std.mem.eql(u8, a, "placeholder")) {
+        var in_buf: [16384]u8 = undefined;
+        const n = try posix.read(0, &in_buf);
+        const v = std.mem.trimRight(u8, in_buf[0..n], "\r\n");
+        const p = try placeholder.make(gpa, v, std.crypto.random);
+        _ = try posix.write(1, p);
+        _ = try posix.write(1, "\n");
+        return;
+    };
     cfg = .{
         .port = 0,
         .upstream_ip = "",
@@ -1556,6 +1661,12 @@ pub fn main() !void {
     const bytes = try std.fs.cwd().readFileAlloc(gpa, path, 1 << 20);
     const parsed = try std.json.parseFromSlice(struct { boundary: conf.Config }, gpa, bytes, .{ .ignore_unknown_fields = true, .allocate = .alloc_always });
     bcfg = parsed.value.boundary;
+    // One placeholder per secret and per computer, so that a placeholder names one value and one
+    // computer (#377 gave every secret of every computer the same one).
+    conf.checkPlaceholders(bcfg.computers) catch |e| {
+        std.debug.print("boundary: {s}\n", .{@errorName(e)});
+        return e;
+    };
     if (!std.mem.eql(u8, env("BUDGETS") orelse "1", "0")) {
         const st = try loadState(path);
         if (st.cfg.computers.len != bcfg.computers.len) return error.ComputersDiffer;
