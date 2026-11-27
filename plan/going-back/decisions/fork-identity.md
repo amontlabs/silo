@@ -2,6 +2,30 @@
 
 ## The choice
 
+An agent's part, 25 November 2026, from the challenge of #355 (page 3).
+
+The case: you fork main to try a database migration. The agent in the fork runs
+`prisma migrate reset` against `DATABASE_URL`, which points to your production database outside the
+computer. The earlier answer says "the database an agent needs starts as it does in the parent",
+which is right for a database inside the computer and says nothing of a remote one; every case in
+#350's evidence used a remote one.
+
+The options:
+
+- A remote database is reached through the fork's own secret: a branch where the provider offers one
+  (Neon, PlanetScale, Supabase), otherwise a credential that only reads (recommended). It costs a
+  database secret that knows the provider, which #355 proposes as `database-secret`, and a fork that
+  cannot write to a database with no branches.
+- The fork gets the parent's credential, as the earlier answer allows by saying nothing. It costs
+  the case above.
+
+Recommended: the fork's own secret. A fork exists to try things, and a migration tried against
+production is the case it should stop.
+
+## The earlier choice
+
+The choice as it stood before 25 November 2026. The answer it recommended is now an option of the choice above.
+
 An agent's part, 22 November 2026. Main runs a job every night at 02:00 that emails your team a
 report, and a Tailscale node that puts main on your private network. At 18:00 you fork main to let
 an agent try something risky.
@@ -28,3 +52,38 @@ on", since "never acts as its parent" cannot be kept for a service Silo does not
 Git versions files; Silo versions something alive. A file does nothing when copied. A computer
 has an identity, scheduled jobs, open sessions and logins. That is why a fork must not act as its
 parent.
+
+## Making the changes before anything in the fork starts (24 November 2026)
+
+An agent's part, 24 November 2026. The answer leaves open how Silo changes the fork before anything
+in it starts. Tried on Linux, on a raw ext4 disk image holding the files a fork must change: the
+image was edited from outside with `debugfs`, the e2fsprogs tool that writes into an ext4 image
+without mounting it. The script is in the project files, `research/2026-11-24-fork-identity`.
+
+- It works and is quick: a new machine identifier, name, `/etc/hosts` and SSH host keys, the
+  systemd timers and crontabs moved aside to a folder Silo keeps for turning them back on, and the
+  files of Tailscale, a CI runner and the agent programs' sign-ins removed. 0.7 s on an image of 2 GB
+  and 0.8 s on one of 64 GB, most of it making the new SSH keys; `e2fsck` found the image clean.
+- **A removed file is still on the disk.** A search of the fork's image found the Tailscale node key
+  after its file was removed: removing frees the blocks and leaves the bytes. Any program with root
+  in the fork reads the raw disk and gets main's key back, so the fork can act as main on your
+  network after all. Zeroing the file's blocks in the fork's copy before removing it fixed it (1.8 s
+  in all); with a disk that shares blocks with main, this writes only those few blocks of the fork.
+  This holds for anything Silo leaves out of a copy by removing it, sign-ins included
+  (`fork-and-sign-in`).
+- The edit from outside needs a raw image and a tool that writes ext4. A qcow2 image needs it
+  opened first, and a Mac has no ext4 of its own: e2fsprogs builds there, but this was not tried
+  on a Mac. The other way is a step of Silo's inside the computer, run first at boot. It needs
+  nothing of the host, but runs only if the computer's own start-up runs it first, which a disk
+  the agent can write does not promise.
+
+What I would add to the answer: a file Silo leaves out of a copy is overwritten in the copy, not
+only removed.
+
+## The account password
+
+Agent, 25 November 2026, from `research/2026-11-25-techniques-from-two-tools/`. A macOS guest that
+logs in by itself keeps its account password in `/etc/kcpassword`, lightly obscured and readable
+by root. Every computer made from one macOS install has the same password, so root in one computer
+learns the password of the others. A fork shares its parent's by nature. A fresh computer made from
+the same install image should get a password of its own at its first start.

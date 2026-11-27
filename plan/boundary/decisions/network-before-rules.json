@@ -1,0 +1,7 @@
+{
+  "asks": "What is main's network before Silo has rules?",
+  "answer": "Open, with your yes when you make main, or closed. Open reaches the internet but never your Mac, your local network or cloud metadata. The first run and `silo status` say plainly that an open network has no limit at the edge yet: what an agent sends out is not checked, held or recorded. It stays so until rules exist, and then the network you chose keeps working under them.",
+  "needs": [
+    "network-stack"
+  ]
+}

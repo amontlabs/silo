@@ -1,4 +1,4 @@
 {
   "asks": "What carries a computer's network at the boundary?",
-  "answer": "Silo's network stack, on Linux and on macOS computers. Never Apple's NAT, which cannot apply a rule or hold a secret at the boundary. Every packet of a computer goes through the stack. If the stack stops, the computer has no network: nothing goes around it. What it costs in speed against a plain machine is to find out, and is measured before it is relied on."
+  "answer": "Silo's network stack, on Linux and on macOS computers. Never Apple's NAT, which cannot apply a rule or hold a secret at the boundary. Every packet of a computer goes through the stack. If the stack stops, the computer has no network: nothing goes around it. Where the stack uses gvproxy, it is a copy patched so that nothing inside a computer reaches the stack's own API, the Mac's loopback, the Mac's own addresses, or a private or link-local address that no rule names. The stack takes large frames. What it costs in speed against a plain machine is measured before it is relied on."
 }

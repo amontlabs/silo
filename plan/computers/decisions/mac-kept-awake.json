@@ -1,0 +1,7 @@
+{
+  "asks": "What does Silo do so that the Mac does not sleep while computers run?",
+  "answer": "While a computer runs and the Mac is on power, Silo holds the Mac awake, as `caffeinate` does. It cannot stop a closed MacBook from sleeping unless an external display is attached, so it says so when you start a computer on such a Mac. Every sleep and wake of the Mac is written in the record, so a stretch with no work shows why.",
+  "needs": [
+    "main-on-macos-first"
+  ]
+}

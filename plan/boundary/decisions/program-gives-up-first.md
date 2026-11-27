@@ -22,3 +22,18 @@ change.
 
 The record marks this line and the next "(Owner; the mechanism Agreed)". The content map reads only
 `hold-limit` as in force, so this line waits for polarzero.
+
+## How each program gives up on a held command (24 November 2026)
+
+An agent's part, 24 November 2026. Measured with the rig of `hold-limit-length`. In every case the
+program or the tool closed the held connection, and the held host saw the close the moment it
+happened. No case gave up without closing.
+
+- Claude Code stopped a held `curl` at 720 seconds: 120 in the foreground, then the 10 minutes a
+  background command may run. It killed the command, which closed the connection, and told the
+  model "stopped after reaching its background time limit".
+- Codex killed a held `curl` when its turn ended, after 10 or 30 seconds in these runs, because the
+  fake model ended the turn instead of waiting on the command.
+- pip closed each try at 15 seconds, then sent the same request again. To Silo that is a close
+  followed by a new request, which this answer ends and the next one starts again. That is the
+  case `hold-limit-length` proposes to join to the open ask.

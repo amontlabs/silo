@@ -1,0 +1,13 @@
+{
+  "name": "One path from a checkpoint",
+  "what": "You read a file or a folder as it was in a checkpoint, and put it back into the running computer. Silo takes a checkpoint of now first, and the record says what was put back.",
+  "needs": [
+    "putting-back-a-path",
+    "checkpoints-taken-on-their-own",
+    "file-changes-in-the-record"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "With several agents in main, bringing back one deleted folder should not undo the others' work, and forks come later."
+  }
+}

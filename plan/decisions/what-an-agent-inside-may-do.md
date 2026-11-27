@@ -16,3 +16,7 @@ agent in main runs `silo` and reads the precaution that pauses main. The audit p
 about it". Both lose their verdict with the edit and are taken again.
 
 The question is put to polarzero in `computer-reads-its-record`, under "The choice".
+
+## Challenged, 25 November 2026
+
+An agent's part. #352 challenge this answer on one case: an agent on your Mac can run the `silo` command and answer an ask meant for you. The replacement is `agents-may-do-and-who-answers`, which names this decision in `replaces`, for polarzero to take or drop. Until then this answer stays in force. The reasons are in `research/2026-11-25-challenged-decisions/README.md`.

@@ -1,0 +1,8 @@
+{
+  "asks": "Does Silo read the traffic of an agent program signed in with a Google account?",
+  "answer": "No. Traffic of Gemini CLI or Antigravity CLI signed in with a Google account passes the boundary unread, as `program-that-cannot-be-read` says. With a Gemini API key or a Vertex AI credential, Silo reads it as it reads any provider's traffic. Google's terms forbid third-party tools to reach these services with their Google sign-in, and Google suspends accounts for it.",
+  "needs": [
+    "program-that-cannot-be-read",
+    "subscription-and-key-alike"
+  ]
+}

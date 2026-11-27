@@ -17,3 +17,19 @@ The options:
   alerts about hosts you were already told about.
 
 Recommended: fork inherits, restore forgets nothing. An alert should mean a host that is new to you.
+
+## The hosts of the first run
+
+Agent, 25 November 2026, from `research/2026-11-25-first-morning-hosts/` (#382's gap 4). This
+entry says which hosts a fork and a restore start with. Main itself starts with the hosts the
+first run reaches, and nothing says whether those count as seen. Measured here, the first run's
+installers reach 12 hosts: Apple's software update hosts for the Command Line Tools (not measured,
+no Mac), github.com, raw.githubusercontent.com, formulae.brew.sh, ghcr.io,
+pkg-containers.githubusercontent.com and release-assets.githubusercontent.com for Homebrew, tmux
+and Codex, downloads.claude.ai for Claude Code, and the three provider hosts the first run checks.
+
+Recommended: they count as seen. Each was reached for the first time during the first run, before
+any agent ran, so `new-host-raises-an-alert` gives their alerts then, on the first run's screen,
+as one line, and the first morning starts with them seen. It removes 6 of the first morning's
+about 57 first-seen hosts. The same rule then covers a fork: it starts with everything main has
+seen, the first run's hosts included.

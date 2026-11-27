@@ -19,3 +19,33 @@ and the list of what needs you already keeps what is still true.
 ## Notes
 
 Marked Notes in the design record.
+
+## From option A's first-run transcript
+
+Agent, 25 November 2026, from `research/2026-11-25-first-run-option-a/` (gap 4 there). `new-host-raises-an-alert` (in force) gives an alert for each host seen for the first time. On a first night every host is new: #371 saw Codex reach four hosts at start, before any work. The first morning then opens on about twenty such alerts, and the paste site an agent sent a log to is one of them. Two things no entry says: hosts reached by the first run's own installers count as seen, and the first-seen hosts of one night are merged into one line with their count, each still an alert. This entry merges repeats of one alert; it does not say how alerts of one kind on many hosts are merged.
+
+## Native builds through the proxy
+
+Agent, 25 November 2026, from `research/2026-11-25-native-builds-through-the-proxy/`. The hosts each program reaches at start, before any work, measured through #378's proxy. Claude Code 2.1.332 with a key: `api.anthropic.com` only, and `downloads.claude.ai` when it updates itself. Codex 0.172.0 with an API key: `api.openai.com`, `chatgpt.com`, `ab.chatgpt.com`, `github.com` and `api.github.com`. Signed in with ChatGPT, Codex reached `chatgpt.com` only. These are the hosts the first run can count as seen, so that they raise no first-seen alert on the first night.
+
+## One night's first-seen hosts
+
+Agent, 25 November 2026, from `research/2026-11-25-first-morning-hosts/` (#382's gap 4). "Alerts of
+one kind in one computer that come close together" does not say whether hosts reached hours apart
+in one night are close together. On the measured first night they are about 57 hosts over the
+night. Read as one night, they are one alert with its count, and the paste site comes first when
+the hosts in it are ordered by the bytes sent to each. Read as minutes, they are dozens of alerts.
+Recommended: while you are away, alerts of one kind merge until you next look. Ordering inside the
+merged alert is in `new-host-alert-is-a-rule`'s notes.
+
+## A program that refuses Silo's certificate (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-tls-refusals`. A refused certificate
+is a condition that lasts, as this entry describes: it starts at a program's first refusal on a
+host, and ends when that program makes a request to that host, or after 30 minutes with no
+refusal. Codex refused 47 times in 5 minutes; under this entry it is one alert, "Codex on main does
+not trust Silo's certificate for api.openai.com: nothing it sends there gets through", and one
+line in the morning: "Codex on main did not trust Silo's certificate for api.openai.com: 47
+refusals from 18:53 to 18:58, still refusing at the end. Give it Silo's authority (SSL_CERT_FILE
+or the system's store)." The program is named from the User-Agent its TLS client sent on an
+earlier connection that worked; a client never seen working is shown by its TLS fingerprint.

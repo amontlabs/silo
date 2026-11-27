@@ -1,0 +1,18 @@
+{
+  "asks": "Does an idle computer keep the memory it was given?",
+  "answer": "A Linux computer that is idle gives memory back to the Mac. A macOS computer gives back only what Apple's balloon lets Silo take, which `memory-given-back` measures; until that shows it gives memory back, a macOS computer's memory is a size you choose.",
+  "replaces": [
+    "idle-memory"
+  ],
+  "sets": [
+    {
+      "in": "computers/properties",
+      "id": "idle-computer-gives-memory-back",
+      "says": "A Linux computer that is idle gives memory back to the Mac.",
+      "kind": "liveness",
+      "check": [
+        "live check"
+      ]
+    }
+  ]
+}

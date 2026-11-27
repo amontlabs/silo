@@ -33,3 +33,55 @@ I believe is already planned."
 - A computer that reaches a port of your Mac is the other direction. It is not in this entry, and
   `nothing-shared-from-your-device` is in force.
 - `sign-in-from-a-computer` needs this entry.
+
+## Previews measured against a hostile page (24 November 2026)
+
+An agent's part. The prototype and its numbers are in
+`research/2026-11-24-red-team-fixes/preview/`. A page served on the computer's port 3000 tried 26
+ways to send the computer's secret to an attacker, in Chromium, through seven set-ups of Silo's
+forwarder. The app's own fetches, WebSocket, storage and cookie worked in all seven.
+
+| Set-up | Ways that reached the attacker |
+|---|---|
+| The port at localhost, as this entry says today | 26, the Mac's localhost cookie and a service on the Mac among them |
+| A strict content policy added by the forwarder | 10: navigations, speculation rules, popups, WebRTC |
+| An origin of its own per port, such as `3000.c1.silo.localhost` | 10, with the Mac's cookies out of reach |
+| A Silo page that holds the app in a sandboxed frame | 3, all WebRTC |
+| That page in a browser Silo starts, whose requests go through the computer's rules | 0; what the page tried was denied and recorded |
+
+The case for a change: "at localhost" puts a page the agent wrote next to everything your browser
+holds for localhost, and lets it leave by 26 ways the computer's rules never see. A suggestion for
+the entry: each port gets its own name under `.localhost`, which also gives two forks on port 3000
+two addresses, and opens inside a page of Silo's. Whether that page runs in your browser (3 ways left)
+or in a browser Silo starts (none left, but not your own browser) is the choice. A WKWebView's
+control of WebRTC was not checked on a Mac.
+
+## The wrapper as one component (25 November 2026)
+
+An agent's part, from `research/2026-11-25-port-previews`, which builds on #363's preview research.
+The wrapper was built as one component (a forwarder and a rule proxy per computer) and tried
+against what #363 did not try, in Chromium on Linux.
+
+- **Each computer needs a site of its own.** Under names like `3000.c1.silo.localhost`, a page in c1
+  set a cookie for `silo.localhost` from script, and c2's app received c1's secret in it. With
+  `3000.<computer id>.localhost` and the Silo page at `silo.<computer id>.localhost/3000`, nothing
+  crossed, and the app's own sign-in cookie still worked in the frame.
+- **Names are never reused.** A service worker left by a dropped computer answered the address of a
+  new computer with the same name. The computer's id goes in the name, and a dropped computer's
+  preview profile is deleted with it.
+- **The browser Silo starts must resolve no name itself.** #363's set-up let one DNS query out per
+  run, for a TURN server whose name carried the secret. With
+  `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"` none left, and the name was denied
+  by the rule proxy without being looked up.
+- **One rule proxy per computer.** With a content policy loosened for hot reload (`ws:`), c1's page
+  reached c2's app by WebSocket in a browser shared by all computers. One browser per computer, with
+  its own proxy, denied it.
+- **No `allow-modals` in the frame.** With it, the app drew "Silo: enter your Mac password" over
+  Silo's page.
+- **The clipboard stays open.** A click on "copy" in the app put `curl … | sh` on the clipboard in
+  every set-up. It is a channel for `channel-list`.
+- **Dev servers keep working.** Vite 8 and Next.js 16 loaded in the Silo page, in the browser Silo
+  starts with all of the above, and hot reload carried an edit in about half a second.
+
+Recommended, if the entry is taken: a browser per computer, with the names, flags and sandbox
+above. Not checked on a Mac: WKWebView, Safari, and a headed Chrome.

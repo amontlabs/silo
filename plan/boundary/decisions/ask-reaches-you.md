@@ -34,3 +34,13 @@ from the Mac: if only the Mac answers, the hold passes its limit (`hold-limit`) 
 refused as not answered. The audit proposes: "An ask has to reach you where you are. Only Silo's own
 apps answer it, the phone app included (`phone-app`). A chat app or a forwarded message may show you
 the ask and lead back to Silo; it does not answer." The feature then stands as written.
+
+## An answer signed by the phone app, carried by any relay (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-ask-reaches-a-phone/`. The prototype pairs the phone with the Mac once,
+with keys exchanged on the Mac's screen. Each ask goes to the phone sealed and signed by the Mac,
+and each answer comes back sealed and signed by the phone, bound to the ask, the version of the
+list the phone showed, a nonce and an expiry. The relay in between can delay or drop messages and
+nothing more: 12 tamper cases, among them a forged answer, a replayed yes and a yes to a list the
+Mac never sent, were refused. So "only Silo's own apps answer" holds even when a third party
+carries the message; what answers is the phone app's key, not the channel.

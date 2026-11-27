@@ -1,0 +1,8 @@
+{
+  "asks": "What is in main when the first run ends?",
+  "answer": "What agents need to start working, installed by the first run over SSH with each vendor's own installer, after it shows you the list: Apple's Command Line Tools, Homebrew, tmux, and the agent programs you choose among those Silo offers. You can take any of them off the list. Once recipes exist, the same list becomes the recipe main is made from.",
+  "needs": [
+    "unmodified-agent-programs",
+    "documented-surfaces"
+  ]
+}

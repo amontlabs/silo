@@ -36,3 +36,13 @@ hold one computer and nothing more. The entry also sets the words for two of the
 - That the recorder is its own process is put forward in `recorder-process`, and that the boundary
   lives in the helper in `which-process-holds-the-boundary`. Both need this decision and say what
   the table assumes.
+
+## The network stack as a process (25 November 2026)
+
+An agent's part, from `research/2026-11-25-network-link-restart/`. The table puts the network stack
+in the helper. With gvproxy as the stack, it is a process of its own, one per computer, started by
+the helper. Measured on Linux: when it stops, the helper starts it again and its computer keeps
+running with its network paused for about 0.1 s beyond the restart, as long as the helper, not the
+stack, holds the computer's end of the link. Connections open at that moment are lost. Suggested for
+the table: the stack is the helper's child; if it stops, the helper starts it again, the computer's
+open connections end, and nothing else stops.

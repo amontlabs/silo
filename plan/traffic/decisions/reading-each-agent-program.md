@@ -199,3 +199,193 @@ forwards the sign-in inside each request and stores it nowhere (`logins`).
   and OpenAI's help-centre articles.
 - This is a reading of the terms, not legal advice. No lawyer has read it, and neither vendor was
   asked.
+
+## Trust from the system's store alone, on Linux (24 November 2026)
+
+An agent's part, 24 November 2026. This answers one of the points still to find out above, on
+Linux only.
+
+A test authority was made, and a certificate signed by it for `api.anthropic.com`,
+`api.openai.com` and `chatgpt.com`. A fake provider presented it on port 443 of the same machine,
+and `/etc/hosts` sent those names there, so each program reached it as it would reach a boundary
+that ends the connection. Each program ran with an empty environment apart from its API key, so
+no setting of the machine or of this session told it about the authority. Ubuntu 24.04, Claude
+Code 2.1.331, Codex 0.172.0 with an API key.
+
+| Where the authority was | Claude Code | Codex |
+|---|---|---|
+| Nowhere | Refuses: "Self-signed certificate detected (SELF_SIGNED_CERT_IN_CHAIN) … set NODE_EXTRA_CA_CERTS to that CA bundle, or add it to the system certificate store" | Refuses: its WebSocket fails at the stage `Tls`, and it keeps retrying |
+| Only in the system's store (`update-ca-certificates`) | Works: one tool call, one answer | Works: one tool call, one answer |
+| Only in the program's setting (`NODE_EXTRA_CA_CERTS`, `CODEX_CA_CERTIFICATE` or `SSL_CERT_FILE`) | Works | Works, with either setting |
+
+So on Linux the computer's trust store is enough for both programs, and no setting in the program
+is needed. The Mac, and Codex signed in with ChatGPT, are still to test.
+
+On the Mac, read from the programs' own code (not run on a Mac):
+
+- Claude Code 2.1.331 trusts two lists unless told otherwise: the authorities it carries and the
+  system's. `CLAUDE_CODE_CERT_STORE` set to `bundled` alone drops the system's. Its runtime reads
+  the system's list through the operating system, which on a Mac is the keychain.
+  `NODE_EXTRA_CA_CERTS` only adds to the two.
+- Codex 0.172.0 logs "using system root certificates because no CA override environment variable
+  was selected", and its HTTP client uses native-tls, which on a Mac asks the keychain. With
+  `CODEX_CA_CERTIFICATE` or `SSL_CERT_FILE` set it builds a second client with that file as its
+  list. Its Bedrock client is a separate one, from the AWS SDK.
+
+So an authority Silo adds to the computer's keychain should be enough on a Mac too, for the
+model requests of both. What stays to try on a Mac: that the keychain entry is enough for Codex's
+Bedrock client and for its side connection to `github.com`, and that a program with its own
+setting set by the user does not drop the keychain.
+
+Three more things were seen in the same runs:
+
+- **Claude Code compresses its requests.** To `api.anthropic.com` it sent each request body
+  compressed with gzip (`content-encoding: gzip`). To a provider address set by
+  `ANTHROPIC_BASE_URL` it did not. The boundary reads a decompressed copy and forwards the
+  compressed bytes, as `forwarded-byte-for-byte` already says.
+- **Codex falls back from its WebSocket.** With an API key, Codex 0.172.0 first opened a WebSocket
+  to `api.openai.com/v1/responses`. When that failed (the fake provider did not speak WebSocket),
+  it tried seven times and then sent plain requests with a stream of events. So a boundary that
+  refused the WebSocket would still read Codex, through the fallback. Whether the fallback stays in
+  later versions is not known.
+- **Claude Code calls two more addresses on the same host** before its first model request:
+  `GET /api/claude_code/settings` and `GET /api/claude_code/policy_limits`.
+
+## Codex's WebSocket, read through a spike of the boundary (24 November 2026)
+
+An agent's part, 24 November 2026. The spike of the boundary described in `forwarded-byte-for-byte`
+was taught WebSocket: frames, masks, fragmented messages and compression (permessage-deflate,
+with its state kept from message to message). It was then put in front of a fake provider that
+speaks WebSocket, with and without compression. Codex 0.172.0 used it on its own: with an API key,
+it asked for compression and opened `wss://api.openai.com/v1/responses`.
+
+- The spike read every message both ways, with and without compression. It held a reply's frames
+  while a tool call was open, and a denied `exec_command` failed through the probe as over plain
+  requests. The next call ran.
+- Each message from Codex is a `response.create` carrying what a plain request's body would. Each
+  message from the host is one event, the same JSON as an event of the stream.
+- **On a socket, Codex sends only what is new.** Its first message is a warm-up with
+  `"generate": false` and no input. Its second carries the whole conversation and names the
+  warm-up's reply in `previous_response_id`. After that, each message carries only the new items,
+  such as the result of the last call, and names the previous reply. This held with
+  `"store": false`. A conversation resumed later opened a new socket and sent the whole
+  conversation again.
+
+So for Codex on a socket, the boundary cannot read a conversation from one message. It has to
+follow `previous_response_id` from reply to reply within the connection, as
+`recognising-a-conversation` already allows. Whether OpenAI's own server accepts compression, and
+whether Codex signed in with ChatGPT behaves the same, is not known.
+
+## Claude Code on Amazon Bedrock (24 November 2026)
+
+An agent's part, 24 November 2026. Claude Code 2.1.331 with `CLAUDE_CODE_USE_BEDROCK=1`, against a
+stand-in for Bedrock. What the boundary reads differs from Anthropic's API in four ways:
+
+- The address names the model: `POST /model/<model id>/invoke-with-response-stream` for the
+  conversation, `/invoke` for short calls. The body is Anthropic's request with
+  `anthropic_version: "bedrock-2023-05-31"`, and the betas move from a header into the body
+  (`anthropic_beta`).
+- The body is sent uncompressed, since its hash is part of the signature
+  (`x-amz-content-sha256`).
+- The reply is not a stream of server-sent events. It is AWS's binary event stream
+  (`application/vnd.amazon.eventstream`): frames with a length, headers and a CRC, each carrying a
+  JSON object whose `bytes` holds one of Anthropic's events, base64-encoded. The reader needs this
+  framing too, and the probe of `denied-tool-call-mechanism` must see a tool call inside it.
+- At start, Claude Code lists the region's inference profiles and sends a short request to three
+  models before the conversation begins. `x-claude-code-session-id` is sent here too.
+
+The scripts are in the project files, `research/2026-11-24-bedrock`.
+
+## Every other agent program, on Linux (24 November 2026)
+
+An agent's part, 24 November 2026. The research in `research/2026-11-24-every-agent-program` ran
+nine more programs against a stand-in for their providers, with fake keys, and five of them
+through the spike of the boundary. Linux only, no real sign-in.
+
+**Trust.** With Silo's test authority in the system's store and no setting in the program:
+
+- Works: Claude Code, Codex, Cline, OpenCode, Goose, GitHub Copilot CLI, Amp, Cursor CLI. Cline
+  builds a bundle of its own from the system's store at start.
+- Refuses: Gemini CLI 0.71.1 and Qwen Code 0.28.4, which run on plain Node.js, and Aider 0.86.2,
+  which is Python with the `certifi` list. Gemini CLI works with `NODE_USE_SYSTEM_CA=1`, Qwen Code
+  with `NODE_EXTRA_CA_CERTS`, Aider with `SSL_CERT_FILE` naming the system's bundle. These are the
+  settings their recipes would write.
+- With the authority nowhere, all of them refused. None skips the check.
+
+**Transports.** Every program fell back to HTTP/1.1 when the boundary offered nothing else,
+including Goose, which offers HTTP/2 first. Cursor's agent prefers HTTP/2 in both directions; its
+code holds a setting `network.useHttp1ForAgent`.
+
+**Formats.** One host serves several formats: `api.openai.com` gets Chat Completions from Aider
+and Responses from Codex, Cline, OpenCode and Goose. So the reader is chosen by the request's path.
+The spike was taught Chat Completions and Google's `generateContent`, and read whole conversations
+of Gemini CLI, Qwen Code, Cline, OpenCode and Goose. Cursor, Amp and Copilot send the conversation
+to their vendor's own server: `vendor-runs-the-model-calls`.
+
+So for these programs the four things this entry checks split this way: the certificate is
+accepted by all, three of them through a setting; every transport seen can be read over HTTP/1.1;
+signing in and byte for byte were not tried.
+
+## From option A's first-run transcript
+
+Agent, 25 November 2026, from `research/2026-11-25-first-run-option-a/` (gap 6 and 11 there). Two shapes no check covers yet. First, the exit code of a command is a report the program sends to its model, and #377 finds it with a text pattern on the tool result ("Exit code", "Process exited with code"). Codex 0.172.0 now sends its commands as JavaScript to one `exec` tool, which returns `JSON.stringify(result)` (#374). The command is then JavaScript source and the exit a field of JSON, so the receipt's commands, its last whole test run and the side-by-side link to a deleted path can all be empty for Codex. The check of each program should cover the shape of its tool calls and results, not only its hosts and format. Second, every trial of the boundary ran Claude Code from npm (#347, #374, #377), while `main-set-up-for-agents` installs it with `claude.ai/install.sh`. That build has not run through the boundary, through `HTTPS_PROXY`, or with `NODE_EXTRA_CA_CERTS`, and Codex's WebSocket has not run through a `CONNECT` proxy. A program that ignores the settings does not fail at once: Claude Code retried for 193 s (#378). So the first run should run each program once, signed in, through the boundary before it says main is ready.
+
+## Codex's code mode, measured
+
+An agent's part, 25 November 2026, from [attribution without processes](../../../research/2026-11-25-attribution-without-processes/README.md).
+Which shape Codex 0.172.0 uses depends on the model. For gpt-5.5, o3 and gpt-5.2-codex it sends
+`exec_command` as a function tool, and for gpt-5.5 also `apply_patch` as a custom tool. For
+gpt-6.2-sol it sends no `tools` at all: the tools come in an `additional_tools` input item, as one
+custom JavaScript tool `exec` and functions such as `wait` and `spawn_agent`. #371's boundary
+read none of that night's 4 tool calls and marked the conversation as a side one. Reading
+`custom_tool_call` items, their `custom_tool_call_output` results and the tools in
+`additional_tools` fixed it. A check of Codex should cover both shapes. What a code-mode result
+holds is what the model's script prints: with `text(r.output)` the exit code and the session id of
+a process still running are not in the traffic, with `text(JSON.stringify(r))` they are. The task
+`spawn_agent` gives a subagent is marked `encrypted` in its schema, so the boundary may not be able
+to read what a Codex subagent was asked.
+
+## Native builds through the proxy
+
+Agent, 25 November 2026, from `research/2026-11-25-native-builds-through-the-proxy/`. The two runs the note above asks for, on Linux through #378's closed network. The Claude Code `install.sh` installs (2.1.332, a Bun executable, its SHA-256 checked against `downloads.claude.ai`'s list) follows `HTTPS_PROXY` and `https_proxy`, and trusts Silo's authority through `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE` or the system's store, signed in with a key or with a plan token. Codex 0.172.0 opens its WebSocket to `api.openai.com` as a `CONNECT` with no setting of its own, and trusts the authority through `SSL_CERT_FILE` or the system's store. So main's environment sets `HTTPS_PROXY`, `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS` and `NODE_USE_ENV_PROXY=1`, and puts the authority in the system's store. Still not tried: Codex signed in with ChatGPT up to its model call (the stand-in could not answer its workspace lookup), and which protocol each program picks when HTTP/2 is offered.
+
+## Codex read in full, signed in with ChatGPT (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-codex-read-in-full/`. Codex 0.172.0
+on Linux, through #378's closed network and through #385's boundary, against a stand-in; no real
+sign-in.
+
+- **A ChatGPT sign-in reaches its model call.** It stopped at the workspace check before
+  (#403). Codex requires `account_routing_override` in the answer of
+  `chatgpt.com/backend-api/wham/accounts/check` to be `NO_CONSTRAINT`, `us` or `us_cr`
+  (`workspace_routing.rs`). With it, Codex opened its WebSocket to
+  `chatgpt.com/backend-api/codex/responses` and ran a whole turn with a tool call.
+- **What must pass.** Each other ChatGPT request answered 403 in turn: Codex worked without the
+  model list, plugins, MCP, settings, analytics and `ab.chatgpt.com`'s metrics. It did not start
+  without the workspace check ("workspace routing discovery failed"). So a ChatGPT sign-in needs
+  `chatgpt.com/backend-api/wham/accounts/check` and the model call, and `auth.openai.com/oauth/token`
+  when it renews its token; an API key needs only the model call.
+- **Renewing breaks a check by token value.** #385's boundary refuses a credential that is not
+  one the computer was given, by its exact value. A ChatGPT access token changes when Codex renews
+  it, and then all 30 requests were refused and Codex could not start. Matching the account named
+  in the token (`chatgpt_account_id`) instead held: shown failing, then passing, in the research.
+- **Code mode.** The model's `exec` script runs inside Codex; its nested calls cross the boundary
+  only in Codex's own report, which is off by default (`code-mode-calls-reported`).
+
+## The check built and run (an agent's notes, 26 November 2026)
+
+`research/2026-11-25-agent-program-contracts/` builds the check this entry asks for and ran it on
+eight releases of each program from May to November 2026, through #374's boundary against stand-in
+providers. Claude Code released 158 times in those six months and changed its betas, tools or
+headers in most steps, but never what the boundary reads: all checks pass from 2.1.152 to 2.1.332,
+also with Silo's authority only in the computer's trust store. Codex changed what the boundary reads
+three times (its session in 0.142.5, every tool into `additional_tools` in 0.146.1,
+`custom_tool_call_output` in 0.167.0), and sends its model calls over a WebSocket by default, where
+#374's boundary counts no call. Gemini CLI did not change.
+
+A choice this raises, not yet an entry: Claude Code updates itself, about once a day. A check per
+pinned version holds only if the computer keeps that version. The options are to turn the
+program's own updater off in the recipe and move the pin after the check passes (recommended:
+what the app calls read has then been seen read, at the cost of a day or more behind), or to let it
+update and run the check when the boundary first sees a new version in the `user-agent`, showing
+that version's traffic as "read, not checked" until it passes.

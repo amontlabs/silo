@@ -34,3 +34,19 @@ is `hold-limit`.
 
 - That no wait at the boundary ends by best effort is polarzero's, said of the limits on a hold and
   on every wait at the boundary.
+
+## How long the agent program waits on its model (24 November 2026)
+
+An agent's part, 24 November 2026. A classifier that judges a tool call in the model's reply holds
+that reply, so its wait is bounded by how long the program waits on its model. Measured in
+`how-a-hold-ends`: with nothing new on the stream, Claude Code 2.1.331 and Codex 0.172.0 both
+wait 300 seconds, then send the request again, and that second request is paid again. Silo's limit
+on a classifier's wait has to stay well under 300 seconds, or the program sends the request a second
+time while the first one is still held.
+
+An agent's part, 26 November 2026 (`research/2026-11-25-boundary-end-to-end/heavy-night.md`).
+Built as the answer says: #353's detector with #383's rules in a process of its own, the boundary
+keeping the 2 s wait for its opinion and the hold's 90 s, each with its own timer, and
+`on_no_opinion` set to deny or leave to the rules. The detector decided in 0.1 ms (p50) and
+0.5 ms (p99) on 6,188 requests in two minutes; a unit test ends a precaution that never answers at
+the limit (`boundary/src/hold.zig`).

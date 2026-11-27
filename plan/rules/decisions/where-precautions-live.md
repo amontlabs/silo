@@ -11,3 +11,7 @@ classifier, which can be fooled. A rule holds even when the agent knows it
 
 This answers the second half of the question "May a computer read its own record by default?".
 The first half stays open in `record`: `computer-reads-its-record`.
+
+## Challenged, 25 November 2026
+
+An agent's part. #351 challenge this answer on one case: an agent that asks which run changed a file gets the changes with no run attached, since which run did it is an opinion. The replacement is `what-a-computer-sees-of-opinions`, which names this decision in `replaces`, for polarzero to take or drop. Until then this answer stays in force. The reasons are in `research/2026-11-25-challenged-decisions/README.md`.

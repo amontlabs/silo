@@ -1,0 +1,8 @@
+{
+  "asks": "Where does Silo keep copies of the record's head, so that a record rewritten or cut by a program running as you on the Mac shows?",
+  "answer": "Off the Mac, in an anchor you set: a Git repository whose branch refuses force pushes and deletions, or the team's host. The recorder sends the head there, signed by a key of the Mac that only Silo can use, every minute while it records and when it stops. `silo verify` checks the record against every head the anchor ever received. Until you set an anchor, `silo verify` says that a rewrite by a program running as you would not show.",
+  "needs": [
+    "changes-to-the-record",
+    "record-file-format"
+  ]
+}

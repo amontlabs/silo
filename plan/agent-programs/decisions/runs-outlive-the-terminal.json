@@ -1,0 +1,8 @@
+{
+  "asks": "What keeps an agent running after you close the terminal you started it from?",
+  "answer": "A second SSH entry for each computer, named with `.keep` after its name, opens tmux in that computer and attaches to the session already there. An agent started in it goes on when the terminal closes or the Mac's connection drops, and `ssh main.keep` finds it again.",
+  "needs": [
+    "computer-reached-over-ssh",
+    "reaching-a-computer"
+  ]
+}

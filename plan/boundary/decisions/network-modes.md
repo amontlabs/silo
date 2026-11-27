@@ -16,3 +16,98 @@ The options:
 
 Recommended: three settings. Comparable tools offer the same three (off, a list, everything), and
 one step to close is what you want when something goes wrong.
+
+## What "a host" is on a connection Silo does not read (24 November 2026)
+
+An agent's part, 24 November 2026. Reasoned, with the sources named; not tried against a CDN.
+A computer limited to `github.com` opens an encrypted connection that Silo passes unread
+(`ending-the-encrypted-connection`). The only name Silo sees is the one the program puts in the
+first message of the connection, the server name. Four ways an agent with root can make that name
+lie:
+
+- **Its own address.** The agent sends the name `github.com` to an address of its own choosing,
+  for example with `curl --connect-to github.com:443:<its server>:443`. If Silo forwards to the
+  address the computer asked for, the list is worth nothing. Silo has to look the name up itself
+  and connect to the address it found, whatever address the computer used.
+- **No name at all.** A connection to a bare address carries no server name. In a limited computer
+  it is refused.
+- **A shared front.** On a CDN, the name in the first message picks the certificate, and the name
+  inside, which Silo does not read, picks the site. A 2024 study at the ACM Web Conference found
+  22 of 30 providers still letting the two differ, Akamai and Fastly among them. So a host on such
+  a CDN, allowed and unread, can carry traffic to any other site there. Hosts Silo reads are out of
+  reach of this, since it sees the inner name.
+- **An encrypted first message (ECH, RFC 9849).** The real name is then encrypted and the visible
+  one is the provider's, such as Cloudflare's. A program gets the key for it from a DNS record of
+  type `HTTPS`. Silo answers the computer's lookups (`how-a-hold-ends`), so it can leave those keys
+  out, and refuse a first message that still carries ECH towards a host it does not read.
+
+What I would add to `network-modes`: in a limited computer, a host on the list is reached at the
+address Silo itself finds for it, and a connection without a name, or with an encrypted one, is
+refused. And the app should say that a host on a shared CDN, allowed and not read, is a way out to
+the rest of that CDN, unless Silo reads it.
+
+Sources: "Domain fronting in 2026" (routeharden.com/blog/domain-fronting-2026), which cites the
+2024 study; RFC 9849.
+
+## The hosts an agent program reaches besides its model (24 November 2026)
+
+An agent's part, 24 November 2026. In a limited computer, an agent program reaches more than its
+model. Claude Code 2.1.331 and Codex 0.172.0 each ran one turn with the model on a local stand-in
+and every other connection sent to a stand-in for the boundary that refused it, reset it, or never
+answered.
+
+- **Claude Code** opened five other connections in one `claude -p` turn, all to
+  `api.anthropic.com`, the model's own host, even with the model at another address. The stand-in
+  saw only the host, not what was sent; reports are the likely reason. **Codex** opened four: `github.com` and `api.github.com` (its check for a new
+  version), `chatgpt.com` and `ab.chatgpt.com`.
+- **Refused or reset, they cost nothing.** Both programs answered in under a second, as with every
+  host open.
+- **Left without an answer, they cost 10 to 12 seconds.** The same turn took 12.5 s in Claude Code
+  and 10.2 s in Codex, waiting on connections that never answered, and this is paid on every run of
+  `claude -p` or `codex exec`, which agents start from commands.
+
+What I would add to the answer: a limited computer refuses at once, never in silence, and the
+hosts each program reaches besides its model belong in the piece that adds the program
+(`recipe-names-its-needs`), so that a new computer does not raise an alert or an ask for
+`ab.chatgpt.com`. The scripts are in the project files, `research/2026-11-24-side-hosts`.
+
+## The hosts a common install reaches (24 November 2026)
+
+An agent's part, 24 November 2026. A computer "limited to a list of hosts" is only as good as the
+list. Each install below ran once on Linux with empty caches, through a proxy that logged every
+host it reached:
+
+| Install | Hosts reached |
+|---|---|
+| `npm install esbuild sharp bcrypt typescript prisma@6 @prisma/client@6` (npm 10.9) | registry.npmjs.org; binaries.prisma.sh, where Prisma's install step fetches its engines |
+| `pip install requests numpy pandas` (pip 26.2) | pypi.org, files.pythonhosted.org |
+| `uv pip install httpx pydantic` (uv 0.11) | pypi.org, files.pythonhosted.org |
+| `uv python install 3.12` | releases.astral.sh |
+| `cargo fetch` of a crate using serde | index.crates.io, static.crates.io |
+| `go mod tidy` of a module using github.com/google/uuid (Go 1.24) | proxy.golang.org, sum.golang.org |
+| `git clone https://github.com/…` | github.com |
+| A GitHub release asset with `curl -L` | github.com, then release-assets.githubusercontent.com |
+| A file from raw.githubusercontent.com | raw.githubusercontent.com |
+| `apt-get update` on Ubuntu 24.04 | archive.ubuntu.com, security.ubuntu.com, and each extra source |
+| `npx playwright install --dry-run chromium` | cdn.playwright.dev, with playwright.download.prss.microsoft.com as the second source |
+| What nvm reads | nodejs.org |
+| `docker pull alpine:3.20` (Docker 29) | registry-1.docker.io, auth.docker.io, production.cloudfront.docker.com |
+| `docker pull ghcr.io/…` | ghcr.io, pkg-containers.githubusercontent.com |
+
+So most installs need a second host that their usual name does not suggest: a list holding
+`pypi.org` fails on the first wheel, one holding `crates.io` fails on the first crate, one holding
+`github.com` fails on the first release asset. The agent then sees, with that second host refused:
+pip named the host and showed the refusal; cargo retried each crate and reported "spurious network
+error" and a 403; curl said only "CONNECT tunnel failed, response 403". (These refusals went
+through a proxy that the tools were told about, where the reason travels in the proxy's answer.
+Silo's boundary is not a proxy the tools know, so on a host it does not read, the words reach
+them only as `how-a-hold-ends` describes.)
+
+What I would add to the answer: Silo offers a limited computer's list in named groups, each holding
+an ecosystem's hosts together: "PyPI" is pypi.org and files.pythonhosted.org, "crates" is
+index.crates.io and static.crates.io, "Go modules" is proxy.golang.org and sum.golang.org,
+"GitHub" includes release-assets.githubusercontent.com and raw.githubusercontent.com, "Docker
+Hub" is three hosts. A group is a
+shorthand for its hosts, shown as such, and `network-rules-from-use` still finds what a project
+adds, such as binaries.prisma.sh. Not tried: Homebrew, Maven. The proxy and the runs
+are in the project files, `research/2026-11-24-install-hosts`.

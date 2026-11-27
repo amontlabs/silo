@@ -31,3 +31,13 @@ To find out, for Apple's framework and for the virtual machine monitor of Linux 
 - A virtual machine lives in the process that created it.
 - libkrun runs a virtual machine in the process that calls it. Fact as of 19 November 2026, from
   [the research in the notes of `linux-vm-engine`](linux-vm-engine.md).
+
+## The first build's spec
+
+Agent, 24 November 2026, from [the build specs of the first
+build](../../../research/2026-11-24-first-build-specs/README.md). The specs make each helper a
+launchd job of its own, so launchd ending the engine never ends a computer. A started engine
+connects to `run/helpers/<id>.sock`, and both sides prove they hold the computer's key with HMAC
+over a nonce. A helper that answers with the boot the engine last saw is taken back with nothing
+done. If the Mac kit shows this cannot work, the engine stops each computer at its own start
+instead, and the first build promises only that main runs while the engine is down.

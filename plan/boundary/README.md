@@ -43,9 +43,10 @@ show what was sent to it, or its size (`record-shows-what-was-sent`).
 - What a computer can reach, to decide: `device-out-of-reach`, `reach-of-a-computer`,
   `paths-out-are-shown`, `guarantees-outside-the-computer`,
   `safe-fresh-install`, `channel-list`.
-- Secrets, to decide: `secret-values`, `secret-placeholder`, `secret-entry`, `secret-limits`,
+- Secrets, to decide: `secret-values`, `secret-placeholder`, `ssh-keys`, `exchanged-tokens`,
+  `cloud-credentials`, `secret-entry`, `secret-limits`,
   `secret-and-prompt-cache`.
-- The network, to decide: `network-modes`, `main-network-rules`,
+- The network, to decide: `network-modes`, `name-lookups`, `main-network-rules`,
   `package-age-rule`, `package-age-at-the-boundary`, `no-read-freely-preset`.
 - Answered on 22 November 2026, to decide: `hold-limit-length`, `how-a-hold-ends`,
   `reason-in-a-refusal`, `registry-traffic-read`.

@@ -1,0 +1,8 @@
+{
+  "asks": "What does the recorder do when it starts and finds a line of the record damaged, other than one it had not finished writing?",
+  "answer": "It keeps recording. It leaves the damaged segment as it is, starts a new segment after the last line it could read, and writes a fact that names the damaged segment and the place. `silo verify` and the first screen show the damage until you look at it. A bad line in the last segment after the line that the record's head on disk names is a write that was never acknowledged, such as one a power cut left: the recorder cuts it, keeps its bytes beside the segment and writes a fact, and it is not shown as damage.",
+  "needs": [
+    "changes-to-the-record",
+    "enforcing-and-recording"
+  ]
+}

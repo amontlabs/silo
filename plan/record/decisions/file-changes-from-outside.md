@@ -104,3 +104,57 @@ trial's code is.
 - A faster way to serve a folder.
 - The risk of the host mounting a disk that a hostile agent wrote.
 - A checkpoint taken while the disk is busy.
+
+## The first build's spec
+
+Agent, 24 November 2026, from [the build specs of the first
+build](../../../research/2026-11-24-first-build-specs/README.md). The spec of step 5 builds #352's
+reader (files 09 and 11): Silo's own, never a mount, run in a process with no rights, comparing by
+leaf address, and a gap for a disk it cannot read. It finds one more need: `silo look` and `silo
+put-back` read file contents, with APFS's compression, which the metadata-only reader of #352 does
+not. It writes a rename as a delete and a create, as `file-changes-in-the-record` says, with the
+APFS object id on both lines so they can be joined later.
+
+## ext4 needs its journal replayed
+
+An agent's part, 25 November 2026, from [option B's specs](../../../research/2026-11-25-linux-main/README.md). Measured in a Linux container: copies of a mounted
+ext4 disk taken 7 s and 30 s after a burst of changes showed none of them to a reader that ignores
+the journal; at 120 s they all showed. A checkpoint is such a copy, so the last minutes before each
+checkpoint would land in the next one. A trial reader that replays the journal in memory matched
+the kernel exactly, on those copies and on Ubuntu 26.04's own image (107,853 paths). Proposed
+sentence: "On a filesystem with a journal, such as ext4, the reader replays the journal in memory
+before it reads, as the computer's kernel does at its next boot, and never writes it back."
+
+## Reading only the blocks written, on ext4
+
+An agent's part, 25 November 2026, from [the write log's research](../../../research/2026-11-25-write-log/README.md).
+This answers two of the entry's "to find out" for a Linux computer, measured in a Linux container on
+Ubuntu 26.04's own disk grown to about a million paths. Between two copies of the running disk,
+1,000 files changed: 400 edited, 200 deleted, 100 renamed, 300 created. With the set of blocks
+written between them, which the write log keeps, the comparer read 13 MiB and gave the same 1,362
+lines as a full walk of both copies, which read 533 MiB. The journal of each copy was replayed with
+its checksums checked (24,927 of them). A file rewritten in place, with the same size and extents,
+shows only a changed mtime to a full walk; the write log names it, whatever its times say.
+
+## A disk a hostile agent wrote, read from outside
+
+An agent's part, 25 November 2026, from `research/2026-11-25-main-disk-from-outside/`. Root in
+main can write any byte of main's disk, with valid APFS checksums. Measured on Linux with
+dissect.apfs's test disks and Apple's open-source lzfse:
+
+- #390's content reader crashed, or allocated without bound, at 10 faults on crafted disks: a huge
+  extent offset, length or stream size, and keys or values too short for what is read from them.
+  One crafted file stops the listing of every file. Six rules (lengths checked before use, no size
+  from the disk decides an allocation, extents in order, the block table checked whole, decoder
+  input padded and output of the exact size, a bounded walk) made the same fuzzing find nothing.
+- Apple's lzfse reads up to 7 bytes past the end of a crafted LZFSE block. Eight zero bytes after
+  every input are enough: 36.4 million fuzzed inputs found nothing more.
+- A corrupted LZVN or LZFSE block decodes to wrong bytes of the right size in 64% to 69% of
+  single-bit flips. APFS has no checksum of file data, so macOS reads the same wrong bytes. The
+  reader's bar is the bytes macOS gives for that disk.
+- On ext4 (option B), the reader must check the journal's checksums: with them, it refuses the 4
+  disks with a planted checksum fault that the kernel refuses to mount, and matches the kernel on
+  the others. Without them, #381's trial showed those 4 disks as if they were fine.
+
+Not checked: a Mac, Apple's `libcompression`, and whether root in main can write a crafted
+compressed file with SIP on.

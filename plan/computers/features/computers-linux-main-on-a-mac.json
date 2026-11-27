@@ -1,0 +1,38 @@
+{
+  "name": "A Linux main on your Mac",
+  "what": "Silo runs main on your Mac as a Linux computer: Ubuntu for arm64, with a kernel Silo builds and main cannot replace. Several agents work in it at once, across several repositories, with Docker. Nothing from your Mac is shared into it, and files go in or out only through a channel you grant.",
+  "needs": [
+    "main-and-its-agents",
+    "main-on-macos-first",
+    "main-on-linux",
+    "one-main-or-several",
+    "several-agents-in-main",
+    "main-repositories",
+    "device-not-shared",
+    "files-through-a-channel",
+    "computer-image",
+    "blank-computer",
+    "x86-linux-computers",
+    "containers-on-macos",
+    "macos-and-linux-consistent",
+    "one-kind-of-computer",
+    "neutral-core",
+    "linux-vm-engine",
+    "work-on-top-of-libkrun",
+    "libkrun-patches",
+    "engine-patch-review",
+    "storage-between-computers",
+    "network-stack",
+    "engine-program-and-clients",
+    "engine-matches-wanted",
+    "mac-silo-needs",
+    "network-before-rules"
+  ],
+  "keeps": [
+    "nothing-shared-from-your-device"
+  ],
+  "suggest": {
+    "verdict": "drop",
+    "why": "A macOS main stays recommended first. This is the fallback, specified and ready: take it in place of `computers-main-on-a-mac` if the Mac's tests of provisioning, gvproxy or the Keychain fail, or if the first unattended run does not need Xcode in main."
+  }
+}

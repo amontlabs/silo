@@ -22,3 +22,12 @@ that may be incomplete does not answer that.
 
 How Silo computes the paths, and shows those a grant adds, is the part `extensions`
 (`grant-shows-its-paths`).
+
+## A forwarded port is a path to the internet (24 November 2026)
+
+An agent's part. A page served from a computer and opened on your Mac sent the computer's secret to
+an attacker 26 ways in Chromium (`research/2026-11-24-red-team-fixes/preview/`). The first place
+outside the computer was your Mac, so this answer would show the path as ending there, and the
+data reached the internet. The suggestion: an opened port counts as a path to every host the
+browser that shows it can reach, unless the page opens in a browser whose requests go through the
+computer's rules. In that set-up, 0 of the 26 left, and each attempt was recorded.

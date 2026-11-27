@@ -18,8 +18,8 @@ The options:
   costs what makes Silo different: a Linux machine for agents is what cloud services already offer,
   and agents that build Mac software, Silo's own app included, cannot do it there.
 
-Recommended: macOS first. A Mac of its own is what people already give their agents, and no cloud
-offers it.
+Recommended: macOS first. A Mac of its own is what people already give their agents. On the Mac
+you already have, it costs nothing by the hour.
 
 ## Notes
 
@@ -33,6 +33,11 @@ polarzero said this, 18 November 2026. polarzero expects much more interest this
    own app.
 4. Under this design a fork is occasional. The limit of two macOS computers per Mac does not rule
    it out.
+
+Reason 2 no longer holds as written. Agents' research of 24 November 2026 found cloud services
+that rent macOS machines to agents by the hour, and local apps that give an agent a macOS virtual
+machine. The recommendation rests on reasons 1, 3 and 4, and on the cost: a macOS computer in main
+runs on a Mac the user already owns.
 
 ## Facts it has to respect
 
@@ -59,3 +64,50 @@ how the code reaches it.
 
 `linux-beside-a-macos-main`, `containers-on-macos`, `record-halves-per-system`,
 `macos-ships-facts-first`, `x86-linux-computers`, `neutral-core`.
+
+## Who needs it most, 24 November 2026
+
+An agent's part, from research on who would use Silo first. It adds a reason and changes neither
+the answer nor the recommendation.
+
+- A Linux computer per agent, with network rules and secrets kept outside, is already free on a
+  Mac. Agents that build Mac and iOS software cannot use one: Linux has no Xcode and no iOS
+  simulator. For these developers the alternatives are a second Mac or a Mac rented by the hour or
+  the month. Main on macOS is where Silo has no free substitute.
+- A developer shipped a small app on 20 November 2026 to watch agents inside macOS virtual
+  machines, because "I couldn't see what the agents were doing in there". That is the record, asked
+  for by someone who already runs agents in a macOS computer.
+- Several agents in one macOS computer clash over the iOS simulator. `simulators-for-parallel-agents`
+  asks what Silo does about it.
+
+## The limit, from Apple
+
+An agent's note, 24 November 2026. Apple's developer support said in September 2026 that the
+framework enforces the limit of two for macOS guests only, and "has no fixed cap for Linux VMs".
+It declined to say how to get the written exception the license mentions. For an iOS developer, the
+parallel work then happens inside main, which is what `simulators-for-parallel-agents` is about.
+Details: `research/2026-11-24-mac-and-ios-developers/README.md`.
+
+## Weighed against a Linux main first
+
+An agent's part, 24 November 2026, from [the comparison of first builds](../../../research/2026-11-24-first-build-and-the-record/README.md). A Linux main on the Mac in the first build was
+weighed, because more of the record has already run on Linux (#347, #367, #371) and a Linux
+computer can give processes from a probe with a kernel of Silo's own. It is not recommended: it
+lands beside free Linux microVM products on the Mac, it gives up Xcode and macOS apps in main, and
+the macOS main would still have to be built later, which writes the computer, its checkpoints and
+its file comparison twice. It stays the fallback if the Mac kit (#359) shows that macOS 27's
+provisioning or gvproxy under a macOS computer does not work: the engine, the boundary and the
+recorder run on the Mac outside every computer and carry over unchanged.
+
+## Option B specified
+
+An agent's part, 25 November 2026, from [option B's specs](../../../research/2026-11-25-linux-main/README.md). B, a Linux main on the Mac, is now specified at the
+level of #370 for a macOS main, in steps 2 to 7, with a test kit for a Linux host with KVM. Under
+B this entry's answer would read "Main is a Linux computer first. Its forks are Linux. A macOS
+computer comes later, as a computer of its own beside main", and `linux-never-copies-macos-main`
+stays as it is. Three things the notes above do not weigh: B's Linux computer is the one
+`computers-linux-beside-main` needs anyway, so building it first loses nothing under this answer;
+a macOS main has more ways to fail before the first night (macOS 27, provisioning, gvproxy with a
+macOS computer, the Keychain over SSH); and B's first morning holds processes and Docker. The
+recommendation stays this answer, with an order of building that leaves the choice open until the
+Mac's tests have run.

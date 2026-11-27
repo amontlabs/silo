@@ -26,3 +26,40 @@ To find out, per kind of fact and report.
 Rough estimates for one busy computer per day: tens of megabytes for process, file and connection
 lines once merged and compressed; a few megabytes per long conversation; recordings are the heavy
 item and are kept only while an agent drives the screen.
+
+## One real conversation, measured (24 November 2026)
+
+An agent's part, 24 November 2026. The transcript of one real Claude Code session was measured:
+the agent that wrote these notes, working for about two hours. It ran experiments, wrote code and
+edited the plan, with many long command outputs. Only sizes were computed. The text was not kept.
+
+| | |
+|---|---|
+| Model requests | 134 |
+| Messages (the user's, the model's, tool calls and results) | 436 |
+| Every request kept whole, as the provider receives it | about 73 MB |
+| Each message kept once, as `store-messages-once` says | 0.95 MB |
+| The same, compressed with zlib | 0.43 MB, about 0.2 MB an hour |
+
+- The whole requests were counted from the transcript, each holding every message before it, plus
+  50 KB for the system prompt and tool definitions, the size seen in the fake runs of
+  `denial-per-program`. Kept once, those 50 KB count once.
+- Kept whole, the requests are 77 times larger than the messages kept once, and the gap grows with
+  the length of the conversation.
+- Tool results and the user's messages were 36 % of the text. The largest single message was
+  27 KB.
+
+So the message text of a busy agent comes to about 0.2 MB an hour, compressed: a few megabytes for
+a day of several agents. That agrees with the notes' rough "a few megabytes for a long
+conversation" (`conversation-text-kept`). Recordings of the screen and the lines of the record
+itself are not in this number.
+
+## Carried over 30 nights (26 November 2026)
+
+An agent's part, 26 November 2026, from `research/2026-11-25-disk-budget/`. With #386's heavy night per agent-hour (lines
+0.29 MB once compressed, message text 0.55 MB), 30 nights of agents working 17 hours a day hold
+0.4 GiB of lines and 0.8 GiB of text for 3 agents, 1.1 and 2.1 GiB for 8. Recordings of computer
+use were measured on Linux: 0.2 GiB an hour encoded by quality, 0.75 GiB at a fixed 6 Mbit/s, so
+an hour a day of computer use is 6 to 23 GiB a month, most of the record. With the full list of
+hashes on every request, lines reach 8.2 GiB for 8 agents in 30 nights, about 100 GiB a year
+that no limit may remove.

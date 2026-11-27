@@ -2,6 +2,28 @@
 
 ## The choice
 
+An agent's part, 25 November 2026, from the challenge of #361, with #350.
+
+The case: an iOS developer runs 16 agents in main on a 32 GB Mac, and each checks its work in a
+booted simulator. Each holds about 3.4 GB (measured by the xcfs project on a Mac, not by Silo), so four
+already take 13.6 GB before any build, and 16 do not fit. The two-VM limit rules out a computer per
+simulator.
+
+The options:
+
+- Add the simulators as a load of their own: a few booted, shared by many agents, with the maximum
+  shown (recommended). It costs agents waiting for a simulator, which the open draft
+  `simulators-for-parallel-agents` (#361) settles. Mac kit test 25 measures how many fit.
+- Keep two loads counted in agents, as the earlier answer says. It promises a heavy load an iOS
+  developer cannot reach.
+
+Recommended: add the simulators. #350 also asks that main plus one and two Linux forks be measured on
+a 16 GB Mac before the common load is promised; the answer's last sentence already requires it.
+
+## The earlier choice
+
+The choice as it stood before 25 November 2026. The answer it recommended is now an option of the choice above.
+
 An agent's part, 22 November 2026. On a MacBook Pro with 32 GB, 16 agents work in main across two
 repositories. On a MacBook Air with 16 GB, three agents work in main and one fork tries a migration.
 
@@ -15,3 +37,38 @@ The options:
 
 Recommended: two loads. Many developers work on a 16 GB Mac, and the heavy case is the one you set
 for those who run many agents.
+
+## For an iOS developer
+
+An agent's challenge, 24 November 2026. The heavy load, 16 agents in main on a 32 GB Mac, does not
+fit an iOS developer: an agent that checks its work wants a booted simulator, and each holds about
+3.4 GB (measured by the xcfs project on a Mac, not by Silo). Four booted simulators already take
+13.6 GB, before any build. What fits is many agents sharing a few simulators, with a maximum booted
+at once, as `simulators-for-parallel-agents` proposes. The load to measure for this user is then
+the number of simulators, not of agents. Mac test 25 of `research/2026-11-24-mac-and-ios-developers/README.md` measures it in a computer.
+
+## Simulators per agent, against the memory main is given (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-checkpoint-retention/` (section
+"Simulators per agent"), a model and a simulation on Linux, nothing measured on a Mac.
+
+- **Main's memory is set when it starts.** Apple's framework gives a macOS computer a fixed size,
+  and whether it gives any back is to find out (`memory-given-back`). So everything the agents run
+  in main, simulators included, fits in what main was given before the night.
+- **What fits.** With the Mac keeping 6 to 10 GB for itself and one Linux computer beside main, a
+  booted simulator between 0.9 GB (one vendor's figure) and 3.4 GB (xcfs), and one to three Xcode
+  builds at about 4 GB each at their peak: on a 16 GB Mac, main has about 8 GB and no simulator
+  fits beside a build. On 32 GB, 4 agents get 2 booted simulators at 3.4 GB (8 at 0.9 GB), and 16
+  agents with three builds at once do not fit before any simulator. 16 agents get 2 to 7 on 48 GB
+  and 6 to 19 on 64 GB.
+- **How many 16 agents need.** Agents that think and edit for about 3 minutes, build for 1, and run
+  the app for 1.5 minutes on half their turns: with a simulator held per use and kept booted until
+  another agent needs the place, 6 booted keep the wait under 30 s for 95 uses in 100, and 4 cost
+  each agent 7% of the night waiting. With a simulator held for the whole session, every agent
+  beyond the maximum waits all night.
+
+A challenge to the answer, on that case: "about 16 agents in main, on a Mac with 32 GB" does not
+hold for an iOS developer, with or without simulators, because three Xcode builds at once already
+take most of what main gets. A proposal: for iOS work, the heavy load is 16 agents with 6 booted
+simulators on a 64 GB Mac, and the common one 4 agents with 2 booted on 32 GB; Mac test 25 of
+#361's kit measures both, with the numbers of the model as what it confirms or corrects.
