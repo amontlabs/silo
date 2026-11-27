@@ -132,3 +132,9 @@ the version of Silo you run and from yours.
 
 **Not built:** the boundary in Zig still checks one key (#396's `prices.zig`); the two-key rule and
 the index are in Python in the research. How the app shows the table's state is not designed.
+
+## More research on this (27 November 2026)
+
+An agent's part, 27 November 2026. These reports bear on this entry, and its notes did not point to them. The answer is unchanged.
+
+- `research/2026-11-25-red-team-round-two/` (#435), finding 7, read in the code and not run: the prototype never enforces the price table's check date, so a release past its date is used as if current, with nothing in the record.

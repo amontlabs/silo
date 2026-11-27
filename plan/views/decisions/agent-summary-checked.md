@@ -96,3 +96,9 @@ reports it, most of it the command line's own tokens.
 ## Settled in the consolidation (27 November 2026)
 
 Settled, 27 November 2026, in the consolidation: no change to the answer, which already takes #387's reader as an extension and always shows the receipt's lines.
+
+## More research on this (27 November 2026)
+
+An agent's part, 27 November 2026. These reports bear on this entry, and its notes did not point to them. The answer is unchanged.
+
+- `research/2026-11-26-headline-numbers/` (#439): the catch rates of `research/2026-11-25-catch-rate` came out the same on a second run. The two models' results were reproduced from their recorded answers, not from new model calls.

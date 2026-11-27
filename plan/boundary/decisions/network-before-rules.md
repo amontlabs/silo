@@ -41,3 +41,9 @@ An agent's part, 25 November 2026, written while merging every draft into one br
 ## Settled in the consolidation (27 November 2026)
 
 Settled, 27 November 2026, in the consolidation: the answer stands. Its "never your Mac, your local network or cloud metadata" holds on the two ways in the drafts kept, #378's card that leads nowhere and #380's patched gvproxy, and the Mac kit's tests 07, 35 and 41 check it on a Mac.
+
+## More research on this (27 November 2026)
+
+An agent's part, 27 November 2026. These reports bear on this entry, and its notes did not point to them. The answer is unchanged.
+
+- `research/2026-11-25-gvproxy-upstream/` (#430): a connection to a port of the gateway where stock gvproxy serves nothing leaves for the same address on the Mac's own network. An open main that is promised "never your local network" needs the report's fix, or a deny list that holds `private`.

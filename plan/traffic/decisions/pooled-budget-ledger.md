@@ -184,3 +184,9 @@ An agent's part, 25 November 2026, written while merging #390 and #392 to #396 o
 ## Settled in the consolidation (27 November 2026)
 
 Settled, 27 November 2026, in the consolidation: one entry. `pooled-budget-on-a-host` is folded into this one, below.
+
+## More research on this (27 November 2026)
+
+An agent's part, 27 November 2026. These reports bear on this entry, and its notes did not point to them. The answer is unchanged.
+
+- `research/2026-11-25-red-team-round-two/` (#435), finding 6, read in the code and not run: anyone who can push to the team's repository can rewrite a ledger kept on a branch, and main can push there. The prototype's ledger server also took a negative cost and a give in another Mac's name. The fixes it calls for are ledger commits signed by a key no computer reaches, and each Mac authenticated.

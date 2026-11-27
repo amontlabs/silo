@@ -90,3 +90,9 @@ on a running computer; Claude Code builds other than 2.1.332.
 ## The program's own report (25 November 2026)
 
 An agent's part, from `research/2026-11-25-plan-windows/`, added on merge because #407 wrote it before #393 had landed. "A budget cannot be set on a computer whose Claude traffic passes unread" holds for budgets read from traffic. `program-reports-its-own-spend` would allow a precaution budget there. The app's sentence for such a computer should also say that the plan's window is not shown.
+
+## More research on this (27 November 2026)
+
+An agent's part, 27 November 2026. These reports bear on this entry, and its notes did not point to them. The answer is unchanged.
+
+- `research/2026-11-25-red-team-round-two/` (#435), finding 5, read in the code and not run: the prototype's reader of the sign-in splits header lines on CRLF only, and Anthropic's host also ends a header at a bare LF. A plan's sign-in can then pass through a computer set for a key. `research/2026-11-25-untrusted-parsers/`'s strict reader closes it.

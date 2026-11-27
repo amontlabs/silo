@@ -105,3 +105,10 @@ program grown by about 110 lines.
 ## Settled in the consolidation (27 November 2026)
 
 Settled, 27 November 2026, in the consolidation: the recommendation above is out of date. #402 measured the card that leads only to Silo, and the answer now takes it: no packet of main goes through Apple's NAT, even at its first start. The Mac kit's test 43 checks it on a Mac.
+
+## More research on this (27 November 2026)
+
+An agent's part, 27 November 2026. These reports bear on this entry, and its notes did not point to them. The answer is unchanged.
+
+- `research/2026-11-25-red-team-round-two/` (#435), finding 2: the Mac end of the card kept a count with no bound, so a scan from main filled the Mac's memory and disk. The report also shows that a SYN from main does reach the Mac end's stack, against what the draft said. Its patch fixes both, with tests that fail first.
+- `research/2026-11-26-headline-numbers/` (#439): the way in was run again and gave the same results. The copy of 2 MB took 0.23 s, 35 s and 12 s on three runs, so its speed is not an argument until it is measured over several runs.
