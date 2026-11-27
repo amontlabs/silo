@@ -54,7 +54,7 @@ The ask held as a contract («don't change the tests», «run the whole suite»,
 caught nothing in either corpus: public issues rarely quote an ask with a rule in it. A night
 records the ask word for word, so this is left for a real night to measure.
 
-## Where the drafts of 25 November disagree (integration)
+## Where the drafts of 25 November disagreed (integration)
 
 An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
 
@@ -92,3 +92,7 @@ in the repo.», and matched on Codex's «Bun runs the suite.». With #400's inje
 claude #1's words, `shape.py` marked «receipt», both readers still said mismatch on the same
 lines, and the run stayed under What needs you. The 30 calls of the page cost $0.25 as `claude -p`
 reports it, most of it the command line's own tokens.
+
+## Settled in the consolidation (27 November 2026)
+
+Settled, 27 November 2026, in the consolidation: no change to the answer, which already takes #387's reader as an extension and always shows the receipt's lines.

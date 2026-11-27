@@ -31,7 +31,7 @@ forbidding it, the way is a decision that replaces `fork-from-the-moment` with b
 A path is read from the checkpoint by the same reader that compares checkpoints
 (`file-changes-from-outside`), never by mounting the disk on the Mac.
 
-## Where the drafts of 25 November disagree (integration)
+## Where the drafts of 25 November disagreed (integration)
 
 An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
 
@@ -58,3 +58,7 @@ deletions, on #399's night, and tested.
 
 Proposed for the answer, after "so nothing is lost": "If a path changes after you saw what it
 replaces, Silo stops and shows you again." Without the check, "nothing is lost" is not true.
+
+## Settled in the consolidation (27 November 2026)
+
+Settled, 27 November 2026, in the consolidation: no change to the answer. How the put-back is written inside main (open folders with no-follow, never `tar` through paths an agent controls) is how it is built, from #378 and #436.

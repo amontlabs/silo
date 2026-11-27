@@ -1,6 +1,6 @@
 {
   "asks": "What does a budget on a conversation promise, when an agent program can start a new conversation at any time?",
-  "answer": "It limits one conversation. As its worst case it says that a new conversation starts again at zero. The limit that no new conversation gets around is a budget on the computer.",
+  "answer": "It limits one conversation. A conversation continued in a fork starts at what its history had spent: the parent's spend at the request the fork's first request continues. As its worst case it says that a new conversation starts again at zero. The limit that no new conversation gets around is a budget on the computer.",
   "needs": [
     "word-budget",
     "recognising-a-conversation"

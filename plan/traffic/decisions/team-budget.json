@@ -1,6 +1,6 @@
 {
   "asks": "How is a team's spend on models held across its members' Macs?",
-  "answer": "Each member's Silo holds a budget on all of that member's computers, set by the team's rule set. It is a rule, exact on that Mac, since the boundary there sees every model call. A team total is not enforced across Macs: it is the sum of what members' Silos report, and it is shown as such. A budget shared by several people is exact only where their computers run on one host.",
+  "answer": "Each member's Silo holds a budget on all of that member's computers, set by the team's rule set. It is a rule, exact on that Mac, since the boundary there sees every model call. A team total across Macs is held only where the team runs the ledger of `pooled-budget-ledger`. Without it, the total is the sum of what members' Silos report, and it is shown as such.",
   "needs": [
     "budget-rule-or-precaution",
     "team-rule-set"

@@ -1,6 +1,6 @@
 {
   "asks": "How does the record store what is sent to a model provider?",
-  "answer": "Silo stores each retained message once, named by a keyed hash whose key stays on your Mac, and records which messages each request sent. A request is then a short list of hashes. Without the key, a hash in the record cannot be used to test guesses of what a message held.",
+  "answer": "Silo stores each retained message once, named by a keyed hash whose key stays on your Mac. A request names the request it extends and lists the messages it added; when the program changed an earlier message, it lists all of them. Without the key, a hash in the record cannot be used to test guesses of what a message held.",
   "replaces": [
     "store-messages-once"
   ]

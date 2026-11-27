@@ -69,11 +69,11 @@ Not built yet: a lease that expires, so a slice held by a Mac that went to sleep
 admitting each call at the ledger once less than a slice per Mac is free, which would remove the
 recalls at the end of a budget (they made calls wait up to 48 s through a Git repository).
 
-## Where the drafts disagree, second pass (integration)
+## Where the drafts disagreed, second pass (integration)
 
 An agent's part, 25 November 2026, written while merging #390 and #392 to #396 onto #391 (`research/2026-11-25-integration-2/`).
 
-#392's `pooled-budget-on-a-host` answers the same question for a team on one host, with one exact count. The note there proposes that the host's count is this ledger, so one team budget has one count wherever its computers run.
+#392's `pooled-budget-on-a-host` (now folded in below) answers the same question for a team on one host, with one exact count. The note there proposes that the host's count is this ledger, so one team budget has one count wherever its computers run.
 
 ## The ledger's commit on a Mac
 
@@ -146,3 +146,41 @@ was stopped as a sleeping laptop.
   Macs asking every 10 s on average waited 10.7 s at the median and 43.6 s at worst. It suits a
   few Macs that ask rarely; a recall cannot reach a Mac through it unless the Mac reads the branch
   every few seconds. The shared Linux host or a Mac that stays on remain the places to run it.
+
+## One budget for a team's host, folded in (27 November 2026)
+
+An agent's part, 27 November 2026, written while consolidating the drafts. #392's entry `pooled-budget-on-a-host` asked the same question for a team on one host, so it is folded into this one: the answer now says the host's engine keeps the ledger and the computers on the host draw from it directly. Its notes follow.
+
+### What #392 proposed
+
+An agent's part, 25 November 2026. A team of five gives its host $3,000 a month for models, and
+each person $1,000. #362 found a pooled budget across Macs needs a count every Mac reaches before
+each call, so it proposed a budget per person (`team-budget`). On one host, every computer's
+model calls cross boundaries on the same machine, so one count is local.
+
+#374 measured how a budget stops calls: holding each model's typical output before the call
+stopped 7% to 9% under a $3 budget, and letting calls finish overspent by about 54%. A pooled
+count works the same way, with every person's boundary reserving against one count kept by the
+engine.
+
+The options:
+
+- A pooled limit on the host, beside each person's budget (recommended). Exact on that host. It
+  costs one count the engine keeps, which every boundary on the host asks before a model call.
+- Per-person budgets only. It costs the team's total as a limit: it is only a sum.
+- A pooled limit only. It costs the case where one person spends the team's month in a night.
+
+Recommended: a pooled limit beside each person's budget. It is what a team lead sets, and on one
+host it costs a local call.
+
+Not built: the reservation is #374's, run for one computer, not shared between boundaries.
+
+### Where the drafts disagreed (integration)
+
+An agent's part, 25 November 2026, written while merging #390 and #392 to #396 onto #391 (`research/2026-11-25-integration-2/`).
+
+#388's `pooled-budget-ledger` and this entry answer the same question in two places. This one keeps one count on a host and reserves each call against it; #388's gives each Mac a slice from a ledger. They agree once the ledger runs on the host, as #388 suggests. Recommended: computers on the host draw from the host's count directly, Macs take slices from the same count as #388's leases, and this entry needs `pooled-budget-ledger`.
+
+## Settled in the consolidation (27 November 2026)
+
+Settled, 27 November 2026, in the consolidation: one entry. `pooled-budget-on-a-host` is folded into this one, below.

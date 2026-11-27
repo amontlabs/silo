@@ -23,7 +23,7 @@ Agent, 24 November 2026. From draft #354, gap 2, and draft #360's notes on `main
 people who run agents overnight use a Mac mini that stays on. Whether Apple's framework already
 holds the Mac awake while a virtual machine runs is not known; `pmset -g assertions` on a Mac tells.
 
-## Where the drafts of 25 November disagree (integration)
+## Where the drafts of 25 November disagreed (integration)
 
 An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
 
@@ -35,3 +35,7 @@ An agent's part, 25 November 2026, from [the guest clock across a sleep](../../.
 Holding the Mac awake does not cover every sleep: a closed lid, or a MacBook on battery. After
 each one, main is behind by the whole sleep and does not catch up. The fix is now an open entry of
 its own, `main-clock-kept`.
+
+## Settled in the consolidation (27 November 2026)
+
+Settled, 27 November 2026, in the consolidation: the clock is its own entry, `main-clock-kept` (#397), which takes #378's fix. This entry keeps only the Mac awake.

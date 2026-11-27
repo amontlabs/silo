@@ -24,8 +24,12 @@ find out on a Mac.
 Agent, 24 November 2026. From draft #352 (files 02 and 07, "Main's disk on a full Mac"). Whether an
 overwrite on APFS needs new space when no clone shares the block is a Mac test of that draft.
 
-## Where the drafts of 25 November disagree (integration)
+## Where the drafts of 25 November disagreed (integration)
 
 An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
 
 #378, section 4: on the Mac's APFS, removing a checkpoint may free nothing while a local Time Machine snapshot exists, and the private size APFS reports then reads 0. The level where Silo pauses computers must not count on space freed by removing checkpoints in the same minute.
+
+## Settled in the consolidation (27 November 2026)
+
+Settled, 27 November 2026, in the consolidation: no change to the answer. The level where checkpoints stop counts only space that is free now, never space a removal would free, which the Mac kit's test 46 measures.

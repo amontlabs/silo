@@ -44,7 +44,7 @@ Not verified: Gemini's storage price per million tokens per hour (the run used $
 stand-in), whether OpenAI bills a cancelled background response for what it generated, and
 Gemini's batch result format, which was not built.
 
-## Where the drafts of 25 November disagree (integration)
+## Where the drafts of 25 November disagreed (integration)
 
 An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
 
@@ -59,3 +59,7 @@ An agent's part, 25 November 2026, from `research/2026-11-25-model-prices`.
   of $4.50 above is the real one for that model.
 - OpenAI now prices eligible background requests 30% below standard for a 2-hour completion
   window and 40% below for an 8-hour one. A bound at the standard price stays a bound for them.
+
+## Settled in the consolidation (27 November 2026)
+
+Settled, 27 November 2026, in the consolidation: the answer is #385's, with #378's refusal only for work Silo still cannot bound.

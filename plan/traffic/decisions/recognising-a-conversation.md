@@ -149,7 +149,7 @@ only, and joining on the program's session (`metadata.user_id` for Claude Code,
 whole. It supports the recommended option, and adds that the prefix test has to leave out what
 the program rewrites.
 
-## Where the drafts of 25 November disagree (integration)
+## Where the drafts of 25 November disagreed (integration)
 
 An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
 
@@ -194,3 +194,7 @@ of a fork, and a fork that then became main, against a stand-in provider.
   by content, so the answer keeps them in the conversation. Codex also sends
   `forked_from_thread_id` and `forked_from_ordinal_exclusive` in `client_metadata` on every
   request of the fork: a link the program states itself, which holds after a compaction.
+
+## Settled in the consolidation (27 November 2026)
+
+Settled, 27 November 2026, in the consolidation: the answer now links a fork's conversation to the parent's request it continues (#426), and `what-a-conversation-budget-promises` says its spend starts there.

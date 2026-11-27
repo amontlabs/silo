@@ -194,7 +194,7 @@ What I would choose, with #378's card that leads nowhere as one of the paths:
 The answer above stays as it is: every packet still passes Silo, and nothing goes around it when
 Silo's part stops.
 
-## Where the drafts of 25 November disagree (integration)
+## Where the drafts of 25 November disagreed (integration)
 
 An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
 
@@ -220,7 +220,7 @@ faults came up between the drafts.
   has none, and every computer behind its own gvproxy is `192.168.127.2`. The boundary gave each
   computer its own socket on each way in, and its own port for lookups.
 
-## Where the drafts disagree, second pass (integration)
+## Where the drafts disagreed, second pass (integration)
 
 An agent's part, 25 November 2026, written while merging #390 and #392 to #396 onto #391 (`research/2026-11-25-integration-2/`).
 
@@ -287,3 +287,7 @@ needs the fix; ping reaches 169.254.0.0/16, which TCP and UDP refuse; and a conn
 the gateway where gvproxy serves nothing goes to the same address on the host's network. #380's
 suite, extended, passes every case with the series in all seven settings Silo would use. Sending
 anything upstream is polarzero's call.
+
+## Settled in the consolidation (27 November 2026)
+
+Settled, 27 November 2026, in the consolidation: the answer stands, and each point above is in it or in another entry. #378's card that leads nowhere, with the proxy and SSH over vsock, is one way in of Silo's stack, so a closed main needs no Apple's NAT. Where gvproxy is used, it is #380's patch (`-outbound-deny`), which hands the metadata address to the boundary. Computers are told apart by one socket per computer on each way in. The first start is `way-in-before-the-relay`'s.

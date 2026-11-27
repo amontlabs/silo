@@ -60,7 +60,7 @@ Once the relay is in, Silo reaches main only through it: each vsock connection g
 `sshd -i`, so Remote Login on the card can be turned off and main listens on no TCP port for
 SSH. Measured on Linux with a Unix socket standing in for vsock.
 
-## Where the drafts of 25 November disagree (integration)
+## Where the drafts of 25 November disagreed (integration)
 
 An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
 
@@ -101,3 +101,7 @@ against gVisor's TCP. No crash was found in gVisor. What main can still do is ke
 Mac busy by sending frames as fast as the socket takes them, about 3 µs each; the Mac's side of the
 socket pair was not measured. This changes no option above: the recommended one stands, with the
 program grown by about 110 lines.
+
+## Settled in the consolidation (27 November 2026)
+
+Settled, 27 November 2026, in the consolidation: the recommendation above is out of date. #402 measured the card that leads only to Silo, and the answer now takes it: no packet of main goes through Apple's NAT, even at its first start. The Mac kit's test 43 checks it on a Mac.

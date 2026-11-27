@@ -33,6 +33,6 @@
   ],
   "suggest": {
     "verdict": "drop",
-    "why": "A macOS main stays recommended first. This is the fallback, specified and ready: take it in place of `computers-main-on-a-mac` if the Mac's tests of provisioning, gvproxy or the Keychain fail, or if the first night does not need Xcode in main."
+    "why": "A macOS main stays recommended first. This is the fallback, specified and ready: take it in place of `computers-main-on-a-mac` if the Mac's tests of provisioning, gvproxy or the Keychain fail, or if the first unattended run does not need Xcode in main."
   }
 }

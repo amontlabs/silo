@@ -1,6 +1,6 @@
 {
   "asks": "When one budget covers computers on several Macs, how does each Mac's boundary know what is left of it?",
-  "answer": "One ledger gives each Mac a slice of the budget. Each Mac's boundary admits model calls on its own against its slice, with the rule `what-a-budget-promises` settles, asks for more before the slice runs out, and gives back what it has not spent when its agents end. When the ledger runs short, it takes back the room other Macs hold beyond what their calls under way will typically still use. The ledger holds dollars per Mac and per request, and nothing else. It runs where the team has a place for it: its shared Linux host, a Mac that stays on, or a branch of the team's repository.",
+  "answer": "One ledger gives each Mac a slice of the budget. Each Mac's boundary admits model calls on its own against its slice, with the rule `what-a-budget-promises` settles, asks for more before the slice runs out, and gives back what it has not spent when its agents end. When the ledger runs short, it takes back the room other Macs hold beyond what their calls under way will typically still use. The ledger holds dollars per Mac and per request, and nothing else. It runs where the team has a place for it: its shared Linux host, a Mac that stays on, or a branch of the team's repository. On a team's shared host, the host's engine keeps that ledger, and the computers on the host draw from it directly.",
   "needs": [
     "team-budget",
     "what-a-budget-promises"

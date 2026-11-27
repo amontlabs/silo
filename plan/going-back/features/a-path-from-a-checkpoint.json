@@ -8,6 +8,6 @@
   ],
   "suggest": {
     "verdict": "take",
-    "why": "With several agents in main, bringing back one deleted folder should not undo the others' night, and forks come later."
+    "why": "With several agents in main, bringing back one deleted folder should not undo the others' work, and forks come later."
   }
 }

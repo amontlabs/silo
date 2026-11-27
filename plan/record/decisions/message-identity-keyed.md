@@ -22,7 +22,7 @@ The options:
 Recommended: a keyed hash for every message. One way of naming messages, and the guess test fails
 for all of them. The direction polarzero took, store each message once, does not change.
 
-## Where the drafts of 25 November disagree (integration)
+## Where the drafts of 25 November disagreed (integration)
 
 An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
 
@@ -32,3 +32,7 @@ Two drafts propose a replacement for the taken `store-messages-once`, for differ
 - #386: "a short list of hashes" is not short. On a modelled night the full lists take 49.6 MB, against 5.5 MB when each request names the request it extends and lists only the messages it added.
 
 They do not conflict. Recommended: one replacement that holds both. "Silo stores each retained message once, named by a keyed hash whose key stays on your Mac. A request names the request it extends and lists the messages it added; when the program changed an earlier message, it lists all of them."
+
+## Settled in the consolidation (27 November 2026)
+
+Settled, 27 November 2026, in the consolidation: the answer now holds both, as recommended.

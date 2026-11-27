@@ -146,7 +146,7 @@ holding each call's typical output, through a ledger or leases. Twelve members u
 Where the count is kept (one boundary, a ledger 150 ms away, leases) moved these by a point or
 two at most.
 
-## Where the drafts of 25 November disagree (integration)
+## Where the drafts of 25 November disagreed (integration)
 
 An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
 
@@ -199,7 +199,7 @@ Recommended: count it at a bound. A budget still holds, since the bound is above
 charges, and a new model does not stop work. This would replace the sentence of the answer on a
 model Silo has no price for. The answer is left as it is for polarzero to choose.
 
-## Where the drafts disagree, second pass (integration)
+## Where the drafts disagreed, second pass (integration)
 
 An agent's part, 25 November 2026, written while merging #390 and #392 to #396 onto #391 (`research/2026-11-25-integration-2/`).
 
@@ -245,3 +245,7 @@ refused, Codex stopped with Silo's sentence, and the tool never ran. A refused m
 a shared compression context ends the socket, since the host could not read the next ones. A
 budget reached in the middle of a reply on the socket is not cut: `mid_stream` "cut" covers plain
 requests only.
+
+## Settled in the consolidation (27 November 2026)
+
+Settled, 27 November 2026, in the consolidation, choosing what keeps the core smallest. The answer now holds each call's typical output before it leaves (#385's measure, which brought the overshoot from about 35% to under the budget in every run), and lets calls under way finish. It does not take #385's cut of a call that passes the budget anyway: cutting a reply would be a fourth change to traffic, which `what-silo-changes-in-traffic` does not allow. A model with no price still does not leave under a budget; #396's bound at twice the dearest price stays an option for the budget, with `where-prices-come-from`.

@@ -27,7 +27,7 @@ extends and lists the messages it added; when the program changed an earlier mes
 of them." Claude Code changes earlier messages it resends (#371, finding 1), so some requests carry
 the full list; the model assumed 5% of them. How often it happens on a real night is to measure.
 
-## Where the drafts of 25 November disagree (integration)
+## Where the drafts of 25 November disagreed (integration)
 
 An agent's part, 25 November 2026, written while merging every draft into one branch (`research/2026-11-25-integration-2/`).
 
@@ -40,3 +40,7 @@ programs resend them. On seven kinds of fork with Claude Code and Codex, a store
 held 5.3 and 5.6 times the bytes of one store shared by every computer on the Mac. The store should
 be one per Mac, with each computer's record pointing into it; what a computer may read of it stays
 its own, as `computer-reads-its-record` says.
+
+## Settled in the consolidation (27 November 2026)
+
+Settled, 27 November 2026, in the consolidation: the replacement is `message-identity-keyed`, whose answer now holds both.

@@ -58,5 +58,5 @@ can be decided one by one:
   computer's address got its owner's cloud token), `host-out-of-reach`.
 - Secrets and records: `secrets-on-a-shared-host`, `records-on-a-shared-host`. The host's
   administrator can read both, and Silo says so.
-- Spend: `pooled-budget-on-a-host`, exact on one host.
+- Spend: `pooled-budget-ledger`, exact on one host.
 - Size: `team-host-size`, 128 GB, 16 cores and 4 TB for five.

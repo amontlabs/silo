@@ -557,7 +557,7 @@ one, `placeholder-not-a-key`. With that, Silo cannot tell which computer's place
 keep the shape programs read: Claude Code tells a key (`sk-ant-api03-…`) from a sign-in
 (`sk-ant-oat01-…`) by it, and Azure's tokens must be JWTs.
 
-## Where the drafts disagree, second pass (integration)
+## Where the drafts disagreed, second pass (integration)
 
 An agent's part, 25 November 2026, written while merging #390 and #392 to #396 onto #391 (`research/2026-11-25-integration-2/`).
 
@@ -586,3 +586,7 @@ at least 96 random bits. A JWT keeps its header and claims and gets a new signat
 decode Azure's tokens (#379). #395 wrote that Claude Code tells a key from a sign-in by its
 placeholder's shape. Claude Code 2.1.332 does not: it sends `x-api-key` for `ANTHROPIC_API_KEY` and
 `Authorization: Bearer` for `CLAUDE_CODE_OAUTH_TOKEN`, whatever the value looks like.
+
+## Settled in the consolidation (27 November 2026)
+
+Settled, 27 November 2026, in the consolidation: the answer keeps one placeholder per secret and per computer and the swap at the boundary whichever way requests reach it, as #395 and #417 found. It does not take #417's refusal of a placeholder sent elsewhere. A placeholder carries no secret, so sending it elsewhere harms nothing, and refusing a request is a precaution's to do, not the core's (polarzero's reading of 23 November in `denied-tool-call-mechanism`). The swap happens only for the computer the placeholder belongs to, which closes the case #395 found; a placeholder seen elsewhere is forwarded and recorded. A precaution may still deny it.

@@ -40,8 +40,12 @@ damage, and this entry's options apply. Under that rule every one of the 4,100 s
 it is sent off the Mac (`record-head-off-the-mac`), so that the lines after it are only the last
 minute's.
 
-## Where the drafts disagree, second pass (integration)
+## Where the drafts disagreed, second pass (integration)
 
 An agent's part, 25 November 2026, written while merging #390 and #392 to #396 onto #391 (`research/2026-11-25-integration-2/`).
 
 #386 recommends that the recorder keeps recording in a new segment when it finds damage at start. #394 found that a power cut leaves tails that look like damage, so that option alone would flag every power cut. Recommended: #386's option with #394's after-head rule, which tells a cut tail from damage.
+
+## Settled in the consolidation (27 November 2026)
+
+Settled, 27 November 2026, in the consolidation: the answer now has #394's after-head rule.

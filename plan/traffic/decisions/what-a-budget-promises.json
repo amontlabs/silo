@@ -1,6 +1,6 @@
 {
   "asks": "What does a budget on a computer or on a conversation promise at the moment it is reached?",
-  "answer": "Once a budget on a computer or on a conversation is reached, no further request it meters leaves; `budget-denies-or-holds` says what then happens to that request. The calls already under way finish, even past the budget, and none is cut midway. So what is spent can end over the budget by those calls at most. A call to a model Silo has no price for does not leave when a budget covers it, since the budget could not count it, and the agent program gets an error that says so.",
+  "answer": "Once a budget on a computer or on a conversation is reached, no further request it meters leaves; `budget-denies-or-holds` says what then happens to that request. A request leaves only if what is left covers its input and the model's typical output, which stays held until the call ends and is then settled at what the call cost. The calls already under way finish, even past the budget, and none is cut midway, since cutting a reply is not one of the changes `what-silo-changes-in-traffic` allows. So what is spent can end over the budget only by what those calls produce beyond their typical output. A call to a model Silo has no price for does not leave when a budget covers it, since the budget could not count it, and the agent program gets an error that says so.",
   "sets": [
     {
       "in": "traffic/properties",
