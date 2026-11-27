@@ -140,8 +140,8 @@ export const NO_MAP: MapLayout & PageLayout = { places: {}, zones: [], notes: []
  * Silo's map: your Mac, and inside it the virtual machines where the computers run. The app and the engine sit on the
  * left, the record, the opinions and the rules along the bottom, the boundary on the edge of the virtual machines, and
  * outside the Mac the hosts a computer reaches, the servers and clouds where computers also run, and your phone, a zone
- * like the Mac that shows what you see too. The wires follow a request out through the boundary to the internet, the calls to model providers that Model traffic and
- * spend reads on the way, the facts the boundary leaves in the record, what the record triggers back at the boundary,
+ * like the Mac that shows what you see too. The wires follow a request out through the boundary to the internet, the calls to model providers that Model traffic
+ * reads on the way, the facts the boundary leaves in the record, what the record triggers back at the boundary,
  * the record shown in the app, and your own terminal reaching a computer over
  * SSH. The boundary's channels are written under it. What rests on a proposal (the channels, SSH, servers and clouds,
  * the phone) is drawn as not decided until it is taken.
@@ -200,7 +200,7 @@ export const SILO_MAP: MapLayout = {
       rests: ['network-policy-by-the-user', 'first-seen-host', 'denied-attempts', 'what-was-sent-to-a-host'],
       fold: { d: 'M516 76H525M632 80H865', arrows: [[532, 76, 'r'], [872, 80, 'r']] },
     },
-    // The calls to a model provider leave the same way, and Model traffic and spend reads them.
+    // The calls to a model provider leave the same way, and Model traffic reads them.
     {
       of: 'traffic', d: 'M716 178H790V153M940 105H977', arrows: [[790, 146, 'u'], [984, 105, 'r']], label: [799, 168, 'calls'],
       rests: ['part:boundary', 'part:traffic', 'tool-calls-from-traffic'],
