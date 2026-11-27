@@ -124,6 +124,31 @@ net_sealed_build() {
   net_sealed_present
 }
 
+# #380's gvproxy for Silo: gvisor-tap-vsock's main of 25 November 2026 with net/gvproxy-silo.patch
+# (a copy of #380's research/2026-11-25-gvproxy-component/gvproxy-silo.patch: -no-gateway-api,
+# -no-host-loopback, -outbound-deny, -dns-upstream, -outbound-handoff, and -sealed and -closed
+# built from them). It does not apply to v0.9.0 (dns.go changed since), hence its own commit.
+NET_GVPROXY_SILO_COMMIT=197eea05a7b22da4c30c299b63fc93eddfaef893
+NET_GVPROXY_SILO="${KIT_WORK_ROOT:-$HOME/SiloKit}/bin/gvproxy-silo-${NET_GVPROXY_SILO_COMMIT:0:8}"
+
+net_silo_present() { [ -x "$NET_GVPROXY_SILO" ] && "$NET_GVPROXY_SILO" -help 2>&1 | grep -q -- -outbound-deny; }
+
+# net_silo_build: build gvproxy at NET_GVPROXY_SILO_COMMIT with net/gvproxy-silo.patch into
+# NET_GVPROXY_SILO, as net_sealed_build does. The caller asks kit_confirm first.
+net_silo_build() {
+  net_silo_present && return 0
+  local go src
+  go="$(net_go)" || return 1
+  src="${KIT_WORK_ROOT:-$HOME/SiloKit}/work/gvproxy-silo-src"
+  rm -rf "$src" && mkdir -p "$src" || return 1
+  git -C "$src" init -q && git -C "$src" fetch -q --depth 1 https://github.com/containers/gvisor-tap-vsock "$NET_GVPROXY_SILO_COMMIT" &&
+    git -C "$src" checkout -q FETCH_HEAD || { kit_log "could not fetch gvisor-tap-vsock at $NET_GVPROXY_SILO_COMMIT"; return 1; }
+  git -C "$src" apply "$KIT_ROOT/net/gvproxy-silo.patch" || { kit_log "#380's patch does not apply"; return 1; }
+  (cd "$src" && CGO_ENABLED=0 GOTOOLCHAIN=local GOFLAGS=-mod=readonly "$go" build -o "$NET_GVPROXY_SILO" ./cmd/gvproxy) >&2 || return 1
+  rm -rf "$src"
+  net_silo_present
+}
+
 # net_mac_norm MAC: lower case, two digits per byte, as gvproxy's DHCP server writes it.
 net_mac_norm() { python3 -c 'import sys; print(":".join("%02x" % int(x, 16) for x in sys.argv[1].split(":")))' "$1"; }
 
@@ -175,15 +200,19 @@ net_gvproxy_config() {
   } > "$d/gvproxy.yaml"
 }
 
-# net_gvproxy_start D [sealed|closed]: start gvproxy with D/gvproxy.yaml (Silo's build, with
-# -sealed or -closed, when one is given), wait for its API socket. Prints its pid.
+# net_gvproxy_start D [sealed|closed | silo FLAG...]: start gvproxy with D/gvproxy.yaml (Silo's
+# build with -sealed or -closed when one is given; with "silo", the same patch built by
+# net_silo_build and run with the flags that follow), wait for its API socket. Prints its pid.
 net_gvproxy_start() {
-  local d="$1" i=0 pid bin="$NET_GVPROXY" flag=""
-  case "${2:-}" in sealed|closed) bin="$NET_GVPROXY_SEALED"; flag="-$2" ;; esac
+  local d="$1" i=0 pid bin="$NET_GVPROXY" flags=""
+  case "${2:-}" in
+    sealed|closed) bin="$NET_GVPROXY_SEALED"; flags="-$2" ;;
+    silo) bin="$NET_GVPROXY_SILO"; shift 2; flags="$*" ;;
+  esac
   rm -f "$d/gv.sock" "$d/api.sock" "$d/ssh.sock" "$d/gvproxy.pid"
   [ "${#d}" -lt 90 ] || { kit_log "socket folder path is ${#d} bytes; a Unix socket path must stay under 104"; return 1; }
   # shellcheck disable=SC2086
-  "$bin" -config "$d/gvproxy.yaml" $flag > "$d/gvproxy.out" 2>&1 &
+  "$bin" -config "$d/gvproxy.yaml" $flags > "$d/gvproxy.out" 2>&1 &
   pid=$!
   echo "$pid" > "$d/gvproxy.run.pid"
   while [ ! -S "$d/api.sock" ] || [ ! -S "$d/gv.sock" ]; do

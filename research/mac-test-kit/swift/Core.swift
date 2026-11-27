@@ -535,6 +535,76 @@ func readLine(_ fd: Int32, limit: Int = 65536) throws -> String {
   return String(decoding: out, as: UTF8.self)
 }
 
+// MARK: - vsock bridges
+
+/// One `--vsock-in` or `--vsock-out` of `silovm run`: a vsock port of the computer and a Unix
+/// socket on the Mac. in: silovm listens on the Unix socket and opens the port inside for each
+/// connection (Silo's way in, as SSH over vsock). out: silovm listens on the port, for the
+/// computer, and connects the Unix socket for each connection (the way out, to Silo's proxy).
+struct VsockBridgeSpec: Equatable {
+  let port: UInt32
+  let path: String
+  let inward: Bool
+
+  static func parse(_ s: String, inward: Bool) throws -> VsockBridgeSpec {
+    let flag = inward ? "--vsock-in" : "--vsock-out"
+    guard let colon = s.firstIndex(of: ":") else { throw Fail("\(flag) takes PORT:SOCKETPATH, got \(s)") }
+    guard let port = UInt32(s[..<colon]), port > 0 else {
+      throw Fail("\(flag): the port must be a number above 0, got \(s[..<colon])")
+    }
+    let path = String(s[s.index(after: colon)...])
+    guard !path.isEmpty else { throw Fail("\(flag) \(port): no socket path") }
+    _ = try unixAddress(path)  // under 104 bytes
+    return VsockBridgeSpec(port: port, path: path, inward: inward)
+  }
+}
+
+/// Copies bytes both ways between two connected stream descriptors until both directions end,
+/// on two threads of their own; an end of one direction is passed on as a shutdown of the
+/// other side's writing. Closes both descriptors, then calls done with the bytes copied a to b
+/// and b to a.
+func splice(_ a: Int32, _ b: Int32, done: @escaping (UInt64, UInt64) -> Void) {
+  final class Counts: @unchecked Sendable {
+    let lock = NSLock()
+    var bytes: [UInt64] = [0, 0]
+  }
+  let group = DispatchGroup()
+  let counts = Counts()
+  func pump(_ from: Int32, _ to: Int32, _ slot: Int) {
+    group.enter()
+    let t = Thread {
+      var buf = [UInt8](repeating: 0, count: 65536)
+      var total: UInt64 = 0
+      outer: while true {
+        let n = buf.withUnsafeMutableBytes { read(from, $0.baseAddress, $0.count) }
+        if n < 0 && errno == EINTR { continue }
+        if n <= 0 { break }
+        var off = 0
+        while off < n {
+          let w = buf[off..<n].withUnsafeBytes { write(to, $0.baseAddress, $0.count) }
+          if w < 0 && errno == EINTR { continue }
+          if w <= 0 { break outer }
+          off += w
+        }
+        total += UInt64(n)
+      }
+      _ = shutdown(to, Int32(SHUT_WR))
+      _ = shutdown(from, Int32(SHUT_RD))
+      counts.lock.lock(); counts.bytes[slot] = total; counts.lock.unlock()
+      group.leave()
+    }
+    t.start()
+  }
+  pump(a, b, 0)
+  pump(b, a, 1)
+  group.notify(queue: .global()) {
+    close(a)
+    close(b)
+    counts.lock.lock(); let c = counts.bytes; counts.lock.unlock()
+    done(c[0], c[1])
+  }
+}
+
 // MARK: - The control socket
 
 /// ctl.sock of a running `silovm run`: one JSON line in, one JSON line out, then the connection

@@ -21,35 +21,62 @@
 decision main-on-macos-first
   asks: What is main in the first build: a macOS computer behind Silo's stack from its first start, a macOS computer on Apple's NAT first, or a Linux computer?
   source: plan, open; #373 weighs options A, B and C of the first build and recommends A, with B as the fallback if the Mac kit fails on provisioning or gvproxy
-  tests: 00 01 13 07 35
+  tests: 00 01 13 07 35 40 47
   option a-macos-boundary: A: macOS main, on Silo's network stack and behind the boundary from its first start (#373)
   option c-macos-nat: C: macOS main on Apple's NAT first, as #348 and #370 specify
   option b-linux: B: a Linux main on the Mac first, and macOS main later (#373)
+  option a-macos-deadend: A with #378's dead-end card: macOS main whose only card answers ARP for the router and drops the rest; its way out is a relay over vsock to Silo's proxy (#378, #380; listed last until the owner rules on the order)
   00 install-failed: b-linux
   01 both-fail: b-linux
   13 all-failed: b-linux
-  07 gvproxy-fails: c-macos-nat b-linux
-  35 sealed-breaks: c-macos-nat b-linux
+  07 gvproxy-fails: a-macos-deadend c-macos-nat b-linux
+  35 sealed-breaks: a-macos-deadend c-macos-nat b-linux
+  40 leaks: a-macos-boundary c-macos-nat b-linux
+  40 relay-fails: a-macos-boundary c-macos-nat b-linux
+  47 no-boot: a-macos-deadend a-macos-boundary c-macos-nat
 
 decision network-stack
   asks: What carries main's network in the first build?
   source: plan, open; #370 assumes Apple's NAT until a patched gvproxy passes test 07; #373 needs a stack from main's first start; #363 seals gvproxy with a 64-line patch, which #380 grows into Silo's gvproxy (-sealed, -closed)
-  tests: 07 35 36
+  tests: 07 35 36 40 41 42
   option sealed-gvproxy: Silo's gvproxy (#363's seal, grown in #380) with -sealed: nothing of the Mac, its loopback or its network is reached from inside, and -closed shuts every way out
   option configured-gvproxy: gvproxy as released, configured as research 04 says (API token, no map to the Mac's 127.0.0.1); the Mac's network stays reachable
   option nat-first: Apple's NAT until a stack passes; main's network has no boundary and reaches your network (#370)
   option own-stack: Silo's own stack, written before main runs
-  07 gvproxy-stalls: nat-first own-stack
-  07 gvproxy-fails: nat-first own-stack
-  07 hardening-fails: sealed-gvproxy nat-first own-stack
-  35 sealed-leaks: configured-gvproxy nat-first own-stack
-  35 sealed-breaks: configured-gvproxy nat-first own-stack
-  36 alters: nat-first own-stack
+  option silo-gvproxy: gvproxy with #380's patch (-sealed, -closed): no ping, no name looked up by the stack itself
+  option dead-end-card: no stack: #378's card answers ARP and drops everything; main's only way out is a relay over vsock to Silo's proxy, its way in SSH over vsock (#378 and #380 recommend it for the first build; listed last until the owner rules on the order)
+  07 gvproxy-stalls: dead-end-card nat-first own-stack
+  07 gvproxy-fails: dead-end-card nat-first own-stack
+  07 hardening-fails: dead-end-card silo-gvproxy sealed-gvproxy nat-first own-stack
+  35 sealed-leaks: dead-end-card silo-gvproxy configured-gvproxy nat-first own-stack
+  35 sealed-breaks: dead-end-card configured-gvproxy nat-first own-stack
+  36 alters: dead-end-card nat-first own-stack
+  40 leaks: silo-gvproxy sealed-gvproxy configured-gvproxy nat-first own-stack
+  40 relay-fails: silo-gvproxy sealed-gvproxy configured-gvproxy nat-first own-stack
+  41 silo-leaks: dead-end-card sealed-gvproxy configured-gvproxy nat-first own-stack
+  41 silo-breaks: dead-end-card sealed-gvproxy configured-gvproxy nat-first own-stack
+  41 fact sealed363_ping_mac=reached: dead-end-card silo-gvproxy configured-gvproxy nat-first own-stack
+  42 datagram-limits: dead-end-card nat-first own-stack
+
+decision network-place
+  asks: Where does each computer's network end, and what of the Mac can it reach?
+  source: plan, open: what test 40 shows of the dead-end card fills it in
+  tests: 40
+
+decision network-before-rules
+  asks: Is main's network closed before Silo's rules are in force?
+  source: #348, draft; #380 closes ping and the stack's own lookups in gvproxy
+  tests: 41
+
+decision ports-reached-from-your-mac
+  asks: How do you open a computer's port from your Mac, and what can that page reach?
+  source: plan, open; #384 measured a browser of Silo's own per computer on Linux
+  tests: 44
 
 decision mac-silo-needs
   asks: Which macOS must the Mac run for Silo?
   source: #348, open; #370 assumes macOS 27 or later for Apple's guest provisioning
-  tests: 00 01 10 13
+  tests: 00 01 10 13 47
   option macos-27: macOS 27 or later: Apple's guest provisioning sets main up with nobody at its screen
   option macos-26-too: macOS 26 too: main's first start is set up by a keystroke script, or by writing Apple's private formats onto its disk
   01 both-fail: macos-26-too
@@ -78,14 +105,31 @@ decision moving-in-on-macos
 decision first-run-time-macos
   asks: How long does the first run take with a macOS main?
   source: plan, open: measured, not chosen
-  tests: 00 13 14 23
+  tests: 00 13 14 23 43
+
+decision way-in-before-the-relay
+  asks: How does Silo reach main on its first start, before main's relay to the proxy is installed?
+  source: #382, draft: four ways, the first that test 43 leaves
+  tests: 43
+  option nat-first-start: main's first start on Apple's NAT, its card swapped for the dead-end card once provisioned
+  option gvproxy-first-start: main's first start behind gvproxy, which is then replaced by the dead-end card
+  option own-tcp-one-connection: a TCP stack of Silo's own that carries one connection, to the installer
+  option relay-by-provisioning: Apple's guest provisioning installs the relay itself, so main never needs a network
+  43 nat-first-start-fails: gvproxy-first-start own-tcp-one-connection relay-by-provisioning
+  43 fact gvproxy_first_start=fails: nat-first-start own-tcp-one-connection relay-by-provisioning
+  43 fact provisioning_can_run_program=no: nat-first-start gvproxy-first-start own-tcp-one-connection
+
+decision linux-vm-engine
+  asks: How does Silo run a Linux computer on the Mac: libkrun on Apple's Hypervisor framework, and what it costs there?
+  source: plan, open: measured; #381 measured it on Linux with KVM and left L1 to L8 to a Mac
+  tests: 47 48 49
 
 # --- The engine and its processes ----------------------------------------------------------------
 
 decision engine-saved-state
   asks: How does the engine save its own state on a Mac?
   source: plan, open; #370 follows #352 file 02, with #352 file 03 as the other option
-  tests: 06 31
+  tests: 06 31 45
   option log-and-two-places: a log and two state places, one F_FULLFSYNC per group of writes, a stop on any failed write (#352 file 02)
   option whole-save: a save of the whole state after each input, no log (#352 file 03)
   06 full-slow-reserve-needed: log-and-two-places
@@ -94,18 +138,20 @@ decision engine-saved-state
 decision space-the-engine-keeps
   asks: How does the engine keep room to write on a full volume?
   source: #348, open; #370 assumes a reserve file of 4 GiB and a floor of 20 GB until tests 06 and 33 and a full volume measure them
-  tests: 06 33 38
+  tests: 06 33 38 46 48
   option reserve-file: a reserve file the engine makes and frees when the volume fills, and a floor under which checkpoints stop
   option preallocate: the engine's own files preallocated, no reserve
   06 full-fast-reserve-needed: reserve-file
   06 full-slow-reserve-needed: reserve-file
   38 framework-stops: reserve-file
   38 guest-damaged: reserve-file
+  46 snapshot-holds-space: reserve-file
+  48 trim-ignored: reserve-file
 
 decision low-disk
   asks: What does Silo do when the disk runs low, given what a full volume does to a running computer?
   source: plan, open: its levels are measured
-  tests: 06 33 38
+  tests: 06 33 38 46
 
 decision events-until-the-recorder
   asks: How large is the engine's table of events waiting for the recorder?
@@ -141,7 +187,7 @@ decision neutral-core
 decision own-cost-targets
   asks: Against which idle reference and which flush are Silo's own costs set?
   source: plan, open: measured on polarzero's Mac
-  tests: 06 16 36
+  tests: 06 16 36 42
 
 decision silo-is-light
   asks: What does an idle macOS computer cost the Mac?
@@ -151,7 +197,14 @@ decision silo-is-light
 decision record-speed-cost
   asks: What does keeping the record cost in speed?
   source: plan, open: measured
-  tests: 06 16
+  tests: 06 16 45
+
+decision record-damaged-at-start
+  asks: When the recorder starts on a record whose end is damaged, does it keep recording or stop until you look?
+  source: #386, draft: how often damage other than an unfinished last line happens is what test 45 measures
+  tests: 45
+  option keep-recording: the recorder cuts the unfinished last line and goes on, noting the cut in the record
+  option stop-until-you-look: the recorder stops on any damage and waits for you
 
 # --- The way in ----------------------------------------------------------------------------------
 
@@ -180,6 +233,11 @@ decision fork-and-sign-in
   option leave-out-files: a fork leaves out the sign-ins agent programs keep in files, as written
   option says-copied: a login kept in main's keychain is copied into a fork, and Silo says so
   02 lasts-in-keychain: says-copied
+
+decision engine-matches-wanted
+  asks: Does the engine keep the computers you want running, with nobody logged in?
+  source: plan, open; test 49 asks it of option B's Linux main
+  tests: 49
 
 decision runs-outlive-the-terminal
   asks: Does a run started in a session that outlives its terminal keep working, signed in, through the night?
@@ -211,7 +269,7 @@ decision who-made-each-change
 decision checkpoint-per-system
   asks: How is a checkpoint of a running macOS main taken?
   source: plan, open; #370 assumes an APFS clone while main runs if test 04 holds, #365's delta behind NBD otherwise
-  tests: 03 04 15 31 32 33
+  tests: 03 04 15 31 32 33 48
   option clone-running: an APFS clone of the image and the auxiliary storage, taken while main runs
   option clone-paused: an APFS clone, with main paused for it
   option delta-nbd: #365's delta: main's disk served by Silo over NBD, each checkpoint the blocks it copied
@@ -226,6 +284,7 @@ decision checkpoint-per-system
   31 not-a-moment: clone-running clone-paused stopped-only
   32 checkpoint-broke: clone-running clone-paused stopped-only
   32 no-boot: clone-running clone-paused stopped-only
+  48 torn: clone-paused delta-nbd stopped-only
 
 decision checkpoint-at-each-turn
   asks: What does a checkpoint at each turn cost a macOS main?
@@ -240,7 +299,7 @@ decision thinning-checkpoints
 decision checkpoint-storage
   asks: How much disk do a macOS main's checkpoints keep, and what happens when the volume fills?
   source: plan, open
-  tests: 33 38
+  tests: 33 38 46
 
 decision restore-to-a-checkpoint
   asks: Does a macOS main restored from a checkpoint of a running disk boot clean?

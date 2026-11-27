@@ -61,6 +61,13 @@ silovm run --bundle BUNDLE [options]
                                           gives the attachment's sync mode none, otherwise full;
                                           --disk-cache does not apply. Prints "nbd" events
       --nbd-timeout N                     with --disk-nbd: seconds before the client reconnects (5)
+      --vsock-in PORT:PATH                a virtio socket device; each connection to the Unix socket
+                                          PATH (made by silovm) opens PORT inside the computer.
+                                          Repeatable. Tests 40 and 43 reach sshd this way
+      --vsock-out PORT:PATH               a virtio socket device; each connection the computer opens
+                                          to the Mac's PORT (CID 2) is carried to the Unix socket
+                                          PATH, which must be listening. Repeatable. Test 40's relay
+                                          to the stand-in proxy
       --max-seconds N                     force a stop after N seconds
       --continue-on-provisioning-error    start anyway when provisioning is refused
 silovm ctl --bundle BUNDLE COMMAND
@@ -80,6 +87,10 @@ silovm ip --bundle BUNDLE [--wait SECONDS]
 {"event":"state","value":"running"|"paused"|"stopping"|"error"}
 {"event":"nbd","state":"connected","connections":1,"t":..}         with --disk-nbd, each (re)connection
 {"event":"nbd","state":"error","domain":"VZErrorDomain","code":20002,"name":"networkBlockDeviceDisconnected",..}
+{"event":"vsock","state":"listening","dir":"in"|"out","port":22,"path":".."}   each --vsock-in and --vsock-out
+{"event":"vsock","state":"open","dir":"in"|"out","id":1,"port":22,"t":..}
+{"event":"vsock","state":"closed","dir":"in"|"out","id":1,"bytes_from_guest":..,"bytes_to_guest":..,"t":..}
+{"event":"vsock","state":"refused","dir":"in"|"out","port":22,..}       the port or the Unix socket did not answer
 {"event":"stopped","how":"guest"|"requested"|"forced"|"max-seconds"|"error","error":"..","t":..}
 ```
 

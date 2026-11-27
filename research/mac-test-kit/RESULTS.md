@@ -646,35 +646,183 @@ Inside a macOS computer, files compressed by APFS (decmpfs: zlib, LZVN, LZFSE, i
 | `reads-wrong` | A file read from outside differs from the guest's, a file the guest marks compressed was read as plain, or a plain file gave a gap: the reader's handling of that case is wrong (examples in the facts); nothing reads contents from outside until it is fixed. |
 | `inconclusive` | The computer did not start, its disk is not raw, its data volume is encrypted, or no compressed file was made; the sentence says which. |
 
-## 40. What Silo's own writers wait for on APFS: an acknowledgement with F_FULLFSYNC, F_BARRIERFSYNC or fsync
+## 40. A network card that leads nowhere, with Silo's relay and proxy over vsock (#378)
+
+With a network card whose other end on the Mac answers ARP for one router and drops every other frame, and a relay that carries 127.0.0.1:3128 inside to Silo's proxy over vsock and the Mac's SSH in over vsock: does SSH get in; which programs (curl, git, npm, Node's fetch, pip, Claude Code, Codex, Homebrew, xcodebuild) reach the internet through the proxy with the system proxy set, with the proxy variables, with both and with neither; does anything reach anything without it, root included (a route, another address, ping, a name server, the Mac's own address); and is a macOS computer "offline" when the router's ARP goes unanswered?
+
+- Decides: network-stack (#378's card as main's network, which #380 recommends for the first build), main-on-macos-first (option A without gvproxy), network-place (the frames the card drops)
+- **Blocks: option A of the first build on #378's card instead of gvproxy, which #380 and #382 recommend for main's first start: then test 07 no longer blocks it.**
+- Tier: `vm`. Step: needed for step 2 of the first build. Time: about an hour (a first start on Apple's NAT to put the relay in, then two starts on the card, 4 settings of 9 programs). Needs: the base computer of test 00, about 250 MB downloaded inside the computer on its first start (Node, Claude Code, Codex), the Mac on a network, no sudo on the Mac.
+- Script: [`tests/40-card-that-leads-nowhere.sh`](tests/40-card-that-leads-nowhere.sh)
+
+| Outcome | What it means |
+|---|---|
+| `closed-holds` | SSH came in over vsock, the proxy carried curl and at least one agent program, and nothing reached anything without the proxy: every attempt by root (a route, an address of its own, ping, a lookup at a public name server, the Mac's own address) ended at the card, which counted it. network-stack: #378's card can carry main's first build without gvproxy (#380's recommendation), and test 07 stops blocking option A. The facts say which programs need which proxy setting; a program that follows neither stays closed. |
+| `leaks` | Something reached a server without the proxy (named in the sentence): the card or the relay lets something through that #378 says it cannot; the card cannot carry main until that is found. |
+| `relay-fails` | SSH over vsock never answered, or nothing inside ever reached the proxy: the relay does not work in a macOS computer as built (AF_VSOCK, launchd or silovm's bridges); the sentence says which. #378's card cannot be main's network until it does. |
+| `inconclusive` | The computer did not start or did not take the relay on its first start on Apple's NAT; the sentence says why. |
+
+## 41. Ping and name lookups past gvproxy: as released, #363's patch and #380's
+
+On a Mac, with a macOS computer on gvproxy (as released and hardened, with #363's -sealed, with #380's -sealed and with #380's -closed), does root inside ping the Mac's own address, the Mac's router and the internet; does a TCP connection to a service on the Mac get through; and does a lookup of a random name leave through the Mac's resolver (watched with tcpdump on the Mac)? Does Silo's own SSH forward still get in under each?
+
+- Decides: network-stack (#380: #363's patch leaves ping open, and only #380's -sealed and -closed close it; a lookup is a way out unless -closed), network-before-rules (#348: never your Mac, your local network or cloud metadata)
+- Tier: `vm`. Step: needed for step 2 of the first build. Time: about 40 minutes (four starts of one computer), plus building #380's gvproxy once (Go 1.26, as test 35). Needs: the base computer of test 00, git (the Command Line Tools), Go 1.26.0 (downloaded, about 65 MB, unless installed), the Mac on a network; sudo with --allow-sudo only, to watch the Mac's name lookups with tcpdump (otherwise that half is not watched).
+- Script: [`tests/41-ping-and-names-past-gvproxy.sh`](tests/41-ping-and-names-past-gvproxy.sh)
+
+| Outcome | What it means |
+|---|---|
+| `silo-holds` | Under #380's -sealed, no ping and no connection reached the Mac or its router; under -closed, nothing at all left: no ping, no lookup (refused inside, and not seen on the Mac's network when watched); SSH came in under all four. network-stack: #380's patch closes on macOS what #363's leaves open; the facts say whether #363's still pings the Mac, as #380 found on Linux. |
+| `silo-leaks` | Under #380's -sealed or -closed, something reached the Mac, its router, or (under -closed) the internet or the Mac's resolver; the sentence names it. #380's patch misses a path on macOS. |
+| `silo-breaks` | #380's build gave no lease or no SSH forward where gvproxy as released did; the sentence says which setting. |
+| `inconclusive` | #380's gvproxy did not build, or the computer did not start on gvproxy as released. |
+
+## 42. Throughput over the datagram socket a Mac gives gvproxy, at MTU 1500 and the largest the framework takes
+
+Through gvproxy, which a Mac reaches only over a Unix datagram socket (one frame per datagram), how fast does a 512 MB download into the computer and a 256 MB upload out of it run, at MTU 1500, 9000 and the largest VZFileHandleNetworkDeviceAttachment takes, against the same over Apple's NAT? What are the Mac's datagram limits (net.local.dgram.maxdgram, recvspace)?
+
+- Decides: network-stack (#380: over a datagram socket, traffic into the computer was 0.28 to 0.90 Gbit/s at MTU 1500 against 1.05 to 1.13 over a stream socket, cause not found; Apple's framework gives only the datagram socket), own-cost-targets
+- Tier: `vm`. Step: needed for step 2 of the first build. Time: about 30 minutes (one computer started four times: Apple's NAT, then gvproxy at three MTUs). Needs: the base computer of test 00, a 27 MB download of gvproxy (test 07's), no sudo.
+- Script: [`tests/42-datagram-throughput.sh`](tests/42-datagram-throughput.sh)
+
+| Outcome | What it means |
+|---|---|
+| `fast-enough` | Into the computer through gvproxy at MTU 1500 is at least half of Apple's NAT: the datagram socket is not the limit for main; network-stack needs no MTU change for it. |
+| `needs-large-mtu` | At MTU 1500 into the computer is under half of Apple's NAT, and at a larger MTU it is at least half: silovm and gvproxy set that MTU from the first start (the fact mtu_max says the largest the framework took). |
+| `datagram-limits` | Into the computer stays under half of Apple's NAT at every MTU: the Mac's datagram transport is the limit, which #380 names as a case for a different stack; #378's card, which carries traffic over vsock, is not affected. |
+| `inconclusive` | The computer did not start on gvproxy or on Apple's NAT, or a transfer failed; the sentence says which. |
+
+## 43. How the first run reaches main before the relay is in it (#382)
+
+A provisioned computer turns on SSH on its network card, and a card that leads nowhere gives SSH no road until the relay is in. Does any option of Apple's guest provisioning run a program at the first start (then the relay could start with no road at all)? How long does #382's recommended way take (first start on Apple's NAT, relay in over SSH, a stop, a start on the card, SSH over vsock), and what can the computer reach meanwhile? Does the second way (gvproxy with nothing out, SSH in through its forward) do the same?
+
+- Decides: way-in-before-the-relay (#382's three ways for the first SSH, when main's card leads nowhere), first-run-time-macos (what the extra start costs)
+- Tier: `vm`. Step: needed for step 2 of the first build. Time: about 40 minutes (two first starts, each followed by a start on the card); 5 minutes more to download gvproxy if test 07 has not. Needs: the base computer of test 00, the Command Line Tools (the SDK's headers), the Mac on a network, a 27 MB download of gvproxy (test 07's) for the second way, no sudo on the Mac.
+- Script: [`tests/43-way-in-before-the-relay.sh`](tests/43-way-in-before-the-relay.sh)
+
+| Outcome | What it means |
+|---|---|
+| `nat-first-start-works` | The first start on Apple's NAT took the relay, and the start on the card answered SSH over vsock; the measures give what the extra start costs and the facts what the computer could reach during it. way-in-before-the-relay: #382's recommendation can be built as written; the fact gvproxy_first_start says whether the second way is a working alternative. |
+| `nat-first-start-fails` | The relay did not go in over Apple's NAT, or the computer did not come back over vsock after it did: the recommended way does not work as written; the sentence says where it stopped. |
+| `inconclusive` | The computer did not start or answer SSH on its first start; the sentence says why. |
+
+## 44. The browser Silo starts for a port preview, on a Mac: names, WebRTC, other computers, its own traffic
+
+#384 ran Chrome for Testing headless on Linux. On a Mac, in a headed, branded Google Chrome started with #384's flags (its own profile, a rule proxy per computer, WebRTC only through the proxy, no name looked up by the browser) and a page that tries every way out #384 measured, does any name carrying the page's secret reach the Mac's resolver, does the page reach another computer's preview, and what does a branded Chrome send by itself? Without --host-resolver-rules (the control), does the TURN server's name leak as #384 found?
+
+- Decides: ports-reached-from-your-mac (#384's set-up: a browser of Silo's own per computer, a rule proxy, --host-resolver-rules so the browser looks no name up itself)
+- Tier: `guided`. Step: after the first build. Time: about 5 minutes; you look at Chrome's window once. Needs: Google Chrome in /Applications (or KIT_44_CHROME), no VM; sudo with --allow-sudo only, to watch the Mac's name lookups with tcpdump (without it, the lookups half is not watched and the outcome is inconclusive).
+- Script: [`tests/44-preview-browser.sh`](tests/44-preview-browser.sh)
+
+| Outcome | What it means |
+|---|---|
+| `flags-hold` | With #384's flags no name carrying the secret was looked up on the Mac (watched with tcpdump) and no request reached the other computer's preview: ports-reached-from-your-mac can take #384's set-up on a Mac; the facts list what Chrome sent by itself. |
+| `flags-leak` | With #384's flags, a name carrying the secret reached the Mac's resolver, or the page reached the other computer's preview; the sentence names the way. The set-up needs another wall on a Mac. |
+| `inconclusive` | Chrome did not load the page, or the lookups were not watched (no --allow-sudo); the facts hold what was seen. |
+
+## 45. What a disk keeps of the record when its power is cut: F_FULLFSYNC against fsync
+
+A writer appends numbered lines with a CRC to a file on a USB disk, forcing each out (F_FULLFSYNC, or plain fsync) and noting each line it would call safe on the Mac's own disk. The disk loses power mid-write. Once it is back: is every line acknowledged before the cut there and whole? Is any line damaged with whole lines after it (damage in the middle, which #386's recorder must handle on start), or only an unfinished end?
+
+- Decides: record-damaged-at-start (#386: how often the recorder will start on a damaged line, other than an unfinished last one), record-speed-cost and engine-saved-state (whether F_FULLFSYNC, which test 06 prices, is what keeps an acknowledged line)
+- Tier: `guided`. Step: needed for step 5 of the first build. Time: about 10 minutes per way of forcing a write (two by default); you pull a USB disk's cable while the kit writes, then plug it back. Needs: an external USB disk you can lose the contents of a folder on (its own power from the cable, so pulling the cable cuts it), named in KIT_45_VOLUME or the only external volume mounted; you at the keyboard; no sudo, no VM.
+- Script: [`tests/45-record-power-cut.sh`](tests/45-record-power-cut.sh)
+
+| Outcome | What it means |
+|---|---|
+| `full-keeps-acked` | With F_FULLFSYNC every acknowledged line came back whole and damage, if any, was only after the last of them: the record's writer can acknowledge a line once F_FULLFSYNC returns; the facts say what plain fsync kept on the same disk. |
+| `full-loses-acked` | With F_FULLFSYNC, a line acknowledged before the cut is missing or damaged: this disk lies about its cache, and no writer on it can promise a line; Silo keeps the record on the Mac's internal disk only, and the facts say whether fsync did worse. |
+| `inconclusive` | No external volume, the cable was not pulled while lines were written, or the volume did not come back. |
+
+## 46. What deleting a checkpoint frees while a local Time Machine snapshot exists
+
+On the volume Silo keeps checkpoints on, a clone shares blocks with the file it came from and a write to it takes new ones. Without a local snapshot, does deleting the clone and its file give their space back at once? Once a local Time Machine snapshot exists, how much does the same deletion free, what private size and clone id does APFS report for the files, and how much comes back when the snapshot goes?
+
+- Decides: low-disk (#378: the level where Silo pauses computers must not count on space freed by removing checkpoints in the same minute), space-the-engine-keeps (a reserve the engine holds, since deleting may free nothing), checkpoint-storage (how Silo counts what a checkpoint holds)
+- Tier: `quick`. Step: needed for step 4 of the first build. Time: about 5 minutes. Needs: 3 GB free on the volume of ~/SiloKit, the Command Line Tools (./kit build), no VM; it makes one local Time Machine snapshot of that volume (after asking), which macOS removes within 24 hours, and with --allow-sudo the kit removes it at the end.
+- Script: [`tests/46-local-snapshots-and-free-space.sh`](tests/46-local-snapshots-and-free-space.sh)
+
+| Outcome | What it means |
+|---|---|
+| `snapshot-holds-space` | With a local snapshot, deleting the files freed under a quarter of what they took, as #378 says, and the space came back when the snapshot went (or the kit could not remove it; the facts say). low-disk: Silo never counts on space freed by deleting checkpoints while a local snapshot exists, and shows "frees once macOS removes its local snapshots"; space-the-engine-keeps: the reserve file is the defence that holds. |
+| `delete-frees` | Deleting freed at least three quarters of what the files took even with a local snapshot: #378's trap does not hold on this macOS; the facts give the private sizes APFS reported. |
+| `no-snapshot` | macOS made no local snapshot (Time Machine refused it without sudo, or is turned off by a profile); only the control ran. Rerun with --allow-sudo. |
+| `inconclusive` | The files could not be made, or free space moved too much for a reading (another program wrote meanwhile). |
+
+## 47. Option B's Linux main through libkrun on this Mac: boot, stop, memory given back, disk speed (#381 L1 to L3)
+
+On this Mac and its macOS, does libkrun on Apple's Hypervisor framework boot Ubuntu 26.04 to SSH over vsock with no network device, how long do the first and second boots take, is systemd "running"? Does libkrun's stop request (its shutdown eventfd, with the seed's HandleRebootKey=poweroff) power main off? After main touches and frees 4 GiB, how much does the Mac get back? How fast does main write to its disk, against the Mac's own?
+
+- Decides: main-on-macos-first (option B, a Linux main first, #381), linux-vm-engine (#381's measurements 1, 4 and 5 on a Mac), mac-silo-needs (which macOS option B needs)
+- Tier: `vm`. Step: needed for step 2 of the first build. Time: about 20 minutes, plus about 1 GB downloaded once (Ubuntu 26.04's arm64 cloud image, kernel and initrd). Needs: Homebrew's libkrun (brew tap slp/krun; brew install libkrun) and ./kit build after it, 8 GB free, no sudo, no macOS 27 (libkrun's floor is macOS 14, to confirm).
+- Script: [`tests/47-linux-main-on-hvf.sh`](tests/47-linux-main-on-hvf.sh)
+
+| Outcome | What it means |
+|---|---|
+| `boots-and-stops` | Main booted to SSH over vsock, systemd running, and libkrun's stop request powered it off: option B's first build runs on this macOS; the measures give its boot, the memory it gives back and its disk against the Mac's. |
+| `stop-ignored` | Main booted, but the stop request did not power it off within 60 s: the helper needs another way to stop main (a poweroff over SSH, then a kill), which #381's step 2 must say. |
+| `no-boot` | Main never answered SSH over vsock within 5 minutes: option B does not run on this Mac as specified; console.log says why. |
+| `inconclusive` | The image could not be prepared, or a measurement failed. |
+
+## 48. Option B's disk.raw on APFS: a clonefile while main writes, and discards (#381 L5, L8)
+
+Main writes numbered 4 KiB blocks, each flushed before the next. Does every clonefile of disk.raw taken meanwhile hold a prefix of them (every block up to some n and none after), read through #381's ext4 reader with the journal replayed? After main writes 1 GiB, deletes it and runs fstrim, how much of disk.raw's space comes back to the Mac?
+
+- Decides: linux-vm-engine (#381: a clone of a running main's disk as a checkpoint, under B), space-the-engine-keeps (whether a deleted file's space comes back to the Mac), main-on-macos-first (option B's checkpoints)
+- Tier: `vm`. Step: needed for step 4 of the first build. Time: about 15 minutes, after test 47's image. Needs: Homebrew's libkrun and ./kit build, the image test 47 prepares, 10 GB free, no sudo.
+- Script: [`tests/48-linux-disk-on-apfs.sh`](tests/48-linux-disk-on-apfs.sh)
+
+| Outcome | What it means |
+|---|---|
+| `moment-and-trim` | Every clone held a prefix, and at least 900 MiB came back after fstrim: under B, a checkpoint is a clonefile taken while main runs, and space follows main's deletions. |
+| `torn` | A clone held block n+1 without block n: under B a checkpoint needs a pause around the clone (#381's K07 question on APFS). |
+| `trim-ignored` | Every clone held a prefix, but under 900 MiB came back: libkrun on a Mac does not punch holes for discards, so the engine keeps a reserve and #381's step 4 says disk.raw only grows. |
+| `inconclusive` | Main did not boot (see test 47), or the reader failed. |
+
+## 49. Option B's main run by a launch daemon while you are logged out (#381 L7)
+
+When krun-boot runs main as a launch daemon in the system domain (as your user, with the hypervisor entitlement), does main start, and does it keep running, with its clock and its writes going on, while you log out and back in?
+
+- Decides: engine-matches-wanted (computers that keep running while you are logged out), linux-vm-engine (whether libkrun's hypervisor use is allowed outside your login session)
+- Tier: `guided`. Step: after the first build. Time: about 15 minutes; you log out for 3 minutes and log back in. Needs: Homebrew's libkrun and ./kit build, the image test 47 prepares, --allow-sudo (a launch daemon is installed and removed), you at the Mac.
+- Script: [`tests/49-linux-main-logged-out.sh`](tests/49-linux-main-logged-out.sh)
+
+| Outcome | What it means |
+|---|---|
+| `runs-logged-out` | Main started from launchd and wrote every 10 s while you were logged out: under B the engine can keep computers going with nobody logged in. |
+| `stops-at-logout` | Main started, but its writes stopped while you were logged out (or it was gone when you came back). |
+| `refused` | launchd could not start main (the hypervisor refused outside a login session, or the job failed); the facts say how. |
+| `inconclusive` | The logout was skipped, or main did not answer before it. |
+
+## 50. What Silo's own writers wait for on APFS: an acknowledgement with F_FULLFSYNC, F_BARRIERFSYNC or fsync
 
 On this Mac's APFS, what does the record's writer wait for before it acknowledges a line, when every flush is F_FULLFSYNC, when only the flush before an acknowledgement is (the rest F_BARRIERFSYNC), and with plain fsync (which keeps nothing through a power cut), alone and while another program writes; and what does a SQLite commit cost with fullfsync?
 
 - Decides: record-file-format (the flush before an acknowledgement), record-damaged-at-start (whether the barrier rule of research 2026-11-25-record-head-off-the-mac is worth it), what-a-budget-promises (the spend journal's two flushes per model call), pooled-budget-ledger (the team ledger's commit on a Mac), research 2026-11-25-durability-on-a-mac
 - Tier: `long`. Step: needed for step 1 of the first build. Time: about 15 minutes (18 runs of the record's writer and 4 of SQLite, quiet and while another program writes). Needs: 2 GB free, no VM, no sudo; Zig 0.15.2 and the writer's source, as test 31 (both asked first).
-- Script: [`tests/40-writers-flush-cost.sh`](tests/40-writers-flush-cost.sh)
+- Script: [`tests/50-writers-flush-cost.sh`](tests/50-writers-flush-cost.sh)
 
 | Outcome | What it means |
 |---|---|
 | `full-affordable` | With every flush F_FULLFSYNC, an acknowledgement waits 50 ms or less at the 99th percentile even while another program writes, new blobs included: Silo's writers flush that way everywhere, the spend journal's two flushes per model call cost nothing a person sees, and no barrier rule is needed. |
-| `barrier-for-blobs` | Each acknowledgement alone is 50 ms or less, but a line with a new blob passes it with every flush F_FULLFSYNC and not with the barrier rule: the writer keeps F_FULLFSYNC before each acknowledgement and F_BARRIERFSYNC for blobs and folders, as #394's mac-barrier model, and test 41 must show the barrier holds. |
+| `barrier-for-blobs` | Each acknowledgement alone is 50 ms or less, but a line with a new blob passes it with every flush F_FULLFSYNC and not with the barrier rule: the writer keeps F_FULLFSYNC before each acknowledgement and F_BARRIERFSYNC for blobs and folders, as #394's mac-barrier model, and test 51 must show the barrier holds. |
 | `group-lines` | An acknowledgement with F_FULLFSYNC passes 50 ms while another program writes, and grouping 16 lines per flush brings the rate back over 1,000 lines a second: the writer groups what arrives while a flush runs (one flush acknowledges them all), as the recorder's batch already does. |
 | `too-slow` | Even grouped by 16, F_FULLFSYNC leaves the writer under 1,000 lines a second while another program writes: the record's flush needs another design (a longer batch, or acknowledging after the flush is only issued) before the first build relies on it. |
 | `inconclusive` | The writer did not build or a run failed; look at the attached logs. |
 
-## 41. A power cut under the record's writer: a macOS computer on a disk that loses its cache
+## 51. A power cut under the record's writer: a macOS computer on a disk that loses its cache
 
 When a macOS computer loses power while the record's writer runs, with its disk served by a stand-in drive that keeps writes in a cache until a flush and loses part of that cache in the cut, does every line the writer acknowledged survive and the record start again, with every flush F_FULLFSYNC, with the barrier rule, and with plain fsync?
 
 - Decides: record-file-format (the flush before an acknowledgement), record-damaged-at-start (the after-head start rule), research 2026-11-25-durability-on-a-mac, research 2026-11-25-record-head-off-the-mac
 - Tier: `vm`. Step: needed for step 1 of the first build. Time: about 40 minutes (seven starts of a computer). Needs: the base computer of test 00 (raw disk), 40 GB free, no sudo; Zig 0.15.2 and the writer's source, as test 31 (both asked first).
-- Script: [`tests/41-power-cut-through-the-disk.sh`](tests/41-power-cut-through-the-disk.sh)
+- Script: [`tests/51-power-cut-through-the-disk.sh`](tests/51-power-cut-through-the-disk.sh)
 
 | Outcome | What it means |
 |---|---|
-| `full-holds-fsync-loses` | With F_FULLFSYNC, and with the barrier rule, every acknowledged line survived every cut and the record started; with plain fsync some did not: the writer's flushes are right on APFS, and the barrier rule may be used where test 40 says it saves time. |
+| `full-holds-fsync-loses` | With F_FULLFSYNC, and with the barrier rule, every acknowledged line survived every cut and the record started; with plain fsync some did not: the writer's flushes are right on APFS, and the barrier rule may be used where test 50 says it saves time. |
 | `barrier-loses` | F_FULLFSYNC kept every acknowledged line, the barrier rule did not: F_BARRIERFSYNC does not order the writes the rule needs through this disk; the writer uses F_FULLFSYNC for every flush. |
-| `fsync-holds` | Even plain fsync kept every acknowledged line: the computer's disk path flushed on its own (the flush counts are in the facts), so this stand-in cannot tell the flushes apart; trust #394's models and test 40 instead. |
+| `fsync-holds` | Even plain fsync kept every acknowledged line: the computer's disk path flushed on its own (the flush counts are in the facts), so this stand-in cannot tell the flushes apart; trust #394's models and test 50 instead. |
 | `full-loses` | An acknowledged line was lost even with every flush F_FULLFSYNC: F_FULLFSYNC does not reach the disk through this path, or the writer is wrong; nothing relies on the record's durability on a Mac until the cause is found (the runs are attached). |
 | `no-start` | The computer did not start again after a cut: APFS itself did not survive this stand-in's power cut, which says more about the stand-in than about the writer; look at the attached logs. |
 | `inconclusive` | The computer did not start from the served disk or the writer did not run; read the facts. |

@@ -49,6 +49,47 @@ func selftest() throws {
   let parsed = try JSONSerialization.jsonObject(with: Data(encodeJSON(.obj([("s", .s("é\u{1}\\"))])).utf8)) as? [String: Any]
   check((parsed?["s"] as? String) == "é\u{1}\\", "JSON round trip")
 
+  // vsock bridges
+  let vin = try VsockBridgeSpec.parse("22:/tmp/ssh.sock", inward: true)
+  check(vin == VsockBridgeSpec(port: 22, path: "/tmp/ssh.sock", inward: true), "--vsock-in PORT:PATH")
+  for bad in ["22", "0:/x", "x:/x", "22:", String(repeating: "a", count: 120)] {
+    threw = false
+    do { _ = try VsockBridgeSpec.parse(bad, inward: false) } catch { threw = true }
+    check(threw, "--vsock-out \(bad.prefix(12)) is refused")
+  }
+  // splice: two socket pairs joined, bytes both ways and the ends passed on.
+  var p1: [Int32] = [0, 0], p2: [Int32] = [0, 0]
+  check(socketpair(AF_UNIX, sockStream, 0, &p1) == 0 && socketpair(AF_UNIX, sockStream, 0, &p2) == 0, "socketpair")
+  let finished = DispatchSemaphore(value: 0)
+  var copied: (UInt64, UInt64) = (0, 0)
+  splice(p1[1], p2[0]) { ab, ba in copied = (ab, ba); finished.signal() }
+  let big = [UInt8](repeating: 7, count: 300_000)
+  let w0 = p1[0]
+  let writer = Thread {
+    var off = 0
+    while off < big.count {
+      let n = big[off...].withUnsafeBytes { write(w0, $0.baseAddress, $0.count) }
+      if n <= 0 { break }
+      off += n
+    }
+    _ = shutdown(w0, Int32(SHUT_WR))
+  }
+  writer.start()
+  var got = 0
+  var buf = [UInt8](repeating: 0, count: 65536)
+  while true {
+    let n = buf.withUnsafeMutableBytes { read(p2[1], $0.baseAddress, $0.count) }
+    if n <= 0 { break }
+    got += n
+  }
+  check(got == big.count, "splice carried \(got) of \(big.count) bytes and passed the end on")
+  try writeAll(p2[1], "back\n")
+  _ = shutdown(p2[1], Int32(SHUT_WR))
+  check(try readLine(p1[0]) == "back", "splice carries the other way after one way ended")
+  check(finished.wait(timeout: .now() + 5) == .success, "splice ends when both ways end")
+  check(copied == (UInt64(big.count), 5), "splice counts \(copied)")
+  close(p1[0]); close(p2[1])
+
   // MAC addresses and leases
   check(normaliseMAC("1,a:b:c:d:e:f") == "0a:0b:0c:0d:0e:0f", "lease MAC without zeros")
   check(normaliseMAC("1A:2b:03:04:5:60") == "1a:2b:03:04:05:60", "mixed MAC")

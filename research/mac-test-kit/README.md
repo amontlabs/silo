@@ -8,7 +8,11 @@ outcome, and [RESULTS.md](RESULTS.md) says what each outcome means for which dec
 and what each outcome leaves possible, so a run ends on one verdict per decision.
 
 The tests follow the first build's steps (#370): each says which step it serves, and the ones that
-block a step (#373) run first.
+block a step (#373) run first. Tests 40 to 49 ask what the drafts of 25 November left for a Mac:
+the dead-end card and its relay over vsock (#378), gvproxy with #380's patch and datagram throughput
+(#380), the way in before the relay (#382), the preview browser's flags (#384), a power cut under
+the record's writer (#386), option B's Linux main on libkrun (#381), and free space with Time
+Machine's local snapshots (#389).
 
 Nothing here has run on a Mac yet. Every part ran on Linux against fakes and Linux analogues
 (`./kit selftest`), so expect a first-run fix or two, most likely in the VM helper's Swift.
@@ -36,10 +40,10 @@ cd research/mac-test-kit
 ./kit run blocking       # 00, then 07 21 35: what blocks option A of the first build (#373)
 ./kit run step2          # every test of one step of the first build (#370): step1 to step6, steplater
 ./kit run all            # everything, in the kit's order
-./kit run quick          # 03 05 06 20: about 40 minutes, no VM, no sudo, no download
+./kit run quick          # 03 05 06 20 46: about 40 minutes, no VM, no sudo, no download
 ./kit run 00             # downloads macOS 27 (about 18 GB) and installs the base computer: about an hour
-./kit run vm             # 01 04 07 10 11 14 21 23 24 26 27 32 33 35 36 38 39 51: about 11 hours, unattended after the first questions
-./kit run guided         # 02 08 09 19 22 28 29 30 37: you at the keyboard for sign-ins, app checks and a sleep
+./kit run vm             # 01 04 07 10 11 14 21 23 24 26 27 32 33 35 36 38 39 40 41 42 43 47 48 51: hours, unattended after the first questions
+./kit run guided         # 02 08 09 19 22 28 29 30 37 44 45 49: you at the keyboard for sign-ins, app checks and a sleep
 ./kit run long           # 12 13 15 16 17 18 25 31 34 50: hours; 16 and 34 are meant for a night; 31, 50 and 51 download Zig (51 MB)
 ./kit verdicts           # one verdict per open decision, from every run so far (the newest outcome of each test)
 ./kit pack               # one .tar.gz of the last run, to hand back to an agent
@@ -53,12 +57,12 @@ order.
 | Step of the first build | Tests |
 |---|---|
 | 1. The engine (#370) | 06 20 |
-| 2. Main runs (#370) | 00 01 02 04 07 08 09 10 11 12 13 14 21 35 36 |
+| 2. Main runs (#370) | 00 01 02 04 07 08 09 10 11 12 13 14 21 35 36 40 41 42 43 47 |
 | 3. A night (#370) | 16 37 |
-| 4. The way back (#370) | 03 15 17 31 32 33 38 |
-| 5. The record, and the morning (#370) | 05 18 19 39 |
+| 4. The way back (#370) | 03 15 17 31 32 33 38 46 48 |
+| 5. The record, and the morning (#370) | 05 18 19 39 45 |
 | 6. The boundary for model traffic (#373) | 34 |
-| Later | 22 to 30 |
+| Later | 22 to 30, 44 49 |
 
 A test asks before anything that downloads, starts a computer or takes more than 10 minutes.
 `--yes` answers those questions in advance, so `./kit run --yes vm` runs on its own.
@@ -73,7 +77,7 @@ Everything goes under `~/SiloKit`, which `./kit clean --all` deletes: the macOS 
 installed computer, the clones each test makes and deletes, the results, the kit's own SSH key.
 The computers are reached with that key and never through `~/.ssh`.
 
-Eleven tests touch something else, and each asks first and undoes it when it ends (or at
+Twenty tests touch something else, and each asks first and undoes it when it ends (or at
 `./kit clean`):
 
 - **03** attaches an ASIF disk image for the length of the test. If the device is not yours, it
@@ -102,6 +106,19 @@ Eleven tests touch something else, and each asks first and undoes it when it end
   and fills it. Your own volume is never filled.
 - **30** hands your iPhone's USB connection to a computer while it runs; it comes back to the Mac
   when the computer stops.
+- **40** and **43** install launch daemons inside the test computer only (the relays over vsock);
+  40 runs a stand-in proxy on a socket under `~/SiloKit` for the length of the test.
+- **41** builds gvproxy with #380's patch (`net/gvproxy-silo.patch`) as 35 builds #363's, and with
+  `--allow-sudo` watches the Mac's name lookups with `tcpdump`.
+- **42** runs a small server on `127.0.0.1` that the computer sends to through gvproxy.
+- **44** starts Google Chrome with a profile of its own under `~/SiloKit` (deleted at the end), and
+  with `--allow-sudo` watches the Mac's name lookups with `tcpdump`.
+- **45** writes into a folder on an external USB disk, and asks you to pull its cable twice.
+- **46** takes one Time Machine local snapshot (`tmutil localsnapshot`) and deletes it.
+- **47** to **49** need Homebrew's libkrun, which you install (`brew tap slp/krun; brew install
+  libkrun`); they download Ubuntu 26.04's arm64 cloud image, kernel and initrd (about 1 GB, checked
+  against Ubuntu's SHA256SUMS) into `~/SiloKit/linuxmain`. **49**, with `--allow-sudo`, installs a
+  launch daemon for the length of the test and asks you to log out and back in.
 
 `sudo` is used on the Mac only with `--allow-sudo`, and each use says why first. Tests that need
 root inside a computer use `sudo` there, never on the Mac. Nothing restarts your Mac; when a test needs
@@ -137,9 +154,10 @@ read every result against RESULTS.md.
 | `tests/NN-*.sh` | One test each. Its header gives its question, tier, time, needs, what it decides, and its outcomes with their meaning; `./kit doc` writes RESULTS.md from those headers |
 | `lib/` | Helpers the tests share: results (`common.sh`), computers (`vm.sh`, `first-start.sh`, `guest.sh`), gvproxy (`net.sh`), Xcode and simulators (`ios.sh`), the checkpoint engine prototype and its NBD server (`ckpt.sh`, `nbd.sh`), the build (`build.sh`) |
 | `swift/` | `silovm`, the VM helper on Apple's Virtualization framework. Its commands are in [swift/README.md](swift/README.md) |
-| `c/` | Probes built by `./kit build`: clone and fsync benchmarks, block maps, socket peers, an SSH proxy, a sleep meter (`powerwatch`) |
-| `py/` | Analysis, the stand-in servers, and a read-only APFS reader in `py/apfs/` (`apfscontent.py` reads files' contents, compressed ones included) |
-| `net/` | #380's patch to gvproxy (-sealed, -closed), which test 35 builds |
+| `c/` | Probes built by `./kit build`: clone and fsync benchmarks, block maps, socket peers, an SSH proxy, a sleep meter (`powerwatch`), a relay over vsock (`vsockrelay`), clone attributes (`cloneattrs`), a writer for power cuts (`plugwriter`) |
+| `py/` | Analysis, the stand-in servers and proxy (`kitproxy.py`), #378's dead-end card (`deadend.py`), a read-only APFS reader in `py/apfs/` (`apfscontent.py` reads files' contents, compressed ones included), and #381's image and ext4 readers in `py/linuxmain/` |
+| `net/` | #380's patch to gvproxy (-sealed, -closed), which tests 35 and 41 build |
+| `krun/` | `krun-boot`, #381's libkrun launcher with `--initrd` and a stop request, built by `./kit build` when Homebrew's libkrun is installed (tests 47 to 49) |
 | `guest/` | Scripts copied into a test computer (perl and sh: macOS has no python3 until the Command Line Tools are installed there) |
 | `linux/` | `./kit selftest` and the fakes and Linux analogues it runs |
 
@@ -148,7 +166,7 @@ To add a test, copy the header of an existing one, give it a step, end it with o
 
 ## What the Linux runs already show
 
-The analogues cannot answer a Mac question, but three of them found something the Mac runs should
+The analogues cannot answer a Mac question, but four of them found something the Mac runs should
 confirm:
 
 - **A restart of gvproxy kills a computer's network for good when its link goes straight to
@@ -169,4 +187,6 @@ confirm:
   carries a checksum, and only zlib's catches it. A reader of main's disk from outside therefore
   checks what it reads against something (the size, or a hash Silo keeps), never only that it
   decoded. Test 39 compares every compressed file it reads against the computer's own hash.
-
+- **Without `--host-resolver-rules`, the preview browser looks up the TURN server's name itself**,
+  carrying the page's secret past the rule proxy, as #384 found; with #384's flags nothing was looked
+  up. Test 44 asks the same of a headed Google Chrome on the Mac.

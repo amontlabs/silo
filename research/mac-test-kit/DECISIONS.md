@@ -10,28 +10,32 @@ test leaves possible (`./kit verdicts`). Written by `./kit doc` from
 What is main in the first build: a macOS computer behind Silo's stack from its first start, a macOS computer on Apple's NAT first, or a Linux computer?
 
 - Source: plan, open; #373 weighs options A, B and C of the first build and recommends A, with B as the fallback if the Mac kit fails on provisioning or gvproxy
-- Tests: 00 (Download macOS and install the base computer), 01 (Provisioning with the Mac's own login name), 13 (Ten fresh computers, and one with a new identity), 07 (gvproxy with a macOS computer, against Apple's NAT), 35 (Silo's gvproxy (#363's seal, grown in #380) with a macOS computer: what root inside reaches, sealed and closed)
+- Tests: 00 (Download macOS and install the base computer), 01 (Provisioning with the Mac's own login name), 13 (Ten fresh computers, and one with a new identity), 07 (gvproxy with a macOS computer, against Apple's NAT), 35 (Silo's gvproxy (#363's seal, grown in #380) with a macOS computer: what root inside reaches, sealed and closed), 40 (A network card that leads nowhere, with Silo's relay and proxy over vsock (#378)), 47 (Option B's Linux main through libkrun on this Mac: boot, stop, memory given back, disk speed (#381 L1 to L3))
 
 | Option | Means |
 |---|---|
 | `a-macos-boundary` | A: macOS main, on Silo's network stack and behind the boundary from its first start (#373) |
 | `c-macos-nat` | C: macOS main on Apple's NAT first, as #348 and #370 specify |
 | `b-linux` | B: a Linux main on the Mac first, and macOS main later (#373) |
+| `a-macos-deadend` | A with #378's dead-end card: macOS main whose only card answers ARP for the router and drops the rest; its way out is a relay over vsock to Silo's proxy (#378, #380; listed last until the owner rules on the order) |
 
 | Test and outcome | Leaves possible |
 |---|---|
 | 00 `install-failed` | `b-linux` |
 | 01 `both-fail` | `b-linux` |
 | 13 `all-failed` | `b-linux` |
-| 07 `gvproxy-fails` | `c-macos-nat`, `b-linux` |
-| 35 `sealed-breaks` | `c-macos-nat`, `b-linux` |
+| 07 `gvproxy-fails` | `a-macos-deadend`, `c-macos-nat`, `b-linux` |
+| 35 `sealed-breaks` | `a-macos-deadend`, `c-macos-nat`, `b-linux` |
+| 40 `leaks` | `a-macos-boundary`, `c-macos-nat`, `b-linux` |
+| 40 `relay-fails` | `a-macos-boundary`, `c-macos-nat`, `b-linux` |
+| 47 `no-boot` | `a-macos-deadend`, `a-macos-boundary`, `c-macos-nat` |
 
 ## `network-stack`
 
 What carries main's network in the first build?
 
 - Source: plan, open; #370 assumes Apple's NAT until a patched gvproxy passes test 07; #373 needs a stack from main's first start; #363 seals gvproxy with a 64-line patch, which #380 grows into Silo's gvproxy (-sealed, -closed)
-- Tests: 07 (gvproxy with a macOS computer, against Apple's NAT), 35 (Silo's gvproxy (#363's seal, grown in #380) with a macOS computer: what root inside reaches, sealed and closed), 36 (What a computer's connections meet on gvproxy and on Apple's NAT, and a restart of the stack)
+- Tests: 07 (gvproxy with a macOS computer, against Apple's NAT), 35 (Silo's gvproxy (#363's seal, grown in #380) with a macOS computer: what root inside reaches, sealed and closed), 36 (What a computer's connections meet on gvproxy and on Apple's NAT, and a restart of the stack), 40 (A network card that leads nowhere, with Silo's relay and proxy over vsock (#378)), 41 (Ping and name lookups past gvproxy: as released, #363's patch and #380's), 42 (Throughput over the datagram socket a Mac gives gvproxy, at MTU 1500 and the largest the framework takes)
 
 | Option | Means |
 |---|---|
@@ -39,22 +43,57 @@ What carries main's network in the first build?
 | `configured-gvproxy` | gvproxy as released, configured as research 04 says (API token, no map to the Mac's 127.0.0.1); the Mac's network stays reachable |
 | `nat-first` | Apple's NAT until a stack passes; main's network has no boundary and reaches your network (#370) |
 | `own-stack` | Silo's own stack, written before main runs |
+| `silo-gvproxy` | gvproxy with #380's patch (-sealed, -closed): no ping, no name looked up by the stack itself |
+| `dead-end-card` | no stack: #378's card answers ARP and drops everything; main's only way out is a relay over vsock to Silo's proxy, its way in SSH over vsock (#378 and #380 recommend it for the first build; listed last until the owner rules on the order) |
 
 | Test and outcome | Leaves possible |
 |---|---|
-| 07 `gvproxy-stalls` | `nat-first`, `own-stack` |
-| 07 `gvproxy-fails` | `nat-first`, `own-stack` |
-| 07 `hardening-fails` | `sealed-gvproxy`, `nat-first`, `own-stack` |
-| 35 `sealed-leaks` | `configured-gvproxy`, `nat-first`, `own-stack` |
-| 35 `sealed-breaks` | `configured-gvproxy`, `nat-first`, `own-stack` |
-| 36 `alters` | `nat-first`, `own-stack` |
+| 07 `gvproxy-stalls` | `dead-end-card`, `nat-first`, `own-stack` |
+| 07 `gvproxy-fails` | `dead-end-card`, `nat-first`, `own-stack` |
+| 07 `hardening-fails` | `dead-end-card`, `silo-gvproxy`, `sealed-gvproxy`, `nat-first`, `own-stack` |
+| 35 `sealed-leaks` | `dead-end-card`, `silo-gvproxy`, `configured-gvproxy`, `nat-first`, `own-stack` |
+| 35 `sealed-breaks` | `dead-end-card`, `configured-gvproxy`, `nat-first`, `own-stack` |
+| 36 `alters` | `dead-end-card`, `nat-first`, `own-stack` |
+| 40 `leaks` | `silo-gvproxy`, `sealed-gvproxy`, `configured-gvproxy`, `nat-first`, `own-stack` |
+| 40 `relay-fails` | `silo-gvproxy`, `sealed-gvproxy`, `configured-gvproxy`, `nat-first`, `own-stack` |
+| 41 `silo-leaks` | `dead-end-card`, `sealed-gvproxy`, `configured-gvproxy`, `nat-first`, `own-stack` |
+| 41 `silo-breaks` | `dead-end-card`, `sealed-gvproxy`, `configured-gvproxy`, `nat-first`, `own-stack` |
+| 41 `fact sealed363_ping_mac=reached` | `dead-end-card`, `silo-gvproxy`, `configured-gvproxy`, `nat-first`, `own-stack` |
+| 42 `datagram-limits` | `dead-end-card`, `nat-first`, `own-stack` |
+
+## `network-place`
+
+Where does each computer's network end, and what of the Mac can it reach?
+
+- Source: plan, open: what test 40 shows of the dead-end card fills it in
+- Tests: 40 (A network card that leads nowhere, with Silo's relay and proxy over vsock (#378))
+
+Measured, not chosen: the verdict is the measures of the tests above.
+
+## `network-before-rules`
+
+Is main's network closed before Silo's rules are in force?
+
+- Source: #348, draft; #380 closes ping and the stack's own lookups in gvproxy
+- Tests: 41 (Ping and name lookups past gvproxy: as released, #363's patch and #380's)
+
+Measured, not chosen: the verdict is the measures of the tests above.
+
+## `ports-reached-from-your-mac`
+
+How do you open a computer's port from your Mac, and what can that page reach?
+
+- Source: plan, open; #384 measured a browser of Silo's own per computer on Linux
+- Tests: 44 (The browser Silo starts for a port preview, on a Mac: names, WebRTC, other computers, its own traffic)
+
+Measured, not chosen: the verdict is the measures of the tests above.
 
 ## `mac-silo-needs`
 
 Which macOS must the Mac run for Silo?
 
 - Source: #348, open; #370 assumes macOS 27 or later for Apple's guest provisioning
-- Tests: 00 (Download macOS and install the base computer), 01 (Provisioning with the Mac's own login name), 10 (A first start cut off after 20 seconds), 13 (Ten fresh computers, and one with a new identity)
+- Tests: 00 (Download macOS and install the base computer), 01 (Provisioning with the Mac's own login name), 10 (A first start cut off after 20 seconds), 13 (Ten fresh computers, and one with a new identity), 47 (Option B's Linux main through libkrun on this Mac: boot, stop, memory given back, disk speed (#381 L1 to L3))
 
 | Option | Means |
 |---|---|
@@ -67,7 +106,7 @@ Which macOS must the Mac run for Silo?
 | 13 `all-failed` | `macos-26-too` |
 | 10 `not-provisioned` | `macos-27`, `macos-26-too` |
 
-Tests 00 give evidence (their numbers and facts) and rule out no option.
+Tests 00, 47 give evidence (their numbers and facts) and rule out no option.
 
 ## `computer-image`
 
@@ -111,7 +150,36 @@ Does main's user have your own login name and home path?
 How long does the first run take with a macOS main?
 
 - Source: plan, open: measured, not chosen
-- Tests: 00 (Download macOS and install the base computer), 13 (Ten fresh computers, and one with a new identity), 14 (What provisioning leaves in a new computer), 23 (Xcode copied in from the Mac, and the iOS runtime downloaded in the computer)
+- Tests: 00 (Download macOS and install the base computer), 13 (Ten fresh computers, and one with a new identity), 14 (What provisioning leaves in a new computer), 23 (Xcode copied in from the Mac, and the iOS runtime downloaded in the computer), 43 (How the first run reaches main before the relay is in it (#382))
+
+Measured, not chosen: the verdict is the measures of the tests above.
+
+## `way-in-before-the-relay`
+
+How does Silo reach main on its first start, before main's relay to the proxy is installed?
+
+- Source: #382, draft: four ways, the first that test 43 leaves
+- Tests: 43 (How the first run reaches main before the relay is in it (#382))
+
+| Option | Means |
+|---|---|
+| `nat-first-start` | main's first start on Apple's NAT, its card swapped for the dead-end card once provisioned |
+| `gvproxy-first-start` | main's first start behind gvproxy, which is then replaced by the dead-end card |
+| `own-tcp-one-connection` | a TCP stack of Silo's own that carries one connection, to the installer |
+| `relay-by-provisioning` | Apple's guest provisioning installs the relay itself, so main never needs a network |
+
+| Test and outcome | Leaves possible |
+|---|---|
+| 43 `nat-first-start-fails` | `gvproxy-first-start`, `own-tcp-one-connection`, `relay-by-provisioning` |
+| 43 `fact gvproxy_first_start=fails` | `nat-first-start`, `own-tcp-one-connection`, `relay-by-provisioning` |
+| 43 `fact provisioning_can_run_program=no` | `nat-first-start`, `gvproxy-first-start`, `own-tcp-one-connection` |
+
+## `linux-vm-engine`
+
+How does Silo run a Linux computer on the Mac: libkrun on Apple's Hypervisor framework, and what it costs there?
+
+- Source: plan, open: measured; #381 measured it on Linux with KVM and left L1 to L8 to a Mac
+- Tests: 47 (Option B's Linux main through libkrun on this Mac: boot, stop, memory given back, disk speed (#381 L1 to L3)), 48 (Option B's disk.raw on APFS: a clonefile while main writes, and discards (#381 L5, L8)), 49 (Option B's main run by a launch daemon while you are logged out (#381 L7))
 
 Measured, not chosen: the verdict is the measures of the tests above.
 
@@ -120,7 +188,7 @@ Measured, not chosen: the verdict is the measures of the tests above.
 How does the engine save its own state on a Mac?
 
 - Source: plan, open; #370 follows #352 file 02, with #352 file 03 as the other option
-- Tests: 06 (Cost of a forced write, and overwrites after a clone), 31 (The checkpoint engine's prototype on APFS: full, cbw, nbd, delta, and the catalog under kill)
+- Tests: 06 (Cost of a forced write, and overwrites after a clone), 31 (The checkpoint engine's prototype on APFS: full, cbw, nbd, delta, and the catalog under kill), 45 (What a disk keeps of the record when its power is cut: F_FULLFSYNC against fsync)
 
 | Option | Means |
 |---|---|
@@ -132,14 +200,14 @@ How does the engine save its own state on a Mac?
 | 06 `full-slow-reserve-needed` | `log-and-two-places` |
 | 06 `full-slow-prealloc-protects` | `log-and-two-places` |
 
-Tests 31 give evidence (their numbers and facts) and rule out no option.
+Tests 31, 45 give evidence (their numbers and facts) and rule out no option.
 
 ## `space-the-engine-keeps`
 
 How does the engine keep room to write on a full volume?
 
 - Source: #348, open; #370 assumes a reserve file of 4 GiB and a floor of 20 GB until tests 06 and 33 and a full volume measure them
-- Tests: 06 (Cost of a forced write, and overwrites after a clone), 33 (Does the guest's TRIM free the blocks of the disk image on the Mac), 38 (The Mac's volume fills under a running computer)
+- Tests: 06 (Cost of a forced write, and overwrites after a clone), 33 (Does the guest's TRIM free the blocks of the disk image on the Mac), 38 (The Mac's volume fills under a running computer), 46 (What deleting a checkpoint frees while a local Time Machine snapshot exists), 48 (Option B's disk.raw on APFS: a clonefile while main writes, and discards (#381 L5, L8))
 
 | Option | Means |
 |---|---|
@@ -152,6 +220,8 @@ How does the engine keep room to write on a full volume?
 | 06 `full-slow-reserve-needed` | `reserve-file` |
 | 38 `framework-stops` | `reserve-file` |
 | 38 `guest-damaged` | `reserve-file` |
+| 46 `snapshot-holds-space` | `reserve-file` |
+| 48 `trim-ignored` | `reserve-file` |
 
 Tests 33 give evidence (their numbers and facts) and rule out no option.
 
@@ -160,7 +230,7 @@ Tests 33 give evidence (their numbers and facts) and rule out no option.
 What does Silo do when the disk runs low, given what a full volume does to a running computer?
 
 - Source: plan, open: its levels are measured
-- Tests: 06 (Cost of a forced write, and overwrites after a clone), 33 (Does the guest's TRIM free the blocks of the disk image on the Mac), 38 (The Mac's volume fills under a running computer)
+- Tests: 06 (Cost of a forced write, and overwrites after a clone), 33 (Does the guest's TRIM free the blocks of the disk image on the Mac), 38 (The Mac's volume fills under a running computer), 46 (What deleting a checkpoint frees while a local Time Machine snapshot exists)
 
 Measured, not chosen: the verdict is the measures of the tests above.
 
@@ -232,7 +302,7 @@ Measured, not chosen: the verdict is the measures of the tests above.
 Against which idle reference and which flush are Silo's own costs set?
 
 - Source: plan, open: measured on polarzero's Mac
-- Tests: 06 (Cost of a forced write, and overwrites after a clone), 16 (An idle computer for a night), 36 (What a computer's connections meet on gvproxy and on Apple's NAT, and a restart of the stack)
+- Tests: 06 (Cost of a forced write, and overwrites after a clone), 16 (An idle computer for a night), 36 (What a computer's connections meet on gvproxy and on Apple's NAT, and a restart of the stack), 42 (Throughput over the datagram socket a Mac gives gvproxy, at MTU 1500 and the largest the framework takes)
 
 Measured, not chosen: the verdict is the measures of the tests above.
 
@@ -250,9 +320,23 @@ Measured, not chosen: the verdict is the measures of the tests above.
 What does keeping the record cost in speed?
 
 - Source: plan, open: measured
-- Tests: 06 (Cost of a forced write, and overwrites after a clone), 16 (An idle computer for a night)
+- Tests: 06 (Cost of a forced write, and overwrites after a clone), 16 (An idle computer for a night), 45 (What a disk keeps of the record when its power is cut: F_FULLFSYNC against fsync)
 
 Measured, not chosen: the verdict is the measures of the tests above.
+
+## `record-damaged-at-start`
+
+When the recorder starts on a record whose end is damaged, does it keep recording or stop until you look?
+
+- Source: #386, draft: how often damage other than an unfinished last line happens is what test 45 measures
+- Tests: 45 (What a disk keeps of the record when its power is cut: F_FULLFSYNC against fsync)
+
+| Option | Means |
+|---|---|
+| `keep-recording` | the recorder cuts the unfinished last line and goes on, noting the cut in the record |
+| `stop-until-you-look` | the recorder stops on any damage and waits for you |
+
+Tests 45 give evidence (their numbers and facts) and rule out no option.
 
 ## `reaching-a-computer`
 
@@ -306,6 +390,15 @@ Can a fork leave out an agent program's sign-in on macOS?
 |---|---|
 | 02 `lasts-in-keychain` | `says-copied` |
 
+## `engine-matches-wanted`
+
+Does the engine keep the computers you want running, with nobody logged in?
+
+- Source: plan, open; test 49 asks it of option B's Linux main
+- Tests: 49 (Option B's main run by a launch daemon while you are logged out (#381 L7))
+
+Measured, not chosen: the verdict is the measures of the tests above.
+
 ## `runs-outlive-the-terminal`
 
 Does a run started in a session that outlives its terminal keep working, signed in, through the night?
@@ -350,7 +443,7 @@ Measured, not chosen: the verdict is the measures of the tests above.
 How is a checkpoint of a running macOS main taken?
 
 - Source: plan, open; #370 assumes an APFS clone while main runs if test 04 holds, #365's delta behind NBD otherwise
-- Tests: 03 (APFS clone time against fragmentation, with a writer), 04 (Is a clone of a running computer's disk a moment in time, per disk mode), 15 (A real macOS computer under agent-like work, a checkpoint per step), 31 (The checkpoint engine's prototype on APFS: full, cbw, nbd, delta, and the catalog under kill), 32 (Does a macOS computer boot and run from a disk Silo serves over NBD), 33 (Does the guest's TRIM free the blocks of the disk image on the Mac)
+- Tests: 03 (APFS clone time against fragmentation, with a writer), 04 (Is a clone of a running computer's disk a moment in time, per disk mode), 15 (A real macOS computer under agent-like work, a checkpoint per step), 31 (The checkpoint engine's prototype on APFS: full, cbw, nbd, delta, and the catalog under kill), 32 (Does a macOS computer boot and run from a disk Silo serves over NBD), 33 (Does the guest's TRIM free the blocks of the disk image on the Mac), 48 (Option B's disk.raw on APFS: a clonefile while main writes, and discards (#381 L5, L8))
 
 | Option | Means |
 |---|---|
@@ -371,6 +464,7 @@ How is a checkpoint of a running macOS main taken?
 | 31 `not-a-moment` | `clone-running`, `clone-paused`, `stopped-only` |
 | 32 `checkpoint-broke` | `clone-running`, `clone-paused`, `stopped-only` |
 | 32 `no-boot` | `clone-running`, `clone-paused`, `stopped-only` |
+| 48 `torn` | `clone-paused`, `delta-nbd`, `stopped-only` |
 
 Tests 33 give evidence (their numbers and facts) and rule out no option.
 
@@ -397,7 +491,7 @@ Measured, not chosen: the verdict is the measures of the tests above.
 How much disk do a macOS main's checkpoints keep, and what happens when the volume fills?
 
 - Source: plan, open
-- Tests: 33 (Does the guest's TRIM free the blocks of the disk image on the Mac), 38 (The Mac's volume fills under a running computer)
+- Tests: 33 (Does the guest's TRIM free the blocks of the disk image on the Mac), 38 (The Mac's volume fills under a running computer), 46 (What deleting a checkpoint frees while a local Time Machine snapshot exists)
 
 Measured, not chosen: the verdict is the measures of the tests above.
 
