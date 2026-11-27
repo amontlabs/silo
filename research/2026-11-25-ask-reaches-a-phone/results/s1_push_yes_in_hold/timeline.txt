@@ -1,0 +1,13 @@
+   -0.72  mac    listening          {"port": 20952, "holds": {"git": 600, "aws": 50, "pip": 12, "default": 90}, "gather": 2.0}
+    0.00  agent  command.start      {"run": "git push http://{B}/repo.git main"}
+    0.06  mac    ask.opened         {"ask": "ask_1", "computer": "main", "ends": 1795617679.6572914}
+    0.07  mac    request.held       {"ask": "ask_1", "line": 1, "desc": "push main to 127.0.0.1:20952/repo.git (51935bb)"}
+    0.07  mac    ask.version        {"ask": "ask_1", "version": 1, "lines": ["push main to 127.0.0.1:20952/repo.git (51935bb)"], "list_hash": "2cdc2c17cca1584801ebd5961ad75d8b", "ends": 1795617679.6572914}
+    2.10  mac    ask.forwarded      {"ask": "ask_1", "version": 1, "size": 341}
+    2.10  phone  shown              {"ask": "ask_1", "version": 1, "lines": ["push main to 127.0.0.1:20952/repo.git (51935bb)"], "sent": 1795615881.6840084, "in_transit": 0.0104}
+   10.10  phone  answered           {"ask": "ask_1", "version": 1, "verdict": "yes", "lines": 1}
+   10.11  mac    answer.received    {"ask": "ask_1", "version": 1, "verdict": "yes"}
+   10.11  mac    ask.answered       {"ask": "ask_1", "version": 1, "verdict": "yes", "lines": 1, "issued": 1795615889.694992, "via": "phone"}
+   10.11  mac    ask.closed         {"ask": "ask_1", "why": "answered and done"}
+   10.13  mac    request.forwarded  {"ask": "ask_1", "line": 1, "status": 200}
+   10.13  agent  command.end        {"exit": 0, "run": "git push http://{B}/repo.git main"}

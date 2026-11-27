@@ -1,0 +1,2 @@
+{"t": 1795615881.8117, "kind": "shown", "ask": "ask_1", "version": 1, "lines": ["PUT 127.0.0.1:39842/prod-backups/db/dump.sql (1000 bytes)"], "sent": 1795615881.801244, "in_transit": 0.0105}
+{"t": 1795615949.8143, "kind": "answered", "ask": "ask_1", "version": 1, "verdict": "yes", "lines": 1}

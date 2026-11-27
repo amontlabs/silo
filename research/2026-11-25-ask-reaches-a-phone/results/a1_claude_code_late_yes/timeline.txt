@@ -1,0 +1,16 @@
+   -0.89  mac    listening          {"port": 26241, "holds": {"git": 60, "aws": 50, "pip": 12, "default": 90}, "gather": 2.0}
+    0.00  agent  command.start      {"run": "sed 's#BOUNDARY#{B}#g' {P}/agents/cc_late.json > /tmp/claude-0/-home-user/56cb5b83-c27d-5ecb-ae7c-5c4957f3a75c/scratchpad/agents/cc_late.json && KILL_AFTER=400 bash /home/user/silo/research/2026-11-24-gap-fixes/
+    1.83  mac    ask.opened         {"ask": "ask_1", "computer": "main", "ends": 1795634671.5085213}
+    1.83  mac    request.held       {"ask": "ask_1", "line": 1, "desc": "push main to 127.0.0.1:26241/repo.git (467b7a6)"}
+    1.83  mac    ask.version        {"ask": "ask_1", "version": 1, "lines": ["push main to 127.0.0.1:26241/repo.git (467b7a6)"], "list_hash": "841af7d6e1c3f46f0d4516df0d5126ba", "ends": 1795634671.5085213}
+    3.90  mac    ask.forwarded      {"ask": "ask_1", "version": 1, "size": 341}
+    3.90  phone  shown              {"ask": "ask_1", "version": 1, "lines": ["push main to 127.0.0.1:26241/repo.git (467b7a6)"], "sent": 1795632873.5664065, "in_transit": 0.0176}
+   61.90  mac    hold.ended         {"ask": "ask_1", "line": 1, "how": "limit"}
+   61.90  mac    request.refused    {"ask": "ask_1", "line": 1, "why": "held, not answered"}
+   61.98  mac    request.joined     {"ask": "ask_1", "line": 1, "desc": "push main to 127.0.0.1:26241/repo.git (467b7a6)"}
+   91.90  phone  answered           {"ask": "ask_1", "version": 1, "verdict": "yes", "lines": 1}
+   91.90  mac    answer.received    {"ask": "ask_1", "version": 1, "verdict": "yes"}
+   91.90  mac    ask.answered       {"ask": "ask_1", "version": 1, "verdict": "yes", "lines": 1, "issued": 1795632961.5847466, "via": "phone"}
+   91.90  mac    ask.closed         {"ask": "ask_1", "why": "answered and done"}
+   91.92  mac    request.forwarded  {"ask": "ask_1", "line": 1, "status": 200}
+   92.02  agent  command.end        {"exit": 0, "run": "sed 's#BOUNDARY#{B}#g' {P}/agents/cc_late.json > /tmp/claude-0/-home-user/56cb5b83-c27d-5ecb-ae7c-5c4957f3a75c/scratchpad/agents/cc_late.json && KILL_AFTER=400 bash /home/user/silo/research/2026-11-24

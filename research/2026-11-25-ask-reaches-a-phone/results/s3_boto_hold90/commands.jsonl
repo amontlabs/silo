@@ -1,0 +1,1 @@
+{"at": 0, "run": "/tmp/claude-0/bv/bin/python {P}/s3put.py {B} db/dump.sql", "start": 0.0, "end": 75.4, "exit": 0, "out": "put ok after 75.1 s\n"}

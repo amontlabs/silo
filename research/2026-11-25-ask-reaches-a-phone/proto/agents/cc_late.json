@@ -1,0 +1,3 @@
+{"probe": false, "steps": [
+ {"calls": [{"name": "Bash", "input": {"command": "git push http://BOUNDARY/repo.git main", "description": "push"}}]},
+ {"calls": [{"name": "Bash", "input": {"command": "git push http://BOUNDARY/repo.git main", "description": "push again"}}]}]}

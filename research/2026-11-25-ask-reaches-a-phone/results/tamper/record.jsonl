@@ -1,0 +1,74 @@
+{"t": 1795616127.5937, "kind": "listening", "port": 8932, "holds": {"git": 600, "aws": 50, "pip": 12, "default": 8}, "gather": 0.2}
+{"t": 1795616128.5045, "kind": "ask.opened", "ask": "ask_1", "computer": "main", "ends": 1795617928.504463}
+{"t": 1795616128.5045, "kind": "request.held", "ask": "ask_1", "line": 1, "desc": "POST 127.0.0.1:8932/v1/charges (8 bytes)"}
+{"t": 1795616128.5046, "kind": "ask.version", "ask": "ask_1", "version": 1, "lines": ["POST 127.0.0.1:8932/v1/charges (8 bytes)"], "list_hash": "c0afa0870bbf76f73e1af834c09d0ab3", "ends": 1795617928.504463}
+{"t": 1795616128.7565, "kind": "ask.forwarded", "ask": "ask_1", "version": 1, "size": 333}
+{"t": 1795616129.111, "kind": "answer.refused", "why": "not signed by the paired side"}
+{"t": 1795616136.5151, "kind": "hold.ended", "ask": "ask_1", "line": 1, "how": "limit"}
+{"t": 1795616136.5154, "kind": "request.refused", "ask": "ask_1", "line": 1, "why": "held, not answered"}
+{"t": 1795616136.5254, "kind": "request.held", "ask": "ask_1", "line": 2, "desc": "POST 127.0.0.1:8932/v1/charges (8 bytes)"}
+{"t": 1795616136.5255, "kind": "ask.version", "ask": "ask_1", "version": 2, "lines": ["POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)"], "list_hash": "ee4ac763ae207a9bef3f2a589f9f68ce", "ends": 1795617928.504463}
+{"t": 1795616136.7514, "kind": "ask.forwarded", "ask": "ask_1", "version": 2, "size": 376}
+{"t": 1795616137.1205, "kind": "answer.refused", "why": "not sealed to this side, or changed on the way"}
+{"t": 1795616144.5358, "kind": "hold.ended", "ask": "ask_1", "line": 2, "how": "limit"}
+{"t": 1795616144.5363, "kind": "request.refused", "ask": "ask_1", "line": 2, "why": "held, not answered"}
+{"t": 1795616144.5446, "kind": "request.held", "ask": "ask_1", "line": 3, "desc": "POST 127.0.0.1:8932/v1/charges (8 bytes)"}
+{"t": 1795616144.5447, "kind": "ask.version", "ask": "ask_1", "version": 3, "lines": ["POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)"], "list_hash": "ab539188449ee4df2475cc492e4f2ba9", "ends": 1795617928.504463}
+{"t": 1795616144.7966, "kind": "ask.forwarded", "ask": "ask_1", "version": 3, "size": 419}
+{"t": 1795616145.1436, "kind": "answer.refused", "why": "not sealed to this side, or changed on the way"}
+{"t": 1795616152.5548, "kind": "hold.ended", "ask": "ask_1", "line": 3, "how": "limit"}
+{"t": 1795616152.5551, "kind": "request.refused", "ask": "ask_1", "line": 3, "why": "held, not answered"}
+{"t": 1795616152.5629, "kind": "request.held", "ask": "ask_1", "line": 4, "desc": "POST 127.0.0.1:8932/v1/charges (8 bytes)"}
+{"t": 1795616152.5629, "kind": "ask.version", "ask": "ask_1", "version": 4, "lines": ["POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)"], "list_hash": "f3abfeba8247025e12f77044da74b52a", "ends": 1795617928.504463}
+{"t": 1795616152.7931, "kind": "ask.forwarded", "ask": "ask_1", "version": 4, "size": 461}
+{"t": 1795616153.1606, "kind": "answer.received", "ask": "ask_1", "version": 4, "verdict": "yes"}
+{"t": 1795616153.1607, "kind": "ask.answered", "ask": "ask_1", "version": 4, "verdict": "yes", "lines": 4, "issued": 1795616153.1576657, "via": "phone"}
+{"t": 1795616153.1611, "kind": "request.forwarded", "ask": "ask_1", "line": 4, "status": 200}
+{"t": 1795616153.1704, "kind": "ask.opened", "ask": "ask_2", "computer": "main", "ends": 1795617953.170378}
+{"t": 1795616153.1704, "kind": "request.held", "ask": "ask_2", "line": 1, "desc": "POST 127.0.0.1:8932/v1/charges (8 bytes)"}
+{"t": 1795616153.1705, "kind": "ask.version", "ask": "ask_2", "version": 1, "lines": ["POST 127.0.0.1:8932/v1/charges (8 bytes)"], "list_hash": "c0afa0870bbf76f73e1af834c09d0ab3", "ends": 1795617953.170378}
+{"t": 1795616153.3985, "kind": "ask.forwarded", "ask": "ask_2", "version": 1, "size": 332}
+{"t": 1795616153.7658, "kind": "answer.received", "ask": "ask_1", "version": 4, "verdict": "yes"}
+{"t": 1795616153.7659, "kind": "answer.refused", "ask": "ask_1", "why": "ask already answered"}
+{"t": 1795616161.1813, "kind": "hold.ended", "ask": "ask_2", "line": 1, "how": "limit"}
+{"t": 1795616161.1816, "kind": "request.refused", "ask": "ask_2", "line": 1, "why": "held, not answered"}
+{"t": 1795616161.1901, "kind": "request.held", "ask": "ask_2", "line": 2, "desc": "POST 127.0.0.1:8932/v1/charges (8 bytes)"}
+{"t": 1795616161.1902, "kind": "ask.version", "ask": "ask_2", "version": 2, "lines": ["POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)"], "list_hash": "ee4ac763ae207a9bef3f2a589f9f68ce", "ends": 1795617953.170378}
+{"t": 1795616161.3957, "kind": "ask.forwarded", "ask": "ask_2", "version": 2, "size": 375}
+{"t": 1795616161.7872, "kind": "answer.received", "ask": "ask_2", "version": 2, "verdict": "yes"}
+{"t": 1795616161.7872, "kind": "answer.refused", "ask": "ask_2", "why": "the list answered is not the list of that version"}
+{"t": 1795616169.201, "kind": "hold.ended", "ask": "ask_2", "line": 2, "how": "limit"}
+{"t": 1795616169.2013, "kind": "request.refused", "ask": "ask_2", "line": 2, "why": "held, not answered"}
+{"t": 1795616169.2108, "kind": "request.held", "ask": "ask_2", "line": 3, "desc": "POST 127.0.0.1:8932/v1/charges (8 bytes)"}
+{"t": 1795616169.2109, "kind": "ask.version", "ask": "ask_2", "version": 3, "lines": ["POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)"], "list_hash": "ab539188449ee4df2475cc492e4f2ba9", "ends": 1795617953.170378}
+{"t": 1795616169.444, "kind": "ask.forwarded", "ask": "ask_2", "version": 3, "size": 419}
+{"t": 1795616169.8083, "kind": "answer.received", "ask": "ask_2", "version": 3, "verdict": "yes"}
+{"t": 1795616169.8083, "kind": "answer.refused", "ask": "ask_2", "why": "answer out of date"}
+{"t": 1795616177.2235, "kind": "hold.ended", "ask": "ask_2", "line": 3, "how": "limit"}
+{"t": 1795616177.2238, "kind": "request.refused", "ask": "ask_2", "line": 3, "why": "held, not answered"}
+{"t": 1795616177.2333, "kind": "request.held", "ask": "ask_2", "line": 4, "desc": "POST 127.0.0.1:8932/v1/charges (8 bytes)"}
+{"t": 1795616177.2333, "kind": "ask.version", "ask": "ask_2", "version": 4, "lines": ["POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)"], "list_hash": "f3abfeba8247025e12f77044da74b52a", "ends": 1795617953.170378}
+{"t": 1795616177.4467, "kind": "ask.forwarded", "ask": "ask_2", "version": 4, "size": 462}
+{"t": 1795616180.8323, "kind": "answer.received", "ask": "ask_2", "version": 4, "verdict": "yes"}
+{"t": 1795616180.8324, "kind": "answer.refused", "ask": "ask_2", "why": "answer out of date"}
+{"t": 1795616185.2433, "kind": "hold.ended", "ask": "ask_2", "line": 4, "how": "limit"}
+{"t": 1795616185.2436, "kind": "request.refused", "ask": "ask_2", "line": 4, "why": "held, not answered"}
+{"t": 1795616185.2521, "kind": "request.held", "ask": "ask_2", "line": 5, "desc": "POST 127.0.0.1:8932/v1/charges (8 bytes)"}
+{"t": 1795616185.2522, "kind": "ask.version", "ask": "ask_2", "version": 5, "lines": ["POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)"], "list_hash": "122b8aae3d1148c182a0425282b64d96", "ends": 1795617953.170378}
+{"t": 1795616185.4917, "kind": "ask.forwarded", "ask": "ask_2", "version": 5, "size": 505}
+{"t": 1795616193.2633, "kind": "hold.ended", "ask": "ask_2", "line": 5, "how": "limit"}
+{"t": 1795616193.2637, "kind": "request.refused", "ask": "ask_2", "line": 5, "why": "held, not answered"}
+{"t": 1795616193.2732, "kind": "request.held", "ask": "ask_2", "line": 6, "desc": "POST 127.0.0.1:8932/v1/charges (9 bytes)"}
+{"t": 1795616193.2733, "kind": "ask.version", "ask": "ask_2", "version": 6, "lines": ["POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (9 bytes)"], "list_hash": "9d659702abab66946f09faae8626b815", "ends": 1795617953.170378}
+{"t": 1795616193.4884, "kind": "ask.forwarded", "ask": "ask_2", "version": 6, "size": 548}
+{"t": 1795616194.376, "kind": "request.held", "ask": "ask_2", "line": 7, "desc": "POST 127.0.0.1:8932/v1/charges (13 bytes)"}
+{"t": 1795616194.3761, "kind": "ask.version", "ask": "ask_2", "version": 7, "lines": ["POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (8 bytes)", "POST 127.0.0.1:8932/v1/charges (9 bytes)", "POST 127.0.0.1:8932/v1/charges (13 bytes)"], "list_hash": "236312c8a6257eb528e6765f651c6292", "ends": 1795617953.170378}
+{"t": 1795616194.5964, "kind": "ask.forwarded", "ask": "ask_2", "version": 7, "size": 591}
+{"t": 1795616194.9728, "kind": "answer.received", "ask": "ask_2", "version": 6, "verdict": "yes"}
+{"t": 1795616194.9729, "kind": "ask.answered", "ask": "ask_2", "version": 6, "verdict": "yes", "lines": 6, "issued": 1795616194.3688061, "via": "phone"}
+{"t": 1795616194.973, "kind": "ask.opened", "ask": "ask_3", "computer": "main", "ends": 1795617994.9729502}
+{"t": 1795616194.973, "kind": "ask.version", "ask": "ask_3", "version": 1, "lines": ["POST 127.0.0.1:8932/v1/charges (13 bytes)"], "list_hash": "43df65b2a2ee8a72b9894fd1cba8606b", "ends": 1795617994.9729502}
+{"t": 1795616194.9733, "kind": "request.forwarded", "ask": "ask_2", "line": 6, "status": 200}
+{"t": 1795616195.2017, "kind": "ask.forwarded", "ask": "ask_3", "version": 1, "size": 335}
+{"t": 1795616202.3868, "kind": "hold.ended", "ask": "ask_3", "line": 1, "how": "limit"}
+{"t": 1795616202.3871, "kind": "request.refused", "ask": "ask_3", "line": 1, "why": "held, not answered"}

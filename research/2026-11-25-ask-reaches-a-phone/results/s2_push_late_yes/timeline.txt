@@ -1,0 +1,27 @@
+   -0.70  mac    listening          {"port": 37114, "holds": {"git": 60, "aws": 50, "pip": 12, "default": 90}, "gather": 2.0}
+    0.00  agent  command.start      {"run": "git push http://{B}/repo.git main"}
+    0.04  mac    ask.opened         {"ask": "ask_1", "computer": "main", "ends": 1795617679.540537}
+    0.04  mac    request.held       {"ask": "ask_1", "line": 1, "desc": "push main to 127.0.0.1:37114/repo.git (51935bb)"}
+    0.04  mac    ask.version        {"ask": "ask_1", "version": 1, "lines": ["push main to 127.0.0.1:37114/repo.git (51935bb)"], "list_hash": "9d57ac3f163862c4f6219f658e571d5b", "ends": 1795617679.540537}
+    2.06  mac    ask.forwarded      {"ask": "ask_1", "version": 1, "size": 340}
+    2.06  phone  shown              {"ask": "ask_1", "version": 1, "lines": ["push main to 127.0.0.1:37114/repo.git (51935bb)"], "sent": 1795615881.5497658, "in_transit": 0.0101}
+   60.10  mac    hold.ended         {"ask": "ask_1", "line": 1, "how": "limit"}
+   60.10  mac    request.refused    {"ask": "ask_1", "line": 1, "why": "held, not answered"}
+   60.11  agent  command.end        {"exit": 1, "run": "git push http://{B}/repo.git main"}
+   90.06  phone  answered           {"ask": "ask_1", "version": 1, "verdict": "yes", "lines": 1}
+   90.06  mac    answer.received    {"ask": "ask_1", "version": 1, "verdict": "yes"}
+   90.06  mac    ask.answered       {"ask": "ask_1", "version": 1, "verdict": "yes", "lines": 1, "issued": 1795615969.5606816, "via": "phone"}
+  120.00  agent  command.start      {"run": "git push http://{B}/repo.git main"}
+  120.04  mac    request.passed     {"ask": "ask_1", "line": 1, "why": "late yes, spent once"}
+  120.04  mac    ask.closed         {"ask": "ask_1", "why": "answered and done"}
+  120.06  mac    request.forwarded  {"ask": "ask_1", "line": 1, "status": 200}
+  120.08  agent  command.end        {"exit": 0, "run": "git push http://{B}/repo.git main"}
+  140.00  agent  command.start      {"run": "echo two > f && git commit -qam two && git push http://{B}/repo.git main"}
+  140.11  mac    ask.opened         {"ask": "ask_2", "computer": "main", "ends": 1795617819.60725}
+  140.11  mac    request.held       {"ask": "ask_2", "line": 1, "desc": "push main to 127.0.0.1:37114/repo.git (07d844c)"}
+  140.11  mac    ask.version        {"ask": "ask_2", "version": 1, "lines": ["push main to 127.0.0.1:37114/repo.git (07d844c)"], "list_hash": "305b52aa3216d2fc12200764b7bdeef8", "ends": 1795617819.60725}
+  142.14  mac    ask.forwarded      {"ask": "ask_2", "version": 1, "size": 338}
+  142.14  phone  shown              {"ask": "ask_2", "version": 1, "lines": ["push main to 127.0.0.1:37114/repo.git (07d844c)"], "sent": 1795616021.641247, "in_transit": 0.0031}
+  200.18  agent  command.end        {"exit": 1, "run": "echo two > f && git commit -qam two && git push http://{B}/repo.git main"}
+  200.18  mac    hold.ended         {"ask": "ask_2", "line": 1, "how": "limit"}
+  200.18  mac    request.refused    {"ask": "ask_2", "line": 1, "why": "held, not answered"}

@@ -1,0 +1,3 @@
+{"t": 1795615881.8774, "kind": "shown", "ask": "ask_1", "version": 1, "lines": ["GET 127.0.0.1:31021/simple/pip/"], "sent": 1795615881.8653626, "in_transit": 0.012}
+{"t": 1795615886.897, "kind": "shown", "ask": "ask_1", "version": 2, "lines": ["GET 127.0.0.1:31021/simple/pip/", "GET 127.0.0.1:31021/simple/leftpad-silo-test/"], "sent": 1795615886.8939214, "in_transit": 0.003}
+{"t": 1795615921.8798, "kind": "answered", "ask": "ask_1", "version": 2, "verdict": "yes", "lines": 2}

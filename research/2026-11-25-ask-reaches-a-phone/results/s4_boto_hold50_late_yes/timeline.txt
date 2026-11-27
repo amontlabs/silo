@@ -1,0 +1,18 @@
+   -0.69  mac    listening          {"port": 39842, "holds": {"git": 600, "aws": 50, "pip": 12, "default": 90}, "gather": 2.0}
+    0.00  agent  command.start      {"run": "/tmp/claude-0/bv/bin/python {P}/s3put.py {B} db/dump.sql"}
+    0.23  mac    ask.opened         {"ask": "ask_1", "computer": "main", "ends": 1795617679.7678356}
+    0.23  mac    request.held       {"ask": "ask_1", "line": 1, "desc": "PUT 127.0.0.1:39842/prod-backups/db/dump.sql (1000 bytes)"}
+    0.23  mac    ask.version        {"ask": "ask_1", "version": 1, "lines": ["PUT 127.0.0.1:39842/prod-backups/db/dump.sql (1000 bytes)"], "list_hash": "1b888109a80366ab10e388796b6750fb", "ends": 1795617679.7678356}
+    2.27  mac    ask.forwarded      {"ask": "ask_1", "version": 1, "size": 350}
+    2.28  phone  shown              {"ask": "ask_1", "version": 1, "lines": ["PUT 127.0.0.1:39842/prod-backups/db/dump.sql (1000 bytes)"], "sent": 1795615881.801244, "in_transit": 0.0105}
+   50.29  mac    hold.ended         {"ask": "ask_1", "line": 1, "how": "limit"}
+   50.29  mac    request.refused    {"ask": "ask_1", "line": 1, "why": "held, not answered"}
+   50.42  agent  command.end        {"exit": 1, "run": "/tmp/claude-0/bv/bin/python {P}/s3put.py {B} db/dump.sql"}
+   70.28  phone  answered           {"ask": "ask_1", "version": 1, "verdict": "yes", "lines": 1}
+   70.28  mac    answer.received    {"ask": "ask_1", "version": 1, "verdict": "yes"}
+   70.28  mac    ask.answered       {"ask": "ask_1", "version": 1, "verdict": "yes", "lines": 1, "issued": 1795615949.8124003, "via": "phone"}
+  100.00  agent  command.start      {"run": "/tmp/claude-0/bv/bin/python {P}/s3put.py {B} db/dump.sql"}
+  100.22  mac    request.passed     {"ask": "ask_1", "line": 1, "why": "late yes, spent once"}
+  100.22  mac    ask.closed         {"ask": "ask_1", "why": "answered and done"}
+  100.22  mac    request.forwarded  {"ask": "ask_1", "line": 1, "status": 200}
+  100.30  agent  command.end        {"exit": 0, "run": "/tmp/claude-0/bv/bin/python {P}/s3put.py {B} db/dump.sql"}

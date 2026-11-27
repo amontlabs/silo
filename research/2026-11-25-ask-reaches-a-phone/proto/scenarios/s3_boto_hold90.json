@@ -1,0 +1,2 @@
+{"holds": {"aws": 90}, "policy": {"delay": 73, "verdict": "yes"},
+ "commands": [{"at": 0, "run": "/tmp/claude-0/bv/bin/python {P}/s3put.py {B} db/dump.sql"}]}

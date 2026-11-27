@@ -70,3 +70,24 @@ Labs, when you make a computer that needs them.
 A property for polarzero to word, if the answer is taken: "A request Silo makes on its own carries
 nothing that tells one Mac from another." The test `test_two_macs_send_the_same_bytes` in the
 research checks it.
+
+## The phone app's pushes (25 November 2026)
+
+An agent's part, 25 November 2026, from `research/2026-11-25-ask-reaches-a-phone/`. To rule. Apple sends a push to an iPhone app only
+from a server that holds the publisher's push key. Even a self-hosted ntfy server sends its iOS
+wake-ups through ntfy.sh for this reason, and without that, messages can wait hours. So
+`phone-app` needs a relay that Amont Labs runs. With the ask sealed to the phone, the relay learns
+that a paired Mac sent something to its phone at a given time, and its size.
+
+The case: an agent pushes at 23:10 while you are out, and your phone buzzes. The options:
+
+- Amont Labs' relay, used only once you pair a phone (recommended). Pairing is the act that turns
+  it on, as a crash report is sent only when you choose. It costs a service Amont Labs keeps
+  running, and timing that leaves the Mac.
+- Your own relay. It still reaches the iPhone through a service holding a push key, so it moves
+  the timing to another party rather than keeping it home.
+- No push. The phone app checks when you open it. It costs every ask you do not look for, which
+  then waits until you open the app.
+
+Recommended: Amont Labs' relay, used only once you pair a phone. "What it does not cover" above
+would then name it beside the asks you forward yourself.

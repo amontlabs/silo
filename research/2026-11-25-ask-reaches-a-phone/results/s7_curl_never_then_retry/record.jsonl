@@ -1,0 +1,21 @@
+{"t": 1795615878.8522, "kind": "listening", "port": 37352, "holds": {"git": 600, "aws": 50, "pip": 12, "default": 30}, "gather": 2.0}
+{"t": 1795615879.5806, "kind": "ask.opened", "ask": "ask_1", "computer": "main", "ends": 1795615954.5806448}
+{"t": 1795615879.5807, "kind": "request.held", "ask": "ask_1", "line": 1, "desc": "POST 127.0.0.1:37352/v1/charges (11 bytes)"}
+{"t": 1795615879.5808, "kind": "ask.version", "ask": "ask_1", "version": 1, "lines": ["POST 127.0.0.1:37352/v1/charges (11 bytes)"], "list_hash": "14fbbad9a9946d8b9e6cadb1cd114959", "ends": 1795615954.5806448}
+{"t": 1795615881.6153, "kind": "ask.forwarded", "ask": "ask_1", "version": 1, "size": 336}
+{"t": 1795615909.6129, "kind": "hold.ended", "ask": "ask_1", "line": 1, "how": "limit"}
+{"t": 1795615909.6133, "kind": "request.refused", "ask": "ask_1", "line": 1, "why": "held, not answered"}
+{"t": 1795615919.5669, "kind": "request.joined", "ask": "ask_1", "line": 1, "desc": "POST 127.0.0.1:37352/v1/charges (11 bytes)"}
+{"t": 1795615920.5684, "kind": "request.held", "ask": "ask_1", "line": 2, "desc": "POST 127.0.0.1:37352/v1/charges (13 bytes)"}
+{"t": 1795615920.5685, "kind": "ask.version", "ask": "ask_1", "version": 2, "lines": ["POST 127.0.0.1:37352/v1/charges (11 bytes)", "POST 127.0.0.1:37352/v1/charges (13 bytes)"], "list_hash": "ab256b752993f8bc09eeb922f1d651c8", "ends": 1795615954.5806448}
+{"t": 1795615922.5929, "kind": "ask.forwarded", "ask": "ask_1", "version": 2, "size": 381}
+{"t": 1795615949.5992, "kind": "hold.ended", "ask": "ask_1", "line": 1, "how": "limit"}
+{"t": 1795615949.5994, "kind": "request.refused", "ask": "ask_1", "line": 1, "why": "held, not answered"}
+{"t": 1795615950.5998, "kind": "hold.ended", "ask": "ask_1", "line": 2, "how": "limit"}
+{"t": 1795615950.6001, "kind": "request.refused", "ask": "ask_1", "line": 2, "why": "held, not answered"}
+{"t": 1795615954.8607, "kind": "ask.closed", "ask": "ask_1", "why": "ask's own limit"}
+{"t": 1795615959.5713, "kind": "ask.opened", "ask": "ask_2", "computer": "main", "ends": 1795616034.57126}
+{"t": 1795615959.5713, "kind": "request.held", "ask": "ask_2", "line": 1, "desc": "POST 127.0.0.1:37352/v1/charges (11 bytes)"}
+{"t": 1795615959.5714, "kind": "ask.version", "ask": "ask_2", "version": 1, "lines": ["POST 127.0.0.1:37352/v1/charges (11 bytes)"], "list_hash": "14fbbad9a9946d8b9e6cadb1cd114959", "ends": 1795616034.57126}
+{"t": 1795615961.6216, "kind": "ask.forwarded", "ask": "ask_2", "version": 1, "size": 334}
+{"t": 1795615964.5771, "kind": "hold.ended", "ask": "ask_2", "line": 1, "how": "client closed"}

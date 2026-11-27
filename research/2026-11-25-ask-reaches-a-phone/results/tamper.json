@@ -1,0 +1,122 @@
+{
+ "results": [
+  {
+   "case": "answer signed by another key",
+   "request_passed": false,
+   "expected_pass": false,
+   "ok": true,
+   "mac_said": [
+    "not signed by the paired side"
+   ]
+  },
+  {
+   "case": "bytes of the relay's own making",
+   "request_passed": false,
+   "expected_pass": false,
+   "ok": true,
+   "mac_said": [
+    "not sealed to this side, or changed on the way"
+   ]
+  },
+  {
+   "case": "one bit changed on the way",
+   "request_passed": false,
+   "expected_pass": false,
+   "ok": true,
+   "mac_said": [
+    "not sealed to this side, or changed on the way"
+   ]
+  },
+  {
+   "case": "honest yes (control)",
+   "request_passed": true,
+   "expected_pass": true,
+   "ok": true,
+   "mac_said": []
+  },
+  {
+   "case": "old yes replayed for the same request",
+   "request_passed": false,
+   "expected_pass": false,
+   "ok": true,
+   "mac_said": [
+    "ask already answered"
+   ]
+  },
+  {
+   "case": "yes to a list the Mac never sent",
+   "request_passed": false,
+   "expected_pass": false,
+   "ok": true,
+   "mac_said": [
+    "the list answered is not the list of that version"
+   ]
+  },
+  {
+   "case": "answer an hour old",
+   "request_passed": false,
+   "expected_pass": false,
+   "ok": true,
+   "mac_said": [
+    "answer out of date"
+   ]
+  },
+  {
+   "case": "yes held by the relay past its expiry",
+   "request_passed": false,
+   "expected_pass": false,
+   "ok": true,
+   "mac_said": [
+    "answer out of date"
+   ]
+  },
+  {
+   "case": "answer dropped by the relay",
+   "request_passed": false,
+   "expected_pass": false,
+   "ok": true,
+   "mac_said": []
+  },
+  {
+   "case": "yes to the version seen lets its own line pass",
+   "request_passed": true,
+   "expected_pass": true,
+   "ok": true,
+   "mac_said": []
+  },
+  {
+   "case": "yes to the version seen does not cover a line added after",
+   "request_passed": false,
+   "expected_pass": false,
+   "ok": true,
+   "mac_said": []
+  },
+  {
+   "case": "phone refuses an ask the relay made up",
+   "ok": true,
+   "phone_said": "not signed by the paired side"
+  }
+ ],
+ "relay_saw_example": [
+  {
+   "topic": "ta6fa4ac9f60d745496f0b250cd8c29ef",
+   "size": 333,
+   "t": 1795616128.7559466
+  },
+  {
+   "topic": "t40ed5eb0f2e2dfa8739ad5584388f7a8",
+   "size": 330,
+   "t": 1795616129.109664
+  },
+  {
+   "topic": "ta6fa4ac9f60d745496f0b250cd8c29ef",
+   "size": 376,
+   "t": 1795616136.7507231
+  }
+ ],
+ "relay_saw_fields": [
+  "size",
+  "t",
+  "topic"
+ ]
+}
