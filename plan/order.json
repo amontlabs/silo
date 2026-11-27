@@ -349,6 +349,7 @@
         "secret-and-prompt-cache",
         "secret-entry",
         "secret-values",
+        "secret-shaped-values",
         "ending-the-encrypted-connection",
         "secret-placeholder",
         "foreign-credential-refused",

@@ -1,0 +1,18 @@
+{"method": "pairs", "patterns": 0, "windows": 0, "bytes": 8470946, "hits": 0, "mb_per_s": 594.7, "secrets": 0, "forms": false}
+{"method": "pairs", "patterns": 0, "windows": 0, "bytes": 8470946, "hits": 0, "mb_per_s": 722.1, "secrets": 0, "forms": true}
+{"method": "anchors", "patterns": 0, "windows": 0, "bytes": 8470946, "hits": 0, "mb_per_s": 785.3, "secrets": 0, "forms": true}
+{"method": "pairs", "patterns": 10, "windows": 0, "bytes": 8471134, "hits": 0, "mb_per_s": 740.8, "secrets": 10, "forms": false}
+{"method": "pairs", "patterns": 124, "windows": 0, "bytes": 8471134, "hits": 4, "mb_per_s": 545.3, "secrets": 10, "forms": true}
+{"method": "anchors", "patterns": 124, "windows": 6563, "bytes": 8471134, "hits": 12, "mb_per_s": 369.7, "secrets": 10, "forms": true}
+{"method": "pairs", "patterns": 50, "windows": 0, "bytes": 8471969, "hits": 2, "mb_per_s": 615.2, "secrets": 50, "forms": false}
+{"method": "pairs", "patterns": 388, "windows": 0, "bytes": 8471969, "hits": 12, "mb_per_s": 114.5, "secrets": 50, "forms": true}
+{"method": "anchors", "patterns": 388, "windows": 9591, "bytes": 8471969, "hits": 60, "mb_per_s": 739.9, "secrets": 50, "forms": true}
+{"method": "pairs", "patterns": 200, "windows": 0, "bytes": 8480853, "hits": 6, "mb_per_s": 381.6, "secrets": 200, "forms": false}
+{"method": "pairs", "patterns": 2069, "windows": 0, "bytes": 8480853, "hits": 42, "mb_per_s": 5.8, "secrets": 200, "forms": true}
+{"method": "anchors", "patterns": 2069, "windows": 85365, "bytes": 8480853, "hits": 598, "mb_per_s": 254.2, "secrets": 200, "forms": true}
+{"method": "pairs", "patterns": 1000, "windows": 0, "bytes": 8506157, "hits": 26, "mb_per_s": 68.5, "secrets": 1000, "forms": false}
+{"method": "pairs", "patterns": 10338, "windows": 0, "bytes": 8506157, "hits": 202, "mb_per_s": 0.4, "secrets": 1000, "forms": true}
+{"method": "anchors", "patterns": 10338, "windows": 450958, "bytes": 8506157, "hits": 2091, "mb_per_s": 64.6, "secrets": 1000, "forms": true}
+{"method": "shapes", "engine": "python re", "bytes": 8470946, "mb_per_s": 2.8}
+{"method": "shapes+decode", "engine": "python re", "bytes": 8470946, "mb_per_s": 2.2}
+{"method": "shapes", "engine": "hyperscan, one pass", "bytes": 8470946, "rules_hit": 1811, "mb_per_s": 1030.3}

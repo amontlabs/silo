@@ -101,3 +101,29 @@ On a 2 KB reply, every step stays above 30 MB/s, which is under 0.1 ms.
 - What a cut costs: the agent sees a broken reply instead of a placeholder. It happens only when a
   host sends a secret back in a long reply, which should be rare. Whether it is rare enough is for
   the owner.
+
+## What the record must look for to keep the value out
+
+An agent's part, 25 November 2026, from [the redaction
+research](../../../research/2026-11-25-secret-redaction/README.md).
+
+`secret-never-written-down` has no "as it is" in it, but the record format's redactor (#386) looks
+only for the value as it is. On 816 samples it took the whole value in 444 and left it whole in the
+other 372. A private key read by a tool reaches the record inside a JSON request body, with `\n`
+for each line break, and none of the 6 such samples was caught. A token in `Authorization: Basic` or in
+a base64 file is never caught.
+
+A redactor that looks for every form of the value (JSON escaped once and twice, percent-encoded,
+base64 at its three alignments, hex, shell-quoted) and follows a match across line breaks took the
+whole value in 733 and part of it in 30. To keep the property:
+
+- the recorder redacts a model's reply after the stream is put together, never stream piece by
+  piece (0 of 51 raw streams were caught by any method);
+- an output read in pieces is redacted as one string before it is cut into lines (19 of 51 values
+  split in two were caught whole);
+- it looks the forms up by windows of 16 bytes in a hashed table, not by #386's table of starting
+  pairs, which falls to 6 MB/s with the forms of 200 secrets. The windowed lookup ran at 740 MB/s
+  with the forms of 50 secrets and 254 MB/s with 200.
+
+This also answers "how replies are searched without slowing them", for the record. The same lookup
+fits the boundary's search of a host's replies.
