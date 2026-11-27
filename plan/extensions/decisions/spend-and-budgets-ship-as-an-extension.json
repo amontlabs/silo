@@ -3,5 +3,6 @@
   "answer": "No. The core reads model traffic and records each model call as facts: the model that answered, the tokens the provider reports and the limits reached. Turning those into dollars and stopping calls at a budget is the work of an extension that ships with Silo and uses the same manifest as any other. It carries the price table and adds the budget rules. Without it, Silo prices nothing, stops no call for a budget and fetches no price table. Whether it is switched on at the first run is to find out.",
   "needs": [
     "shipped-extensions-use-the-manifest"
-  ]
+  ],
+  "verdict": "take"
 }
