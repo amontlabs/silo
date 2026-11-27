@@ -83,3 +83,41 @@ commit in the drive's cache, so a ledger on a member's Mac that stays on can los
 already spends from in a power cut, and grant the same dollars twice. SQLite asks for
 `F_FULLFSYNC` only with `PRAGMA fullfsync` and `PRAGMA checkpoint_fullfsync`, both off by
 default; the prototype now sets both.
+
+## Through a branch of the team's repository
+
+An agent's part, 25 November 2026 (`research/2026-11-25-team-budget-in-git/`). The leases above
+were run against a real GitHub branch, and simulated as a branch can actually serve them.
+
+A branch works as the ledger. One push asks for a slice: 1.6 to 1.7 s at the median from a cloud
+container, 2.7 s at worst. Twelve Macs asking at the same moment waited up to 56 s, since each
+refused push is read again and retried. In about 600 pushes the branch never granted more than the
+budget and never lost a grant.
+
+A branch cannot call a Mac, so the recall in the answer above cannot happen there. #388's 2 s row
+kept it, and at the end of a budget it made 287 writes per model call for a team of five. In its
+place, in the simulation of the same team:
+
+- a Mac that is out of room gives back what it holds when it asks;
+- a Mac with agents running checks in every 5 minutes and gives back what it holds beyond its
+  calls under way and one slice;
+- a call with nothing free waits for the next check-in of a Mac that holds room, and is refused
+  only when no Mac holds any.
+
+That ended the team between 2.6% under and the budget, at about one push per model call.
+
+A slice must stay the Mac's until the Mac gives it back. A slice that expired, with the ledger
+taking back what the Mac had not reported, went up to 42% over when GitHub could not be reached for
+10 minutes: each Mac had spent what it could not push. A slice that stays the Mac's never went
+over. Its cost is a Mac that sleeps holding a slice: that room waits for the Mac to wake. With $2
+slices, that left the team of five 10% to 13% under $15. With the larger first slices above, it left
+up to 50%, and so did the recall above, which a sleeping Mac does not answer.
+
+Every member can push to the branch, so each Mac checks every change before it trusts the file:
+only the pushing Mac's entry changes, by no more than was free, nothing goes down, the budget stays,
+and the history is not rewritten. A check that does this caught each of five cheats. It needs the
+commit's signer to be the Mac, so the branch requires signed commits and refuses force-pushes.
+
+Proposed in place of the answer's recall: "A Mac gives back the room it cannot use when it asks, and
+the room beyond its calls under way and one slice when it checks in. A slice is the Mac's until the
+Mac gives it back." Nothing else in the answer changes.
