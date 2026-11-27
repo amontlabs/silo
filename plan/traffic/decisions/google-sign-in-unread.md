@@ -42,3 +42,17 @@ What the terms say, read on 24 November 2026 (an agent's reading, not a lawyer's
 Anthropic, OpenAI and GitHub document inspecting proxies for their programs, so this entry is about
 Google alone. `subscription-and-key-alike` already lets a kind of sign-in pass unread when a
 provider's terms rule it out.
+
+## The reason, said more exactly (27 November 2026)
+
+An agent's part, from pages another agent read on 27 November 2026. Google's terms forbid
+"third party software, tools, or services to access the Service"
+([Antigravity terms](https://antigravity.google/terms)). They do not say whether a boundary that
+reads the unmodified program's own traffic is such a tool, and nobody at Google has answered that
+anywhere found. A maintainer of Gemini CLI wrote that an account flagged a second time is
+banned for good. So the traffic stays unread because no answer can be had and a wrong reading
+costs the account, not because the text forbids reading.
+
+The same pages bear on work left to run alone. An answer on Google's developer forum, from
+someone with no staff mark, says background requests "are not supported on consumer plans". The
+app should say that work left to run alone belongs on an API key.

@@ -1,0 +1,7 @@
+{
+  "asks": "Does Silo cut an agent program's own telemetry?",
+  "answer": "No, by default. Silo sets up an agent program as its vendor ships it, telemetry included, and the network rules Silo proposes for that program allow the hosts it reports to. You can turn the telemetry off with the program's own setting.",
+  "needs": [
+    "what-silo-sends-home"
+  ]
+}

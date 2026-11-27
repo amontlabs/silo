@@ -60,3 +60,36 @@ this answer would read:
 
 That edit is not made here, since #373's `decisions.md` proposes its own edit to the same answer;
 both fit in one text.
+
+## What Anthropic's own pages say about reading (27 November 2026)
+
+An agent's part. Another agent read these pages on 27 November 2026. They were not read a second
+time for this note.
+
+- The network page of Claude Code's documentation says TLS-inspection proxies "work without
+  additional configuration when their root certificate is installed in the OS trust store"
+  ([network configuration](https://code.claude.com/docs/en/network-config)).
+- The gateway page describes a subscription's sign-in passing through a gateway: "a saved
+  claude.ai login remains the active credential, so its usage limits and billing apply". It lists
+  budgets and "log every model request" among what a gateway is for
+  ([LLM gateway](https://code.claude.com/docs/en/llm-gateway)).
+- The gateway compatibility guide says how to inspect: "inspect without modifying"
+  ([guide](https://code.claude.com/docs/en/llm-gateway-protocol)). The boundary forwards byte for
+  byte (`forwarded-byte-for-byte`), which is that.
+- Claude Code can give out the same content itself, as a report: its setting
+  `OTEL_LOG_RAW_API_BODIES` emits each request and reply
+  ([monitoring](https://code.claude.com/docs/en/monitoring-usage)).
+
+What this changes. The answer above already goes by the gateway page, and these pages support it
+further. Writing to Anthropic is now to have that reading in writing, for a product and not for
+one organisation's own network, which none of these pages covers.
+
+What it does not change. The legal page still forbids developers to "collect, store, or
+intermediate Claude.ai credentials or session tokens", and nobody at Anthropic has said what
+"intermediate" covers. The fallback of the answer stays.
+
+If Anthropic said no, less would be lost than `claude-key-or-plan` alone suggests. The record of
+the disk, the network and the processes does not depend on any provider. The model's words would
+come from Claude Code's own transcript, as a report where they are a fact today. What would be
+lost is refusing a model call at the boundary, and knowing that the account of the conversation
+is complete.

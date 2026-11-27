@@ -60,6 +60,14 @@ An agent's part, 27 November 2026, from reading the research. It bounds what "fa
   on the record of a real night.
 - Nothing about a transaction guard has been tried.
 
+## An API key, or a subscription
+
+An agent's part, 27 November 2026. The three steps work with an API key. With a Claude or ChatGPT
+subscription they rest on a reading of the providers' own pages that no provider has confirmed
+for a product (`anthropic-reads-intermediate`). A computer signed in with a Google account passes
+unread (`google-sign-in-unread`), so step 2 shows nothing there. The first build promises the
+three steps for an API key.
+
 ## Which system main runs first
 
 An agent's part, 27 November 2026. This choice is polarzero's, in `main-on-macos-first`, where the

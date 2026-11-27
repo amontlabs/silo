@@ -52,3 +52,22 @@ with a 4B model there as with a small hosted one (55 of 57), with more false ala
 wording for the last sentence: "A classifier, a summary or an extension that asks a provider's
 model and has no such key does not ask it, and says so; a model that runs in a computer of Silo's
 needs no key." `summary-reader-model` asks which of these the summary reader uses.
+
+## One provider offers a way on a plan (27 November 2026)
+
+An agent's part, from pages another agent read on 27 November 2026. OpenAI's "Sign in with
+ChatGPT" lets an open-source program that runs on the user's own machine make its own requests on
+the user's ChatGPT plan ([developer documentation](https://developers.openai.com/siwc/llms-full.txt)).
+Nothing like it was found at Anthropic or Google. Anthropic's Agent SDK page says third-party
+developers may not offer a claude.ai login or its limits in their products "unless previously
+approved", so an extension that drives `claude -p` on your plan for its own work is ruled out.
+
+The answer above could gain one sentence: "For OpenAI's models, an extension may also use Sign in
+with ChatGPT." It is not added here. It needs a ruling, and a check that Silo's extensions meet
+that programme's terms.
+
+Two more limits for an extension that asks a model about the record, such as
+`said-compared-with-done`. It reads only what the provider sends in plain text, and never tries
+to open sealed reasoning (`hidden-reasoning-stays-closed`). And the model it asks is an existing
+one: training a model on recorded replies needs the provider's agreement under both Anthropic's
+and OpenAI's terms.
