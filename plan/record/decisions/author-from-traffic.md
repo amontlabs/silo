@@ -62,3 +62,11 @@ conversation and that run had none. For connections: a host is named only on a h
 "only one conversation was open" never names a connection, and a host another program reaches at
 its start names nobody. Then 0 wrong on this night and on #399's `one-main` (which had 1), at the
 cost of one right answer. `checks/connections_wrong.py` there shows it failing, then passing.
+
+## A second run of the same night
+
+An agent's part, 25 November 2026, from [put back with a preview](../../../research/2026-11-25-put-back-and-chain/README.md). On a second run of #399's `one-main` night, the
+rules in the answer again named no wrong conversation. The two the answer leaves out did: one
+Claude Code conversation running ("own files") took two files of another that had not yet made
+its first model call, and "only one tool call open" took one connection. #399's own run had none
+wrong. Leaving them out is right, because they depend on timing.

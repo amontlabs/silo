@@ -1,0 +1,32 @@
+test_every_link_drawn_rests_on_a_strong_rule_and_matches_the_probe (test_putback.Chain.test_every_link_drawn_rests_on_a_strong_rule_and_matches_the_probe)
+The probe is the reference (#399): where it named a run, a drawn link must agree. ... 
+  links drawn: 489, against the probe wrong: 0
+ok
+test_no_link_is_drawn_for_bashrc (test_putback.Chain.test_no_link_is_drawn_for_bashrc) ... ok
+test_the_deletion_leads_to_rm_rf_and_the_ask (test_putback.Chain.test_the_deletion_leads_to_rm_rf_and_the_ask) ... ok
+test_the_screen_escapes_what_agents_wrote (test_putback.Chain.test_the_screen_escapes_what_agents_wrote) ... ok
+test_who_else_needs_a_path_that_reaches_it_not_the_name (test_putback.Chain.test_who_else_needs_a_path_that_reaches_it_not_the_name)
+#371 matched the folder's name: `fixtures` in client-b's `../shared-fixtures`. ... ok
+test_370_as_specified_loses_a_write_made_during_the_copy (test_putback.PutBack.test_370_as_specified_loses_a_write_made_during_the_copy)
+#370 step 5 says the write is lost, and kept only in the save. Shown here. ... ok
+test_a_changed_file_is_put_back_and_the_change_is_kept_in_the_save (test_putback.PutBack.test_a_changed_file_is_put_back_and_the_change_is_kept_in_the_save) ... ok
+test_a_folder_put_back_removes_what_was_created_since_and_names_who (test_putback.PutBack.test_a_folder_put_back_removes_what_was_created_since_and_names_who) ... ok
+test_a_hostile_name_is_escaped_in_the_preview (test_putback.PutBack.test_a_hostile_name_is_escaped_in_the_preview) ... ok
+test_a_write_between_preview_and_confirm_stops_it (test_putback.PutBack.test_a_write_between_preview_and_confirm_stops_it) ... ok
+test_deleted_folder_comes_back_and_nothing_else_moves (test_putback.PutBack.test_deleted_folder_comes_back_and_nothing_else_moves) ... ok
+test_no_terminal_no_yes_does_nothing (test_putback.PutBack.test_no_terminal_no_yes_does_nothing) ... ok
+test_refuses_a_path_not_there_before_anything (test_putback.PutBack.test_refuses_a_path_not_there_before_anything) ... ok
+test_the_record_holds_the_save_and_the_put_back_and_its_chain_holds (test_putback.PutBack.test_the_record_holds_the_save_and_the_put_back_and_its_chain_holds) ... ok
+test_what_a_swap_replaces_is_kept_in_a_checkpoint (test_putback.PutBack.test_what_a_swap_replaces_is_kept_in_a_checkpoint) ... ok
+test_with_the_guard_a_write_during_the_copy_stops_it_before_the_swap (test_putback.PutBack.test_with_the_guard_a_write_during_the_copy_stops_it_before_the_swap) ... ok
+test_one_exchange_never_does (test_putback.Swap.test_one_exchange_never_does) ... 
+  one exchange: path missing in 0 of 118127 reads
+ok
+test_two_renames_leave_the_path_missing (test_putback.Swap.test_two_renames_leave_the_path_missing) ... 
+  two renames: path missing in 989 of 130295 reads
+ok
+
+----------------------------------------------------------------------
+Ran 18 tests in 12.724s
+
+OK
