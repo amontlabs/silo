@@ -9,10 +9,11 @@ The options:
 
 - Build it in MVP (recommended). The receipt puts the outside record beside the agent's own summary:
   the model calls and tool calls read at the boundary, the files created, changed or deleted between
-  checkpoints, the hosts reached and bytes sent, and any gap, shown in `silo` and in a small
-  views-only Swift Mac app with computer, checkpoint, fork and network controls. Later features add
-  processes, spend, secrets, tasks and screen recordings to the same receipt. It costs a small Mac
-  app surface in MVP.
+  checkpoints, the hosts reached and bytes sent, and any gap, shown in the Swift Mac app (`mac-app`)
+  and in `silo`, with copy and export controls so you can hand a full receipt with its relevant
+  record lines and file diffs to any agent for analysis. Later features add processes, spend, tasks
+  and screen recordings to the same receipt. It costs building the receipt and export formatter in
+  Zig in MVP.
 - Leave it out until after MVP. You read raw JSON lines from `silo` and inspect diffs by hand. It
   costs the clearest way to compare what an agent claimed with what Silo saw.
 

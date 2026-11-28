@@ -9,7 +9,13 @@
     "engine-states-and-failures",
     "engine-shape",
     "tigerstyle-by-place",
-    "processes"
+    "processes",
+    "engine-inputs",
+    "numbered-events",
+    "call-ids",
+    "who-can-call-the-engine",
+    "formats-carry-versions",
+    "mvp-api"
   ],
   "suggest": {
     "verdict": "take",

@@ -12,10 +12,11 @@ agent says with what Silo saw, limits what crosses the boundary, and keeps check
 you can go back (`the-shape`, `record`, `boundary`).
 
 The first user is polarzero, on a Mac (`who-it-is-for`). The MVP starts with a Linux main on the
-Mac, the outside record, disk checkpoints and forks, model calls at the boundary, receipts and the
-`silo` command (`mvp-scope`, still to decide). Where computers run after that: `where-it-runs`. The
-sentence for the home page is still to decide: `one-sentence`. What Silo cannot see from outside is
-still to decide: `what-silo-cannot-see`.
+Mac, one settled engine API driving the Swift Mac app and the `silo` command, boundary secret
+placeholders, the outside record, disk checkpoints and forks, model calls at the boundary, and
+receipts with copy and export (`mvp-scope`, still to decide). Where computers run after that:
+`where-it-runs`. The sentence for the home page is still to decide: `one-sentence`. What Silo
+cannot see from outside is still to decide: `what-silo-cannot-see`.
 
 ## Why it is so
 

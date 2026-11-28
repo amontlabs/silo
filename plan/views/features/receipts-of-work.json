@@ -1,8 +1,9 @@
 {
   "name": "Receipts",
-  "what": "Each run or fork has a receipt made from the outside record, not by the agent: the model calls and tool calls, the files created, changed or deleted between checkpoints, the hosts reached and bytes sent, and anything missing from the record. The agent's own summary is shown beside it as plain text marked as the agent's words. Receipts, timeline inspection, and computer, checkpoint, fork and network controls are available in `silo` and in a small views-only Swift Mac app. Later features add processes, spend, secrets, tasks and screen recordings to the same receipt.",
+  "what": "Each run or fork has a receipt made from the outside record, not by the agent: the model calls and tool calls, the files created, changed or deleted between checkpoints, the hosts reached and bytes sent, and anything missing from the record. The agent's own summary is shown beside it as plain text marked as the agent's words. In the Swift Mac app and in `silo`, you can inspect a receipt and copy or export the full receipt together with its relevant record lines and file diffs (with no secret values) to hand to any agent for analysis. Later features add processes, spend, tasks and screen recordings to the same receipt.",
   "needs": [
     "silo-command",
+    "mac-app",
     "record-of-a-computer",
     "file-changes-in-the-record",
     "model-calls-in-the-record",

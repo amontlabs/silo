@@ -1,8 +1,9 @@
 {
   "name": "The `silo` command",
-  "what": "Every feature is reached from the `silo` command on your Mac from the day it is built. It prints plain text for a person and one JSON line per item with `--json`, so both you and your agents can query the record with ordinary tools. Inside a computer it reads only what that computer may read.",
+  "what": "Every MVP feature is reached from the `silo` command on your Mac through the same client API the Swift app uses. It prints plain text for a person and one JSON line per item with `--json`, and exports a receipt with its record and file diffs so you or a script can inspect it or hand it to an agent. Scoped `silo` tools inside a computer come after MVP.",
   "needs": [
     "engine-program-and-clients",
+    "mvp-api",
     "silo-command-reads-the-app",
     "record-queried-with-ordinary-tools"
   ],

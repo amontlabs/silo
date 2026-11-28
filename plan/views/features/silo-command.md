@@ -20,3 +20,7 @@ already prints JSON lines (`record-queried-with-ordinary-tools`).
 
 Agent, 24 November 2026. Every command and its output on one night are in draft #354
 (`details/cli.md`).
+
+An agent's part, 28 November 2026. On polarzero's direction, `silo` runs on your Mac in MVP while
+the Swift Mac app (`mac-app`) drives the same API so you do not have to touch the command line.
+Scoped `silo` tools inside a computer come after MVP.

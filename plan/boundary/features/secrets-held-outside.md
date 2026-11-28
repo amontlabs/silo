@@ -18,3 +18,10 @@ The options:
 
 Recommended: build it. The secret is the private data an agent must not carry out, and keeping it
 outside is the one way to be sure it does not.
+
+## In MVP (28 November 2026)
+
+An agent's part, on polarzero's direction. Moved into the `mvp` stage for plain values sent as-is
+(such as API keys and tokens). In MVP you enter and attach secrets directly in the Swift Mac app's
+prompt outside any chat; agent-initiated secret asks inside a computer (`secret-asked-mid-task`)
+and non-swap secrets (`ssh-keys`, `exchanged-tokens`, `cloud-credentials`) stay after MVP.

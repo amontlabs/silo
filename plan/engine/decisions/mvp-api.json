@@ -1,0 +1,11 @@
+{
+  "asks": "What is the API contract between the engine, the Swift Mac app and the `silo` command in MVP?",
+  "answer": "One versioned definition in Zig drives all three surfaces of MVP: the host Unix socket (`run/engine.sock`, authenticated by local user with `getpeereid`, binary-framed with magic, version, CRC-32C, session and request number), the C interface (`libsilo_client`) linked into the views-only Swift Mac app (opaque checked handles, explicit buffer ownership, per-call error structs, initial state snapshot and numbered event stream with `resync`), and the `silo` command on your Mac (plain text and versioned `--json` lines). Nine concept-named groups cover every MVP mechanism: `engine` (`status`, `snapshot`, `follow`), `computers` (`setup`, `list`, `get`, `start`, `stop`, `pause`, `resume`, `drop`, `ssh_info`), `network` (`set_mode`, `allow_host`, `revoke_host`, `list_hosts`), `secrets` (`add`, `list`, `attach`, `detach`, `delete`), `checkpoints` (`create`, `list`, `restore`, `fork`, `diff`), `links` (`list_pending`, `approve`, `deny`), `ports` (`list`, `open`, `close`), `record` (`query`, `head`, `verify`) and `receipts` (`list`, `get`, `export`). `links` handles any URL a program inside a computer asks to open in your Mac's browser; when the URL carries a loopback `redirect_uri`, approving it atomically opens a `oneshot_callback` port in `ports` that forwards one response without recording the query or code and then closes. Persistent `forward` ports stay shaped in `ports` for after MVP, when isolated browser previews ship. Every mutating call is idempotent by caller session and request number, every refusal carries a named error, and `secrets.add` carries secret bytes only on the host call and never writes them into state, events, the log, the record, a receipt or an export. `receipts.export` runs in Zig so the Swift app's copy and export buttons and `silo receipts export` produce the exact same Markdown text or JSONL bundle, with facts kept apart from unverified reports and agent summaries. In MVP every caller runs on your Mac; the `computer` caller scope is reserved in the protocol types and no socket is exposed inside a computer until after MVP.",
+  "needs": [
+    "mvp-scope",
+    "engine-client",
+    "mac-app-language",
+    "silo-command-reads-the-app",
+    "one-name-per-concept"
+  ]
+}

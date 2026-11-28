@@ -1,0 +1,17 @@
+{
+  "name": "The Swift Mac app for MVP",
+  "what": "A native Swift Mac app, views only, linked to the Zig client through its C interface. From the app you set up, start, stop, pause, resume and drop computers, copy or open SSH access, approve browser links and one-shot callbacks, switch network modes and allowed hosts, enter and attach secrets outside any chat, take and restore checkpoints, fork a computer, inspect file changes and the record, and open, copy or export receipts without touching the command line. Every view follows the engine's numbered events and tells facts apart from unverified reports.",
+  "needs": [
+    "engine-program-and-clients",
+    "mvp-api",
+    "mac-app-language",
+    "kinds-look-different"
+  ],
+  "keeps": [
+    "never-shown-as-a-fact"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "You can handle every MVP action and view from the Swift app without touching the command line, exercising the C interface from the first build."
+  }
+}
