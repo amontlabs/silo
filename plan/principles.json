@@ -15,5 +15,11 @@
     "says": "A report is used only for what cannot be seen from outside the computer.",
     "asks": "Can it be seen from outside the computer?",
     "why": "A fact cannot be tampered with from inside the computer. A report can."
+  },
+  {
+    "id": "mechanism-not-use",
+    "says": "The engine holds the mechanism, never one use of it.",
+    "asks": "Is this the mechanism, or one way of using it?",
+    "known_as": "separation of mechanism and policy"
   }
 ]

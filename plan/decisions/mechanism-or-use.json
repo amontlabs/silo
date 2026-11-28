@@ -1,13 +1,8 @@
 {
   "asks": "Does the engine hold one use of a mechanism?",
   "answer": "No. The engine holds the mechanism, never one use of it. A use that knows a domain, such as dollars or which calls of a provider's API destroy something, or that takes a position on what is good or bad, is an extension. The uses most people want ship with Silo as extensions.",
-  "sets": [
-    {
-      "in": "principles",
-      "id": "mechanism-not-use",
-      "says": "The engine holds the mechanism, never one use of it.",
-      "asks": "Is this the mechanism, or one way of using it?",
-      "known_as": "separation of mechanism and policy"
-    }
-  ]
+  "adds": [
+    "mechanism-not-use"
+  ],
+  "verdict": "take"
 }
