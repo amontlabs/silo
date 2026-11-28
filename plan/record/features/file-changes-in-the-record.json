@@ -3,11 +3,12 @@
   "what": "The files a computer created, changed or deleted from one checkpoint to the next are in the record as facts, seen from outside the computer. A rename shows as a delete and a create. A file created and deleted between two checkpoints is not in the record.",
   "needs": [
     "record-of-a-computer",
+    "checkpoints-taken-on-their-own",
     "file-reads",
     "file-changes-from-outside"
   ],
   "suggest": {
     "verdict": "take",
-    "why": "Disk, receipts and what each run wrote all rest on file changes that an agent cannot hide."
+    "why": "Receipts and disk inspection rest on file changes observed from outside that an agent cannot hide."
   }
 }

@@ -2,20 +2,22 @@
 
 ## The choice
 
-An agent's part, 22 November 2026. codex worked for 1 h 12 in a fork on "fix the flaky login test",
-and says all tests pass.
+An agent's part, 28 November 2026. An agent finishes work in a fork and says all tests pass and it
+only touched files in the repository.
 
 The options:
 
-- Build it (recommended). The receipt shows your words, the commands and their exit codes, the 38
-  files changed and the one only in the fork, the hosts, the secret used, $6.40, and a gap of 2
-  minutes, with codex's own summary beside it. It costs a large build that rests on most of the
-  record: files, commands, model calls and which run wrote what.
-- Leave it out. You read the agent's summary and the diff. It costs everything a diff does not show,
-  such as packages, hosts, secrets and spend, and any check of the agent's claim.
+- Build it in MVP (recommended). The receipt puts the outside record beside the agent's own summary:
+  the model calls and tool calls read at the boundary, the files created, changed or deleted between
+  checkpoints, the hosts reached and bytes sent, and any gap, shown in `silo` and in a small
+  views-only Swift Mac app with computer, checkpoint, fork and network controls. Later features add
+  processes, spend, secrets, tasks and screen recordings to the same receipt. It costs a small Mac
+  app surface in MVP.
+- Leave it out until after MVP. You read raw JSON lines from `silo` and inspect diffs by hand. It
+  costs the clearest way to compare what an agent claimed with what Silo saw.
 
-Recommended: build it. polarzero called the receipt the main thing Silo gives, and it is how an hour of
-agent work is judged in a minute.
+Recommended: build it in MVP. The receipt is how you verify agent work at a glance without taking
+the agent's word for it.
 
 ## Notes
 

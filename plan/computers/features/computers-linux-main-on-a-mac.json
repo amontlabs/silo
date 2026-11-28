@@ -3,36 +3,20 @@
   "what": "Silo runs main on your Mac as a Linux computer: Ubuntu for arm64, with a kernel Silo builds and main cannot replace. Several agents work in it at once, across several repositories, with Docker. Nothing from your Mac is shared into it, and files go in or out only through a channel you grant.",
   "needs": [
     "main-and-its-agents",
-    "main-on-macos-first",
-    "main-on-linux",
-    "one-main-or-several",
     "several-agents-in-main",
     "main-repositories",
     "device-not-shared",
-    "files-through-a-channel",
-    "computer-image",
-    "blank-computer",
-    "x86-linux-computers",
-    "containers-on-macos",
-    "macos-and-linux-consistent",
     "one-kind-of-computer",
-    "neutral-core",
+    "main-on-macos-first",
     "linux-vm-engine",
-    "work-on-top-of-libkrun",
-    "libkrun-patches",
-    "engine-patch-review",
-    "storage-between-computers",
     "network-stack",
-    "engine-program-and-clients",
-    "engine-matches-wanted",
-    "mac-silo-needs",
-    "network-before-rules"
+    "engine-program-and-clients"
   ],
   "keeps": [
     "nothing-shared-from-your-device"
   ],
   "suggest": {
     "verdict": "take",
-    "why": "polarzero said on 28 November 2026 that the first build can run a Linux main if that is faster. It is: the Linux computer is specified, more of the record has run on Linux, and it waits on none of the Mac's unknowns. `computers-main-on-a-mac` follows it."
+    "why": "polarzero confirmed starting with a Linux main on 28 November 2026: it avoids macOS-guest unknowns, runs Docker, and uses the same engine and boundary that a macOS main reuses after MVP."
   }
 }

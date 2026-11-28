@@ -1,0 +1,10 @@
+{
+  "asks": "What is in Silo's MVP?",
+  "answer": "The MVP gives your agents a Linux main computer on your Mac, reached over SSH by the terminal, editor and agent programs you already use, with full access inside and sign-in opening in your Mac's browser. Outside the computer, Silo runs the Zig engine, owns the network boundary with open, limited or closed modes, keeps an append-only record of facts and reports, takes APFS copy-on-write disk checkpoints with restore and forks, compares file changes between checkpoints, and reads model calls at the boundary. Everything is read and driven through the `silo` command as plain text or JSON lines, so both you and your agents can query the record, and receipts show what an agent claimed beside what Silo saw in `silo` and in a small Swift Mac app. A macOS main, the extension runtime, classifiers, precautions, held requests, Nix recipes, secret placeholders and spend budgets come after MVP.",
+  "needs": [
+    "one-position"
+  ],
+  "replaces": [
+    "first-build-shows-the-outside"
+  ]
+}

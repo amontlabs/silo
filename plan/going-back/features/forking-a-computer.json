@@ -1,20 +1,15 @@
 {
   "name": "Forks",
-  "what": "You fork a computer, or one of its checkpoints, and the fork lives its own life with its own display, while the computer it came from loses nothing. A fork you ask for is refused, with the reason, when the Mac already runs as many computers as it may, or when the fork is macOS and two macOS computers already run. The fork gets a new identity, with its scheduled jobs and named services off, so it never repeats what its source does. It gets no secrets, no access to repositories of its own and no push unless you, or a rule you set, give it more, and never more than its parent has.",
+  "what": "You fork a computer, or one of its checkpoints, into a copy-on-write clone that lives its own life while the computer it came from loses nothing. The fork gets a new identity with its scheduled jobs off and no copied logins or secrets unless you say so, and never gets wider reach than its parent has.",
   "needs": [
+    "computers-linux-main-on-a-mac",
     "checkpoints-taken-on-their-own",
     "fork-from-the-moment",
     "when-a-fork-is-made",
-    "fork-per-system",
-    "fork-shares-disk-blocks",
-    "fork-identity",
-    "what-a-fork-is-given",
     "whole-computer-grain",
-    "meanings-for-computers",
-    "speed-budgets",
-    "computers-main-on-a-mac",
-    "fork-and-sign-in",
-    "storage-between-computers"
+    "login-handling",
+    "fork-shares-disk-blocks",
+    "checkpoint-per-system"
   ],
   "keeps": [
     "grant-needs-a-fact-or-you"

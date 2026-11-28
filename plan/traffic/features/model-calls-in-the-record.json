@@ -3,20 +3,16 @@
   "what": "Each model call is in the record as a fact: the model that really answered, the effort and speed asked for, the token counts with cache reads and writes, what the provider said of a plan's limits, the tool calls in its reply, and their results in the next request, grouped into turns and conversations. The model's hidden reasoning is never opened; the record says that it passed, and its size. For a program whose traffic cannot be read, the record still has the hosts, sizes and timing.",
   "needs": [
     "model-traffic-read",
+    "record-of-a-computer",
     "tool-calls-from-traffic",
-    "what-traffic-gives",
-    "recognising-a-conversation",
-    "hidden-reasoning-stays-closed",
-    "program-that-cannot-be-read",
     "hooks-for-tool-calls",
-    "hook-is-a-report",
-    "record-of-a-computer"
+    "hook-is-a-report"
   ],
   "keeps": [
     "report-never-stored-as-fact"
   ],
   "suggest": {
     "verdict": "take",
-    "why": "It answers why an agent did something with what Silo saw, not with what the agent program says."
+    "why": "It records why an agent acted and what tool results came back, from outside the computer rather than from the agent program's own log."
   }
 }

@@ -3,19 +3,14 @@
   "what": "You put a computer back to one of its checkpoints, and Silo first saves where you were. The disk and the agents' conversations go back to the same moment, so an agent program can take its conversation up again there. Main can be restored too, and everyone in it goes back.",
   "needs": [
     "checkpoints-taken-on-their-own",
-    "restore-saves-first",
     "restore-main",
-    "whole-computer-grain",
-    "why-destructive",
-    "meanings-for-computers",
-    "computers-stopped-and-paused",
-    "what-a-restore-leaves"
+    "whole-computer-grain"
   ],
   "keeps": [
     "grant-needs-a-fact-or-you"
   ],
   "suggest": {
     "verdict": "take",
-    "why": "Putting a computer back to a checkpoint is the plain way back when one agent works in it, and saving first makes the restore itself undoable."
+    "why": "Putting a computer back to a checkpoint is the plain way back when an agent breaks the machine, and saving first makes the restore itself undoable."
   }
 }

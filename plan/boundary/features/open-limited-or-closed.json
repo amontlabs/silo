@@ -1,27 +1,18 @@
 {
   "name": "A computer's network: open, limited or closed",
-  "what": "Each computer's network is open, limited to a list of hosts, or closed, and you open or close it in one step. Even when it is open, a computer cannot reach your Mac, your local network, your VPN or cloud metadata. Nothing done inside the computer changes these settings.",
+  "what": "Each computer's network is open, limited to a list of hosts, or closed, and you open or close it in one step. Even when it is open, a computer cannot reach your Mac, your local network, your VPN or cloud metadata. The boundary records each host reached, denied attempts and bytes sent as facts, and nothing done inside the computer changes these settings.",
   "needs": [
+    "computers-linux-main-on-a-mac",
+    "network-stack",
     "network-modes",
     "network-policy-by-the-user",
-    "main-network-rules",
-    "device-out-of-reach",
-    "reach-of-a-computer",
-    "safe-fresh-install",
-    "guarantees-outside-the-computer",
-    "actions-that-never-wait",
     "full-access-inside",
     "rules-inside-are-no-boundary",
     "security-framing",
-    "where-limits-are-set",
-    "network-stack",
-    "which-process-holds-the-boundary",
-    "computers-linux-main-on-a-mac",
-    "allow-hold-or-deny",
-    "rules-out-of-reach"
+    "where-limits-are-set"
   ],
   "suggest": {
     "verdict": "take",
-    "why": "Every other limit at the edge of a computer (secrets, the hosts in the record, the age of packages) stands on this one."
+    "why": "Every other limit and observation at the edge of a computer stands on owning the network boundary."
   }
 }

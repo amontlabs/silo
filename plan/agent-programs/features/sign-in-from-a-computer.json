@@ -2,13 +2,11 @@
   "name": "A sign-in started in a computer",
   "what": "When an agent program or an MCP server in a computer starts a sign-in, the page opens in the browser on your Mac, with your yes. The answer the provider sends to localhost reaches the program in the computer.",
   "needs": [
-    "ports-reached-from-your-mac",
-    "agent-programs-run-unmodified",
-    "held-requests-and-asks",
-    "channel-list"
+    "agent-programs-reach-every-computer",
+    "login-handling"
   ],
   "suggest": {
     "verdict": "take",
-    "why": "Without it, a sign-in that waits for its answer on the computer itself never finishes, and you marked it as important."
+    "why": "Without it, an OAuth sign-in inside a headless Linux computer never finishes cleanly, and Silo never touches or stores the subscription credential."
   }
 }

@@ -2,24 +2,17 @@
   "name": "Model traffic read at the boundary",
   "what": "Silo reads the traffic between an agent program and its model provider at the boundary, whether the program signs in with a subscription or an API key. You sign in to the unmodified program through the vendor's own flow, and Silo forwards every request and answer byte for byte, apart from the changes it records. The sign-in token is forwarded and written nowhere.",
   "needs": [
-    "ending-the-encrypted-connection",
-    "reading-each-agent-program",
-    "adapters-follow-providers",
-    "subscription-and-key-alike",
-    "forwarded-byte-for-byte",
-    "logins",
-    "provider-sees-silos-connection",
-    "anthropic-reads-intermediate",
-    "what-silo-changes-in-traffic",
+    "open-limited-or-closed",
+    "agent-programs-reach-every-computer",
     "network-stack",
-    "agent-programs-run-unmodified",
-    "secrets-held-outside"
+    "adapters-follow-providers",
+    "ending-the-encrypted-connection"
   ],
   "keeps": [
     "no-silent-change-to-traffic"
   ],
   "suggest": {
     "verdict": "take",
-    "why": "Turns, tool calls, spend and budgets all rest on reading model traffic, and the first test read both programs."
+    "why": "Reading model calls from outside is what lets Silo verify what an agent asked and received without trusting the program inside."
   }
 }

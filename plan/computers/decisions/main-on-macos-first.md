@@ -2,24 +2,21 @@
 
 ## The choice
 
-An agent's part, 22 November 2026. You install Silo on your Mac. Main is where your agents will
-live, and it is either a macOS computer or a Linux one.
+An agent's part, 28 November 2026. You install Silo on your Mac. Main is where your agents will
+live, and it is either a Linux computer first or a macOS computer first.
 
 The options:
 
-- macOS first (recommended). Your agents get a Mac of their own: they can build and test Mac and iOS
-  apps, use a Mac screen, and what you bring in from your Mac keeps its paths and tools. A Linux
-  computer beside main is never a copy of it: it is a fresh computer. It costs a first run that
-  downloads macOS from Apple, over 10 GB, and installs it. A macOS computer takes more disk and
-  memory than a Linux one. Apple allows two macOS computers running on one Mac, so at most one fork
-  of main runs beside it. A fork of main starts from a copy of main's disk, so the programs that
-  were running in main are not running in it.
-- Linux first. Main is lighter, gives idle memory back, and several forks can run beside it. It
-  costs what makes Silo different: a Linux machine for agents is what cloud services already offer,
-  and agents that build Mac software, Silo's own app included, cannot do it there.
+- Linux first (recommended). Main is lighter, gives idle memory back, runs Docker, avoids Apple's
+  two-VM cap and >10 GB macOS restore download, and lets MVP ship without waiting on macOS-guest
+  provisioning unknowns. A macOS main follows after MVP for Mac and iOS builds. It costs Xcode and
+  macOS-native apps in main during MVP.
+- macOS first. Your agents get a Mac of their own right away, so they can build and test Mac and iOS
+  apps and keep Mac paths. It costs downloading over 10 GB from Apple on first run, higher RAM and
+  disk use, Apple's two-VM cap, and several unverified macOS-guest unknowns before MVP can ship.
 
-Recommended: macOS first. A Mac of its own is what people already give their agents. On the Mac
-you already have, it costs nothing by the hour.
+Recommended: Linux first. It gets a real, fast daily-driver Silo running first on the same Zig core,
+boundary and record that a macOS main will reuse right after MVP.
 
 ## polarzero's words, 28 November 2026
 

@@ -6,25 +6,13 @@
     "engine-design",
     "engine-own-program",
     "engine-client",
-    "engine-shape",
-    "engine-inputs",
-    "engine-state",
-    "engine-limits",
-    "deterministic-core",
-    "core-dependencies",
-    "core-knows-no-agents",
-    "numbered-events",
-    "call-ids",
     "engine-states-and-failures",
-    "how-the-engine-is-built",
-    "core-simulator",
-    "who-can-call-the-engine",
-    "formats-carry-versions",
+    "engine-shape",
     "tigerstyle-by-place",
-    "engine-source-checks"
+    "processes"
   ],
   "suggest": {
     "verdict": "take",
-    "why": "Every feature of the app talks to the engine through it, and nine entries already wait on it."
+    "why": "Every feature of Silo talks to the engine through this core and client."
   }
 }

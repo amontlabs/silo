@@ -2,30 +2,19 @@
   "name": "The record of a computer",
   "what": "Silo writes down what happens to a computer, outside it. What Silo saw is a fact, and what a program inside told it is a report. Each line is written once and says its time, its computer and its source.",
   "needs": [
+    "engine-program-and-clients",
+    "computers-linux-main-on-a-mac",
+    "open-limited-or-closed",
     "words-for-what-silo-knows",
     "what-the-record-holds",
     "what-a-fact-carries",
     "what-a-report-carries",
     "line-never-mixes",
-    "changes-to-the-record",
-    "kinds-of-lines",
-    "who-made-each-change",
-    "word-line",
-    "sources-number-their-lines",
-    "sources",
     "record-file-format",
-    "git-history-inside",
-    "record-path-and-core",
-    "events-until-the-recorder",
-    "observing-and-waiting",
-    "record-overhead-limit",
-    "engine-program-and-clients",
-    "computers-linux-main-on-a-mac",
-    "measuring-the-store",
-    "formats-carry-versions"
+    "record-path-and-core"
   ],
   "suggest": {
     "verdict": "take",
-    "why": "The record is the centre of Silo, and fifteen other features read it."
+    "why": "The outside record is the core of Silo, and receipts, diffs and model calls all write to and read from it."
   }
 }

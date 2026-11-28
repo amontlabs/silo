@@ -1,19 +1,17 @@
 {
   "name": "Checkpoints taken on their own",
-  "what": "While agents work, Silo takes checkpoints of their computer by itself, at intervals and at moments the engine sees, such as each ask. A checkpoint is a copy of the computer's disk that shares blocks with it, made as the machine that runs the computer allows, so it holds the agents' conversations too, and it is stored where nothing inside the computer can reach it. It never changes once saved.",
+  "what": "While agents work, Silo takes checkpoints of their computer by itself, at intervals and at moments the engine sees. A checkpoint is a copy of the computer's disk that shares blocks with it, made as the machine that runs the computer allows, so it holds the agents' conversations too, and it is stored where nothing inside the computer can reach it. It never changes once saved.",
   "needs": [
+    "computers-linux-main-on-a-mac",
+    "record-of-a-computer",
     "automatic-checkpoints",
     "whole-computer-grain",
-    "checkpoint-per-system",
-    "checkpoint-storage",
     "git-words",
-    "meanings-for-computers",
-    "speed-budgets",
-    "computers-linux-main-on-a-mac",
-    "space-the-engine-keeps"
+    "fork-shares-disk-blocks",
+    "checkpoint-per-system"
   ],
   "suggest": {
     "verdict": "take",
-    "why": "It is the way back `the-shape` promises, and every other way back in Silo starts from these checkpoints."
+    "why": "It is the way back `the-shape` promises, and both restore and outside file diffs stand on it."
   }
 }

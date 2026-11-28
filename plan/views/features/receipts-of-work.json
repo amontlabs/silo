@@ -1,22 +1,18 @@
 {
   "name": "Receipts",
-  "what": "Each run, task or fork has a receipt: an account made from the record, not by the agent, that a person can judge in a minute. It holds what you asked the agent word for word, the commands and their exit codes, for a task, the checks Silo ran and their results, the files that changed and what is only here, the hosts reached, how much was sent to each and, where Silo reads the traffic, what was sent, the secrets used by name, the model calls and their spend, the time split between work and waiting, the asks and their answers, recordings of the screen, and what could not be attributed or is missing. The agent's own summary can be shown beside it, marked as the agent's.",
+  "what": "Each run or fork has a receipt made from the outside record, not by the agent: the model calls and tool calls, the files created, changed or deleted between checkpoints, the hosts reached and bytes sent, and anything missing from the record. The agent's own summary is shown beside it as plain text marked as the agent's words. Receipts, timeline inspection, and computer, checkpoint, fork and network controls are available in `silo` and in a small views-only Swift Mac app. Later features add processes, spend, secrets, tasks and screen recordings to the same receipt.",
   "needs": [
-    "what-a-receipt-is",
-    "what-a-receipt-holds",
-    "agent-summary-beside-receipt",
-    "kinds-look-different",
-    "mac-app-language",
+    "silo-command",
     "record-of-a-computer",
     "file-changes-in-the-record",
-    "processes-in-the-record",
-    "what-each-run-wrote",
-    "gaps-in-the-record",
-    "hosts-reached-and-denied",
     "model-calls-in-the-record",
-    "spend-per-conversation",
-    "how-a-path-comes-back",
-    "app-as-text"
+    "checkpoints-taken-on-their-own",
+    "restore-to-a-checkpoint",
+    "forking-a-computer",
+    "what-a-receipt-is",
+    "agent-summary-beside-receipt",
+    "kinds-look-different",
+    "mac-app-language"
   ],
   "keeps": [
     "never-shown-as-a-fact",
@@ -24,6 +20,6 @@
   ],
   "suggest": {
     "verdict": "take",
-    "why": "The receipt is how a person judges an hour of agent work in a minute without trusting the agent's word."
+    "why": "A receipt puts what the agent claimed beside what Silo saw from outside, in `silo` and in a small Swift Mac app."
   }
 }
