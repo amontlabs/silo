@@ -1,4 +1,4 @@
 {
   "asks": "What is Silo, in one sentence?",
-  "answer": "Your agents work with full access in a virtual machine of their own. Silo sits outside it, where they cannot reach. It records what they run, change and send, compares what they say with what it saw, and can hold a request at the edge for your answer."
+  "answer": "Install Silo and your agents work as they do today, with full access, in a virtual machine of their own. Silo sits outside it, where they cannot reach, and records what they run, change and send. You, your agents and the extensions you add read that record while the work runs or long after, and can act on it at the edge."
 }

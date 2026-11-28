@@ -1,6 +1,6 @@
 {
   "asks": "What does the first build show?",
-  "answer": "The first build shows what Silo's position outside the computer gives. An agent program runs in a computer with every approval off. The `silo` command lists the model calls the boundary read, with the agent program's own account beside each one, and marks a mismatch. An extension gives its opinion on what the agent said it did, from the record alone. Another extension holds one request at the boundary, and you answer the ask. Checkpoints are taken in this build, since a precaution and the record of file changes need them. Restore comes after it.",
+  "answer": "The first build shows what Silo's position outside the computer gives. An agent program runs in a computer with every approval off. The `silo` command lists the model calls the boundary read, with the agent program's own account beside each one, and marks a mismatch. An extension gives its opinion on what the agent said it did, from the record alone. Another extension holds one request at the boundary, and you answer the ask. Checkpoints are taken in this build, since a precaution and the record of file changes need them. Restore comes after it. This says where the first work goes. It is not a fixed list: polarzero changes it as the work shows what matters.",
   "needs": [
     "one-position"
   ]

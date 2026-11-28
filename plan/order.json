@@ -385,6 +385,7 @@
         "tools-the-provider-runs",
         "forwarded-byte-for-byte",
         "anthropic-reads-intermediate",
+        "no-wait-on-a-provider",
         "provider-sees-silos-connection",
         "reading-each-agent-program",
         "code-mode-calls-reported",

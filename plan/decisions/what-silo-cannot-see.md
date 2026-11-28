@@ -43,3 +43,13 @@ classifier and never a fact about intent.
 To find out: how much reasoning is readable at the boundary, for each agent program. An agent
 searched the captures of the research and found no reasoning block. The run on real providers kept sizes and counts, and
 every later run used stand-in providers that sent none.
+
+## polarzero's words, 28 November 2026
+
+Owner: "it should be clear what exactly silo sees as facts, and what it \"guesses\" as intent which
+we need to decide what goes into extension area."
+
+An agent's part. The answer now says the split. Fact: seen from outside, by the core. Report: said
+by something inside, kept by the core and marked. Opinion: a guess about intent or about good and
+bad, which belongs to extensions and is never written as a fact. Which guesses ship with Silo is
+`first-extensions-that-ship`.

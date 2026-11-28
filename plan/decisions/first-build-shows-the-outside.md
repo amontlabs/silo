@@ -86,3 +86,11 @@ entry decides it, and the order of the stage "app" keeps `computers-main-on-a-ma
 
 The stage "app" of `order.json` starts with them: `plan` prints the order. The first is
 `access-model-checked` and the last of this build is `transaction-guard`.
+
+## polarzero's words, 28 November 2026
+
+Owner: "Yes I think it's a good first build or at least main part of it. I think overall we should
+not over-obsess on what exactly the first build is precisely. It's important to know that we want
+to focus on that as MVP, but then I can just change and do stuff as we go."
+
+An agent's part. The answer now ends by saying so.

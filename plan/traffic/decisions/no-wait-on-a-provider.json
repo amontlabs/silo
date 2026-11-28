@@ -1,0 +1,4 @@
+{
+  "asks": "Does anything Silo builds wait on a provider's answer about reading a subscription's traffic?",
+  "answer": "No. With an API key, the boundary reads the model calls, always. With a subscription, you choose per computer. The boundary can read the calls the way the provider's own pages describe for an inspecting proxy: it forwards every byte and the sign-in as they came, and keeps no token. Or the connection passes unread, and the model calls come from the agent program's own account, as reports. A computer can also send its model calls on to a gateway you name, such as your company's, in place of the provider. Silo's own boundary is the gateway that ships. polarzero writes to a provider when he chooses to, and nothing waits for it."
+}

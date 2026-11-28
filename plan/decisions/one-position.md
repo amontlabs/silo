@@ -50,3 +50,9 @@ The design record gives this with no mark, and this comparison:
 An agent's part, 24 November 2026: the cell for sandboxes was "no". Some of them now log the
 network decisions at their proxy, or the model requests with their tokens, so the cell says "of the
 network at most". None found records the processes and file changes of the machine.
+
+## polarzero's words, 28 November 2026
+
+Owner, asked whether this is what Silo is for: "Yes roughly". He added that comparing what the
+agent says with what Silo saw is one strong use and not the whole of it. The answer lists it as one
+of five things the position gives.

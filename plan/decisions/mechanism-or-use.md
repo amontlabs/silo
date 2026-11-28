@@ -55,3 +55,7 @@ general form of that. Engineers know it as the separation of mechanism and polic
 polarzero said it about what a classifier's program does, and asked that it be "very customizable". Those cases are the decisions `what-defines-a-classifier` and `what-ships-with-silo`.
 
 The general sentence is an agent's, put forward on 20 November 2026. polarzero has not answered it.
+
+## polarzero's words, 28 November 2026
+
+Owner, asked whether the engine holds mechanisms and extensions hold the uses: "Yes".

@@ -133,3 +133,23 @@ the one it ends on.
 The first build's sentence still says something few people can do today: going back that covers
 what the agent did in the shell, in subagents and in ignored files, because the checkpoint copies
 the disk. #350 ranks work destroyed by the agent as the most frequent serious pain.
+
+## polarzero's words, 28 November 2026
+
+Owner: "comparing what they say with what it saw is one main very strong use case. I'm not sure
+it's the right way to frame as if it was the only thing it does."
+
+Owner, on how he would present the first build: "if you're working with agents and if you're not
+even using VMs you can install Silo and get basically exactly what you already have without any
+friction, but additionally, you get a VM and you get excellent observability and logs". And: "it
+costs nothing to install Silo and to use it, but it can prove to be extremely beneficial in the
+future and you can also get your agent to build extensions using this observability". And: "You
+don't need to have a use case right now."
+
+An agent's part. The answer is rewritten around that. It says three things in his order: nothing
+changes in how you work, you gain a virtual machine and a record made from outside, and the record
+can be used now or later, by you, by an agent or by an extension. Comparing what an agent says with
+what Silo saw is now one use among others (`said-compared-with-done`) and is no longer in the
+sentence. The sentence says "record" where polarzero says observability, as `guides/writing.md`
+asks. "Costs nothing" is not in it, because what Silo costs in memory and speed is not measured
+yet (`silo-is-light`, `record-speed-cost`). It is still undecided.
