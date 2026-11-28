@@ -18,7 +18,7 @@
     "where-rules-run",
     "rule-versions",
     "record-of-a-computer",
-    "computers-main-on-a-mac"
+    "computers-linux-main-on-a-mac"
   ],
   "keeps": [
     "rule-reads-only-facts",

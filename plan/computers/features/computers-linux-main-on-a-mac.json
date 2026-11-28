@@ -32,7 +32,7 @@
     "nothing-shared-from-your-device"
   ],
   "suggest": {
-    "verdict": "drop",
-    "why": "A macOS main stays recommended first. This is the fallback, specified and ready: take it in place of `computers-main-on-a-mac` if the Mac's tests of provisioning, gvproxy or the Keychain fail, or if the first unattended run does not need Xcode in main."
+    "verdict": "take",
+    "why": "polarzero said on 28 November 2026 that the first build can run a Linux main if that is faster. It is: the Linux computer is specified, more of the record has run on Linux, and it waits on none of the Mac's unknowns. `computers-main-on-a-mac` follows it."
   }
 }

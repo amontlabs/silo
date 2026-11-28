@@ -27,3 +27,11 @@ kit for a Linux host with KVM.
 An agent's part, 25 November 2026. It counts 96 open decisions with the first build's other
 features, against 87 for the macOS main with the record of model traffic (#373). The 10 that only it
 needs, and the 3 whose answer changes, have second opinions in the specs' `decisions.md`.
+
+## polarzero's words, 28 November 2026
+
+Owner: "On os yes we can just do a linux first if that's faster."
+
+An agent's part. So the first option above is the one followed: this feature is in the first
+build in place of a macOS main, and `computers-main-on-a-mac` comes after the first build. The
+features of the first build that needed a main now need this one.

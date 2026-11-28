@@ -13,7 +13,7 @@
     "nix-store-shared",
     "meanings-for-recipes",
     "computer-image",
-    "computers-main-on-a-mac",
+    "computers-linux-main-on-a-mac",
     "shared-cache"
   ],
   "suggest": {

@@ -70,6 +70,10 @@ three steps for an API key.
 
 ## Which system main runs first
 
+On 28 November 2026 polarzero said the first build can run a Linux main if that is faster, and
+`main-on-macos-first` now says so. With a Linux main the first build needs 159 undecided decisions.
+What follows was written the day before.
+
 An agent's part, 27 November 2026. This choice is polarzero's, in `main-on-macos-first`, where the
 lean of 18 November is a macOS main. The first build proposed here may reach its three steps
 sooner with a Linux main on the Mac. If an extension's computer is a small Linux one, as

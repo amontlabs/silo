@@ -1,6 +1,6 @@
 {
   "asks": "Can main be a Linux computer?",
-  "answer": "Yes. On a Mac, main is a macOS computer or a Linux computer, and you choose when you make it. On a Linux host, main is a Linux computer, since macOS runs only on Apple hardware. Silo starts with a macOS main on a Mac.",
+  "answer": "Yes. On a Mac, main is a macOS computer or a Linux computer, and you choose when you make it. On a Linux host, main is a Linux computer, since macOS runs only on Apple hardware. Silo's first build makes a Linux main on a Mac, as `main-on-macos-first` says.",
   "needs": [
     "main-on-macos-first"
   ]

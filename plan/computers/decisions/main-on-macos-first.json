@@ -1,6 +1,6 @@
 {
   "asks": "Which system does main run first?",
-  "answer": "Main is a macOS computer first. Its forks are macOS. A Linux computer beside it is a fresh computer.",
+  "answer": "In the first build, main is a Linux computer on the Mac, and its forks are Linux. A macOS main comes after it, as the main that builds Mac and iOS software. A Linux computer beside a macOS main is a fresh computer.",
   "sets": [
     {
       "in": "computers/properties",

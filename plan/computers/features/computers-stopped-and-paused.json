@@ -2,7 +2,7 @@
   "name": "Stopping and pausing computers",
   "what": "Stopping a computer ends every process started in it, detached ones included, and so does dropping it. One action pauses every running computer, and one resumes the computers that action paused.",
   "needs": [
-    "computers-main-on-a-mac",
+    "computers-linux-main-on-a-mac",
     "what-stop-ends",
     "pause-every-computer"
   ],

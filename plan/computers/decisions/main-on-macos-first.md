@@ -21,9 +21,19 @@ The options:
 Recommended: macOS first. A Mac of its own is what people already give their agents. On the Mac
 you already have, it costs nothing by the hour.
 
+## polarzero's words, 28 November 2026
+
+Owner: "On os yes we can just do a linux first if that's faster."
+
+An agent's part. The answer above now says so: a Linux main on the Mac in the first build, and the
+macOS main after it. It is faster for the reasons of the section below. The options of "The choice"
+were written on 22 November and still say what each system costs. polarzero has not taken this
+entry, so it is still his to rule. In the order, `computers-linux-main-on-a-mac` took the place of
+`computers-main-on-a-mac`, which now comes after the first build. The entry keeps its id.
+
 ## The first build and this choice
 
-An agent's part, 27 November 2026. It changes nothing in the answer above, which is polarzero's
+An agent's part, 27 November 2026, written when the answer was a macOS main first, polarzero's
 lean of 18 November.
 
 `first-build-shows-the-outside` proposes a first build that shows the boundary, the model traffic
