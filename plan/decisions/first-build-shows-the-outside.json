@@ -4,5 +4,6 @@
   "needs": [
     "one-position"
   ],
-  "verdict": "take"
+  "verdict": "take",
+  "replaced_by": "mvp-scope"
 }

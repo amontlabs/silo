@@ -6,5 +6,6 @@
   ],
   "replaces": [
     "first-build-shows-the-outside"
-  ]
+  ],
+  "verdict": "take"
 }
