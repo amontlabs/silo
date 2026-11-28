@@ -351,7 +351,9 @@ describe("the phone's camera", () => {
 });
 
 describe('the player', () => {
-  it.each(['window', 'phone'] as const)('shows, whatever was pressed, the frame that a hold of the same moment shows (%s)', (layout) => {
+  // 300 seeded steps that each draw the film twice: a few seconds of work on a fast computer, so the default 5 s is too
+  // near on a busy one.
+  it.each(['window', 'phone'] as const)('shows, whatever was pressed, the frame that a hold of the same moment shows (%s)', { timeout: 30_000 }, (layout) => {
     let now = 1000;
     let waitingFrames: FrameRequestCallback[] = [];
     vi.stubGlobal('requestAnimationFrame', (run: FrameRequestCallback) => waitingFrames.push(run));
